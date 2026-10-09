@@ -13,9 +13,12 @@
 //
 // 12k-2 has the object: the constructor and destructor, ClearVariables,
 // following and attacking a car, finding the bombing run's target spot,
-// and placing the helicopter in the world and taking it out. Planning
-// (12k-3), flying (12k-4), drawing and dust (12k-5), the bombing run
-// itself (12k-6) and tPursuit's UpdateChopper (12k-7) come after.
+// and placing the helicopter in the world and taking it out. 12k-3a has
+// the chase logic under the planning: arriving and leaving, following a
+// route, staking out a signpost, hanging about near a point and keeping
+// the target over the sheet. The plans themselves (12k-3b), flying
+// (12k-4), drawing and dust (12k-5), the bombing run itself (12k-6) and
+// tPursuit's UpdateChopper (12k-7) come after.
 //
 // The ChopperSound is task 29's. The port builds none unless
 // gCreateChopperSoundFn is set, and then every call through it is
@@ -29,6 +32,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "airoute.h"
 #include "blist.h"
 #include "bmatrix.h"
 #include "bvector.h"
@@ -149,6 +153,16 @@ typedef char chopper_layout_check[
      && sizeof(struct Chopper) == 976) ? 1 : -1];
 #endif
 
+// ChopperTarget, 12 bytes: where the planning sends the helicopter, and
+// how fast. HighLevelPlanning (0x001e9648) fills one for Think.
+typedef struct ChopperTarget {
+    bVector2 Location;          // 0
+    float    DesiredSpeed;      // 8
+} ChopperTarget;
+
+typedef char choppertarget_size_check[
+    sizeof(ChopperTarget) == 12 ? 1 : -1];
+
 // ChopperSound's table. Its first base is Sound3d, so the vptr is the
 // Sound3d's at +28.
 #define CHOPPERSOUND_VTABLE       0x002bc2a8u
@@ -266,5 +280,105 @@ void chopper_calc_matrix(struct Chopper *h);
 
 // 0x001ea578. Matrix to WorldObj's, and WorldObj enabled.
 void chopper_update_world_object(struct Chopper *h);
+
+// -------------------------------------------------------- the chase logic
+
+// 0x001e8590. HighLevelPlanning's START_CHASE: `on_sheet`, `flags` and
+// `z` are the HeliSheet's answer (FindZValue) at the target. Off the
+// sheet, or on a polygon with flag bit 1, 1: wait. Otherwise the
+// helicopter is placed 150 over the sheet there and drops at 25 (ZVelocity
+// -25), in PURSUIT, raising dust unless the polygon has flag bit 0; 0.
+int32_t chopper_start_chase_logic(struct Chopper *h, ChopperTarget *t,
+                                  int32_t on_sheet, uint32_t flags, float z);
+
+// 0x001e8608. END_CHASE, from the sheet under CurrentPos:
+//   - 150 or more over it: out of the world, EATING_DONUTS, and 1;
+//   - over a polygon with flag bit 1 while not climbing (ZVelocity 0),
+//     or off the sheet: at 50 for the first point on from ChopperPoint
+//     (GetNextRoutePoint) more than 30 from the helicopter, or the last
+//     before the route runs out; 0;
+//   - otherwise climbing at 25, the target where it is; 0.
+int32_t chopper_end_chase_logic(struct Chopper *h, ChopperTarget *t);
+
+// 0x001e88c0. The car's speed (VelocityMagnitude) plus 30.
+void chopper_set_follow_speed(struct Chopper *h, ChopperTarget *t);
+
+// 0x001e88e0. Back from `info` against `b` (FindNearbySignpost with
+// !b) to the fork it came off: `info` becomes the sign's new route and
+// point, and through a sign 2 (ALWAYS_TAKE) a step on against `b` too and
+// another look. The steps counted, or 0 when a look runs off its route.
+int32_t chopper_find_previous_fork(struct Chopper *h,
+                                   NearestRoutePointInfo *info, int b);
+
+// 0x001e8990. From `in`'s previous fork, up to twice its count of points
+// towards `b` (GetRelativePoint) for one nearer the helicopter than
+// `maxd`: 1 with it in `out`, else 0.
+int32_t chopper_switch_to_nearby_fork(struct Chopper *h,
+                                      NearestRoutePointInfo *out,
+                                      const NearestRoutePointInfo *in, int b,
+                                      float maxd);
+
+// 0x001e8a80. The target, ChopperPoint's position.
+void chopper_target_chopper_point(struct Chopper *h, ChopperTarget *t);
+
+// 0x001e8a98. Towards `point` on `route`. When ChopperPoint is it, or
+// further off than CalcMinRouteFollowDistance (then at SetFollowSpeed),
+// the target is ChopperPoint. Otherwise of up to five points towards it
+// (FindPointsToTarget, by way of a nearby fork when there are none), the
+// first that is `point` or further off than that distance, else the last;
+// at SetFollowSpeed unless it is `point`. With no points, the target
+// stays.
+void chopper_follow_route(struct Chopper *h, ChopperTarget *t,
+                          TrackRoute *route, TrackRoutePoint *point, int fwd);
+
+// 0x001e8ce8. On from `point` (GetNextRoutePoint) to the first signpost
+// that is not NoStakeout, past points marked TRP_NO_HELISHEET; with none,
+// BailToPointNearChopper. The stakeout is the sign's own point when it is
+// Backwards, else where it leads. When the stakeout's route has a point
+// within 400 of the helicopter further along than the stakeout, the
+// helicopter's own point is the target instead. Otherwise
+// HEAD_TO_STAKEOUT, a 60 timeout, and FollowRoute there.
+void chopper_begin_stakeout(struct Chopper *h, ChopperTarget *t,
+                            TrackRoute *route, TrackRoutePoint *point);
+
+// 0x001e8e70. The target pulled towards `point` in its frame, 0.7 of the
+// way along and across at a time (GetPosition), until it is over the
+// sheet. `route` is unused.
+//
+// The divergence: when both have shrunk below the least normal float (or
+// are NaN) and it is still off the sheet, the port stops there, at the
+// point itself. The EE has flushed them to zero by then, and the image
+// tries that spot for ever.
+void chopper_hangout_near_here(struct Chopper *h, ChopperTarget *t,
+                               TrackRoute *route, TrackRoutePoint *point);
+
+// 0x001e8f30. HangoutNearHere at the helicopter's own point.
+void chopper_bail_to_point_near_chopper(struct Chopper *h,
+                                        ChopperTarget *t);
+
+// 0x001e8f40. Speed * 0.1 (gp-28044), at least 30.
+float chopper_calc_min_route_follow_distance(struct Chopper *h,
+                                             ChopperTarget *t);
+
+// 0x001e8f70. Up to three times: the sheet 4.5 either side of the target
+// on each axis (TestLocation), and the target 1.5 towards a side that is
+// on it when the other is not. 1 once nothing moves, else 0.
+int32_t chopper_adjust_target_in_bounds(struct Chopper *h,
+                                        ChopperTarget *t);
+
+// 0x001e90f0. 1 when `route` is not the helicopter's and is the one its
+// previous fork (FindPreviousFork, forwards) came off. `point` is unused.
+int32_t chopper_on_different_fork(struct Chopper *h, TrackRoute *route,
+                                  TrackRoutePoint *point);
+
+// 0x001e9368. The target made relative to the helicopter and turned into
+// its frame (RotateToChopperCoord).
+void chopper_adjust_target_local(struct Chopper *h, ChopperTarget *t);
+
+// 0x001e98d0. FindZValue at (x, y) turned by Yaw and moved to CurrentPos.
+int32_t chopper_test_location(struct Chopper *h, float x, float y);
+
+// 0x001e9940. f * 100.
+float chopper_adjust_by_think_time(struct Chopper *h, float f);
 
 #endif

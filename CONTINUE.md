@@ -1,7 +1,10 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 60 (2026-10-09):
-12k-3's first part is done: the route planners the helicopter follows
+12k-3a is done: the helicopter's chase logic, the sixteen functions
+under its plans (StartChaseLogic .. AdjustByThinkTime, in `chopper.c`;
+`docs/formats/chopper.md`, "The chase logic"). Before it, 12k-3's first
+part: the route planners the helicopter follows
 (ReturnToLastBranch, FindRoutesToTarget, FindPointsToTarget and
 FindNearbySignpost, in `airouteplan.c`; `docs/formats/ai-route.md`).
 Before them, the light flares. Cars' headlights, brake and reverse lights
@@ -400,13 +403,30 @@ pursuit.obj, on a 10 KB manager. Its slices:
     the walk gives up after `ROUTEPLAN_MAX_WALK` (0x11800) steps.
   - `tools/routeplan_check.py`: 81,092 ops, 100,285 lines, 0 differ.
     Of 98 mutations, 97 are caught and 1 is equivalent.
-  - Nothing calls them until 12k-3a (FollowRoute, the stakeout).
-- **Next: 12k-3a**, the helicopter's chase logic in `chopper.c`:
+  - 12k-3a's FollowRoute and FindPreviousFork call FindPointsToTarget
+    and FindNearbySignpost.
+- **12k-3a, done (Session 60):** the chase logic in `chopper.c`,
   StartChaseLogic (`0x001e8590`) .. AdjustByThinkTime (`0x001e9940`),
-  sixteen functions. The gp constants they read: gp-28048 0.7,
-  gp-28044 0.1, gp-28040 0.1, gp-28036 0.1, gp-28032 0.3,
-  gp-28028 0.1. Then 12k-3b: CleverPursuitPlan (`0x001e9150`) and
+  sixteen functions, with `ChopperTarget` (12 bytes: Location and
+  DesiredSpeed).
+  - The divergence: HangoutNearHere stops after a miss once both
+    offsets are below the least normal float, or NaN. The EE has
+    flushed them to zero by then, and the image tries the point itself
+    for ever.
+  - `tools/chopper_check.py`: 9,820 ops, 84,153 lines, 0 differ. Of
+    378 mutations, 376 are caught and 2 are equivalent: the stakeout's
+    index done by a divide, and by an unsigned shift.
+  - Azahar, on AC: a quick race with cops, PASS at 29.9 fps. Nothing
+    calls the chase logic until 12k-3b.
+- **Next: 12k-3b**, the plans: CleverPursuitPlan (`0x001e9150`) and
   HighLevelPlanning (`0x001e9648`).
+  - HighLevelPlanning finds the car's spot with bScaleAdd by gp-28032
+    (0.3) and FindZValue, then calls StartChaseLogic. It takes gp-28036
+    (0.1) off Timeout and calls BombRunLogic (`0x001e9398`, 12k-6).
+  - CleverPursuitPlan calls BeginStakeout, ChopperBehindCar,
+    FollowRoute and HangoutNearHere.
+  - The gp constants still unread: gp-28040 0.1, gp-28036 0.1,
+    gp-28032 0.3, and gp-28028 0.1 (SetXAccel, 12k-4).
   - Then:
     - 12k-4, flying;
     - 12k-5, drawing, dust and ChopperSound;
@@ -4845,9 +4865,9 @@ each class shows what it reaches.
 | 20 | The split-screen decision (task 30), then the final CIA, banner and hardware pass (task 31) | 1-2 |
 
 That was about 41-60 slices to the full game when the table was set.
-After 12k-3's planners (2026-10-09), about 27-40 are left, and the
-count has run low before:
-- step 12's: 12k-3a, 12k-3b, 12k-4 to 12k-7, 12l, 12m and 12n;
+After 12k-3a (2026-10-09), about 26-39 are left, and the count has
+run low before:
+- step 12's: 12k-3b, 12k-4 to 12k-7, 12l, 12m and 12n;
 - steps 10, 14, 14b, 16, 17, 18 and 20.
 
 The replay (`ReplaySnapshot` and every `DoSnapshot`) is not in the
@@ -4860,9 +4880,9 @@ count. It is its own slice when it goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** step 12's 12k-3a (the helicopter's chase logic): 12a to
-  12k-2, the light flares and 12k-3's planners are done. See "First" at
-  the top.
+- **Next:** step 12's 12k-3b (the helicopter's plans): 12a to 12k-2,
+  the light flares, 12k-3's planners and 12k-3a are done. See "First"
+  at the top.
   These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;

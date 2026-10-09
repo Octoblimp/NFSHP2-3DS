@@ -9,7 +9,8 @@ helicopter. The port has it in `chopper.{c,h}`, in slices:
 |---|---|
 | 12k-1 | the HeliSheet it flies over (`helisheet.md`) |
 | 12k-2 | the object, following and attacking a car, the target spot, placing it in the world (this page) |
-| 12k-3 | planning |
+| 12k-3a | the chase logic under the plans (this page) |
+| 12k-3b | the plans: CleverPursuitPlan and HighLevelPlanning |
 | 12k-4 | flying |
 | 12k-5 | drawing, dust and the ChopperSound |
 | 12k-6 | the bombing run |
@@ -207,6 +208,118 @@ WorldObject's update (`0x001ea578`) copies it and enables the object.
 RotateVector turns `v` by `deg` degrees and reads both of its parts before
 writing either, so `out` may be `v`.
 
+## The chase logic
+
+12k-3a ports these sixteen functions. HighLevelPlanning (12k-3b) calls
+them with a `ChopperTarget` on its stack, 12 bytes: `Location`
+(bVector2) and `DesiredSpeed`.
+
+```
+StartChaseLogic(t, on_sheet, flags, z)  0x001e8590
+    if !on_sheet or flags bit 1: return 1
+    PlaceChopperInWorld(t->Location, z + 150)
+    Plan = PURSUIT; EmitDust = !(flags bit 0); ZVelocity = -25
+    return 0
+
+EndChaseLogic(t)                        0x001e8608
+    if FindZValue(CurrentPos) hits, giving z and flags:
+        if z + 150 <= CurrentPos.z:
+            RemoveChopperFromWorld(); Plan = EATING_DONUTS; return 1
+        if !(flags bit 1 and ZVelocity == 0):
+            ZVelocity = 25; t->Location = CurrentPos; return 0
+    walk on from the helicopter's point to the route's end or the first
+    point more than 30 away; t->Location = the last point found
+    t->DesiredSpeed = 50; return 0
+
+SetFollowSpeed(t)                       0x001e88c0
+    t->DesiredSpeed = the car's VelocityMagnitude + 30
+
+FindPreviousFork(info, b)               0x001e88e0
+    back = b ^ 1; count = 0
+    loop:
+        n = FindNearbySignpost(info, back); if n == 0: return 0
+        count += n
+        info = the sign's new route and point
+        if its sign (Flags & 7) is not ALWAYS_TAKE (2): return count
+        info's point = GetRelativePoint(info, back); count += 1
+
+SwitchToNearbyFork(out, in, b, maxd)    0x001e8990
+    out = in; k = FindPreviousFork(out, b); if k == 0: return 0
+    2k times: if out's point is nearer than maxd: return 1
+              out's point = GetRelativePoint(out, b); if NULL: return 0
+    return 0
+
+TargetChopperPoint(t)                   0x001e8a80
+    t->Location = ChopperPoint's position
+
+FollowRoute(t, route, point, fwd)       0x001e8a98
+    mind = CalcMinRouteFollowDistance(t)
+    if ChopperPoint is point or further than mind:
+        if further: SetFollowSpeed(t)
+        TargetChopperPoint(t); return
+    out[5] = FindPointsToTarget(the helicopter's, (route, point), fwd, heli)
+    if none, and SwitchToNearbyFork(the helicopter's, fwd, mind) finds a
+    fork: FindPointsToTarget again from the fork
+    if none: return
+    take the first that is point or further than mind, else the last
+    if it is not point: SetFollowSpeed(t)
+    t->Location = its position
+
+BeginStakeout(t, route, point)          0x001e8ce8
+    walk on from (route, point) to the first point without
+    TRP_NO_HELISHEET whose signpost lacks NO_STAKEOUT (Flags bit 4)
+    off the route's end: BailToPointNearChopper(t); return
+    Target = that point if the sign is BACKWARDS (Flags bit 3), else the
+    sign's new route and point
+    c = FindClosestPoint(Target's route, CurrentPos, 400)
+    if c and Target's index < c's:
+        Target = the helicopter's; TargetChopperPoint(t); return
+    Plan = HEAD_TO_STAKEOUT; Timeout = 60; FollowRoute(t, Target, 1)
+
+HangoutNearHere(t, route, point)        0x001e8e70
+    along = t's offset from point along its Direction
+    across = 0.7 * t's offset across it          (gp-28048)
+    loop: along *= 0.7
+          t->Location = point's GetPosition(along, across)
+          if FindZValue(t->Location) hits: return
+          across *= 0.7
+
+BailToPointNearChopper(t)               0x001e8f30
+    HangoutNearHere(t, ChopperRoute, ChopperPoint)
+
+CalcMinRouteFollowDistance(t)           0x001e8f40
+    max(Speed * 0.1, 30)                         (gp-28044)
+
+AdjustTargetInBounds(t)                 0x001e8f70
+    up to 3 times:
+        TestLocation 4.5 to -x, +x, +y and -y of t
+        x: only -x on the sheet: x -= 1.5; only +x: x += 1.5; y alike
+        nothing moved: return 1
+    return 0
+
+ChopperOnDifferentFork(route, point)    0x001e90f0
+    if route is ChopperRoute: return 0
+    info = the helicopter's; if FindPreviousFork(info, 1) == 0: return 0
+    return info's route is route
+
+AdjustTargetLocal(t)                    0x001e9368
+    t->Location = RotateToChopperCoord(t->Location - CurrentPos)
+
+TestLocation(x, y)                      0x001e98d0
+    FindZValue(CurrentPos + RotateVector((x, y), Yaw)) hits
+
+AdjustByThinkTime(f)                    0x001e9940
+    f * 100
+```
+
+- **Indexes the image's way.** BeginStakeout compares two points'
+  indexes in the route's table as `(p - table) * 0xb6db6db7 >> 4`,
+  signed. For a point in the table that is its index exactly.
+- **The fork's count** is shifted left by one and tested again, so a
+  count of 2^31 walks no points.
+- **The signpost's word.** Its Flags byte is bits 8 to 15: the sign is
+  the low three bits, BACKWARDS bit 3 and NO_STAKEOUT bit 4.
+
 ## The port
 
 - **No sound unless it is set.** The ChopperSound is task 29's. The port
@@ -214,6 +327,11 @@ writing either, so `out` may be `v`.
   through it when there is none. Retail calls through it unguarded except
   in the destructor.
 - **The flags word starts at 0** in FindUnobstructedSpot (see above).
+- **HangoutNearHere stops** after a miss once both offsets are below the
+  least normal float, or NaN. By then the EE has flushed them to zero,
+  so every try is at the point itself, and the image tries it for ever
+  if it is off the sheet. An IEEE float would shrink to the least
+  denormal and stay there. The port leaves the target at that last try.
 
 ## The cross-check
 
@@ -222,8 +340,15 @@ writing either, so `out` may be `v`.
 bSinCos and bIdentity real on both sides. Everything else is a stub that
 logs its arguments and answers from the script: the TopologyCoordinate,
 the TrackPathCoordinate, the WorldObject, the AcidFX emitters, the routes
-and signposts, the HeliSheet's FindZValue, and the sound's table. After
-each call it compares every field at retail's offsets, the pad included.
-The model shares the port's two divergences. It lends retail a silent
-sound when the port has none, and it zeroes the flags word on entry to
-FindUnobstructedSpot.
+and signposts, the planners (FindNearbySignpost, FindPointsToTarget),
+the HeliSheet's FindZValue, and the sound's table. FindZValue answers per
+point or by boxes of the plane. The routes' points sit inside their
+tables, so BeginStakeout's indexes are the image's own. After each call
+it compares every field at retail's offsets, the pad included, and the
+ChopperTarget.
+
+The model shares the port's three divergences:
+- it lends retail a silent sound when the port has none;
+- it zeroes the flags word on entry to FindUnobstructedSpot;
+- a hook after HangoutNearHere's FindZValue (`0x001e8f04`) ends the loop
+  by the port's rule.

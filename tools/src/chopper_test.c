@@ -5,9 +5,13 @@
 // checker's script. Everything else the Chopper calls is a stub here that
 // logs its arguments and answers from the script, as the model's stubs
 // do. Pointers print as names: H for the helicopter (H.topo, H.dust,
-// H.tp and H.pos for its parts), C0.. for cars, R0.. routes, P0.. points,
-// S0.. signposts, and SND, WO, WOP, SHEET, TPM and WORLD; anything else is
-// "?".
+// H.tp and H.pos for its parts), T for the ChopperTarget, C0.. for cars,
+// R0.. routes, P0.. points, S0.. signposts, and SND, WO, WOP, SHEET, TPM
+// and WORLD; anything else is "?".
+//
+// The points sit in their routes' tables, PER_ROUTE to a route, because
+// BeginStakeout compares two points' indices worked out from their
+// addresses.
 
 #include <math.h>
 #include <stdint.h>
@@ -39,6 +43,10 @@
 #define NROUTES 4
 #define NPOINTS 24
 #define PER_ROUTE 6
+#define NBOXES  8
+
+// Point i, in its route's table.
+#define PT(i) (&routes[(i) / PER_ROUTE].TrackRoutePointTable[(i) % PER_ROUTE])
 
 // ---------------------------------------------------- what the port reads
 
@@ -52,8 +60,8 @@ EggIsOnFn         gEggIsOnFn;
 static World           world;
 static Car             cars[NCARS];
 static TrackRoute      routes[NROUTES];
-static TrackRoutePoint points[NPOINTS];
 static Signpost        signs[NPOINTS];
+static ChopperTarget   tgt;
 static HeliSheet       sheet;
 static WorldObject     wo;
 static Sound3d         snd;
@@ -79,6 +87,22 @@ static NearestRoutePointInfo q_near_info;
 static TrackRoutePoint *q_closest[NROUTES];
 static TrackRoute      *q_newroute;
 static int              sound_on = 1;
+// The sheet away from the points: boxes, the first holding a spot wins.
+static int              q_nbox;
+static float            q_box[NBOXES][5];  // x0 y0 x1 y1 z
+static uint32_t         q_box_flags[NBOXES];
+// GetNextRoutePoint's dead ends, after these points.
+static int32_t          q_end[NPOINTS];
+// Each sign's own route and point, when set.
+static int32_t          q_sign_set[NPOINTS];
+static TrackRoute      *q_sign_route[NPOINTS];
+static TrackRoutePoint *q_sign_point[NPOINTS];
+// FindNearbySignpost from each point: the count, and where it stops.
+static int32_t          q_nearby[NPOINTS];
+static NearestRoutePointInfo q_nearby_at[NPOINTS];
+// FindPointsToTarget from each point.
+static uint32_t         q_ptt_n[NPOINTS];
+static NearestRoutePointInfo q_ptt[NPOINTS][8];
 
 // ------------------------------------------------------------- printing
 
@@ -119,6 +143,8 @@ static const char *pname(const void *p)
         if (p == (const void *)&H->CurrentPos)
             return "H.pos";
     }
+    if (p == (const void *)&tgt)
+        return "T";
     for (i = 0; i < NCARS; i++)
         if (p == (const void *)&cars[i]) {
             sprintf(b, "C%d", i);
@@ -130,7 +156,7 @@ static const char *pname(const void *p)
             return b;
         }
     for (i = 0; i < NPOINTS; i++) {
-        if (p == (const void *)&points[i]) {
+        if (p == (const void *)PT(i)) {
             sprintf(b, "P%d", i);
             return b;
         }
@@ -163,17 +189,28 @@ static void *byname(const char *s)
     switch (s[0]) {
     case 'C': return &cars[i];
     case 'R': return &routes[i];
-    case 'P': return &points[i];
+    case 'P': return PT(i);
     }
     fprintf(stderr, "chopper_test: no object %s\n", s);
     exit(2);
 }
 
+// The point's number, or -1 for anything else.
+static int find_point(const void *p)
+{
+    int i;
+
+    for (i = 0; i < NPOINTS; i++)
+        if (p == (const void *)PT(i))
+            return i;
+    return -1;
+}
+
 static int point_index(const void *p)
 {
-    int i = (int)((const TrackRoutePoint *)p - points);
+    int i = find_point(p);
 
-    if (i < 0 || i >= NPOINTS) {
+    if (i < 0) {
         fprintf(stderr, "chopper_test: not a point\n");
         exit(2);
     }
@@ -222,6 +259,8 @@ static void dump(void)
     for (i = 0; i < 12; i++)
         printf(" %02x", pad[i]);
     printf("\n");
+    printf("  tgt %08x %08x %08x\n", fb(tgt.Location.x), fb(tgt.Location.y),
+           fb(tgt.DesiredSpeed));
 }
 
 // ---------------------------------------------------------- the sound
@@ -409,25 +448,47 @@ void ai_get_next_route_point(NearestRoutePointInfo *info)
     int i;
 
     printf("  next %s %s\n", pname(info->Route), pname(info->Point));
-    i = point_index(info->Point) + 1;
+    i = point_index(info->Point);
+    if (q_end[i] || i + 1 >= NPOINTS) {
+        info->Point = NULL;
+        return;
+    }
+    i++;
     info->Route = &routes[i / PER_ROUTE];
-    info->Point = &points[i];
+    info->Point = PT(i);
 }
 
+// A point's polygon is the script's, per point; anywhere else, the first
+// box holding the spot.
 int32_t helisheet_find_z_value(HeliSheet *s, const bVector2 *pt, float *z,
                                uint32_t *flags)
 {
-    int i = point_index(pt);
+    int i = find_point(pt);
+    int k;
 
-    printf("  zval %s %s %s %s\n", pname(s), pname(pt), pname(z),
-           flags != NULL ? "F" : "NULL");
-    if (!q_zhit[i])
-        return 0;
-    if (z != NULL)
-        *z = 1.0f;
-    if (flags != NULL)
-        *flags = q_zflags[i];
-    return 1;
+    printf("  zval %s %s %s %s %08x %08x\n", pname(s), pname(pt),
+           z != NULL ? "Z" : "NULL", flags != NULL ? "F" : "NULL",
+           fb(pt->x), fb(pt->y));
+    if (i >= 0) {
+        if (!q_zhit[i])
+            return 0;
+        if (z != NULL)
+            *z = 1.0f;
+        if (flags != NULL)
+            *flags = q_zflags[i];
+        return 1;
+    }
+    for (k = 0; k < q_nbox; k++) {
+        if (q_box[k][0] <= pt->x && pt->x <= q_box[k][2]
+            && q_box[k][1] <= pt->y && pt->y <= q_box[k][3]) {
+            if (z != NULL)
+                *z = q_box[k][4];
+            if (flags != NULL)
+                *flags = q_box_flags[k];
+            return 1;
+        }
+    }
+    return 0;
 }
 
 int ai_get_nearest_route_point(NearestRoutePointInfo *info,
@@ -463,10 +524,89 @@ Signpost *trpoint_get_signpost(const TrackRoutePoint *p)
     return &signs[point_index(p)];
 }
 
+static int sign_index(const Signpost *s)
+{
+    int i = (int)(s - signs);
+
+    if (i < 0 || i >= NPOINTS) {
+        fprintf(stderr, "chopper_test: not a sign\n");
+        exit(2);
+    }
+    return i;
+}
+
 TrackRoute *signpost_get_new_route(const Signpost *s)
 {
+    int i = sign_index(s);
+
     printf("  new_route %s\n", pname(s));
-    return q_newroute;
+    return q_sign_set[i] ? q_sign_route[i] : q_newroute;
+}
+
+TrackRoutePoint *signpost_get_new_route_point(const Signpost *s)
+{
+    int i = sign_index(s);
+
+    printf("  new_point %s\n", pname(s));
+    return q_sign_set[i] ? q_sign_point[i] : NULL;
+}
+
+// The neighbour within the point's own route, or NULL.
+TrackRoutePoint *troute_get_relative_point(TrackRoute *r, TrackRoutePoint *p,
+                                           int forward)
+{
+    int i = find_point(p);
+    int j;
+
+    printf("  relpt %s %s %d\n", pname(r), pname(p), forward);
+    if (i < 0)
+        return NULL;
+    j = forward ? i + 1 : i - 1;
+    if (j < 0 || j / PER_ROUTE != i / PER_ROUTE)
+        return NULL;
+    return PT(j);
+}
+
+int32_t ai_find_nearby_signpost(NearestRoutePointInfo *info, int fwd)
+{
+    int i = find_point(info->Point);
+
+    printf("  nearby %s %s %d\n", pname(info->Route), pname(info->Point),
+           fwd);
+    if (i < 0 || q_nearby[i] == 0) {
+        info->Point = NULL;
+        return 0;
+    }
+    *info = q_nearby_at[i];
+    return q_nearby[i];
+}
+
+uint32_t ai_find_points_to_target(const NearestRoutePointInfo *start,
+                                  const NearestRoutePointInfo *target,
+                                  NearestRoutePointInfo *out, uint32_t count,
+                                  int fwd, int heli)
+{
+    int i = find_point(start->Point);
+    uint32_t k, n;
+
+    printf("  ptt %s %s %s %s %u %d %d\n", pname(start->Route),
+           pname(start->Point), pname(target->Route), pname(target->Point),
+           count, fwd, heli);
+    if (i < 0)
+        return 0;
+    n = q_ptt_n[i] < count ? q_ptt_n[i] : count;
+    for (k = 0; k < n; k++)
+        out[k] = q_ptt[i][k];
+    return n;
+}
+
+// The spot is (d, l) itself, which the boxes then judge.
+void trpoint_get_position2(const TrackRoutePoint *p, bVector2 *o, float d,
+                           float l)
+{
+    printf("  getpos %s %s %08x %08x\n", pname(p), pname(o), fb(d), fb(l));
+    o->x = d;
+    o->y = l;
 }
 
 // coputil.c's other callees, which nothing here reaches.
@@ -660,7 +800,35 @@ static void answer(char **t, int n)
         q_newroute = (TrackRoute *)byname(t[2]);
     else if (!strcmp(q, "sound"))
         sound_on = atoi(t[2]);
-    else {
+    else if (!strcmp(q, "zbox")) {
+        if (n == 2)
+            q_nbox = 0;
+        else {
+            for (i = 0; i < 5; i++)
+                q_box[q_nbox][i] = fh(t[2 + i]);
+            q_box_flags[q_nbox++] = hx(t[7]);
+        }
+    } else if (!strcmp(q, "end"))
+        q_end[atoi(t[2])] = atoi(t[3]);
+    else if (!strcmp(q, "signto")) {
+        i = atoi(t[2]);
+        q_sign_set[i] = 1;
+        q_sign_route[i] = (TrackRoute *)byname(t[3]);
+        q_sign_point[i] = (TrackRoutePoint *)byname(t[4]);
+    } else if (!strcmp(q, "nearby")) {
+        i = atoi(t[2]);
+        q_nearby[i] = atoi(t[3]);
+        q_nearby_at[i].Route = (TrackRoute *)byname(t[4]);
+        q_nearby_at[i].Point = (TrackRoutePoint *)byname(t[5]);
+    } else if (!strcmp(q, "ptt")) {
+        int k = atoi(t[2]);
+
+        q_ptt_n[k] = (uint32_t)((n - 3) / 2);
+        for (i = 0; i < (int)q_ptt_n[k]; i++) {
+            q_ptt[k][i].Route = (TrackRoute *)byname(t[3 + 2 * i]);
+            q_ptt[k][i].Point = (TrackRoutePoint *)byname(t[4 + 2 * i]);
+        }
+    } else {
         fprintf(stderr, "chopper_test: no answer %s\n", q);
         exit(2);
     }
@@ -680,12 +848,23 @@ static void car_op(char **t)
 
 static void point_op(char **t)
 {
-    TrackRoutePoint *p = &points[atoi(t[1])];
+    TrackRoutePoint *p = PT(atoi(t[1]));
 
     p->Position.x = fh(t[2]);
     p->Position.y = fh(t[3]);
     p->Length = fh(t[4]);
     p->Bits = hx(t[5]);
+    p->Direction.x = fh(t[6]);
+    p->Direction.y = fh(t[7]);
+}
+
+static NearestRoutePointInfo info_of(char **t)
+{
+    NearestRoutePointInfo info;
+
+    info.Route = (TrackRoute *)byname(t[0]);
+    info.Point = (TrackRoutePoint *)byname(t[1]);
+    return info;
 }
 
 static void run(char **t, int n)
@@ -766,7 +945,65 @@ static void run(char **t, int n)
     } else if (!strcmp(op, "point")) {
         point_op(t);
         return;
-    } else {
+    } else if (!strcmp(op, "sign")) {
+        uint32_t w = hx(t[2]);
+
+        memcpy(&signs[atoi(t[1])], &w, 4);
+        return;
+    } else if (!strcmp(op, "tgt")) {
+        tgt.Location.x = fh(t[1]);
+        tgt.Location.y = fh(t[2]);
+        tgt.DesiredSpeed = fh(t[3]);
+        return;
+    } else if (!strcmp(op, "start"))
+        printf("  ret %d\n", chopper_start_chase_logic(h, &tgt, atoi(t[1]),
+                                                       hx(t[2]), fh(t[3])));
+    else if (!strcmp(op, "endchase"))
+        printf("  ret %d\n", chopper_end_chase_logic(h, &tgt));
+    else if (!strcmp(op, "fspeed"))
+        chopper_set_follow_speed(h, &tgt);
+    else if (!strcmp(op, "prevfork")) {
+        NearestRoutePointInfo info = info_of(t + 1);
+        int32_t r = chopper_find_previous_fork(h, &info, atoi(t[3]));
+
+        printf("  ret %d %s %s\n", r, pname(info.Route), pname(info.Point));
+    } else if (!strcmp(op, "switchfork")) {
+        NearestRoutePointInfo in = info_of(t + 1), out;
+        int32_t r;
+
+        memset(&out, 0xcd, sizeof out);
+        r = chopper_switch_to_nearby_fork(h, &out, &in, atoi(t[3]),
+                                          fh(t[4]));
+        printf("  ret %d %s %s\n", r, pname(out.Route), pname(out.Point));
+    } else if (!strcmp(op, "tcp"))
+        chopper_target_chopper_point(h, &tgt);
+    else if (!strcmp(op, "followroute"))
+        chopper_follow_route(h, &tgt, (TrackRoute *)byname(t[1]),
+                             (TrackRoutePoint *)byname(t[2]), atoi(t[3]));
+    else if (!strcmp(op, "stakeout"))
+        chopper_begin_stakeout(h, &tgt, (TrackRoute *)byname(t[1]),
+                               (TrackRoutePoint *)byname(t[2]));
+    else if (!strcmp(op, "hangout"))
+        chopper_hangout_near_here(h, &tgt, (TrackRoute *)byname(t[1]),
+                                  (TrackRoutePoint *)byname(t[2]));
+    else if (!strcmp(op, "bail"))
+        chopper_bail_to_point_near_chopper(h, &tgt);
+    else if (!strcmp(op, "minfollow"))
+        printf("  ret %08x\n",
+               fb(chopper_calc_min_route_follow_distance(h, &tgt)));
+    else if (!strcmp(op, "inbounds"))
+        printf("  ret %d\n", chopper_adjust_target_in_bounds(h, &tgt));
+    else if (!strcmp(op, "difffork"))
+        printf("  ret %d\n", chopper_on_different_fork(
+                   h, (TrackRoute *)byname(t[1]),
+                   (TrackRoutePoint *)byname(t[2])));
+    else if (!strcmp(op, "local"))
+        chopper_adjust_target_local(h, &tgt);
+    else if (!strcmp(op, "testloc"))
+        printf("  ret %d\n", chopper_test_location(h, fh(t[1]), fh(t[2])));
+    else if (!strcmp(op, "bythink"))
+        printf("  ret %08x\n", fb(chopper_adjust_by_think_time(h, fh(t[1]))));
+    else {
         fprintf(stderr, "chopper_test: no op %s\n", op);
         exit(2);
     }

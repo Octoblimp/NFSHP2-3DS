@@ -18876,3 +18876,76 @@ needs stubs for FindNearbySignpost, GetRelativePoint, GetNewRoutePoint,
 FindPointsToTarget, TrackRoutePoint::GetPosition (`0x001c1390`) and
 FindClosestPointAhead (`0x001c1d30`). Then 12k-3b, CleverPursuitPlan and
 HighLevelPlanning.
+
+## Session 60, continued (2026-10-09) -- 12k-3a, the chase logic
+
+The helicopter's plans stand on sixteen smaller functions. They start
+and end the chase, follow a route towards the car, stake out a signpost
+ahead of it, and keep the target over the HeliSheet. They are now in
+`chopper.{c,h}`. `docs/formats/chopper.md` ("The chase logic") has
+them in pseudocode.
+
+### What it does
+
+- **`ChopperTarget`**, 12 bytes on HighLevelPlanning's stack:
+  `Location` (bVector2) and `DesiredSpeed`.
+- **StartChaseLogic / EndChaseLogic.** The chase starts 150 over the
+  sheet, dropping at 25. It ends by climbing at 25 until 150 over the
+  sheet, then leaving the world. Off the sheet, the end walks on to the
+  first point more than 30 away, at 50.
+- **FindPreviousFork** walks back through signposts. It goes on
+  through an ALWAYS_TAKE (sign 2) a step into the new route, and
+  answers the steps counted. **SwitchToNearbyFork** then looks at up to
+  twice that many points from the fork for one within reach.
+- **FollowRoute** aims at the first of FindPointsToTarget's five points
+  that is the goal or beyond the least distance (Speed * 0.1, at least
+  30). Failing that, it aims at the last. It speeds up to the car's speed
+  plus 30 unless it is aiming at the goal.
+- **BeginStakeout** picks the first signpost ahead without NO_STAKEOUT,
+  on a point the helicopter may fly over. It goes to the sign's point
+  when the sign is BACKWARDS, else to its new route and point. If the
+  helicopter is already past that spot, it stays on its own point.
+- **HangoutNearHere** pulls the target towards a point, 0.7 at a time,
+  until it is over the sheet. **AdjustTargetInBounds** nudges a local
+  target 1.5 towards the sheet's side, up to three times.
+- **The signpost's word:** the Flags byte is bits 8-15, the sign the low
+  three, BACKWARDS bit 3 and NO_STAKEOUT bit 4.
+- **The divergence:** HangoutNearHere stops after a miss once both
+  offsets are below the least normal float, or NaN. The EE has flushed
+  them to zero by then, and the image tries the point itself for ever.
+  In IEEE, 0.7 times the least denormal rounds back to itself, so a
+  test for zero never fires.
+
+### Checked
+
+- `tools/chopper_check.py` runs the image's sixteen functions in
+  mipsemu.
+  - New stubs: FindNearbySignpost, FindPointsToTarget,
+    GetRelativePoint, GetNewRoutePoint and TrackRoutePoint::GetPosition
+    (`0x001c1390`). BeginStakeout calls FindClosestPoint
+    (`0x001c1b48`), the stub the checker already had, not
+    FindClosestPointAhead as the last note guessed.
+  - FindZValue answers per point or by boxes of the plane.
+  - The routes' points sit inside their tables, so the stakeout's
+    indexes are the image's.
+  - A hook at `0x001e8f04` gives the model the port's stop.
+- The result is 9,820 ops, 84,153 lines and 0 differ. Of 378
+  mutations, 376 are caught and 2 are equivalent: the stakeout's index
+  done by a divide by 112, and by an unsigned shift. Both give k for a
+  point 112k into the table.
+  - Three survived the first pass, and new cases killed them:
+    - a walk point exactly 30.5 and 30 away;
+    - the helicopter exactly 30 (18, 24) from its point;
+    - a fork whose points are all between the least distance and twice
+      it.
+- The CIA builds. `check_3dsx` and `check_shbin` pass.
+- Azahar, on AC: a quick race with cops from the frontend, PASS at
+  29.9 fps. Nothing calls the chase logic yet.
+
+### Next
+
+12k-3b: CleverPursuitPlan (`0x001e9150`) and HighLevelPlanning
+(`0x001e9648`). HighLevelPlanning finds the car's spot by bScaleAdd with
+gp-28032 (0.3) and FindZValue, then calls StartChaseLogic. It calls
+BombRunLogic (`0x001e9398`, 12k-6, a stub until then) and takes gp-28036
+(0.1) off Timeout.

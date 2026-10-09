@@ -2,6 +2,7 @@
 
 #include "chopper.h"
 
+#include <float.h>
 #include <math.h>
 #include <stddef.h>
 
@@ -425,4 +426,365 @@ void chopper_update_world_object(struct Chopper *h)
     // The image tests &Matrix for NULL, which it never is.
     h->WorldObj->Matrix = h->Matrix;
     h->WorldObj->Enabled = 1;
+}
+
+// -------------------------------------------------------- the chase logic
+
+// The height over the sheet the chase starts and ends at, 0x43160000; the
+// drop and the climb, 0xc1c80000 and 0x41c80000.
+#define CHASE_HEIGHT       150.0f
+#define CHASE_DROP         -25.0f
+#define CHASE_CLIMB        25.0f
+
+// EndChaseLogic's walk: its reach, 0x41f00000, and speed, 0x42480000.
+#define END_CHASE_REACH    30.0f
+#define END_CHASE_SPEED    50.0f
+
+// SetFollowSpeed's lead on the car, 0x41f00000.
+#define FOLLOW_LEAD        30.0f
+
+// CalcMinRouteFollowDistance: Speed times gp-28044, at least 0x41f00000.
+#define FOLLOW_SCALE       0.1f
+#define FOLLOW_MIN         30.0f
+
+// FollowRoute's points.
+#define FOLLOW_POINTS      5
+
+// BeginStakeout's search radius, 0x43c80000, and timeout, 0x42700000.
+#define STAKEOUT_RADIUS    400.0f
+#define STAKEOUT_TIMEOUT   60.0f
+
+// HangoutNearHere's shrink, gp-28048.
+#define HANGOUT_SHRINK     0.7f
+
+// AdjustTargetInBounds: the probes' reach, 0x40900000, the step,
+// 0x3fc00000, and the tries.
+#define BOUNDS_PROBE       4.5f
+#define BOUNDS_STEP        1.5f
+#define BOUNDS_TRIES       3u
+
+// AdjustByThinkTime's scale, 0x42c80000.
+#define THINK_SCALE        100.0f
+
+// A point's index in `r`'s table, the image's way (airoute.c's
+// point_index).
+static int32_t point_index(const TrackRoute *r, const TrackRoutePoint *p)
+{
+    uint32_t d = (uint32_t)((uintptr_t)p
+                            - (uintptr_t)r->TrackRoutePointTable);
+
+    return (int32_t)(d * 0xb6db6db7u) >> 4;
+}
+
+// How far `p` is from the helicopter on the ground, as every caller works
+// it out: x's square plus y's, then the root.
+static float distance_to(const struct Chopper *h, const bVector2 *p)
+{
+    float dx = p->x - h->CurrentPos.x;
+    float dy = p->y - h->CurrentPos.y;
+
+    return sqrtf(dx * dx + dy * dy);
+}
+
+int32_t chopper_start_chase_logic(struct Chopper *h, ChopperTarget *t,
+                                  int32_t on_sheet, uint32_t flags, float z)
+{
+    if (!on_sheet || (flags & 2))
+        return 1;
+    chopper_place_in_world(h, &t->Location, z + CHASE_HEIGHT);
+    h->Plan = CHOPPLAN_PURSUIT;
+    h->EmitDust = (int32_t)((flags ^ 1) & 1);
+    h->ZVelocity = CHASE_DROP;
+    return 0;
+}
+
+int32_t chopper_end_chase_logic(struct Chopper *h, ChopperTarget *t)
+{
+    NearestRoutePointInfo last, next;
+    float z;
+    uint32_t flags;
+
+    if (helisheet_find_z_value(TheHeliSheet, (const bVector2 *)&h->CurrentPos,
+                               &z, &flags)) {
+        if (z + CHASE_HEIGHT <= h->CurrentPos.z) {
+            chopper_remove_from_world(h);
+            h->Plan = CHOPPLAN_EATING_DONUTS;
+            return 1;
+        }
+        if (!((flags & 2) && h->ZVelocity == 0.0f)) {
+            h->ZVelocity = CHASE_CLIMB;
+            t->Location.x = h->CurrentPos.x;
+            t->Location.y = h->CurrentPos.y;
+            return 0;
+        }
+    }
+    last.Route = h->ChopperRoute;
+    last.Point = h->ChopperPoint;
+    next = last;
+    for (;;) {
+        ai_get_next_route_point(&next);
+        if (next.Point == NULL)
+            break;
+        last = next;
+        if (END_CHASE_REACH < distance_to(h, &last.Point->Position))
+            break;
+    }
+    t->DesiredSpeed = END_CHASE_SPEED;
+    t->Location.x = last.Point->Position.x;
+    t->Location.y = last.Point->Position.y;
+    return 0;
+}
+
+void chopper_set_follow_speed(struct Chopper *h, ChopperTarget *t)
+{
+    t->DesiredSpeed = h->CurrentCar->State.VelocityMagnitude + FOLLOW_LEAD;
+}
+
+int32_t chopper_find_previous_fork(struct Chopper *h,
+                                   NearestRoutePointInfo *info, int b)
+{
+    int back = b ^ 1;
+    uint32_t count = 0;
+    int32_t n;
+    Signpost *s;
+
+    (void)h;
+    for (;;) {
+        n = ai_find_nearby_signpost(info, back);
+        if (n == 0)
+            return 0;
+        count += (uint32_t)n;
+        s = trpoint_get_signpost(info->Point);
+        info->Route = signpost_get_new_route(s);
+        info->Point = signpost_get_new_route_point(s);
+        if ((s->Flags & SIGNPOST_SIGN_MASK) != SIGN_ALWAYS_TAKE)
+            return (int32_t)count;
+        info->Point = troute_get_relative_point(info->Route, info->Point,
+                                                back);
+        count++;
+    }
+}
+
+int32_t chopper_switch_to_nearby_fork(struct Chopper *h,
+                                      NearestRoutePointInfo *out,
+                                      const NearestRoutePointInfo *in, int b,
+                                      float maxd)
+{
+    uint32_t k;
+
+    *out = *in;
+    k = (uint32_t)chopper_find_previous_fork(h, out, b);
+    if (k == 0)
+        return 0;
+    // `sll` by one, tested again: zero only for a count of 2^31.
+    for (k <<= 1; k != 0; k--) {
+        if (distance_to(h, &out->Point->Position) < maxd)
+            return 1;
+        out->Point = troute_get_relative_point(out->Route, out->Point, b);
+        if (out->Point == NULL)
+            return 0;
+    }
+    return 0;
+}
+
+void chopper_target_chopper_point(struct Chopper *h, ChopperTarget *t)
+{
+    t->Location.x = h->ChopperPoint->Position.x;
+    t->Location.y = h->ChopperPoint->Position.y;
+}
+
+void chopper_follow_route(struct Chopper *h, ChopperTarget *t,
+                          TrackRoute *route, TrackRoutePoint *point, int fwd)
+{
+    NearestRoutePointInfo out[FOLLOW_POINTS], start, target, fork;
+    float mind = chopper_calc_min_route_follow_distance(h, t);
+    int far = mind < distance_to(h, &h->ChopperPoint->Position);
+    uint32_t n, i;
+
+    if (h->ChopperPoint == point || far) {
+        if (far)
+            chopper_set_follow_speed(h, t);
+        chopper_target_chopper_point(h, t);
+        return;
+    }
+    start.Route = h->ChopperRoute;
+    start.Point = h->ChopperPoint;
+    target.Route = route;
+    target.Point = point;
+    n = ai_find_points_to_target(&start, &target, out, FOLLOW_POINTS, fwd, 1);
+    if (n == 0 && chopper_switch_to_nearby_fork(h, &fork, &start, fwd, mind))
+        n = ai_find_points_to_target(&fork, &target, out, FOLLOW_POINTS, fwd,
+                                     1);
+    if (n == 0)
+        return;
+    for (i = 0; i < n; i++)
+        if (out[i].Point == point
+            || mind < distance_to(h, &out[i].Point->Position))
+            break;
+    if (i == n)
+        i = n - 1;
+    if (out[i].Point != point)
+        chopper_set_follow_speed(h, t);
+    t->Location.x = out[i].Point->Position.x;
+    t->Location.y = out[i].Point->Position.y;
+}
+
+void chopper_begin_stakeout(struct Chopper *h, ChopperTarget *t,
+                            TrackRoute *route, TrackRoutePoint *point)
+{
+    NearestRoutePointInfo info;
+    TrackRoutePoint *c;
+    Signpost *s;
+
+    info.Route = route;
+    info.Point = point;
+    for (;; ai_get_next_route_point(&info)) {
+        if (info.Point == NULL) {
+            chopper_bail_to_point_near_chopper(h, t);
+            return;
+        }
+        if ((info.Point->Bits & TRP_NO_HELISHEET)
+            || !trpoint_has_signpost(info.Point))
+            continue;
+        s = trpoint_get_signpost(info.Point);
+        if (s->Flags & SIGNPOST_NO_STAKEOUT)
+            continue;
+        break;
+    }
+    if (s->Flags & SIGNPOST_BACKWARDS) {
+        h->TargetRoute = info.Route;
+        h->TargetPoint = info.Point;
+    } else {
+        h->TargetRoute = signpost_get_new_route(s);
+        h->TargetPoint = signpost_get_new_route_point(s);
+    }
+    c = troute_find_closest_point(h->TargetRoute,
+                                  (const bVector2 *)&h->CurrentPos,
+                                  STAKEOUT_RADIUS, 0, 0.0f);
+    if (c != NULL && point_index(h->TargetRoute, h->TargetPoint)
+                         < point_index(h->TargetRoute, c)) {
+        h->TargetRoute = h->ChopperRoute;
+        h->TargetPoint = h->ChopperPoint;
+        chopper_target_chopper_point(h, t);
+        return;
+    }
+    h->Plan = CHOPPLAN_HEAD_TO_STAKEOUT;
+    h->Timeout = STAKEOUT_TIMEOUT;
+    chopper_follow_route(h, t, h->TargetRoute, h->TargetPoint, 1);
+}
+
+void chopper_hangout_near_here(struct Chopper *h, ChopperTarget *t,
+                               TrackRoute *route, TrackRoutePoint *point)
+{
+    float dx = t->Location.x - point->Position.x;
+    float dy = t->Location.y - point->Position.y;
+    float along = dx * point->Direction.x + dy * point->Direction.y;
+    float across = (dx * point->Direction.y - dy * point->Direction.x)
+                   * HANGOUT_SHRINK;
+
+    (void)h, (void)route;
+    for (;;) {
+        along = along * HANGOUT_SHRINK;
+        trpoint_get_position2(point, &t->Location, along, across);
+        if (helisheet_find_z_value(TheHeliSheet, &t->Location, NULL, NULL))
+            return;
+        // The port's: both below the least normal float, where the EE has
+        // flushed them to zero and every try from here on is at the point
+        // itself. (An IEEE float shrinks to the least denormal and stays.)
+        if (!(fabsf(along) >= FLT_MIN) && !(fabsf(across) >= FLT_MIN))
+            return;
+        across = across * HANGOUT_SHRINK;
+    }
+}
+
+void chopper_bail_to_point_near_chopper(struct Chopper *h, ChopperTarget *t)
+{
+    chopper_hangout_near_here(h, t, h->ChopperRoute, h->ChopperPoint);
+}
+
+float chopper_calc_min_route_follow_distance(struct Chopper *h,
+                                             ChopperTarget *t)
+{
+    float d = h->Speed * FOLLOW_SCALE;
+
+    (void)t;
+    if (d < FOLLOW_MIN)
+        d = FOLLOW_MIN;
+    return d;
+}
+
+int32_t chopper_adjust_target_in_bounds(struct Chopper *h, ChopperTarget *t)
+{
+    uint32_t tries;
+    int32_t xm, xp, yp, ym;
+    int moved;
+
+    for (tries = 0; tries < BOUNDS_TRIES; tries++) {
+        xm = chopper_test_location(h, t->Location.x - BOUNDS_PROBE,
+                                   t->Location.y);
+        xp = chopper_test_location(h, t->Location.x + BOUNDS_PROBE,
+                                   t->Location.y);
+        yp = chopper_test_location(h, t->Location.x,
+                                   t->Location.y + BOUNDS_PROBE);
+        ym = chopper_test_location(h, t->Location.x,
+                                   t->Location.y - BOUNDS_PROBE);
+        moved = 0;
+        if (xm && !xp) {
+            t->Location.x = t->Location.x - BOUNDS_STEP;
+            moved = 1;
+        } else if (!xm && xp) {
+            t->Location.x = t->Location.x + BOUNDS_STEP;
+            moved = 1;
+        }
+        if (yp && !ym) {
+            t->Location.y = t->Location.y + BOUNDS_STEP;
+            moved = 1;
+        } else if (!yp && ym) {
+            t->Location.y = t->Location.y - BOUNDS_STEP;
+            moved = 1;
+        }
+        if (!moved)
+            return 1;
+    }
+    return 0;
+}
+
+int32_t chopper_on_different_fork(struct Chopper *h, TrackRoute *route,
+                                  TrackRoutePoint *point)
+{
+    NearestRoutePointInfo info;
+
+    (void)point;
+    if (route == h->ChopperRoute)
+        return 0;
+    info.Route = h->ChopperRoute;
+    info.Point = h->ChopperPoint;
+    if (chopper_find_previous_fork(h, &info, 1) == 0)
+        return 0;
+    return info.Route == route;
+}
+
+void chopper_adjust_target_local(struct Chopper *h, ChopperTarget *t)
+{
+    t->Location.x = t->Location.x - h->CurrentPos.x;
+    t->Location.y = t->Location.y - h->CurrentPos.y;
+    chopper_rotate_to_chopper_coord(h, &t->Location, &t->Location);
+}
+
+int32_t chopper_test_location(struct Chopper *h, float x, float y)
+{
+    bVector2 v;
+
+    v.x = x;
+    v.y = y;
+    rotate_vector(&v, &v, h->Yaw);
+    v.x = v.x + h->CurrentPos.x;
+    v.y = v.y + h->CurrentPos.y;
+    return helisheet_find_z_value(TheHeliSheet, &v, NULL, NULL);
+}
+
+float chopper_adjust_by_think_time(struct Chopper *h, float f)
+{
+    (void)h;
+    return f * THINK_SCALE;
 }
