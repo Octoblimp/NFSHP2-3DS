@@ -1,17 +1,18 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 59, continued
-(2026-10-08): 12i-3, retail's e-brake stop, is done. RealDriver's
-ForcedEBrakeStop is retail's float timer, and MonitorRoadBlock's 5 s
-stop is bound (`docs/formats/real-driver.md`). Before it, 12i-2 made
+(2026-10-08): 12j-1, the radar traps, is done. The manager's
+SpawnSpeedTraps sends a cop out of limbo to a radar trap ahead of a
+racer (`docs/formats/cop-manager.md`, "Radar traps"). Before it, 12i-3
+made RealDriver's ForcedEBrakeStop retail's float timer and bound
+MonitorRoadBlock's 5 s stop (`docs/formats/real-driver.md`). 12i-2 made
 the roadblock (`docs/formats/pursuit.md`, "Making a roadblock"): a
 chase that asks for one gets its cops sent to their spots, with no
 barrels (the smokeables are not ported, step 14b) and no spike strip
 (12j). 12i-1 ported the roadblocks' running logic, 12h-2
 tPursuit::Update and 12h-1 tPursuit's object and RequestPursuit. The
-cops' cars still wait
-in limbo until something asks them out: a patrol's or radar trap's
-search (12j's SpawnSpeedTraps) is what starts a chase.
+cops' cars wait in limbo until a radar trap or a roadblock calls them
+out. A radar trap's search is what starts a chase.
 Session 58, continued: 12g-3, the chase (the hot pursuit and caught
 speeder logics), so all of tAICop's logic is in. 12g-2 (the radar traps', roadblocks' and patrols' logic) and
 12g-1 (tAICop::Think, which made a race with cops make their cars) were
@@ -261,12 +262,21 @@ pursuit.obj, on a 10 KB manager. Its slices:
     hits a roadblock cop is braked for up to 5 s.
   - `realdriver_check` has a retail run for it (`OP_RETAIL`); the demo
     scenarios keep the stop at 0.
-- **Next: 12j-1**, SpawnSpeedTraps (`0x00224a20`) and
-  FindCopForSpeedTrap (`0x00224838`), which bind
-  `gCopManagerSpawnSpeedTrapsFn` and take cops out of limbo.
+- **12j-1, done (Session 59):** SpawnSpeedTraps (`0x00224a20`) and
+  FindCopForSpeedTrap (`0x00224838`) in `copmgr.c`.
+  - `main.c` binds `gCopManagerSpawnSpeedTrapsFn`, so a ready cop in
+    limbo is sent to a radar trap ahead of a racer that wants one.
+  - The want follows retail: the roll by difficulty, the chase's cops
+    and backup, the split to the leader against -15 s, and an AI
+    racer's tickets against its laps.
+  - `copmanager_check` also fixed two mutations that had gone stale
+    since 12h-1's rename (`copmanager_replaying`).
+- **Next: 12j-2**, the spike strips: AddSpikeStrip (`0x002276d0`),
+  tSpikeStrip's constructor (`0x00241378`), Init (`0x002414e8`) and
+  Update (`0x002417b8`), and the manager's MonitorSpikeBelts
+  (`0x00227758`). They bind `gCopManagerAddSpikeStripFn` and
+  `gCopManagerMonitorSpikeBeltsFn`, so a roadblock lays its strip.
   Then:
-  - **12j-2** spike strips (AddSpikeStrip, `0x002276d0`, and
-    tSpikeStrip's constructor, `0x00241378`);
   - **12k** the helicopter (UpdateChopper, `0x00229678`);
   - **12l** pullovers and Busted (CreatePullover, `0x00226f30`);
   - **12m** Be A Cop. The user's controls (2026-10-08): in Be A Cop
@@ -275,8 +285,8 @@ pursuit.obj, on a 10 KB manager. Its slices:
     just another directional control;
   - **12n** the radar detector's intensity.
 
-  Nothing takes a cop out of limbo until 12j's SpawnSpeedTraps, so the
-  cops stay unseen until then.
+  Since 12j-1 the radar traps take cops out of limbo, so a chase can
+  start.
 
 The test config for a race with cops is parked as
 `nfshp2_config.txt.cops` (SkipFE, track 12, 3 AI, traffic 0.5,
@@ -4694,9 +4704,14 @@ each class shows what it reaches.
 | 19 | ~~Old 3DS performance~~ none: since 2026-10-05 the port is the New 3DS's alone (the user's call). An Old 3DS shows "This port needs a New 3DS" at boot and exits on START (6ac29d1); there is no Old 3DS mode | 0 |
 | 20 | The split-screen decision (task 30), then the final CIA, banner and hardware pass (task 31) | 1-2 |
 
-That is about 41-60 slices to the full game. The replay (`ReplaySnapshot`
-and every `DoSnapshot`) is not in the count. It is its own slice when it
-goes in.
+That was about 41-60 slices to the full game when the table was set.
+After 12j-1 (2026-10-08), about 24-37 are left, and the count has run
+low before:
+- step 12's five (12j-2, 12k, 12l, 12m, 12n);
+- steps 10, 14, 14b, 16, 17, 18 and 20.
+
+The replay (`ReplaySnapshot` and every `DoSnapshot`) is not in the
+count. It is its own slice when it goes in.
 
 ### Where the port stands (2026-10-08, after 11h-3)
 
@@ -4705,8 +4720,8 @@ goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** step 12, the cops: 12a to 12i-3 are done, 12j-1
-  (SpawnSpeedTraps) is next. See "First" at the top.
+- **Next:** step 12, the cops: 12a to 12j-1 are done, 12j-2
+  (the spike strips) is next. See "First" at the top.
   These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;

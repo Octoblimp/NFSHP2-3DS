@@ -49,6 +49,7 @@ tears managers down with pursuits, cops and spike strips on them.
 import argparse
 import hashlib
 import os
+import random
 import struct
 import subprocess
 import sys
@@ -70,7 +71,7 @@ SD = Path(os.environ.get("APPDATA", "")) / "Azahar" / "sdmc" / "NFSHP2"
 HARNESS = "tools/src/copmanager_test.c"
 COPMGR = "3DS Files/source/copmgr.c"
 SOURCES = [HARNESS, COPMGR, "3DS Files/source/cop.c",
-           "3DS Files/source/copmanager.c",
+           "3DS Files/source/copmanager.c", "3DS Files/source/timer.c",
            "3DS Files/source/vtable.c", "3DS Files/source/bmath.c",
            "3DS Files/source/bmathtab.c"]
 HARNESS_TIMEOUT = 60
@@ -149,6 +150,21 @@ S_BEACOPTHINK = 0x00227f30
 S_DIST2D = 0x0014e3e8
 S_UNCLOAK = 0x0024e3b8
 S_THINKS = {0x0022df88: "aicop", 0x0022d5c8: "playercop"}
+# SpawnSpeedTraps (12j-1), run straight; what it reaches that is stubbed.
+# IsBeingPursued, Timer::SetTime, FindCopForSpeedTrap and tAICop's
+# SetSpeedTrap and Teleport, with tCop::SetDesiredLogicState, run as
+# shipped.
+F_SPAWN = S_SPAWNST
+F_FINDCOP = 0x00224838
+S_RANDOMI = 0x0014e520
+S_SPLIT = 0x001487e8
+S_FREERUN = 0x001ee390
+S_FINDTRAP = 0x0024ea68
+S_TCLEAR = 0x00230e18
+S_MOVEMENT = 0x00131618
+S_RESET = 0x00132eb8
+RACE_SIZE = 1664
+RACE_NRC, RACE_TABLE, RACE_RC_SIZE, RACE_PRC = 24, 36, 192, 1572
 G_WTE = GP - 19560                      # WorldTimeElapsed
 G_RACE = GP - 22272                     # pCurrentRace
 G_RC = GP - 22216                       # pRaceCoordinator
@@ -157,7 +173,8 @@ G_GRAPH = GP - 14840                    # TheTrackGraph
 G_SEED = GP - 14472                     # bDefaultSeed
 WORLD_SIZE = 5936
 CAR_BLOWN = 2124                        # BlownTireBits
-MFIELDS = {"tsls": 10340, "gap": 10344, "super": 10348, "aicops": 4}
+MFIELDS = {"tsls": 10340, "gap": 10344, "super": 10348, "aicops": 4,
+           "diff": 10476}
 
 VT_PURSUIT = 0x002bd460
 VT_AICOP = 0x002bd698
@@ -170,7 +187,7 @@ RP_FIELDS = {"TrackDirection": 12, "AIDemoMode": 24, "TimeTrialTime": 36,
              "Point2Point": 40, "NumLaps": 44, "nMaxCops": 604,
              "bRoadBlocks": 612, "BeACop": 628, "BeACopRB": 640,
              "BeACopChoppers": 644, "CopStrength": 648,
-             "NumPlayerCars": 48}
+             "NumPlayerCars": 48, "Tickets": 636}
 
 # The cars and their collision bodies, at retail's offsets.
 CAR_SIZE = 2304
@@ -447,6 +464,7 @@ def script(chunks, made):
     s += ["cleanup"]
     s += impacts()
     s += thinks(m["order"])
+    s += spawns()
     return s
 
 
@@ -644,6 +662,240 @@ def thinks(order):
     return s
 
 
+def spawns():
+    """SpawnSpeedTraps and FindCopForSpeedTrap (12j-1): the cops, each
+    filter on the cars, the roll, the chased car's test, the split, the
+    tickets, the trap, and Think's call; then a fuzz with no pursuits,
+    one and three."""
+    def mf(name, f):
+        return "mset|%s|%s" % (name, F(f))
+
+    def car(k, x, y):
+        return "car|%d|%d|1|%s|%s" % (k, k, F(x), F(y))
+
+    def rcar(i, k, fin=0, lap=0.5):
+        return "rcar|%d|%d|%d|%s" % (i, k, fin, F(lap))
+
+    def go(*extra):
+        return list(extra) + ["spawn", "spstate"]
+
+    def setup(npursuits):
+        s = track(0) + ["copn|0", "copidx|-1"]
+        s += ["cop|0|ai", "cop|1|ai", "cop|2|ai", "cop|3|player"]
+        s += ["stpos|%d|%s|%s|%d" % (k, F(100.0 + k), F(-50.0 * k),
+                                     0x1000 * k + 7) for k in range(8)]
+        for u in range(npursuits):
+            s += ["pursuit|%d|%d" % (u, u), "chase|%d|%d" % (u, 1 + u),
+                  "pcops|%d|2|1|1" % u]
+        return s
+
+    def base(n_cops=3):
+        s = ["race|3", rcar(0, 0), rcar(1, 1), rcar(2, 2), "player|0|1",
+             "player|1|0", "player|2|0", "player|3|0", "rq|clear",
+             "riq|clear", "split|0", "freerun|0", "ftrap|2", "tclear|1",
+             "mset|diff|1", "mset|aicops|%d" % n_cops, "rp|Point2Point|0",
+             "rp|NumLaps|3", "rp|Tickets|2", "t|wte|%s" % F(0.5)]
+        s += ["stcop|%d|-1" % k for k in range(8)]
+        s += [mf("pursuable%d" % k, 0.0) for k in range(8)]
+        s += [mf("sttimer%d" % k, 0.0) for k in range(8)]
+        s += ["tickets|%d|0" % k for k in range(8)]
+        for k in range(4):
+            s += ["cset|%d|1" % k, "clss|%d|14" % k,
+                  "copcar|%d|%d" % (k, 3 + k if k < 3 else 0)]
+        return s
+
+    half = F(0.5)
+    s = ["t|wte|%s" % F(0.5), "t|racetime|1", "t|rc|0", "g|world|1",
+         "g|tracklen|%s" % F(5000.0), "polyhit|-1"]
+    s += [car(k, 10.0 * k, -3.0 * k) for k in range(NCARS)]
+
+    # ---- no pursuits
+    s += setup(0) + base()
+    # FindCopForSpeedTrap: the first AI cop in LS_LIMBO and ready.
+    for n in (0, 1, 2, 3, 4, -1):
+        for states in (((1, 14), (1, 14), (1, 14), (1, 14)),
+                       ((0, 14), (1, 14), (1, 14), (1, 14)),
+                       ((1, 13), (1, 15), (1, 14), (1, 14)),
+                       ((3, 14), (2, 14), (-1, 14), (1, 14)),
+                       ((1, 0), (14, 1), (1, -14), (1, 14)),
+                       ((1, 14), (0, 0), (0, 0), (0, 0)),
+                       ((0, 0), (0, 0), (0, 0), (0, 0))):
+            for k, (ds, lss) in enumerate(states):
+                s += ["cset|%d|%d" % (k, ds), "clss|%d|%d" % (k, lss)]
+            s += ["mset|aicops|%d" % n, "findcop"]
+    # Which cars: none, a missing one, finished ones, the pursuable timer.
+    # The roll's default answer is over 1, so each car let through waits.
+    for extra in (["race|0"], ["race|-1"], ["rcar|1|-1"],
+                  ["rcar|1|-1", "rcar|2|-1"], [rcar(1, 1, 1)],
+                  [rcar(1, 1, -1), rcar(2, 2, 0x8000)], ["race|8"],
+                  ["race|2", rcar(0, 1), rcar(1, 1)], ["race|1"],
+                  ["rcar|0|-1"]):
+        s += base() + go(*extra)
+    for f in (NAN, -0.0, 1e-30, -1.0, 0.0, INF, -INF, -NAN):
+        s += base() + go(mf("pursuable1", f))
+    # The spawn timer counts down by WorldTimeElapsed, or the car rolls.
+    for f in (0.25, 0.5, 0.75, NAN, -1.0, INF, 1e-30, -0.0, -INF):
+        s += base() + go(mf("sttimer1", f))
+    for w in (NAN, -0.5, INF, 0.0):
+        s += base() + go(mf("sttimer1", 0.25), "t|wte|%s" % F(w))
+    s += ["t|wte|%s" % F(0.5)]
+    # The roll, the player alone: over 1 waits 10, 5 or 1 s; else on, to a
+    # trap.
+    for diff in (0, 1, 2):
+        for r in (1.0, 1.0000001, 0.0, NAN, 2.0, -1.0, 0.99999994, INF,
+                  -INF):
+            s += base() + go("mset|diff|%d" % diff, "rq|%s" % F(r),
+                             "race|1")
+    # Not chased, no pursuits: an AI car (car 0 out of it) goes on with
+    # its split past -15 s, a finished leader, or World::Random(20) of 19;
+    # else it waits 1 s.
+    ai = [mf("pursuable0", 1.0), "race|2", "rq|" + half]
+    for sp in (-60001, -60000, -59999, -59998, -59997, 0, 1, -1,
+               0x7fffffff, -0x80000000, -70000, "none"):
+        s += base() + go(*ai + ["split|%s" % sp])
+    for sp in (-70000, 0):
+        for lead in (0, 1, -1, 0x100):
+            s += base() + go(*ai + ["split|%d" % sp, rcar(0, 0, lead)])
+    for ri in (19, 18, 20, 0, -19, 39):
+        s += base() + go(*ai + ["split|-70000", "riq|%d" % ri])
+    # Going on: a free run or a player's car wants a trap, an AI's while
+    # its tickets' share of the arrest count is below its share of the
+    # race.
+    s += base() + go(*ai + ["freerun|1"])
+    s += base() + go(*ai + ["freerun|1", "player|1|1"])
+    s += base() + go(*ai + ["freerun|-1"])
+    s += base() + go(*ai + ["freerun|-1", "tickets|1|3"])
+    s += base() + go(*ai + ["freerun|2", "tickets|1|3"])
+    s += base() + go(*ai + ["player|1|1"])
+    for p2p, laps, arrest, tix, lap in (
+            (0, 3, 2, 0, 0.5), (0, 3, 2, 1, 0.5), (0, 3, 2, 1, 1.0),
+            (0, 3, 2, 1, 1.0000001), (1, 3, 2, 0, 0.0), (1, 3, 2, 0, 1e-30),
+            (0, 0, 2, 0, 0.5), (0, 0, 2, 0, 0.0), (0, -1, 2, 0, 0.5),
+            (0, 3, -1, 0, 0.5), (0, 3, -1, 1, 0.5), (0, 3, -1, -1, 0.5),
+            (0, 3, 0, -1, 0.5), (0, 3, 2, 127, NAN), (0, 3, 2, -128, -INF),
+            (5, 3, 2, 0, 0.5), (-1, 3, 2, 1, 0.5), (1, 3, 2, 1, 0.75),
+            (0, 7, 3, 2, 3.5), (0, 7, 3, 2, 3.4999998), (0, 1, 1, 1, 0.5),
+            (0, 1, 1, 1, 0.50000006), (0, 0x7fffffff, 2, 0, 1e30),
+            (0, 3, 2, 0, -0.0), (0, 3, 2, 0, INF), (0, 3, 2, 3, INF)):
+        s += base() + go(*ai + ["rp|Point2Point|%d" % p2p,
+                                "rp|NumLaps|%d" % laps,
+                                "rp|Tickets|%d" % arrest,
+                                "tickets|1|%d" % tix, rcar(1, 1, 0, lap)])
+    s += base() + go(*ai + ["tickets|0|5", "tickets|2|5"])
+    # A car that wants a trap: no ready cop, no trap, a trap with a cop,
+    # a spot not clear, then the trap. One trap a call: the cars after
+    # are left as they were.
+    pl = ["race|3", "rq|" + half, "rq|" + half, mf("sttimer2", 3.0)]
+    s += base() + go(*pl + ["cset|0|0", "cset|1|0", "cset|2|0"])
+    s += base() + go(*pl + ["mset|aicops|0"])
+    s += base() + go(*pl + ["ftrap|-1"])
+    s += base() + go(*pl + ["stcop|2|1"])
+    s += base() + go(*pl + ["stcop|2|3"])
+    s += base() + go(*pl + ["tclear|0"])
+    s += base() + go(*pl + ["tclear|-1"])
+    s += base() + go(*pl)
+    s += base() + go(*pl + ["ftrap|7", "clss|0|0"])
+    s += base() + go(*pl + ["copcar|0|-1"])
+    s += base() + go(*pl + ["g|tracklen|%s" % F(NAN)])
+    s += base() + go(*pl + ["g|tracklen|%s" % F(-3.0)])
+    s += ["g|tracklen|%s" % F(5000.0)]
+    # The first car does not want one, so the next gets it.
+    s += base() + go(*pl + ["player|0|0", "tickets|0|3", "player|1|1"])
+    # Twice: the cop and the trap are taken, and the car waits 20 s.
+    s += base() + go(*pl) + go("rq|" + half, "rq|" + half) + go()
+    # Through Think: spawned outside Be A Cop only.
+    s += base() + ["realspawn|1", "rq|" + half, "think", "spstate"]
+    s += base() + ["rp|BeACop|1", "rq|" + half, "think", "spstate",
+                   "rp|BeACop|0", "realspawn|0", "think", "spstate",
+                   "rq|clear"]
+    s += ["cleanup"]
+
+    # ---- one pursuit, of car 1: the chased car's test, and the others
+    # see one pursuit
+    s += setup(1) + base()
+    chased = ["rcar|0|-1", "race|2", "rq|" + half]
+    for mx, n, b in ((2, 0, 0), (2, 1, 1), (2, 1, 0), (2, 2, 1), (0, 0, 0),
+                     (-1, -1, 1), (3, -1, 1), (1, 0x7fffffff, 1),
+                     (-0x80000000, 1, 1), (5, 4, 2), (5, 4, -1), (5, 5, 1),
+                     (0x7fffffff, -0x80000000, 0x100)):
+        s += base() + go(*chased + ["pcops|0|%d|%d|%d" % (mx, n, b)])
+    s += base() + go(*chased + ["pcops|0|2|2|1", "chase|0|2"])
+    s += base() + go("pcops|0|2|2|1", "race|3", "rq|" + half,
+                     "rq|" + half, "rq|" + half, "player|0|0",
+                     "tickets|0|2", "split|-70000")
+    s += base() + go("race|3", "rq|" + half, "rq|" + half, "player|0|0",
+                     "tickets|0|2")
+    s += ["cleanup"]
+
+    # ---- two and three pursuits: only a player's car past the chases
+    for npursuits in (2, 3):
+        s += setup(npursuits) + base()
+        for pl0, pl3 in ((1, 0), (0, 0), (0, 1)):
+            s += base() + go("race|4", rcar(3, 0 + 4, 0),
+                             "player|0|%d" % pl0, "player|4|%d" % pl3,
+                             "pcops|0|2|2|1", "pcops|1|2|2|1",
+                             "rq|" + half, "rq|" + half, "rq|" + half,
+                             "rq|" + half)
+        s += ["player|4|0", "cleanup"]
+
+    # ---- the fuzz
+    rnd = random.Random(12101)
+    laps = (0.0, 0.25, 0.5, 1.0, 2.5, 3.0, NAN, -1.0, INF)
+    for npursuits in (0, 1, 2, 3):
+        s += setup(npursuits) + base()
+        for _ in range(300):
+            o = ["rq|clear", "riq|clear",
+                 "race|%d" % rnd.choice((0, 1, 2, 3, 3, 3, 4, 4)),
+                 rcar(0, rnd.choice((0, 1, 2)), rnd.choice((0, 0, 0, 1)),
+                      rnd.choice(laps))]
+            for i in range(1, 4):
+                if rnd.random() < 0.1:
+                    o.append("rcar|%d|-1" % i)
+                else:
+                    o.append(rcar(i, rnd.choice((0, 1, 2, 3, 4)),
+                                  rnd.choice((0, 0, 0, 0, 1, -1)),
+                                  rnd.choice(laps)))
+            for k in range(5):
+                o += [mf("pursuable%d" % k,
+                         rnd.choice((0.0, 0.0, 0.0, 1.0, -1.0, NAN))),
+                      mf("sttimer%d" % k,
+                         rnd.choice((0.0, 0.0, 0.0, 0.25, 0.5, 1.0, NAN,
+                                     -1.0))),
+                      "tickets|%d|%d" % (k, rnd.choice((0, 0, 1, 2, -1))),
+                      "player|%d|%d" % (k, rnd.random() < 0.3)]
+            for _ in range(rnd.randint(0, 4)):
+                o.append("rq|%s" % F(rnd.choice((0.5, 1.0, 1.0000001, 0.0,
+                                                 2.0, NAN))))
+            for _ in range(rnd.randint(0, 2)):
+                o.append("riq|%d" % rnd.choice((19, 18, 0)))
+            sp = rnd.choice(("none", -70000, -60000, -59999, -59998, 0,
+                             4000))
+            o += ["split|%s" % sp, "freerun|%d" % (rnd.random() < 0.2),
+                  "ftrap|%d" % rnd.choice((-1, 0, 2, 2, 5)),
+                  "tclear|%d" % (rnd.random() < 0.8),
+                  "mset|diff|%d" % rnd.randint(0, 2),
+                  "mset|aicops|%d" % rnd.randint(0, 4),
+                  "rp|Point2Point|%d" % rnd.randint(0, 1),
+                  "rp|NumLaps|%d" % rnd.choice((0, 1, 3, 5)),
+                  "rp|Tickets|%d" % rnd.choice((0, 1, 2, 3, -1)),
+                  "t|wte|%s" % F(rnd.choice((0.5, 0.25, 1.0 / 30.0)))]
+            for k in (0, 2, 5):
+                o.append("stcop|%d|%d" % (k, rnd.choice((-1, -1, -1, 0, 1,
+                                                         3))))
+            for k in range(4):
+                o += ["cset|%d|%d" % (k, rnd.choice((1, 1, 1, 0, 3))),
+                      "clss|%d|%d" % (k, rnd.choice((14, 14, 13, 0))),
+                      "copcar|%d|%d" % (k, rnd.choice((3, 4, 5, -1)))]
+            for u in range(npursuits):
+                o += ["pcops|%d|%d|%d|%d" % (u, rnd.randint(0, 3),
+                                             rnd.randint(0, 3),
+                                             rnd.randint(0, 1)),
+                      "chase|%d|%d" % (u, rnd.randint(0, 5))]
+            s += o + ["spawn", "spstate"]
+        s += ["rq|clear", "riq|clear", "cleanup"]
+    return s
+
+
 def impacts():
     """CarCollisionBody::AddDamage's cop part and MonitorImpact."""
     def car(k, idx, mode, x, y):
@@ -742,11 +994,14 @@ class Model(object):
         self.names[self.world] = "W0"
         # Think's: a race, a race coordinator, the speech manager and the
         # track graph, all zero.
-        self.race = e.alloc(64, align=16)
+        self.race = e.alloc(RACE_SIZE, align=16)
         self.rc = e.alloc(64, align=16)
         self.speech = e.alloc(1472, align=16)
         self.graph = e.alloc(64, align=16)
-        for p, n, g in ((self.race, 64, G_RACE), (self.rc, 64, G_RC),
+        self.names[self.race] = "RACE"
+        for i in range(8):
+            self.names[self.race + RACE_TABLE + RACE_RC_SIZE * i] = "RC%d" % i
+        for p, n, g in ((self.race, RACE_SIZE, G_RACE), (self.rc, 64, G_RC),
                         (self.speech, 1472, G_SPEECH),
                         (self.graph, 64, G_GRAPH)):
             e.write(p, bytes(n))
@@ -756,6 +1011,20 @@ class Model(object):
         self.cansupers = {}
         self.dist_bits = 0
         self.hidden_mgr = 0
+        # SpawnSpeedTraps's (12j-1).
+        self.rq, self.riq = [], []
+        self.split = None
+        self.freerun = 0
+        self.ftrap = -1
+        self.tclear = 0
+        self.realspawn = False
+        for a, fn in ((S_RANDOMI, self.s_randomi), (S_SPLIT, self.s_split),
+                      (S_FREERUN, self.s_freerun),
+                      (S_FINDTRAP, self.s_findtrap),
+                      (S_TCLEAR, self.s_tclear),
+                      (S_MOVEMENT, self.s_movement),
+                      (S_RESET, self.s_reset)):
+            e.stub(a, fn)
         for a, fn in ((S_UPDATE, self.s_update),
                       (S_CANSUPER, self.s_cansuper),
                       (S_SUPERINIT, self.s_superinit),
@@ -916,7 +1185,148 @@ class Model(object):
     def s_random(self, em):
         f = em.fpr[12] & M32
         self.emit("  random %s %08x" % (self.sym(em.reg[4]), f))
-        em.fpr[0] = f ^ 0x00300000
+        em.fpr[0] = self.rq.pop(0) if self.rq else f ^ 0x00300000
+
+    # ---- SpawnSpeedTraps's (12j-1)
+
+    def s_randomi(self, em):
+        v = self.riq.pop(0) if self.riq else 0
+        self.emit("  randomi %s %d -> %d" % (self.sym(em.reg[4]),
+                                             s32(em.reg[5]), v))
+        return v & M32
+
+    def s_split(self, em):
+        line = "  split %s %s %s" % (self.sym(em.reg[4]), self.sym(em.reg[6]),
+                                     self.sym(em.reg[7]))
+        if self.split is None:
+            self.emit(line + " -> none")
+        else:
+            self.e.put32(em.reg[5] & M32, self.split)
+            self.emit(line + " -> %08x" % self.split)
+
+    def s_freerun(self, em):
+        self.emit("  freerun %s -> %d" % (
+            "RP" if em.reg[4] & M32 == RP else "?", self.freerun))
+        return self.freerun & M32
+
+    def trap_sym(self, p):
+        p &= M32
+        m = self.e.u32(G_COPMGR)
+        for k in range(64):
+            b = m + 8260 + 28 * k
+            if p == b:
+                return "st%d" % k
+            if p == b + 4:
+                return "st%d.pos" % k
+        return self.sym(p)
+
+    def s_findtrap(self, em):
+        m = self.e.u32(G_COPMGR)
+        r = m + 8260 + 28 * self.ftrap if self.ftrap >= 0 else 0
+        self.emit("  findtrap %s %s %08x %08x %d -> %s" % (
+            "G" if em.reg[4] & M32 == self.graph else "?",
+            self.sym(em.reg[5]), em.fpr[12] & M32, em.fpr[13] & M32,
+            s32(em.reg[6]), self.trap_sym(r) if r else "none"))
+        return r
+
+    def s_tclear(self, em):
+        e = self.e
+        pos = em.reg[4] & M32
+        self.emit("  tclear %s %08x %08x -> %d" % (
+            self.trap_sym(pos), e.u32(pos), e.u32(pos + 4), self.tclear))
+        return self.tclear & M32
+
+    def s_movement(self, em):
+        self.emit("  movement %s %d" % (self.sym(em.reg[4]), s32(em.reg[5])))
+
+    def s_reset(self, em):
+        e = self.e
+        pos = em.reg[5] & M32
+        self.emit("  reset %s %08x %08x %08x %08x %04x" % (
+            self.sym(em.reg[4]), e.u32(pos), e.u32(pos + 4), e.u32(pos + 8),
+            em.fpr[12] & M32, em.reg[6] & 0xffff))
+
+    def spawn_op(self, a, m):
+        """SpawnSpeedTraps's ops (12j-1); False for none of them."""
+        e = self.e
+        o = a[0]
+        v = lambda j: int(a[j], 0) & M32        # noqa: E731
+        if o == "race":
+            e.put32(self.race + RACE_NRC, v(1))
+        elif o == "rcar":
+            i, k = int(a[1]), int(a[2])
+            rc = self.race + RACE_TABLE + RACE_RC_SIZE * i
+            if k < 0:
+                e.put32(self.race + RACE_PRC + 4 * i, 0)
+            else:
+                e.put32(self.race + RACE_PRC + 4 * i, rc)
+                e.put32(rc, self.cars[k])
+                e.write(rc + 18, struct.pack("<H", v(3) & 0xffff))
+                e.put32(rc + 32, v(4))
+        elif o == "pcops":
+            p = self.pursuits[int(a[1])]
+            e.put32(p + 8, v(2))
+            e.put32(p + 1476, v(3))
+            e.put32(p + 1516, v(4))
+        elif o == "tickets":
+            e.write(m + 88 + 28 * int(a[1]) + 8, bytes([v(2) & 0xff]))
+        elif o == "clss":
+            e.put32(e.u32(m + 16 + 4 * int(a[1])) + 20, v(2))
+        elif o in ("rq", "riq"):
+            q = self.rq if o == "rq" else self.riq
+            if a[1] == "clear":
+                del q[:]
+            else:
+                q.append(v(1) if o == "rq" else s32(v(1)))
+        elif o == "split":
+            self.split = None if a[1] == "none" else v(1)
+        elif o == "freerun":
+            self.freerun = s32(v(1))
+        elif o == "ftrap":
+            self.ftrap = int(a[1])
+        elif o == "tclear":
+            self.tclear = s32(v(1))
+        elif o == "stcop":
+            c = int(a[2])
+            e.put32(m + 8260 + 28 * int(a[1]),
+                    e.u32(m + 16 + 4 * c) if c >= 0 else 0)
+        elif o == "stpos":
+            b = m + 8260 + 28 * int(a[1])
+            e.put32(b + 4, v(2))
+            e.put32(b + 8, v(3))
+            e.write(b + 12, struct.pack("<H", v(4) & 0xffff))
+        elif o == "spawn":
+            fn = None if self.realspawn else e.stubs.pop(S_SPAWNST)
+            e.call(F_SPAWN, m, limit=2000000)
+            if fn is not None:
+                e.stubs[S_SPAWNST] = fn
+            self.emit("spawn")
+        elif o == "findcop":
+            self.emit("findcop -> %s" % self.sym(e.call(F_FINDCOP, m)))
+        elif o == "realspawn":
+            if v(1) and not self.realspawn:
+                self.spawn_stub = e.stubs.pop(S_SPAWNST)
+                self.realspawn = True
+            elif not v(1) and self.realspawn:
+                e.stubs[S_SPAWNST] = self.spawn_stub
+                self.realspawn = False
+        elif o == "spstate":
+            out = ["sp timer"] + ["%08x" % e.u32(m + 10388 + 4 * k)
+                                  for k in range(8)] + ["cops"]
+            for k in range(7):
+                c = e.u32(m + 16 + 4 * k)
+                if c == 0:
+                    out.append("-")
+                else:
+                    out.append("%d/%d/%s" % (s32(e.u32(c + 16)),
+                                             s32(e.u32(c + 20)),
+                                             self.trap_sym(e.u32(c + 36))))
+            out.append("traps")
+            out += [self.sym(e.u32(m + 8260 + 28 * k)) for k in range(8)]
+            self.emit(" ".join(out))
+        else:
+            return False
+        return True
 
     def s_poly(self, em):
         e = self.e
@@ -1207,7 +1617,9 @@ class Model(object):
             e.put32(c + CAR_POS, v(4))
             e.put32(c + CAR_POS + 4, v(5))
         elif o == "copcar":
-            e.put32(e.u32(m + 16 + 4 * int(a[1])) + 4, self.cars[int(a[2])])
+            j = int(a[2])
+            e.put32(e.u32(m + 16 + 4 * int(a[1])) + 4,
+                    self.cars[j] if j >= 0 else 0)
         elif o == "copp":
             u = int(a[2])
             e.put32(e.u32(m + 16 + 4 * int(a[1])),
@@ -1240,13 +1652,14 @@ class Model(object):
             self.names[p] = "S%d" % k
             self.link_tail(m + 80, p)
             e.put32(p + 2288, VT_SPIKE)
-        elif not self.think_op(a, m):
+        elif not (self.think_op(a, m) or self.spawn_op(a, m)):
             raise ValueError(o)
 
     def mfield(self, f):
         if f in MFIELDS:
             return MFIELDS[f]
         for name, base, step in (("pursuable", 10356, 4),
+                                 ("sttimer", 10388, 4),
                                  ("pulltimer", 88 + 4, 28),
                                  ("pullactive", 88 + 12, 28),
                                  ("pullnis", 88 + 16, 28)):
@@ -2007,7 +2420,7 @@ MUTATIONS = [
 
     # ---- 12f: TimeBasedSpeech
     ("tbs_no_replay", C,
-     "    if (replaying())\n        return;\n"
+     "    if (copmanager_replaying())\n        return;\n"
      "    if (gCopSpeechPlaybackStateFn != NULL",
      "    if (gCopSpeechPlaybackStateFn != NULL"),
     ("tbs_speech_keep", C,
@@ -2061,7 +2474,7 @@ MUTATIONS = [
 
     # ---- 12f: SupervisorActivate
     ("sv_no_replay", C,
-     "    if (replaying())\n        return;\n"
+     "    if (copmanager_replaying())\n        return;\n"
      "    if (!(0.0f < m->fSupervisorTimer))",
      "    if (!(0.0f < m->fSupervisorTimer))"),
     ("sv_ge", C, "    if (!(0.0f < m->fSupervisorTimer))",
@@ -2231,9 +2644,222 @@ MUTATIONS = [
     ("gt_keep_going", C, "            trackgraph_uncloak_all_edges(TheTrackGraph);\n"
      "            return;",
      "            trackgraph_uncloak_all_edges(TheTrackGraph);"),
+    # ---- FindCopForSpeedTrap and SpawnSpeedTraps (12j-1)
+    ("fc_ds_any", C, "        if (c->DesiredLogicState == LS_LIMBO\n"
+     "            && c->LogicSubState == LSS_LIMBO_READY)",
+     "        if (c->LogicSubState == LSS_LIMBO_READY)"),
+    ("fc_lss_any", C, "        if (c->DesiredLogicState == LS_LIMBO\n"
+     "            && c->LogicSubState == LSS_LIMBO_READY)",
+     "        if (c->DesiredLogicState == LS_LIMBO)"),
+    ("fc_or", C, "        if (c->DesiredLogicState == LS_LIMBO\n"
+     "            && c->LogicSubState",
+     "        if (c->DesiredLogicState == LS_LIMBO\n"
+     "            || c->LogicSubState"),
+    ("fc_ds_0", C, "        if (c->DesiredLogicState == LS_LIMBO\n"
+     "            && c->LogicSubState",
+     "        if (c->DesiredLogicState == (eLogicState)0\n"
+     "            && c->LogicSubState"),
+    ("fc_lss_13", C, "            && c->LogicSubState == LSS_LIMBO_READY)\n"
+     "            return c;",
+     "            && c->LogicSubState == (eLogicSubState)13)\n"
+     "            return c;"),
+    ("fc_null", C, "            && c->LogicSubState == LSS_LIMBO_READY)\n"
+     "            return c;\n    }\n    return NULL;",
+     "            && c->LogicSubState == LSS_LIMBO_READY)\n"
+     "            return NULL;\n    }\n    return NULL;"),
+    ("fc_from_1", C, "    for (i = 0; i < m->nNumAICops; i++) {\n"
+     "        tCop *c = m->Cops[i];\n\n        if (c->DesiredLogicState == LS_LIMBO",
+     "    for (i = 1; i < m->nNumAICops; i++) {\n"
+     "        tCop *c = m->Cops[i];\n\n        if (c->DesiredLogicState == LS_LIMBO"),
+    ("fc_one_less", C, "    for (i = 0; i < m->nNumAICops; i++) {\n"
+     "        tCop *c = m->Cops[i];\n\n        if (c->DesiredLogicState == LS_LIMBO",
+     "    for (i = 0; i < m->nNumAICops - 1; i++) {\n"
+     "        tCop *c = m->Cops[i];\n\n        if (c->DesiredLogicState == LS_LIMBO"),
+    ("ss_n_zero", C, "         node = node->Next)\n        n++;\n"
+     "    for (i = 0; i < pCurrentRace",
+     "         node = node->Next)\n        n += 0;\n"
+     "    for (i = 0; i < pCurrentRace"),
+    ("ss_n_double", C, "         node = node->Next)\n        n++;\n"
+     "    for (i = 0; i < pCurrentRace",
+     "         node = node->Next)\n        n += 2;\n"
+     "    for (i = 0; i < pCurrentRace"),
+    ("ss_i_from_1", C, "    for (i = 0; i < pCurrentRace->NumRacingCars; i++) {\n"
+     "        struct RacingCar *rc",
+     "    for (i = 1; i < pCurrentRace->NumRacingCars; i++) {\n"
+     "        struct RacingCar *rc"),
+    ("ss_i_le", C, "    for (i = 0; i < pCurrentRace->NumRacingCars; i++) {\n"
+     "        struct RacingCar *rc",
+     "    for (i = 0; i <= pCurrentRace->NumRacingCars && i < 8; i++) {\n"
+     "        struct RacingCar *rc"),
+    ("ss_fin_pos", C, "        if (rc == NULL || rc->FinishReason != 0)\n"
+     "            continue;\n        car = rc->pCar;",
+     "        if (rc == NULL || rc->FinishReason > 0)\n"
+     "            continue;\n        car = rc->pCar;"),
+    ("ss_fin_any", C, "        if (rc == NULL || rc->FinishReason != 0)\n"
+     "            continue;\n        car = rc->pCar;",
+     "        if (rc == NULL)\n"
+     "            continue;\n        car = rc->pCar;"),
+    ("ss_idx_i", C, "        idx = car->CarIndex;\n        if (!(m->fPursuableTimer",
+     "        idx = (int16_t)i;\n        if (!(m->fPursuableTimer"),
+    ("ss_pur_lt", C, "        if (!(m->fPursuableTimer[idx] <= 0.0f))",
+     "        if (!(m->fPursuableTimer[idx] < 0.0f))"),
+    ("ss_pur_nan", C, "        if (!(m->fPursuableTimer[idx] <= 0.0f))",
+     "        if (m->fPursuableTimer[idx] > 0.0f)"),
+    ("ss_pur_none", C, "        if (!(m->fPursuableTimer[idx] <= 0.0f))\n"
+     "            continue;\n", ""),
+    ("ss_st_le", C, "        if (0.0f < *timer) {", "        if (0.0f <= *timer) {"),
+    ("ss_st_nan", C, "        if (0.0f < *timer) {", "        if (!(*timer <= 0.0f)) {"),
+    ("ss_st_nosub", C, "            *timer = *timer - WorldTimeElapsed;",
+     "            *timer = *timer - 0.0f;"),
+    ("ss_st_add", C, "            *timer = *timer - WorldTimeElapsed;",
+     "            *timer = *timer + WorldTimeElapsed;"),
+    ("ss_st_on", C, "            *timer = *timer - WorldTimeElapsed;\n"
+     "            continue;\n", "            *timer = *timer - WorldTimeElapsed;\n"),
+    ("ss_roll_le", C, "        if (1.0f < world_random_f(pCurrentWorld,",
+     "        if (1.0f <= world_random_f(pCurrentWorld,"),
+    ("ss_roll_nan", C, "        if (1.0f < world_random_f(pCurrentWorld,\n"
+     "                                  kSpeedTrapRollRange[m->nDifficultyLevel])) {",
+     "        if (!(1.0f >= world_random_f(pCurrentWorld,\n"
+     "                                  kSpeedTrapRollRange[m->nDifficultyLevel]))) {"),
+    ("ss_roll_none", C, "        if (1.0f < world_random_f(pCurrentWorld,",
+     "        if (0 && 1.0f < world_random_f(pCurrentWorld,"),
+    ("ss_roll_wait_tab", C, "                                  kSpeedTrapRollRange[m->nDifficultyLevel])) {",
+     "                                  kSpeedTrapRollWait[m->nDifficultyLevel])) {"),
+    ("ss_wait_range_tab", C, "            *timer = kSpeedTrapRollWait[m->nDifficultyLevel];",
+     "            *timer = kSpeedTrapRollRange[m->nDifficultyLevel];"),
+    ("ss_tab_wait", C, "kSpeedTrapRollWait[3]  = { 10.0f, 5.0f, 1.0f };",
+     "kSpeedTrapRollWait[3]  = { 10.0f, 5.0f, 2.0f };"),
+    ("ss_tab_wait0", C, "kSpeedTrapRollWait[3]  = { 10.0f, 5.0f, 1.0f };",
+     "kSpeedTrapRollWait[3]  = { 9.0f, 5.0f, 1.0f };"),
+    ("ss_tab_range", C, "kSpeedTrapRollRange[3] = { 2.0f, 1.5f, 1.0f };",
+     "kSpeedTrapRollRange[3] = { 2.0f, 1.25f, 1.0f };"),
+    ("ss_roll_on", C, "            *timer = kSpeedTrapRollWait[m->nDifficultyLevel];\n"
+     "            continue;\n",
+     "            *timer = kSpeedTrapRollWait[m->nDifficultyLevel];\n"),
+    ("ss_p_none", C, "        p = copmanager_is_being_pursued(m, car);",
+     "        p = NULL;"),
+    ("ss_p_nocops1", C, "            want = p->nNumCops == 0\n",
+     "            want = p->nNumCops == 1\n"),
+    ("ss_p_nocops_no", C, "            want = p->nNumCops == 0\n                || ",
+     "            want = "),
+    ("ss_p_le", C, "                || (p->nNumCops < p->nMaxChaseCops",
+     "                || (p->nNumCops <= p->nMaxChaseCops"),
+    ("ss_p_or", C, "                || (p->nNumCops < p->nMaxChaseCops\n"
+     "                    && p->bAlreadyCalledForBackup",
+     "                || (p->nNumCops < p->nMaxChaseCops\n"
+     "                    || p->bAlreadyCalledForBackup"),
+    ("ss_p_nobackup", C, "\n                    && p->bAlreadyCalledForBackup != 0);",
+     ");"),
+    ("ss_p_backup1", C, "                    && p->bAlreadyCalledForBackup != 0);",
+     "                    && p->bAlreadyCalledForBackup == 1);"),
+    ("ss_p_noroom", C, "                || (p->nNumCops < p->nMaxChaseCops\n"
+     "                    && p->bAlreadyCalledForBackup != 0);",
+     "                || p->bAlreadyCalledForBackup != 0;"),
+    ("ss_n_1", C, "        } else if (n < 2 || car->pPlayer != NULL) {",
+     "        } else if (n < 1 || car->pPlayer != NULL) {"),
+    ("ss_n_3", C, "        } else if (n < 2 || car->pPlayer != NULL) {",
+     "        } else if (n < 3 || car->pPlayer != NULL) {"),
+    ("ss_n_noplayer", C, "        } else if (n < 2 || car->pPlayer != NULL) {",
+     "        } else if (n < 2) {"),
+    ("ss_n_and", C, "        } else if (n < 2 || car->pPlayer != NULL) {",
+     "        } else if (n < 2 && car->pPlayer != NULL) {"),
+    ("ss_n_any", C, "        } else if (n < 2 || car->pPlayer != NULL) {",
+     "        } else {"),
+    ("ss_lead_rc", C, "            struct RacingCar *lead = pCurrentRace->pRacingCars[0];",
+     "            struct RacingCar *lead = rc;"),
+    ("ss_lead_1", C, "            struct RacingCar *lead = pCurrentRace->pRacingCars[0];",
+     "            struct RacingCar *lead = pCurrentRace->pRacingCars[1];"),
+    ("ss_split_init_min", C, "            split.PackedTime = 0;\n",
+     "            split.PackedTime = 0x80000000u;\n"),
+    ("ss_split_init1", C, "            split.PackedTime = 0;\n",
+     "            split.PackedTime = 1;\n"),
+    ("ss_split_args", C, "race_calculate_split_time(pCurrentRace, &split, lead, rc);",
+     "race_calculate_split_time(pCurrentRace, &split, rc, lead);"),
+    ("ss_late_more", C, "            timer_set_time(&late, -15.0f);",
+     "            timer_set_time(&late, -15.00025f);"),
+    ("ss_late_less", C, "            timer_set_time(&late, -15.0f);",
+     "            timer_set_time(&late, -14.99975f);"),
+    ("ss_late_le", C, "            if (!((int32_t)late.PackedTime < (int32_t)split.PackedTime",
+     "            if (!((int32_t)late.PackedTime <= (int32_t)split.PackedTime"),
+    ("ss_late_unsigned", C, "            if (!((int32_t)late.PackedTime < (int32_t)split.PackedTime",
+     "            if (!(late.PackedTime < split.PackedTime"),
+    ("ss_late_swap", C, "            if (!((int32_t)late.PackedTime < (int32_t)split.PackedTime",
+     "            if (!((int32_t)split.PackedTime < (int32_t)late.PackedTime"),
+    ("ss_lead_pos", C, "                  || lead->FinishReason != 0\n",
+     "                  || lead->FinishReason > 0\n"),
+    ("ss_lead_none", C, "                  || lead->FinishReason != 0\n", ""),
+    ("ss_lead_own", C, "                  || lead->FinishReason != 0\n",
+     "                  || rc->FinishReason != 0\n"),
+    ("ss_ri_21", C, "                  || world_random_i(pCurrentWorld, 20) == 19)) {",
+     "                  || world_random_i(pCurrentWorld, 21) == 19)) {"),
+    ("ss_ri_ge", C, "                  || world_random_i(pCurrentWorld, 20) == 19)) {",
+     "                  || world_random_i(pCurrentWorld, 20) >= 19)) {"),
+    ("ss_ri_none", C, "\n                  || world_random_i(pCurrentWorld, 20) == 19)) {",
+     ")) {"),
+    ("ss_nogo_2", C, "                *timer = 1.0f;", "                *timer = 2.0f;"),
+    ("ss_nogo_none", C, "                *timer = 1.0f;", "                (void)0;"),
+    ("ss_free_no", C, "            } else if (race_parameters_is_free_run(&TheRaceParameters)\n"
+     "                       || car->pPlayer != NULL) {",
+     "            } else if (car->pPlayer != NULL) {"),
+    ("ss_free_eq1", C, "            } else if (race_parameters_is_free_run(&TheRaceParameters)\n",
+     "            } else if (race_parameters_is_free_run(&TheRaceParameters) == 1\n"),
+    ("ss_player_no", C, "            } else if (race_parameters_is_free_run(&TheRaceParameters)\n"
+     "                       || car->pPlayer != NULL) {",
+     "            } else if (race_parameters_is_free_run(&TheRaceParameters)) {"),
+    ("ss_p2p_eq1", C, "                float laps = TheRaceParameters.Point2Point != 0",
+     "                float laps = TheRaceParameters.Point2Point == 1"),
+    ("ss_p2p_swap", C, "                float laps = TheRaceParameters.Point2Point != 0",
+     "                float laps = TheRaceParameters.Point2Point == 0"),
+    ("ss_p2p_2", C, "                    ? 1.0f : (float)TheRaceParameters.NumLapsInRace;",
+     "                    ? 2.0f : (float)TheRaceParameters.NumLapsInRace;"),
+    ("ss_laps_plus", C, "                    ? 1.0f : (float)TheRaceParameters.NumLapsInRace;",
+     "                    ? 1.0f : (float)(TheRaceParameters.NumLapsInRace + 1);"),
+    ("ss_run_mul", C, "                float run  = rc->FinishedLapNumberExact / laps;",
+     "                float run  = rc->FinishedLapNumberExact * laps;"),
+    ("ss_run_lap", C, "                float run  = rc->FinishedLapNumberExact / laps;",
+     "                float run  = rc->FinishedLapNumberExact;"),
+    ("ss_tix_arrest", C, "                    / (float)(TheRaceParameters.nNumTicketsBeforeArrest + 1);",
+     "                    / (float)TheRaceParameters.nNumTicketsBeforeArrest;"),
+    ("ss_tix_arrest2", C, "                    / (float)(TheRaceParameters.nNumTicketsBeforeArrest + 1);",
+     "                    / (float)(TheRaceParameters.nNumTicketsBeforeArrest + 2);"),
+    ("ss_tix_u8", C, "                float tix  = (float)m->CarPullovers[idx].nNumTickets",
+     "                float tix  = (float)(uint8_t)m->CarPullovers[idx].nNumTickets"),
+    ("ss_tix_i", C, "                float tix  = (float)m->CarPullovers[idx].nNumTickets",
+     "                float tix  = (float)m->CarPullovers[i].nNumTickets"),
+    ("ss_tix_le", C, "                want = tix < run;", "                want = tix <= run;"),
+    ("ss_tix_nan", C, "                want = tix < run;", "                want = !(run <= tix);"),
+    ("ss_tix_swap", C, "                want = tix < run;", "                want = run < tix;"),
+    ("ss_want_all", C, "        if (!want)\n            continue;\n        cop =",
+     "        cop ="),
+    ("ss_nocop_return", C, "        if (cop == NULL)\n            continue;\n        t =",
+     "        if (cop == NULL)\n            return;\n        t ="),
+    ("ss_trap_min", C, "            TheTrackGraph, car, 250.0f,",
+     "            TheTrackGraph, car, 200.0f,"),
+    ("ss_trap_half", C, "            TheTrackPathManager.TrackLength * 0.5f, 1);",
+     "            TheTrackPathManager.TrackLength, 1);"),
+    ("ss_trap_back", C, "            TheTrackPathManager.TrackLength * 0.5f, 1);",
+     "            TheTrackPathManager.TrackLength * 0.5f, 0);"),
+    ("ss_trap_cop", C, "        if (t == NULL || t->cop != NULL\n",
+     "        if (t == NULL\n"),
+    ("ss_tclear_no", C, "\n            || !is_teleport_location_clear(&t->v2Position))",
+     ")"),
+    ("ss_tclear_1", C, "            || !is_teleport_location_clear(&t->v2Position))",
+     "            || is_teleport_location_clear(&t->v2Position) != 1)"),
+    ("ss_trap_return", C, "            || !is_teleport_location_clear(&t->v2Position))\n"
+     "            continue;",
+     "            || !is_teleport_location_clear(&t->v2Position))\n"
+     "            return;"),
+    ("ss_no_set", C, "        taicop_set_speed_trap((tAICop *)(void *)cop, t);\n", ""),
+    ("ss_wait_19", C, "        *timer = 20.0f;\n        return;",
+     "        *timer = 19.0f;\n        return;"),
+    ("ss_no_wait", C, "        *timer = 20.0f;\n        return;", "        return;"),
+    ("ss_no_return", C, "        *timer = 20.0f;\n        return;",
+     "        *timer = 20.0f;"),
 ]
 
 EQUIVALENT = {
+    "ss_split_init1": "the split is only read against Timer::SetTime(-15 s), "
+                      "-59999, and that is below 0 and 1 alike",
     "sv_nan": "a NaN fSupervisorTimer less the frame's seconds is the same "
               "NaN, stored back, and !(NaN <= 0) returns at once; every "
               "other timer takes the same branch either way",

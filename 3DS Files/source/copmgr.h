@@ -211,6 +211,30 @@ void copmanager_monitor_pullovers(tCopManager *m);
 // two-dimensional form) is sent to LS_LIMBO.
 void copmanager_reclaim_patrollers(tCopManager *m);
 
+// FindCopForSpeedTrap, 0x00224838: the first AI cop asked into LS_LIMBO
+// whose limbo is LSS_LIMBO_READY, or NULL.
+tCop *copmanager_find_cop_for_speed_trap(tCopManager *m);
+
+// SpawnSpeedTraps, 0x00224a20, outside Be A Cop: at most one cop a frame
+// out of limbo to a radar trap ahead of a racing car. Each car still
+// racing, that cops may chase (fPursuableTimer at 0 or below):
+//   - fSpeedTrapSpawnTimer above 0 counts down by WorldTimeElapsed;
+//   - else a roll, World::Random of 2, 1.5 or 1 by nDifficultyLevel, over
+//     1 waits 10, 5 or 1 s;
+//   - else a chased car wants a trap when its chase has no cops, or has
+//     called for backup and has room (nNumCops < nMaxChaseCops);
+//   - else, with two pursuits or more, only a player's car goes on. Its
+//     split to the leader past -15 s, a leader who has finished, or
+//     World::Random(20) of 19 goes on, and the rest wait 1 s. Then a
+//     player's car, or any in a free run, wants a trap; an AI's wants
+//     one while its tickets over (nNumTicketsBeforeArrest + 1) are below
+//     its laps run over the laps (1 for a point to point).
+// A car that wants one takes the first ready cop and
+// tTrackGraph::FindSpeedTrap from 250 m to half the track ahead; a
+// trap with no cop, whose spot is clear to teleport to, gets it
+// (tAICop::SetSpeedTrap), and the car waits 20 s.
+void copmanager_spawn_speed_traps(tCopManager *m);
+
 // What Think reaches that later slices port. NULL seams do nothing, and
 // return 0.
 //   - tPursuit::Update (0x00229288): nonzero when the pursuit is over.
@@ -220,8 +244,10 @@ void copmanager_reclaim_patrollers(tCopManager *m);
 //   - SuperInitiates (0x0022b908) and SayFillerSpeech (0x00231760), the
 //     speech manager's.
 //   - The speech manager's previousSedPlaybackState, its word at 1452.
-//   - SpawnSpeedTraps (0x00224a20) and MonitorSpikeBelts (0x00227758),
-//     12j; EndPullover (0x00225878), 12l; BeACopThink (0x00227f30), 12m.
+//   - SpawnSpeedTraps (0x00224a20): main.c binds
+//     copmanager_spawn_speed_traps (12j-1).
+//   - MonitorSpikeBelts (0x00227758), 12j-2; EndPullover (0x00225878),
+//     12l; BeACopThink (0x00227f30), 12m.
 extern int32_t (*gPursuitUpdateFn)(tPursuit *p);
 extern int32_t (*gPursuitCanSupervisorInitiateFn)(tPursuit *p);
 extern void    (*gPursuitSuperInitiatesFn)(tPursuit *p);

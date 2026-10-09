@@ -18,10 +18,14 @@
 #include "cartypeinfo.h"
 #include "configitems.h"
 #include "cop.h"
+#include "coputil.h"
 #include "race.h"
 #include "racecoord.h"
+#include "raceparams.h"
+#include "racesplit.h"
 #include "realdriver.h"
 #include "realtime.h"
+#include "timer.h"
 #include "topology.h"
 #include "trackgraph.h"
 #include "trackmap.h"
@@ -851,6 +855,111 @@ void copmanager_reclaim_patrollers(tCopManager *m)
             < 250.0f)
             continue;
         tcop_set_desired_logic_state(c, LS_LIMBO);
+    }
+}
+
+// ------------------------------------------------------- the speed traps
+
+tCop *copmanager_find_cop_for_speed_trap(tCopManager *m)
+{
+    int32_t i;
+
+    for (i = 0; i < m->nNumAICops; i++) {
+        tCop *c = m->Cops[i];
+
+        if (c->DesiredLogicState == LS_LIMBO
+            && c->LogicSubState == LSS_LIMBO_READY)
+            return c;
+    }
+    return NULL;
+}
+
+// Retail's two tables by difficulty, copied to the stack: the wait after
+// a lost roll (0x002bd170) and the roll's range (0x002bd180).
+static const float kSpeedTrapRollWait[3]  = { 10.0f, 5.0f, 1.0f };
+static const float kSpeedTrapRollRange[3] = { 2.0f, 1.5f, 1.0f };
+
+void copmanager_spawn_speed_traps(tCopManager *m)
+{
+    const tPursuitNode *node;
+    int32_t             n = 0, i;
+
+    for (node = m->PursuitList.Next; node != &m->PursuitList;
+         node = node->Next)
+        n++;
+    for (i = 0; i < pCurrentRace->NumRacingCars; i++) {
+        struct RacingCar *rc = pCurrentRace->pRacingCars[i];
+        Car              *car;
+        int16_t           idx;
+        float            *timer;
+        tPursuit         *p;
+        tCop             *cop;
+        tSpeedTrap       *t;
+        int32_t           want = 0;
+
+        if (rc == NULL || rc->FinishReason != 0)
+            continue;
+        car = rc->pCar;
+        idx = car->CarIndex;
+        if (!(m->fPursuableTimer[idx] <= 0.0f))
+            continue;
+        timer = &m->fSpeedTrapSpawnTimer[idx];
+        if (0.0f < *timer) {
+            *timer = *timer - WorldTimeElapsed;
+            continue;
+        }
+        if (1.0f < world_random_f(pCurrentWorld,
+                                  kSpeedTrapRollRange[m->nDifficultyLevel])) {
+            *timer = kSpeedTrapRollWait[m->nDifficultyLevel];
+            continue;
+        }
+        p = copmanager_is_being_pursued(m, car);
+        if (p != NULL) {
+            // A chase with no cops, or one that has called for backup
+            // and has room.
+            want = p->nNumCops == 0
+                || (p->nNumCops < p->nMaxChaseCops
+                    && p->bAlreadyCalledForBackup != 0);
+        } else if (n < 2 || car->pPlayer != NULL) {
+            struct RacingCar *lead = pCurrentRace->pRacingCars[0];
+            Timer             split, late;
+
+            split.PackedTime = 0;
+            race_calculate_split_time(pCurrentRace, &split, lead, rc);
+            timer_set_time(&late, -15.0f);
+            if (!((int32_t)late.PackedTime < (int32_t)split.PackedTime
+                  || lead->FinishReason != 0
+                  || world_random_i(pCurrentWorld, 20) == 19)) {
+                *timer = 1.0f;
+            } else if (race_parameters_is_free_run(&TheRaceParameters)
+                       || car->pPlayer != NULL) {
+                want = 1;
+            } else {
+                // An AI racer: when it has fewer tickets, for its share
+                // of the arrest count, than its share of the race run.
+                float laps = TheRaceParameters.Point2Point != 0
+                    ? 1.0f : (float)TheRaceParameters.NumLapsInRace;
+                float run  = rc->FinishedLapNumberExact / laps;
+                float tix  = (float)m->CarPullovers[idx].nNumTickets
+                    / (float)(TheRaceParameters.nNumTicketsBeforeArrest + 1);
+
+                want = tix < run;
+            }
+        }
+        if (!want)
+            continue;
+        cop = copmanager_find_cop_for_speed_trap(m);
+        if (cop == NULL)
+            continue;
+        t = trackgraph_find_speed_trap(
+            TheTrackGraph, car, 250.0f,
+            TheTrackPathManager.TrackLength * 0.5f, 1);
+        if (t == NULL || t->cop != NULL
+            || !is_teleport_location_clear(&t->v2Position))
+            continue;
+        taicop_set_speed_trap((tAICop *)(void *)cop, t);
+        *timer = 20.0f;
+        return;
     }
 }
 

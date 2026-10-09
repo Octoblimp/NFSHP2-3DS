@@ -649,8 +649,10 @@ are now called straight from Think, but no cop reaches them before 12h.
 `gCopMoverCtorFn` (COP_MOVEMENT's mover, 12c), `gCopDriverCtorFn`
 (COP_CONTROL's controller, 12d), and since 12g-1 `gAddCopCarToRaceFn`.
 So a race with cops makes their cars. Each starts in limbo and stays
-there: not drawn, parked, not colliding, off the map. Nothing asks a cop
-out of limbo until the radar traps (12j) and the pursuits (12h) are in.
+there: not drawn, parked, not colliding, off the map. Since 12i-2 a
+roadblock calls its cops out of limbo (`pursuit.md`). Since 12j-1 the
+manager's SpawnSpeedTraps sends a ready one to a radar trap ahead of a
+racer (`cop-manager.md`).
 A Hot Pursuit quick race in Azahar runs at 30 fps with its four, as it
 did before 12g-2.
 
@@ -790,14 +792,18 @@ five equivalent:
 - PURSUIT_FOLLOW's zone as FLANK's. Zones 1 and 3, and 2 and 5, have
   the same column in the permission table.
 
-`copmanager_check` links `cop.c` too (25100 lines, 0 differ). Its
+`copmanager_check` links `cop.c` too (33602 lines, 0 differ). Its
 harness, and copmover's (which links all of `copdriver.c`), stand in
 for the drive target's, CopDriver's and Think's calls with ones that
 abort if reached. Since 12g-2, copmanager's also stands in for
 CanTeleport and CarCausedRecentCollision that way, and copdriver's and
 trackgraph's for the collision calls `coputil.c` now makes. Since 12g-3,
 copmanager's also stands in for World::Random(int), WorldToCar,
-CompareDistances and DidTheseCarsCollide. carmode (which now maps CopDriver's host size back to 76),
+CompareDistances and DidTheseCarsCollide. Since 12j-1, cop's and
+pursuit's harnesses stand in for the SpawnSpeedTraps calls they lack
+with ones that abort: the split, Timer::SetTime and FindSpeedTrap in
+both, the free run in cop's, and IsTeleportLocationClear and
+SetSpeedTrap in pursuit's. carmode (which now maps CopDriver's host size back to 76),
 copdriver, copmover, collisionbody, drivecam, drivingchoice, hudanim,
 hudfeatures, hudrender, nearbycar, realcontroller, realdriver, trackmap,
 raceupdate, hudcop, hudscore, aidriver, aicarcontroller, beltmover,

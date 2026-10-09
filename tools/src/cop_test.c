@@ -38,8 +38,11 @@
 #include "drivetargetrenderer.h"
 #include "race.h"
 #include "racecoord.h"
+#include "raceparams.h"
+#include "racesplit.h"
 #include "realdriver.h"
 #include "realtime.h"
+#include "timer.h"
 #include "topology.h"
 #include "trackgraph.h"
 #include "trackmap.h"
@@ -466,6 +469,36 @@ int32_t is_point_in_poly(const bVector2 *p, const bVector2 *poly, int32_t n)
     (void)p; (void)poly; (void)n;
     unreached("is_point_in_poly");
     return 0;
+}
+
+// The manager's SpawnSpeedTraps (12j-1), which copmanager_check checks.
+void race_calculate_split_time(Race *r, Timer *out, struct RacingCar *a,
+                               struct RacingCar *b)
+{
+    (void)r; (void)out; (void)a; (void)b;
+    unreached("race_calculate_split_time");
+}
+
+int32_t race_parameters_is_free_run(const RaceParameters *rp)
+{
+    (void)rp;
+    unreached("race_parameters_is_free_run");
+    return 0;
+}
+
+void timer_set_time(Timer *t, float seconds)
+{
+    (void)t; (void)seconds;
+    unreached("timer_set_time");
+}
+
+struct tSpeedTrap *trackgraph_find_speed_trap(tTrackGraph *g,
+                                              struct Car *car, float fMin,
+                                              float fMax, int32_t forward)
+{
+    (void)g; (void)car; (void)fMin; (void)fMax; (void)forward;
+    unreached("trackgraph_find_speed_trap");
+    return NULL;
 }
 
 // CarCausedRecentCollision's world: each car's collisions, as the script

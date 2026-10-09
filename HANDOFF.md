@@ -18392,3 +18392,65 @@ RealDriver's forced e-brake stop, ported from retail into
 12j-1: SpawnSpeedTraps (`0x00224a20`) and FindCopForSpeedTrap
 (`0x00224838`), which bind `gCopManagerSpawnSpeedTrapsFn`, so the cops
 leave limbo for their radar traps. Then 12j-2, the spike strips.
+
+## Session 59, continued (2026-10-08) -- 12j-1, the radar traps
+
+The manager's SpawnSpeedTraps (`0x00224a20`) and FindCopForSpeedTrap
+(`0x00224838`), ported from retail into `copmgr.c`.
+`docs/formats/cop-manager.md`, "Radar traps (12j-1)", has the details.
+
+### What it does
+
+- **FindCopForSpeedTrap** gives the first AI cop that wants LS_LIMBO
+  and sits in LSS_LIMBO_READY.
+- **SpawnSpeedTraps** goes over the racing cars. For each one not
+  finished and not held off by its pursuable timer, it does three
+  things:
+  - It runs the car's spawn timer down.
+  - It rolls by difficulty: a lost roll waits 10, 5 or 1 s.
+  - It decides whether the car wants a trap, by these rules:
+    - a chased car wants one when its chase has no cops, or has called
+      for backup and has room;
+    - with two or more chases, an unchased AI car does not;
+    - otherwise, the split to the leader must be later than -15 s, or
+      the leader finished, or Random(20) gave 19. If none of these
+      holds, the car waits 1 s;
+    - a free run or a player's car then wants a trap;
+    - an AI racer wants one while its tickets lag its laps.
+- A car that wants one gets a ready cop and the next free radar trap
+  250 m on, if its spot is clear. The cop's SetSpeedTrap teleports it
+  there, the car waits 20 s, and the function returns.
+- `main.c` binds `gCopManagerSpawnSpeedTrapsFn`. Cops now leave limbo
+  for radar traps.
+- The harnesses of cop and pursuit stand in for the new calls they
+  lack with ones that abort if reached: the split, Timer::SetTime and
+  FindSpeedTrap in both, the free run in cop's, and
+  IsTeleportLocationClear and SetSpeedTrap in pursuit's.
+
+### Checked
+
+- `tools/copmanager_check.py` adds the radar traps. `copmanager_test.c`
+  queues World::Random's answers on both sides. `realspawn` swaps the
+  seam between the logging stand-in and the real function. `spstate`
+  prints the timers, the cops' states and the traps' cops.
+  - It covers each filter, the roll at each difficulty, the split one
+    tick either side of -59999, the free run and ticket grids, and one
+    to three chases.
+  - A fuzz of 300 per number of chases runs from seed 12101.
+  - 87402 operations, 33602 lines, 0 differ.
+- `--mutate`: 363 mutations, 358 caught, five equivalent. The fifth is
+  the split starting at 1, which -59999 cannot tell from 0.
+  - Two older patterns (`tbs_no_replay`, `sv_no_replay`) had gone stale
+    at 12h-1's rename. Both are fixed and caught.
+- cop (756972 operations, 93019 lines) and pursuit (58562 operations,
+  86269 lines): 0 differ.
+- The CIA builds.
+- `run_azahar_quickrace.ps1 -HoldKeys 65`: PASS. A Hot Pursuit quick
+  race from the frontend ran at 30 FPS and Speed 100%, on AC.
+
+### Next
+
+12j-2: the spike strips. That is AddSpikeStrip (`0x002276d0`) and
+tSpikeStrip's constructor, Init and Update (`0x00241378`,
+`0x002414e8`, `0x002417b8`), with the manager's MonitorSpikeBelts
+(`0x00227758`).

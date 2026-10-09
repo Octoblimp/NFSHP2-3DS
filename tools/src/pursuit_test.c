@@ -43,10 +43,12 @@
 #include "race.h"
 #include "racecoord.h"
 #include "raceparams.h"
+#include "racesplit.h"
 #include "realdriver.h"
 #include "replay.h"
 #include "smokeable.h"
 #include "table.h"
+#include "timer.h"
 #include "topology.h"
 #include "trackgraph.h"
 #include "trackpath.h"
@@ -824,6 +826,42 @@ tPlayerCop *tplayercop_construct(tPlayerCop *c, struct Car *car, int32_t n)
     (void)c; (void)car; (void)n;
     unreached("tplayercop_construct");
     return NULL;
+}
+
+// The manager's SpawnSpeedTraps (12j-1), which copmanager_check checks.
+void race_calculate_split_time(Race *r, Timer *out, struct RacingCar *a,
+                               struct RacingCar *b)
+{
+    (void)r; (void)out; (void)a; (void)b;
+    unreached("race_calculate_split_time");
+}
+
+void timer_set_time(Timer *t, float seconds)
+{
+    (void)t; (void)seconds;
+    unreached("timer_set_time");
+}
+
+struct tSpeedTrap *trackgraph_find_speed_trap(tTrackGraph *g,
+                                              struct Car *car, float fMin,
+                                              float fMax, int32_t forward)
+{
+    (void)g; (void)car; (void)fMin; (void)fMax; (void)forward;
+    unreached("trackgraph_find_speed_trap");
+    return NULL;
+}
+
+int32_t is_teleport_location_clear(const bVector2 *p)
+{
+    (void)p;
+    unreached("is_teleport_location_clear");
+    return 0;
+}
+
+void taicop_set_speed_trap(tAICop *c, tSpeedTrap *t)
+{
+    (void)c; (void)t;
+    unreached("taicop_set_speed_trap");
 }
 
 // ------------------------------------------------------------ the dumps

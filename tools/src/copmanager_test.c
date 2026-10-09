@@ -28,8 +28,11 @@
 #include "drivetargetrenderer.h"
 #include "race.h"
 #include "racecoord.h"
+#include "raceparams.h"
+#include "racesplit.h"
 #include "realdriver.h"
 #include "realtime.h"
+#include "timer.h"
 #include "topology.h"
 #include "trackgraph.h"
 #include "trackmap.h"
@@ -251,9 +254,18 @@ void trpoint_get_position2(const TrackRoutePoint *p, bVector2 *o, float d,
     printf("  getpos %s %08x %08x\n", sym(p), fb(d), fb(l));
 }
 
+// World::Random's answers: the script's queue first (12j-1), then the
+// bits with 0x00300000 flipped (the float's) or 0 (the int's).
+#define RQ_MAX 256
+static uint32_t rq[RQ_MAX];
+static int32_t  riq[RQ_MAX];
+static int      nrq, rqi, nriq, riqi;
+
 float world_random_f(World *w, float f)
 {
     printf("  random %s %08x\n", sym(w), fb(f));
+    if (rqi < nrq)
+        return bf(rq[rqi++]);
     return bf(fb(f) ^ 0x00300000u);
 }
 
@@ -346,17 +358,17 @@ void car_set_control_mode(Car *c, ControlMode mode)
     unreached("car_set_control_mode");
 }
 
+// tAICop::Teleport's, under SetSpeedTrap (12j-1).
 void car_set_movement_mode(Car *c, MovementMode mode)
 {
-    (void)c; (void)mode;
-    unreached("car_set_movement_mode");
+    printf("  movement %s %d\n", sym(c), (int)mode);
 }
 
 void car_reset_to_position(Car *c, const bVector3 *pos, float speed,
                            uint16_t angle)
 {
-    (void)c; (void)pos; (void)speed; (void)angle;
-    unreached("car_reset_to_position");
+    printf("  reset %s %08x %08x %08x %08x %04x\n", sym(c), fb(pos->x),
+           fb(pos->y), fb(pos->z), fb(speed), angle);
 }
 
 void *bSlotOMalloc(BSlotPool *pool)
@@ -451,13 +463,15 @@ void realdriver_force_ebrake_stop(RealDriver *d, float t)
     unreached("realdriver_force_ebrake_stop");
 }
 
-// The chase's (12g-3), which cop_check checks.
 int32_t world_random_i(World *w, int32_t range)
 {
-    (void)w; (void)range;
-    unreached("world_random_i");
-    return 0;
+    int32_t v = riqi < nriq ? riq[riqi++] : 0;
+
+    printf("  randomi %s %d -> %d\n", sym(w), range, v);
+    return v;
 }
+
+// The chase's (12g-3), which cop_check checks.
 
 void carstate_world_to_car2(CarState *s, bVector2 *out, const bVector2 *in)
 {
@@ -618,6 +632,183 @@ static void beacop_think(tCopManager *m)
     printf("  beacopthink %s\n", sym(m));
 }
 
+// ------------------------------------------- SpawnSpeedTraps's (12j-1)
+
+static int32_t  split_set;
+static uint32_t split_bits;
+static int32_t  freerun_v;
+static int32_t  ftrap_k = -1;
+static int32_t  tclear_v;
+
+// CalculateSplitTime's answer, or none: the timer left as it was.
+void race_calculate_split_time(Race *r, Timer *out, struct RacingCar *a,
+                               struct RacingCar *b)
+{
+    printf("  split %s %s %s", sym(r), sym(a), sym(b));
+    if (split_set) {
+        out->PackedTime = split_bits;
+        printf(" -> %08x\n", split_bits);
+    } else {
+        printf(" -> none\n");
+    }
+}
+
+int32_t race_parameters_is_free_run(const RaceParameters *rp)
+{
+    printf("  freerun %s -> %d\n", rp == &TheRaceParameters ? "RP" : "?",
+           freerun_v);
+    return freerun_v;
+}
+
+static const char *trap_sym(const void *p)
+{
+    static char b[8][16];
+    static int  n;
+    char       *s = b[n++ & 7];
+    int         k;
+
+    for (k = 0; k < COPMANAGER_MAX_SPEEDTRAPS; k++) {
+        if (p == &pCopManager->SpeedTraps[k]) {
+            snprintf(s, 16, "st%d", k);
+            return s;
+        }
+        if (p == &pCopManager->SpeedTraps[k].v2Position) {
+            snprintf(s, 16, "st%d.pos", k);
+            return s;
+        }
+    }
+    return sym(p);
+}
+
+struct tSpeedTrap *trackgraph_find_speed_trap(tTrackGraph *g,
+                                              struct Car *car, float fMin,
+                                              float fMax, int32_t forward)
+{
+    tSpeedTrap *t = ftrap_k >= 0 ? &pCopManager->SpeedTraps[ftrap_k] : NULL;
+
+    printf("  findtrap %s %s %08x %08x %d -> %s\n",
+           g == &the_graph ? "G" : "?", sym(car), fb(fMin), fb(fMax),
+           forward, t != NULL ? trap_sym(t) : "none");
+    return t;
+}
+
+int32_t is_teleport_location_clear(const bVector2 *p)
+{
+    printf("  tclear %s %08x %08x -> %d\n", trap_sym(p), fb(p->x),
+           fb(p->y), tclear_v);
+    return tclear_v;
+}
+
+static uint32_t num(const char *s);
+
+static int spawn_op(tCopManager *m, char **a)
+{
+    const char *o = a[0];
+
+    if (!strcmp(o, "race")) {
+        the_race.NumRacingCars = (int32_t)num(a[1]);
+    } else if (!strcmp(o, "rcar")) {
+        int               i = atoi(a[1]), k = atoi(a[2]);
+        struct RacingCar *rc = &the_race.RacingCarTable[i];
+
+        if (k < 0) {
+            the_race.pRacingCars[i] = NULL;
+        } else {
+            the_race.pRacingCars[i] = rc;
+            rc->pCar = &cars[k];
+            rc->FinishReason = (int16_t)num(a[3]);
+            rc->FinishedLapNumberExact = bf(num(a[4]));
+        }
+    } else if (!strcmp(o, "pcops")) {
+        tPursuit *p = pursuits[atoi(a[1])];
+
+        p->nMaxChaseCops = (int32_t)num(a[2]);
+        p->nNumCops = (int32_t)num(a[3]);
+        p->bAlreadyCalledForBackup = (int32_t)num(a[4]);
+    } else if (!strcmp(o, "tickets")) {
+        m->CarPullovers[atoi(a[1])].nNumTickets = (int8_t)num(a[2]);
+    } else if (!strcmp(o, "clss")) {
+        m->Cops[atoi(a[1])]->LogicSubState = (eLogicSubState)num(a[2]);
+    } else if (!strcmp(o, "rq") || !strcmp(o, "riq")) {
+        int f = !strcmp(o, "rq");
+
+        if (!strcmp(a[1], "clear")) {
+            if (f)
+                nrq = rqi = 0;
+            else
+                nriq = riqi = 0;
+        } else if (f) {
+            if (rqi == nrq)
+                nrq = rqi = 0;
+            if (nrq == RQ_MAX) {
+                fprintf(stderr, "rq full\n");
+                exit(2);
+            }
+            rq[nrq++] = num(a[1]);
+        } else {
+            if (riqi == nriq)
+                nriq = riqi = 0;
+            if (nriq == RQ_MAX) {
+                fprintf(stderr, "riq full\n");
+                exit(2);
+            }
+            riq[nriq++] = (int32_t)num(a[1]);
+        }
+    } else if (!strcmp(o, "split")) {
+        split_set = strcmp(a[1], "none") != 0;
+        if (split_set)
+            split_bits = num(a[1]);
+    } else if (!strcmp(o, "freerun")) {
+        freerun_v = (int32_t)num(a[1]);
+    } else if (!strcmp(o, "ftrap")) {
+        ftrap_k = atoi(a[1]);
+    } else if (!strcmp(o, "tclear")) {
+        tclear_v = (int32_t)num(a[1]);
+    } else if (!strcmp(o, "stcop")) {
+        int c = atoi(a[2]);
+
+        m->SpeedTraps[atoi(a[1])].cop = c >= 0 ? m->Cops[c] : NULL;
+    } else if (!strcmp(o, "stpos")) {
+        tSpeedTrap *s = &m->SpeedTraps[atoi(a[1])];
+
+        s->v2Position.x = bf(num(a[2]));
+        s->v2Position.y = bf(num(a[3]));
+        s->ang = (uint16_t)num(a[4]);
+    } else if (!strcmp(o, "spawn")) {
+        copmanager_spawn_speed_traps(m);
+        printf("spawn\n");
+    } else if (!strcmp(o, "findcop")) {
+        printf("findcop -> %s\n",
+               sym(copmanager_find_cop_for_speed_trap(m)));
+    } else if (!strcmp(o, "realspawn")) {
+        gCopManagerSpawnSpeedTrapsFn = num(a[1]) ? copmanager_spawn_speed_traps
+                                                 : spawn_speed_traps;
+    } else if (!strcmp(o, "spstate")) {
+        int k;
+
+        printf("sp timer");
+        for (k = 0; k < 8; k++)
+            printf(" %08x", fb(m->fSpeedTrapSpawnTimer[k]));
+        printf(" cops");
+        for (k = 0; k < 7; k++) {
+            const tAICop *c = (const tAICop *)(const void *)m->Cops[k];
+
+            if (c == NULL)
+                printf(" -");
+            else
+                printf(" %d/%d/%s", c->Base.DesiredLogicState,
+                       c->Base.LogicSubState, trap_sym(c->pMySpeedTrap));
+        }
+        printf(" traps");
+        for (k = 0; k < 8; k++)
+            printf(" %s", sym(m->SpeedTraps[k].cop));
+        printf("\n");
+    } else {
+        return 0;
+    }
+    return 1;
+}
+
 static void link_tail(tPursuitNode *list, tPursuitNode *node)
 {
     tPursuitNode *prev = list->Prev;
@@ -764,6 +955,7 @@ static int32_t *rp_field(const char *f)
     if (!strcmp(f, "BeACopChoppers"))  return &r->nNumBeACopChoppers;
     if (!strcmp(f, "CopStrength"))     return &r->CopStrength;
     if (!strcmp(f, "NumPlayerCars"))   return &r->NumPlayerCars;
+    if (!strcmp(f, "Tickets"))         return &r->nNumTicketsBeforeArrest;
     fprintf(stderr, "no rp field %s\n", f);
     exit(2);
 }
@@ -802,6 +994,9 @@ static void *mfield(tCopManager *m, const char *f)
     if (!strcmp(f, "gap"))      return &m->MaxSpeechGapTime;
     if (!strcmp(f, "super"))    return &m->fSupervisorTimer;
     if (!strcmp(f, "aicops"))   return &m->nNumAICops;
+    if (!strcmp(f, "diff"))     return &m->nDifficultyLevel;
+    if (sscanf(f, "sttimer%d", &k) == 1)
+        return &m->fSpeedTrapSpawnTimer[k];
     if (sscanf(f, "pursuable%d", &k) == 1)
         return &m->fPursuableTimer[k];
     if (sscanf(f, "pulltimer%d", &k) == 1)
@@ -1097,7 +1292,9 @@ static void op(char **a, int na)
         c->State.Position.x = bf(num(a[4]));
         c->State.Position.y = bf(num(a[5]));
     } else if (!strcmp(o, "copcar")) {
-        m->Cops[atoi(a[1])]->pMyCar = &cars[atoi(a[2])];
+        int j = atoi(a[2]);
+
+        m->Cops[atoi(a[1])]->pMyCar = j >= 0 ? &cars[j] : NULL;
     } else if (!strcmp(o, "copp")) {
         int u = atoi(a[2]);
 
@@ -1138,6 +1335,8 @@ static void op(char **a, int na)
         s->vptr = VT_SPIKE;
     } else if (think_op(m, a)) {
         // Think's (12f).
+    } else if (spawn_op(m, a)) {
+        // SpawnSpeedTraps's (12j-1).
     } else {
         fprintf(stderr, "unknown op %s\n", o);
         exit(2);
@@ -1164,6 +1363,9 @@ int main(int argc, char **argv)
     for (i = 0; i < 3; i++)
         name(&routes[i], "R%d", i);
     name(&world_token, "W%d", 0);
+    name(&the_race, "RACE", 0);
+    for (i = 0; i < RACE_MAX_RACING_CARS; i++)
+        name(&the_race.RacingCarTable[i], "RC%d", i);
     pCurrentRace = &the_race;
     pRaceCoordinator = &the_rc;
     TheTrackGraph = &the_graph;

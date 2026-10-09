@@ -4415,8 +4415,11 @@ int main(int argc, char** argv)
     gPursuitCreateRoadBlockFn   = tpursuit_create_road_block;
     gRealDriverForceEBrakeStopFn = realdriver_force_ebrake_stop;
     gPursuitUpdateRoadBlocksFn  = tpursuit_update_road_blocks;
+    // A cop out of limbo to a radar trap ahead of a racer (copmgr.h).
+    gCopManagerSpawnSpeedTrapsFn = copmanager_spawn_speed_traps;
     // The race's cop drivers each get a car, in limbo -- unseen, parked,
-    // not colliding -- until patrols and chases are ported (copmgr.h).
+    // not colliding -- until a radar trap or a roadblock calls it out
+    // (copmgr.h).
     gAddCopCarToRaceFn         = copmgr_add_cop_car_to_race;
     // World's step thinks for the cops, and uncloaks the graph's cloaked
     // edges once a racer reaches a landmark that says to (copmgr.h).

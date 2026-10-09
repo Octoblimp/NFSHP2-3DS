@@ -253,7 +253,8 @@ that does nothing (or returns 0) while NULL:
 | the supervisor's test | `0x0022aaf0` | `gPursuitCanSupervisorInitiateFn` | 12h |
 | SuperInitiates, SayFillerSpeech | `0x0022b908`, `0x00231760` | `gPursuitSuperInitiatesFn`, `gSayFillerSpeechFn` | speech |
 | the speech manager's previousSedPlaybackState | gp-15624 + 1452 | `gCopSpeechPlaybackStateFn` | speech |
-| SpawnSpeedTraps, MonitorSpikeBelts | `0x00224a20`, `0x00227758` | `gCopManagerSpawnSpeedTrapsFn`, `gCopManagerMonitorSpikeBeltsFn` | 12j |
+| SpawnSpeedTraps | `0x00224a20` | `gCopManagerSpawnSpeedTrapsFn` | 12j-1, bound (below) |
+| MonitorSpikeBelts | `0x00227758` | `gCopManagerMonitorSpikeBeltsFn` | 12j-2 |
 | EndPullover | `0x00225878` | `gCopManagerEndPulloverFn` | 12l |
 | BeACopThink | `0x00227f30` | `gCopManagerBeACopThinkFn` | 12m |
 
@@ -261,6 +262,51 @@ tPursuit's fields from 1104 on are 380 bytes further on in retail than
 in the demo; the chopper's state is 384 further on. `copmanager.h` has
 PursuitState (1484), nHUDPursuitLevel (1492), fPursuitStateTimer
 (1524), fRoadBlockSpawnTimer (1532) and ChopperState (1580).
+
+## Radar traps (12j-1)
+
+SpawnSpeedTraps (`0x00224a20`, `copmanager_spawn_speed_traps`) sends a
+cop out of limbo to a radar trap ahead of a racer. `main.c` binds
+`gCopManagerSpawnSpeedTrapsFn` to it, so Think runs it every frame
+outside Be A Cop.
+
+It counts the pursuits, then takes the racing cars in order. It passes
+over a car that is NULL, has a FinishReason, or whose fPursuableTimer
+is above 0 (or NaN). For each other car:
+
+1. A fSpeedTrapSpawnTimer above 0 counts down by WorldTimeElapsed, and
+   the car waits.
+2. It rolls World::Random over the difficulty's range: 2, 1.5 or 1
+   (`0x002bd180`). A roll above 1 loses, and the car waits 10, 5 or 1 s
+   (`0x002bd170`). On the hardest level the roll never loses.
+3. A car in a chase wants a trap when the chase has no cops, or has
+   called for backup and has fewer than nMaxChaseCops.
+4. A car not in a chase, with two or more chases on and no player, does
+   not want one.
+5. Any other car needs one of three things:
+   - its split to the leader later than -15 s. The split comes from
+     CalculateSplitTime, from 0. The -15 s is Timer::SetTime's packed
+     -59999, compared signed;
+   - the leader finished;
+   - World::Random(20) returning 19.
+
+   Without any of them, the car waits 1 s. With one, a free run or a
+   player's car wants a trap. An AI racer wants one when its share of
+   the arrest count is under its share of the race run:
+   - the share of the arrest count is its tickets over
+     nNumTicketsBeforeArrest + 1;
+   - the share of the race run is FinishedLapNumberExact over the
+     race's laps (1 for point to point).
+
+A car that wants a trap takes the first AI cop in limbo and ready
+(FindCopForSpeedTrap, `0x00224838`: desired LS_LIMBO, sub-state
+LSS_LIMBO_READY). Then it takes the track graph's radar trap ahead
+(FindSpeedTrap, 250 m to half the track's length, forward). If the trap
+has no cop and IsTeleportLocationClear passes its spot, the cop's
+SetSpeedTrap teleports it there and asks for LS_SPEED_TRAP
+(`cops.md`). The car waits 20 s. SpawnSpeedTraps returns there, so it
+places at most one trap a frame. Without a cop or a free trap, the
+car's timer stays where it was, and it tries again on the next frame.
 
 ## The check
 
@@ -288,11 +334,31 @@ amounts at each threshold.
   pursuable timers;
 - GlobalCopThink on the made chunk whose landmarks L1 and L3 uncloak.
 
-The cops' Think, the pursuits' Update and the other seams are logging
-stand-ins on both sides. 3322 operations, 25100 lines, 0 differ.
+12j-1 adds SpawnSpeedTraps and FindCopForSpeedTrap:
 
-`--mutate` runs out of the tree through `mutpar`: 271 mutations, 267
-caught, and four equivalent:
+- FindCopForSpeedTrap over each cop's logic states;
+- the cars passed over;
+- the spawn timer, and the roll at each difficulty;
+- the split one packed tick either side of -59999, the leader finished,
+  and Random(20);
+- a free run (with odd values), a player's car, and an AI racer's grid
+  of tickets and laps;
+- the chases' cops and backup, with one, two and three chases;
+- a cop or trap missing, a trap taken, the spot not clear, and the next
+  car getting the trap;
+- Think with the real SpawnSpeedTraps;
+- a fuzz of 300 per number of chases, from seed 12101.
+
+World::Random's two forms take queued answers on both sides. The split,
+the free run, FindSpeedTrap and IsTeleportLocationClear are stand-ins
+that print their arguments. SetSpeedTrap and FindCopForSpeedTrap run
+for real, and the cars' moves and resets print.
+
+The cops' Think, the pursuits' Update and the other seams are logging
+stand-ins on both sides. 87402 operations, 33602 lines, 0 differ.
+
+`--mutate` runs out of the tree through `mutpar`: 363 mutations, 358
+caught, and five equivalent:
 
 - One turns the AI branch's `!(table <= amount)` into `table > amount`.
   That differs only for NaN, and AddDamage never passes MonitorImpact
@@ -301,6 +367,12 @@ caught, and four equivalent:
   stored back (fSupervisorTimer, fPursuableTimer).
 - One clamps a pursuable timer at `<= 0`: a timer above 0, less the
   frame's seconds, is never -0.0.
+- One starts SpawnSpeedTraps's split at 1, not 0. The split is only
+  compared with -15 s (-59999 packed), which is below both.
+
+Two mutations had gone stale since 12h-1 renamed `replaying` to
+`copmanager_replaying`, so their patterns were not found. 12j-1 fixed
+them, and both are caught.
 
 The checkers that link `copmgr.c`, `copmanager.c` or
 `carcollisionbody.c` still have 0 differ: carmode, collisionbody,
