@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Cross-check 3DS Files/source/chopper.c, the police helicopter's object
-(12k-2), its chase logic (12k-3a) and its plans (12k-3b), against the
-retail image, SLES_507.31, run in mipsemu.
+(12k-2), its chase logic (12k-3a), its plans (12k-3b) and its flying
+(12k-4a), against the retail image, SLES_507.31, run in mipsemu.
 
 **The model** is retail's own code: Chopper's constructor (0x001e7a90),
 destructor (0x001e7b80), ClearVariables (0x001e7c38), FollowThisCar
@@ -25,10 +25,14 @@ CalcMinRouteFollowDistance (0x001e8f40), AdjustTargetInBounds
 (0x001e9368), TestLocation (0x001e98d0) and AdjustByThinkTime
 (0x001e9940); the plans, CleverPursuitPlan (0x001e9150), BombRunLogic
 (0x001e9398) and HighLevelPlanning (0x001e9648) with bScaleAdd
-(0x002589d8) under it; bStringHash and the bombing runs' table
-(0x0031a7c8) as shipped. The harness (tools/src/chopper_test.c) runs
-chopper.c, coputil.c, emath.c, bmath.c, bmatrix.c and bvector.c and
-prints the same lines.
+(0x002589d8) under it; the flying, SetXAccel (0x001e9950), SetYAccel
+(0x001e9a20), SetRotateTarget (0x001e9ae8), HoverTime (0x001e9b30),
+CheckMomentumWithinBounds (0x001e9c68), Think (0x001e9d48),
+CalcChopperRotation (0x001e9e40) and SubtractFromYaw (0x001e9e80), with
+bATan (0x0025a890) and MakeRelativeAngle (0x00231478) under them;
+bStringHash and the bombing runs' table (0x0031a7c8) as shipped. The
+harness (tools/src/chopper_test.c) runs chopper.c, coputil.c, emath.c,
+bmath.c, bmatrix.c and bvector.c and prints the same lines.
 
 **The stubs**, logged and answered by the same rule on both sides: the
 TopologyCoordinate's constructor, destructor, SetInterestBBox,
@@ -43,8 +47,9 @@ TrackRoute::FindClosestPoint, FindClosestPointAhead and
 GetRelativePoint; TrackRoutePoint::GetSignpost and GetPosition;
 Signpost::GetNewRoute and GetNewRoutePoint; Chopper::FireSalvo (12k-6's),
 which logs the run's type and counts; and sound::CreateChopperSound,
-whose sound's table is the checker's own, with a this-adjustment of 8. The routes' points are
-inside their tables, so BeginStakeout's indexes are the image's own.
+whose sound's table is the checker's own, with a this-adjustment of 8.
+The routes' points are inside their tables, so BeginStakeout's indexes
+are the image's own.
 
 **The port's divergences**, which the model is made to share:
   - With no sound (gCreateChopperSoundFn NULL) the port skips every call
@@ -85,7 +90,13 @@ spot on and off the sheet over each flag, the car's progress forward,
 back, onto another route and to and from NULL, the helicopter either
 side of the road's edges and the target's reach, each bomb type to its
 last salvo with the sheet and the ground height either side, and the
-stakeout either side of its give-up and reach distances.
+stakeout either side of its give-up and reach distances; and the flying,
+with the accelerations, rolls, turn rates and angles either side of each
+bound and wrap, NaN among them, from every plan; hovering either side of
+its speed, reach and acceleration, at headings round the circle; every
+mix of the three momentum probes on and off the sheet; and Think from
+each plan's ending, over targets round the helicopter at speeds either
+side of turning on the spot.
 
     python tools/chopper_check.py
     python tools/chopper_check.py --mutate [--only a,b]
@@ -174,6 +185,15 @@ F_CLEVER = 0x001e9150
 F_BOMBRUN = 0x001e9398
 F_HLP = 0x001e9648
 BOMB_NULL = 0x001e93c8                  # its `beq` of the car's points
+F_XACCEL = 0x001e9950
+F_YACCEL = 0x001e9a20
+F_ROTTGT = 0x001e9ae8
+F_HOVER = 0x001e9b30
+F_MOMENTUM = 0x001e9c68
+F_THINK = 0x001e9d48
+F_CALCROT = 0x001e9e40
+F_SUBYAW = 0x001e9e80
+F_RELANGLE = 0x00231478
 
 S_TOPO_CTOR = 0x00151c28
 S_TOPO_DTOR = 0x00151c70
@@ -711,6 +731,11 @@ class Model:
             for k in range(3):
                 e.put32(self.T + 4 * k, int(t[1 + k], 16))
             return
+        if op == "relangle":
+            e.set_f(12, bitsf(int(t[1], 16)))
+            e.call(F_RELANGLE)
+            self.log("ret %08x" % (e.fpr[0] & M32))
+            return
         h = self.H
         T = self.T
         if op == "new":
@@ -830,6 +855,33 @@ class Model:
         elif op == "hlp":
             self.log("ret %d" % self.with_sound(
                 lambda: e.call(F_HLP, h, T)))
+        elif op == "xaccel":
+            e.call(F_XACCEL, h, T)
+        elif op == "yaccel":
+            e.set_f(12, bitsf(int(t[1], 16)))
+            e.call(F_YACCEL, h, T)
+        elif op == "rottgt":
+            e.set_f(12, bitsf(int(t[1], 16)))
+            e.set_f(13, bitsf(int(t[2], 16)))
+            e.call(F_ROTTGT, h)
+        elif op == "hover":
+            self.log("ret %d" % e.call(F_HOVER, h, T))
+        elif op == "momentum":
+            e.call(F_MOMENTUM, h)
+        elif op == "think":
+            self.with_sound(lambda: e.call(F_THINK, h))
+        elif op == "calcrot":
+            v = self.vec(t[2], t[3])
+            e.set_f(12, bitsf(int(t[1], 16)))
+            e.call(F_CALCROT, h, v, v + 4)
+            self.log("out %08x %08x" % (e.u32(v), e.u32(v + 4)))
+            s = self.vec(t[3], "0")
+            e.set_f(12, bitsf(int(t[1], 16)))
+            e.call(F_CALCROT, h, s, s)
+            self.log("same %08x" % e.u32(s))
+        elif op == "subyaw":
+            e.set_f(12, bitsf(int(t[1], 16)))
+            e.call(F_SUBYAW, h)
         else:
             raise SystemExit("no op %s" % op)
         self.dump()
@@ -1701,11 +1753,212 @@ def plans(rng):
     return plans_clever() + plans_bombrun(rng) + plans_hlp(rng)
 
 
+# ---- 12k-4a's flying -------------------------------------------------------
+
+NAN = float("nan")
+
+
+def CARH(i, x, y, heading):
+    return "car|%d|%s|%s|%s|%d|%s|%s" % (i, F(x), F(y), F(5.0), heading,
+                                         F(10.0), F(500.0))
+
+
+def ACC(x, y):
+    return "set|acc|%s|%s" % (F(x), F(y))
+
+
+def fly_angles():
+    return ["relangle|%s" % F(f) for f in (
+        0.0, -0.0, 180.0, 180.00002, -180.0, -180.00002, 179.99998, 540.0,
+        541.0, -541.0, 359.9, -359.9, 720.5, 10000.0, -10000.25, NAN)]
+
+
+def fly_accel():
+    out = ["new", "set|car|C1"]
+    # SetXAccel: toward DesiredSpeed or by the think time, then no lower
+    # than -60 or -120 by the plan and no higher than 20.
+    for plan in (0, 1, 2, 3):
+        for ds in (-1.0, 0.0, -0.0, 5.0, 50.0, NAN):
+            for x in (-10.0, -0.61, -0.59, -0.0, 0.0, 1e-4, 0.19, 0.21,
+                      3.0, 100.0, NAN):
+                for sp in (0.0, 10.0, 40.0, -5.0, NAN):
+                    out += ["set|plan|%d" % plan, "set|speed|%s" % F(sp),
+                            ACC(1.5, 2.5), T(x, 7.0, ds), "xaccel"]
+    # SetYAccel: none from 90 off the nose; the roll past 5, at most 20.
+    for ang in (0.0, -0.0, 45.0, 89.99, 90.0, -90.0, 90.0001, -89.99,
+                180.0, NAN):
+        for y in (0.0, 0.04, 0.05, 0.051, -0.05, -0.051, 0.2, 0.25, -0.25,
+                  0.3, -0.3, 1e3, -1e3, NAN):
+            out += ["set|droll|%s" % F(77.0), ACC(1.5, 2.5), T(9.0, y),
+                    "yaccel|%s" % F(ang)]
+    # SetRotateTarget.
+    for rot in (-200.0, -180.0, -180.0001, -90.0, -90.0001, -89.99, -0.0,
+                0.0, 45.0, 89.99, 90.0, 90.0001, 179.99, 180.0, 200.0, NAN):
+        for sc in (1.0, 2.0, 0.5, 0.0, -0.0, -1.0, NAN):
+            out += ["set|droll|%s" % F(-33.0), "set|rot|%s" % F(1.25),
+                    "rottgt|%s|%s" % (F(rot), F(sc))]
+    out.append("del|3")
+    return out
+
+
+def fly_hover():
+    out = ["new", "set|car|C1", POS(10.0, 20.0, 30.0)]
+
+    def case(speed=0.0, tx=3.0, ty=3.99, ax=0.0, plan=0, heading=16384,
+             car=(40.0, -5.0), yaw=0.0):
+        return ["set|plan|%d" % plan, "set|speed|%s" % F(speed),
+                ACC(ax, 6.0), T(tx, ty), CARH(1, car[0], car[1], heading),
+                "set|yaw|%s" % F(yaw), "set|mm|7",
+                "set|rot|%s" % F(1.25), "set|droll|%s" % F(-33.0), "hover"]
+    # Still, near and not speeding up, one at a time.
+    for sp in (0.0, -0.0, 0.001, -0.001, 0.0010001, -0.0010001, 0.0015,
+               1.0, -1.0, NAN):
+        out += case(speed=sp)
+    for tx, ty in ((3.0, 4.0), (4.99, 0.0), (5.0, 0.0), (5.5, 0.0),
+                   (0.0, -4.999), (0.0, 0.0), (-3.0, -3.99), (NAN, 0.0),
+                   (0.0, NAN)):
+        out += case(tx=tx, ty=ty)
+    for ax in (0.1, 0.0999, 0.1000001, 0.15, -50.0, NAN):
+        out += case(ax=ax)
+    # The turn: the car's heading in PURSUIT, else bATan's way to it.
+    for plan in range(7):
+        for heading in (0, 16384, 32768, 49152, 50000, 65535):
+            for yaw in (0.0, 90.0, 200.0, 359.5):
+                for car in ((40.0, -5.0), (10.0, 20.0), (-60.0, 90.0)):
+                    out += case(plan=plan, heading=heading, yaw=yaw,
+                                car=car)
+    # PURSUIT's heading read unsigned: past 32768, a yaw with low bits a
+    # turn of under 90 away rounds apart from the signed reading's.
+    for heading in (32768, 40000, 50000, 60001, 65535):
+        f = heading * 360.0 / 65536.0
+        for delta in (-71.3, -3.21, 0.0173, 45.678):
+            out += case(heading=heading, yaw=(360.0 - f + delta) % 360.0)
+    out.append("del|3")
+    return out
+
+
+def fly_momentum(rng):
+    out = ["new", "set|car|C1"]
+    # At (0, 0) facing 0 with speed 10 and no acceleration, the probes are
+    # (1, 4.5), (1, -4.5) and (5.5, 0): each box holds one, edges on it.
+    boxes = [(0.5, 4.5, 1.5, 5.0), (1.0, -5.0, 1.5, -4.5),
+             (5.5, -0.5, 6.0, 0.5)]
+    for sp, ax, ay in ((10.0, 0.0, 0.0), (-10.0, 0.0, 0.0),
+                       (10.0, 3.0, -7.0), (NAN, 0.0, 0.0)):
+        for mask in range(8):
+            out.append("q|zbox")
+            out += [BOX(*bx) for k, bx in enumerate(boxes) if mask >> k & 1]
+            out += [POS(0.0, 0.0, 50.0), "set|yaw|%s" % F(0.0),
+                    "set|speed|%s" % F(sp), ACC(ax, ay), "momentum"]
+    for _ in range(150):
+        out.append("q|zbox")
+        for _ in range(rng.randrange(0, 4)):
+            x0, y0 = rng.uniform(-12, 12), rng.uniform(-12, 12)
+            out.append(BOX(x0, y0, x0 + rng.uniform(0, 10),
+                           y0 + rng.uniform(0, 10)))
+        out += [POS(rng.uniform(-3, 3), rng.uniform(-3, 3), 50.0),
+                "set|yaw|%s" % F(rng.choice((0.0, 90.0, 180.0,
+                                             rng.uniform(0, 360)))),
+                "set|speed|%s" % F(rng.uniform(-20, 60)),
+                ACC(rng.uniform(-120, 20), rng.uniform(-40, 40)),
+                "momentum"]
+    out.append("q|zbox")
+    # CalcChopperRotation and SubtractFromYaw.
+    for step in (1.0, 0.0, 5.0, -1.0, 0.25, NAN):
+        for to, cur in ((10.0, 0.0), (0.0, 10.0), (3.0, 3.0), (-5.0, 5.0),
+                        (0.5, 0.0), (0.0, 0.5), (1.0, 0.0), (NAN, 0.0),
+                        (0.0, NAN), (-0.0, 0.0), (0.0, -0.0)):
+            out.append("calcrot|%s|%s|%s" % (F(step), F(to), F(cur)))
+    for yaw in (0.0, 10.0, 350.0, 359.0, 360.0, 180.0):
+        for f in (0.0, 10.0, -10.0, 360.0, -0.0, 370.0, -360.5, 1e-3, -1e-3,
+                  180.0, NAN):
+            out += ["set|yaw|%s" % F(yaw), "subyaw|%s" % F(f)]
+    out.append("del|3")
+    return out
+
+
+def fly_think(rng):
+    out = ["new", "set|car|C1", "set|chop|R0|P1", "set|target|R0|P2",
+           "q|near|1|R2|P15", "q|carroute|1|R0|P3", "q|ahead|0|P4",
+           "width|1|%s|%s" % (F(4.0), F(6.0)), "q|elev|%s|3" % F(4.5),
+           "q|cmp|%s" % F(-12.0)] + plans_world()
+    # AT_STAKEOUT off the sheet: the target is the car's spot, here the car
+    # itself, round the helicopter at (10, 20) every 3 degrees, 40 away and
+    # 4 away.
+    out += ["q|zbox", "carvel|1|%s|%s|%s" % (F(0.0), F(0.0), F(0.0))]
+    for deg in range(0, 360, 3):
+        for r, speeds in ((40.0, (0.0, 0.001, 0.0015, 10.0, -0.0015,
+                                  -10.0)),
+                          (4.0, (0.0, 0.0015, -0.0015))):
+            for sp in speeds:
+                c = math.cos(math.radians(deg))
+                s = math.sin(math.radians(deg))
+                out += [CARH(1, 10.0 + r * c, 20.0 + r * s, 16384),
+                        "set|plan|2", "set|timeout|%s" % F(5.0),
+                        "set|chop|R0|P1", POS(10.0, 20.0, 30.0),
+                        "set|yaw|%s" % F((0.0, 30.0, 250.0)[deg % 3]),
+                        "set|speed|%s" % F(sp), ACC(0.0, 0.0), "set|mm|7",
+                        "set|rot|%s" % F(1.25), "set|droll|%s" % F(-3.0),
+                        "think"]
+    # The plans' 1: START_CHASE off the sheet, END_CHASE high enough to go.
+    out += [CARH(1, 50.0, 60.0, 0), "set|plan|3", "set|mm|7", "think",
+            BOX(-1e9, -1e9, 1e9, 1e9, 30.0, 0), "set|plan|5",
+            POS(-30.0, 7.0, 180.0), "set|mm|7", "think", "q|zbox"]
+    # Mixed.
+    for _ in range(250):
+        plan = rng.choice((0, 0, 1, 2, 3, 4, 5, 6))
+        out.append("q|zbox")
+        bx = rng.random()
+        if bx < 0.5:
+            out.append(BOX(-1e9, -1e9, 1e9, 1e9, rng.uniform(-200, 200),
+                           rng.choice((0, 0, 1, 2, 3))))
+        elif bx < 0.8:
+            x0, y0 = rng.uniform(-60, 60), rng.uniform(-60, 60)
+            out.append(BOX(x0, y0, x0 + rng.uniform(0, 60),
+                           y0 + rng.uniform(0, 60), rng.uniform(0, 80),
+                           rng.choice((0, 1, 2))))
+        r, c = rng.choice(((0, 1), (1, 8), (3, 20), (0, 2)))
+        x, y = PP(c)
+        out += [CARH(1, rng.uniform(-80, 80), rng.uniform(-80, 80),
+                     rng.randrange(65536)),
+                "carvel|1|%s|%s|%s" % (F(rng.uniform(-60, 60)),
+                                       F(rng.uniform(-60, 60)),
+                                       F(rng.uniform(-5, 5))),
+                "q|carroute|1|%s" % rng.choice(("R0|P3", "R0|P2", "R1|P8",
+                                                "R3|P20", "R2|P13",
+                                                "NULL|P3")),
+                "q|ahead|%d|%s" % (rng.randrange(NROUTES),
+                                   rng.choice(("NULL", "P4", "P9", "P22"))),
+                "q|cmp|%s" % F(rng.choice((-12.0, 5.0))),
+                "q|elev|%s|2" % F(rng.choice((4.5, 15.0, 25.0))),
+                "set|chop|R%d|P%d" % (r, c), "set|plan|%d" % plan,
+                "set|timeout|%s" % F(rng.choice((0.05, 0.1, 3.0, 30.0))),
+                "set|zv|%s" % F(rng.choice((0.0, 0.0, 4.0))),
+                "set|speed|%s" % F(rng.choice((0.0, 0.0005, 25.0, 300.0))),
+                ACC(rng.uniform(-60, 20), rng.uniform(-30, 30)),
+                "set|yaw|%s" % F(rng.uniform(0, 360)),
+                "set|bomb|%d" % rng.randrange(5),
+                "set|salvos|%d" % rng.randrange(0, 3),
+                "set|nsalvo|%s" % F(rng.choice((0.05, 0.5))),
+                "set|td|%s" % F(rng.uniform(-20, 300)),
+                "set|old|%s" % rng.choice(("R0|P3", "R0|P1", "R1|P9")),
+                POS(x + rng.uniform(-40, 40), y + rng.uniform(-40, 40),
+                    rng.uniform(5, 200)), "set|mm|7", "think"]
+    out += ["q|zbox", "set|car|C1", "del|3"]
+    return out
+
+
+def flying(rng):
+    return (fly_angles() + fly_accel() + fly_hover() + fly_momentum(rng)
+            + fly_think(rng))
+
+
 def script():
     rng = random.Random(0xc40)
     return (setup() + life() + follows() + attacks(rng) + shifts()
             + spots() + world_ops(rng) + routes() + matrices(rng)
-            + chase(random.Random(0x3a)) + plans(random.Random(0x3b)))
+            + chase(random.Random(0x3a)) + plans(random.Random(0x3b))
+            + flying(random.Random(0x4a)))
 
 
 # ================================================================= running
@@ -1793,8 +2046,8 @@ MUTATIONS = [
     ("clr_posx", C, "    h->CurrentPos.x = 0.0f;\n", ""),
     ("clr_car", C, "    h->CurrentCar = NULL;\n    h->MoveMode",
      "    h->MoveMode"),
-    ("clr_mm", C, "h->MoveMode = CHOPMOVE_PURSUIT;",
-     "h->MoveMode = CHOPMOVE_ROTATE;"),
+    ("clr_mm", C, "h->MoveMode = CHOPMOVE_PURSUIT;\n    h->TargetRoute",
+     "h->MoveMode = CHOPMOVE_ROTATE;\n    h->TargetRoute"),
     ("clr_tr", C, "    h->TargetRoute = NULL;\n    h->TargetPoint = NULL;\n",
      "    h->TargetPoint = NULL;\n"),
     ("clr_tp", C, "    h->TargetPoint = NULL;\n    h->ChopperRoute = NULL;\n",
@@ -1818,7 +2071,7 @@ MUTATIONS = [
     ("clr_speed", C, "    h->Speed = 0.0f;\n    h->Acceleration.x",
      "    h->Acceleration.x"),
     ("clr_accx", C, "    h->Acceleration.x = 0.0f;\n", ""),
-    ("clr_accy", C, "    h->Acceleration.y = 0.0f;\n", ""),
+    ("clr_accy", C, "    h->Acceleration.y = 0.0f;\n    h->Roll", "    h->Roll"),
     ("clr_roll", C, "    h->Roll = 0.0f;\n    h->DesiredRoll = 0.0f;\n"
      "    h->Yaw", "    h->DesiredRoll = 0.0f;\n    h->Yaw"),
     ("clr_droll", C, "    h->DesiredRoll = 0.0f;\n    h->Yaw", "    h->Yaw"),
@@ -2801,6 +3054,213 @@ MUTATIONS = [
      "    chopper_adjust_target_in_bounds(h, t);\n    return 0;"),
     ("hl_ret", C, "    chopper_adjust_target_local(h, t);\n    return 0;\n}",
      "    chopper_adjust_target_local(h, t);\n    return 1;\n}"),
+    # ---- 12k-4a: MakeRelativeAngle
+    ("ra_hi", U, "while (180.0f < deg)", "while (180.0f <= deg)"),
+    ("ra_hi_val", U, "deg = deg - 360.0f;", "deg = deg - 361.0f;"),
+    ("ra_hi_once", U, "    while (180.0f < deg)", "    if (180.0f < deg)"),
+    ("ra_lo", U, "while (deg < -180.0f)", "while (deg <= -180.0f)"),
+    ("ra_lo_val", U, "deg = deg + 360.0f;", "deg = deg + 361.0f;"),
+    ("ra_lo_once", U, "    while (deg < -180.0f)", "    if (deg < -180.0f)"),
+    # ---- SetXAccel
+    ("xa_ds", C, "if (0.0f < t->DesiredSpeed && 0.0f < t->Location.x)",
+     "if (0.0f <= t->DesiredSpeed && 0.0f < t->Location.x)"),
+    ("xa_x", C, "if (0.0f < t->DesiredSpeed && 0.0f < t->Location.x)",
+     "if (0.0f < t->DesiredSpeed && 0.0f <= t->Location.x)"),
+    ("xa_and", C, "if (0.0f < t->DesiredSpeed && 0.0f < t->Location.x)",
+     "if (0.0f < t->DesiredSpeed || 0.0f < t->Location.x)"),
+    ("xa_gain", C, "#define SPEED_GAIN         10.0f",
+     "#define SPEED_GAIN         11.0f"),
+    ("xa_order", C, "(t->DesiredSpeed - h->Speed) * SPEED_GAIN",
+     "(h->Speed - t->DesiredSpeed) * SPEED_GAIN"),
+    ("xa_damp", C, "#define SPEED_DAMP         0.1f",
+     "#define SPEED_DAMP         0.2f"),
+    ("xa_damp_sign", C, "t->Location.x - h->Speed * SPEED_DAMP",
+     "t->Location.x + h->Speed * SPEED_DAMP"),
+    ("xa_think", C, "h->Acceleration.x = chopper_adjust_by_think_time(\n"
+     "            h, t->Location.x - h->Speed * SPEED_DAMP);",
+     "h->Acceleration.x = t->Location.x - h->Speed * SPEED_DAMP;"),
+    ("xa_min", C, "if (h->Acceleration.x < chopper_get_max_deceleration(h))",
+     "if (h->Acceleration.x > chopper_get_max_deceleration(h))"),
+    ("xa_min_set", C, "        h->Acceleration.x = "
+     "chopper_get_max_deceleration(h);\n",
+     "        h->Acceleration.x = -60.0f;\n"),
+    ("xa_max", C, "else if (MAX_ACCEL < h->Acceleration.x)",
+     "else if (MAX_ACCEL > h->Acceleration.x)"),
+    ("xa_max_val", C, "#define MAX_ACCEL          20.0f",
+     "#define MAX_ACCEL          21.0f"),
+    ("xa_max_set", C, "        h->Acceleration.x = MAX_ACCEL;",
+     "        h->Acceleration.x = 21.0f;"),
+    # ---- SetYAccel
+    ("ya_lim", C, "if (SIDE_LIMIT <= fabsf(angle))",
+     "if (SIDE_LIMIT < fabsf(angle))"),
+    ("ya_lim_val", C, "#define SIDE_LIMIT         90.0f",
+     "#define SIDE_LIMIT         89.0f"),
+    ("ya_abs", C, "if (SIDE_LIMIT <= fabsf(angle))",
+     "if (SIDE_LIMIT <= angle)"),
+    ("ya_zero", C, "        h->Acceleration.y = 0.0f;\n    else",
+     "        h->Acceleration.y = 1.0f;\n    else"),
+    ("ya_think", C, "chopper_adjust_by_think_time(h, t->Location.y)",
+     "t->Location.y"),
+    ("ya_absacc", C, "a = fabsf(h->Acceleration.y);",
+     "a = h->Acceleration.y;"),
+    ("ya_reset", C, "    h->DesiredRoll = 0.0f;\n    if (!(ROLL_START < a))",
+     "    if (!(ROLL_START < a))"),
+    ("ya_start", C, "if (!(ROLL_START < a))", "if (!(ROLL_START <= a))"),
+    ("ya_start_val", C, "#define ROLL_START         5.0f",
+     "#define ROLL_START         6.0f"),
+    ("ya_sub", C, "h->DesiredRoll = a - ROLL_START;", "h->DesiredRoll = a;"),
+    ("ya_max", C, "if (ROLL_MAX < h->DesiredRoll)",
+     "if (ROLL_MAX > h->DesiredRoll)"),
+    ("ya_max_val", C, "#define ROLL_MAX           20.0f",
+     "#define ROLL_MAX           21.0f"),
+    ("ya_neg", C, "    if (h->Acceleration.y < 0.0f)\n"
+     "        h->DesiredRoll = -h->DesiredRoll;",
+     "    if (h->Acceleration.y > 0.0f)\n"
+     "        h->DesiredRoll = -h->DesiredRoll;"),
+    ("ya_neg_drop", C, "        h->DesiredRoll = -h->DesiredRoll;\n", ""),
+    # ---- SetRotateTarget
+    ("rt_rate", C, "#define ROTATE_RATE        90.0f",
+     "#define ROTATE_RATE        91.0f"),
+    ("rt_lo", C, "    if (rot < -lim)", "    if (rot <= -lim)"),
+    ("rt_hi", C, "    else if (lim < rot)", "    else if (lim <= rot)"),
+    ("rt_else", C, "    else if (lim < rot)", "    if (lim < rot)"),
+    ("rt_store", C, "    h->RotRate = rot;\n", "    h->RotRate = 0.0f;\n"),
+    ("rt_neg", C, "        h->RotRate = -lim;", "        h->RotRate = lim;"),
+    ("rt_droll", C, "        h->RotRate = lim;\n    h->DesiredRoll = 0.0f;",
+     "        h->RotRate = lim;"),
+    ("rt_scale", C, "float lim = scale * ROTATE_RATE;",
+     "float lim = ROTATE_RATE;"),
+    # ---- HoverTime
+    ("hv_still", C, "if (!(fabsf(h->Speed) <= HOVER_STILL)",
+     "if (!(fabsf(h->Speed) < HOVER_STILL)"),
+    ("hv_abs", C, "if (!(fabsf(h->Speed) <= HOVER_STILL)",
+     "if (!(h->Speed <= HOVER_STILL)"),
+    ("hv_still_val", C, "#define HOVER_STILL        0.001f",
+     "#define HOVER_STILL        0.002f"),
+    ("hv_near", C, "|| !(d < HOVER_NEAR)", "|| !(d <= HOVER_NEAR)"),
+    ("hv_near_val", C, "#define HOVER_NEAR         5.0f",
+     "#define HOVER_NEAR         6.0f"),
+    ("hv_d", C, "                    + t->Location.y * t->Location.y);",
+     "                    - t->Location.y * t->Location.y);"),
+    ("hv_dx", C, "float d = sqrtf(t->Location.x * t->Location.x",
+     "float d = sqrtf(t->Location.y * t->Location.x"),
+    ("hv_acc", C, "!(h->Acceleration.x < HOVER_ACCEL)",
+     "!(h->Acceleration.x <= HOVER_ACCEL)"),
+    ("hv_acc_val", C, "#define HOVER_ACCEL        0.1f",
+     "#define HOVER_ACCEL        0.2f"),
+    ("hv_or", C, "    if (!(fabsf(h->Speed) <= HOVER_STILL) || !(d < HOVER_NEAR)",
+     "    if (!(fabsf(h->Speed) <= HOVER_STILL) && !(d < HOVER_NEAR)"),
+    ("hv_mm", C, "    h->MoveMode = CHOPMOVE_ROTATE;\n    car = h->CurrentCar;",
+     "    car = h->CurrentCar;"),
+    ("hv_plan", C, "    if (h->Plan == CHOPPLAN_PURSUIT)\n        f = BAM_TO_DEG",
+     "    if (h->Plan != CHOPPLAN_PURSUIT)\n        f = BAM_TO_DEG"),
+    ("hv_bam", C, "f = BAM_TO_DEG * (float)car->State.Angle;",
+     "f = BAM_TO_DEG * (float)(int16_t)car->State.Angle;"),
+    ("hv_bam_val", C, "#define BAM_TO_DEG         (360.0f / 65536.0f)",
+     "#define BAM_TO_DEG         (360.0f / 65535.0f)"),
+    ("hv_atan_swap", C, "bATan(car->State.Position.x - h->CurrentPos.x,\n"
+     "                         car->State.Position.y - h->CurrentPos.y)",
+     "bATan(car->State.Position.y - h->CurrentPos.y,\n"
+     "                         car->State.Position.x - h->CurrentPos.x)"),
+    ("hv_atan_sub", C, "bATan(car->State.Position.x - h->CurrentPos.x,",
+     "bATan(h->CurrentPos.x - car->State.Position.x,"),
+    ("hv_full", C, "make_relative_angle(h->Yaw - (FULL_TURN - f))",
+     "make_relative_angle(h->Yaw + (FULL_TURN - f))"),
+    ("hv_full_sign", C, "make_relative_angle(h->Yaw - (FULL_TURN - f))",
+     "make_relative_angle(h->Yaw - (f - FULL_TURN))"),
+    ("hv_rel", C, "make_relative_angle(h->Yaw - (FULL_TURN - f))",
+     "(h->Yaw - (FULL_TURN - f))"),
+    ("hv_scale", C, "#define HOVER_TURN         1.0f",
+     "#define HOVER_TURN         1.5f"),
+    ("hv_ret", C, "HOVER_TURN);\n    return 1;", "HOVER_TURN);\n    return 0;"),
+    # ---- CheckMomentumWithinBounds
+    ("mo_acc_val", C, "#define MOMENTUM_ACCEL     0.05f",
+     "#define MOMENTUM_ACCEL     0.06f"),
+    ("mo_ahead_val", C, "#define MOMENTUM_AHEAD     0.1f",
+     "#define MOMENTUM_AHEAD     0.2f"),
+    ("mo_push_val", C, "#define MOMENTUM_PUSH      0.29999998f",
+     "#define MOMENTUM_PUSH      0.3f"),
+    ("mo_ay", C, "float ay = h->Acceleration.y * MOMENTUM_ACCEL;",
+     "float ay = h->Acceleration.y;"),
+    ("mo_ax", C, "(h->Speed + h->Acceleration.x * MOMENTUM_ACCEL)",
+     "(h->Speed + h->Acceleration.x)"),
+    ("mo_x", C, "(h->Speed + h->Acceleration.x * MOMENTUM_ACCEL) * "
+     "MOMENTUM_AHEAD;", "(h->Speed + h->Acceleration.x * MOMENTUM_ACCEL);"),
+    ("mo_push", C, "float push = h->Speed * MOMENTUM_PUSH;",
+     "float push = MOMENTUM_PUSH;"),
+    ("mo_l", C, "    if (!chopper_test_location(h, x, ay + BOUNDS_PROBE))",
+     "    if (chopper_test_location(h, x, ay + BOUNDS_PROBE))"),
+    ("mo_l_sub", C, "        h->Acceleration.y = h->Acceleration.y - push;",
+     "        h->Acceleration.y = h->Acceleration.y + push;"),
+    ("mo_l_probe", C, "x, ay + BOUNDS_PROBE))", "x, ay + BOUNDS_STEP))"),
+    ("mo_else", C, "    else if (!chopper_test_location(h, x, ay - "
+     "BOUNDS_PROBE))", "    if (!chopper_test_location(h, x, ay - "
+     "BOUNDS_PROBE))"),
+    ("mo_r", C, "    else if (!chopper_test_location(h, x, ay - "
+     "BOUNDS_PROBE))", "    else if (chopper_test_location(h, x, ay - "
+     "BOUNDS_PROBE))"),
+    ("mo_r_add", C, "        h->Acceleration.y = h->Acceleration.y + push;",
+     "        h->Acceleration.y = h->Acceleration.y - push;"),
+    ("mo_r_probe", C, "x, ay - BOUNDS_PROBE))", "x, ay + BOUNDS_PROBE))"),
+    ("mo_f", C, "    if (!chopper_test_location(h, x + BOUNDS_PROBE, ay))",
+     "    if (chopper_test_location(h, x + BOUNDS_PROBE, ay))"),
+    ("mo_f_sub", C, "        h->Acceleration.x = h->Acceleration.x - push;",
+     "        h->Acceleration.x = h->Acceleration.x + push;"),
+    ("mo_f_probe", C, "x + BOUNDS_PROBE, ay))", "x - BOUNDS_PROBE, ay))"),
+    # ---- Think
+    ("th_mm", C, "    h->MoveMode = CHOPMOVE_PURSUIT;\n"
+     "    if (chopper_high_level_planning(h, &t))",
+     "    if (chopper_high_level_planning(h, &t))"),
+    ("th_hlp", C, "    if (chopper_high_level_planning(h, &t))\n"
+     "        return;", "    chopper_high_level_planning(h, &t);"),
+    ("th_hover", C, "    if (chopper_hover_time(h, &t))\n        return;",
+     "    chopper_hover_time(h, &t);"),
+    ("th_rel", C, "a = make_relative_angle((float)bATan(t.Location.x, "
+     "t.Location.y)", "a = ((float)bATan(t.Location.x, t.Location.y)"),
+    ("th_atan_swap", C, "bATan(t.Location.x, t.Location.y)",
+     "bATan(t.Location.y, t.Location.x)"),
+    ("th_still", C, "if (fabsf(h->Speed) <= TURN_STILL",
+     "if (fabsf(h->Speed) < TURN_STILL"),
+    ("th_abs", C, "if (fabsf(h->Speed) <= TURN_STILL",
+     "if (h->Speed <= TURN_STILL"),
+    ("th_still_val", C, "#define TURN_STILL         0.001f",
+     "#define TURN_STILL         0.002f"),
+    ("th_and", C, "<= TURN_STILL && TURN_ANGLE < fabsf(a))",
+     "<= TURN_STILL || TURN_ANGLE < fabsf(a))"),
+    ("th_angle_val", C, "#define TURN_ANGLE         20.0f",
+     "#define TURN_ANGLE         22.0f"),
+    ("th_angle_abs", C, "TURN_ANGLE < fabsf(a))", "TURN_ANGLE < a)"),
+    ("th_scale", C, "#define TURN_SCALE         2.0f",
+     "#define TURN_SCALE         1.5f"),
+    ("th_rot_mm", C, "        h->MoveMode = CHOPMOVE_ROTATE;\n"
+     "        chopper_set_rotate_target(h, a, TURN_SCALE);",
+     "        chopper_set_rotate_target(h, a, TURN_SCALE);"),
+    ("th_rot_ret", C, "        chopper_set_rotate_target(h, a, TURN_SCALE);\n"
+     "        return;", "        chopper_set_rotate_target(h, a, "
+     "TURN_SCALE);"),
+    ("th_y", C, "    chopper_set_y_accel(h, &t, a);",
+     "    chopper_set_y_accel(h, &t, 0.0f);"),
+    ("th_y_drop", C, "    chopper_set_y_accel(h, &t, a);\n", ""),
+    ("th_x_drop", C, "    chopper_set_x_accel(h, &t);\n    chopper_check",
+     "    chopper_check"),
+    ("th_mom", C, "    chopper_check_momentum_within_bounds(h);\n}", "}"),
+    # ---- CalcChopperRotation and SubtractFromYaw
+    ("cr_lt", C, "    if (d < step)\n        step = d;",
+     "    if (d > step)\n        step = d;"),
+    ("cr_dir", C, "    if (to < from)\n        step = -step;",
+     "    if (to > from)\n        step = -step;"),
+    ("cr_add", C, "*cur = from + step;", "*cur = from - step;"),
+    ("cr_abs", C, "float d = fabsf(to - from);", "float d = to - from;"),
+    ("sy_sub", C, "float y = h->Yaw - f;", "float y = h->Yaw + f;"),
+    ("sy_store", C, "    h->Yaw = y;\n    if (y < 0.0f)",
+     "    if (y < 0.0f)"),
+    ("sy_lt", C, "    if (y < 0.0f)\n        h->Yaw = y + FULL_TURN;",
+     "    if (y <= 0.0f)\n        h->Yaw = y + FULL_TURN;"),
+    ("sy_gt", C, "    else if (FULL_TURN < y)", "    else if (FULL_TURN <= y)"),
+    ("sy_add", C, "h->Yaw = y + FULL_TURN;", "h->Yaw = y - FULL_TURN;"),
+    ("sy_sub2", C, "h->Yaw = y - FULL_TURN;", "h->Yaw = y + FULL_TURN;"),
+    ("sy_full", C, "#define FULL_TURN          360.0f",
+     "#define FULL_TURN          361.0f"),
 ]
 
 EQUIVALENT = {

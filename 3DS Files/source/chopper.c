@@ -10,6 +10,7 @@
 #include "airoute.h"
 #include "airouteplan.h"
 #include "bchunk.h"
+#include "bmath.h"
 #include "bmem.h"
 #include "bslotpool.h"
 #include "bvector.h"
@@ -981,4 +982,176 @@ int32_t chopper_high_level_planning(struct Chopper *h, ChopperTarget *t)
     chopper_adjust_target_in_bounds(h, t);
     chopper_adjust_target_local(h, t);
     return 0;
+}
+
+// ----------------------------------------------------------------- flying
+
+// SetXAccel: the gain toward DesiredSpeed, 0x41200000; the share of the
+// speed taken off the target's x, gp-28028; and the most it speeds up,
+// 0x41a00000.
+#define SPEED_GAIN         10.0f
+#define SPEED_DAMP         0.1f
+#define MAX_ACCEL          20.0f
+
+// SetYAccel: no sideways acceleration from 0x42b40000 off the nose; the
+// roll starts past 0x40a00000 of it, and stops at 0x41a00000.
+#define SIDE_LIMIT         90.0f
+#define ROLL_START         5.0f
+#define ROLL_MAX           20.0f
+
+// SetRotateTarget's degrees a second for a scale of 1, 0x42b40000.
+#define ROTATE_RATE        90.0f
+
+// HoverTime: still is at most gp-28024 in speed, near is within 0x40a00000
+// of the target, and not speeding up is below gp-28020. It turns at
+// SetRotateTarget's scale 1.
+#define HOVER_STILL        0.001f
+#define HOVER_NEAR         5.0f
+#define HOVER_ACCEL        0.1f
+#define HOVER_TURN         1.0f
+
+// BAM to degrees, 0x3bb40000, and a turn, 0x43b40000.
+#define BAM_TO_DEG         (360.0f / 65536.0f)
+#define FULL_TURN          360.0f
+
+// CheckMomentumWithinBounds: the acceleration's share, gp-28016; the
+// look ahead, gp-28012; and the share of the speed it pushes back by,
+// gp-28008, whose bits are 0x3e999999, one below 0.3f's. Its probe is
+// AdjustTargetInBounds's 4.5.
+#define MOMENTUM_ACCEL     0.05f
+#define MOMENTUM_AHEAD     0.1f
+#define MOMENTUM_PUSH      0.29999998f
+
+// Think turns on the spot at most gp-28004 in speed and more than
+// 0x41a00000 off the nose, at SetRotateTarget's scale 2.
+#define TURN_STILL         0.001f
+#define TURN_ANGLE         20.0f
+#define TURN_SCALE         2.0f
+
+void chopper_set_x_accel(struct Chopper *h, ChopperTarget *t)
+{
+    if (0.0f < t->DesiredSpeed && 0.0f < t->Location.x)
+        h->Acceleration.x = (t->DesiredSpeed - h->Speed) * SPEED_GAIN;
+    else
+        h->Acceleration.x = chopper_adjust_by_think_time(
+            h, t->Location.x - h->Speed * SPEED_DAMP);
+    if (h->Acceleration.x < chopper_get_max_deceleration(h))
+        h->Acceleration.x = chopper_get_max_deceleration(h);
+    else if (MAX_ACCEL < h->Acceleration.x)
+        h->Acceleration.x = MAX_ACCEL;
+}
+
+void chopper_set_y_accel(struct Chopper *h, ChopperTarget *t, float angle)
+{
+    float a;
+
+    if (SIDE_LIMIT <= fabsf(angle))
+        h->Acceleration.y = 0.0f;
+    else
+        h->Acceleration.y = chopper_adjust_by_think_time(h, t->Location.y);
+    a = fabsf(h->Acceleration.y);
+    h->DesiredRoll = 0.0f;
+    if (!(ROLL_START < a))
+        return;
+    h->DesiredRoll = a - ROLL_START;
+    if (ROLL_MAX < h->DesiredRoll)
+        h->DesiredRoll = ROLL_MAX;
+    if (h->Acceleration.y < 0.0f)
+        h->DesiredRoll = -h->DesiredRoll;
+}
+
+void chopper_set_rotate_target(struct Chopper *h, float rot, float scale)
+{
+    float lim = scale * ROTATE_RATE;
+
+    h->RotRate = rot;
+    if (rot < -lim)
+        h->RotRate = -lim;
+    else if (lim < rot)
+        h->RotRate = lim;
+    h->DesiredRoll = 0.0f;
+}
+
+int32_t chopper_hover_time(struct Chopper *h, ChopperTarget *t)
+{
+    float d = sqrtf(t->Location.x * t->Location.x
+                    + t->Location.y * t->Location.y);
+    struct Car *car;
+    float f;
+
+    if (!(fabsf(h->Speed) <= HOVER_STILL) || !(d < HOVER_NEAR)
+        || !(h->Acceleration.x < HOVER_ACCEL))
+        return 0;
+    h->MoveMode = CHOPMOVE_ROTATE;
+    car = h->CurrentCar;
+    if (h->Plan == CHOPPLAN_PURSUIT)
+        f = BAM_TO_DEG * (float)car->State.Angle;
+    else
+        f = (float)bATan(car->State.Position.x - h->CurrentPos.x,
+                         car->State.Position.y - h->CurrentPos.y)
+            * BAM_TO_DEG;
+    chopper_set_rotate_target(
+        h, make_relative_angle(h->Yaw - (FULL_TURN - f)), HOVER_TURN);
+    return 1;
+}
+
+void chopper_check_momentum_within_bounds(struct Chopper *h)
+{
+    float ay = h->Acceleration.y * MOMENTUM_ACCEL;
+    float x = (h->Speed + h->Acceleration.x * MOMENTUM_ACCEL) * MOMENTUM_AHEAD;
+    float push = h->Speed * MOMENTUM_PUSH;
+
+    if (!chopper_test_location(h, x, ay + BOUNDS_PROBE))
+        h->Acceleration.y = h->Acceleration.y - push;
+    else if (!chopper_test_location(h, x, ay - BOUNDS_PROBE))
+        h->Acceleration.y = h->Acceleration.y + push;
+    if (!chopper_test_location(h, x + BOUNDS_PROBE, ay))
+        h->Acceleration.x = h->Acceleration.x - push;
+}
+
+void chopper_think(struct Chopper *h)
+{
+    ChopperTarget t;
+    float a;
+
+    h->MoveMode = CHOPMOVE_PURSUIT;
+    if (chopper_high_level_planning(h, &t))
+        return;
+    if (chopper_hover_time(h, &t))
+        return;
+    a = make_relative_angle((float)bATan(t.Location.x, t.Location.y)
+                            * BAM_TO_DEG);
+    if (fabsf(h->Speed) <= TURN_STILL && TURN_ANGLE < fabsf(a)) {
+        h->MoveMode = CHOPMOVE_ROTATE;
+        chopper_set_rotate_target(h, a, TURN_SCALE);
+        return;
+    }
+    chopper_set_y_accel(h, &t, a);
+    chopper_set_x_accel(h, &t);
+    chopper_check_momentum_within_bounds(h);
+}
+
+void chopper_calc_chopper_rotation(struct Chopper *h, float step,
+                                   const float *target, float *cur)
+{
+    float to = *target, from = *cur;
+    float d = fabsf(to - from);
+
+    (void)h;
+    if (d < step)
+        step = d;
+    if (to < from)
+        step = -step;
+    *cur = from + step;
+}
+
+void chopper_subtract_from_yaw(struct Chopper *h, float f)
+{
+    float y = h->Yaw - f;
+
+    h->Yaw = y;
+    if (y < 0.0f)
+        h->Yaw = y + FULL_TURN;
+    else if (FULL_TURN < y)
+        h->Yaw = y - FULL_TURN;
 }

@@ -3,9 +3,9 @@
 // cubics. CarInRecentCollision is here for CopDriver, GetForwardTrackDistance
 // and IsTeleportLocationClear for the track graph, and CanTeleport and
 // CarCausedRecentCollision for the cops' logic (12g-2), DidTheseCarsCollide
-// for the chase's (12g-3), and RotateVector for the helicopter (12k-2);
-// the rest come with the chases. GetTopSpeed is pursuit.c's, its only
-// caller's.
+// for the chase's (12g-3), and RotateVector (12k-2) and MakeRelativeAngle
+// (12k-4a) for the helicopter; the rest come with the chases. GetTopSpeed
+// is pursuit.c's, its only caller's.
 
 #ifndef COPUTIL_H
 #define COPUTIL_H
@@ -62,5 +62,9 @@ int32_t car_in_recent_collision(struct Car *car);
 // (int)(deg * 65536) / 360, and bSinCos gives both; then
 // out.y = y cos - x sin and out.x = x cos + y sin.
 void rotate_vector(bVector2 *out, const bVector2 *v, float deg);
+
+// MakeRelativeAngle(float), 0x00231478: `deg` less 360 while it is above
+// 180, then more 360 while it is below -180. A NaN comes back as it is.
+float make_relative_angle(float deg);
 
 #endif

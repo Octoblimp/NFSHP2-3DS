@@ -428,6 +428,55 @@ void chopper_bomb_run_logic(struct Chopper *h, ChopperTarget *t);
 // AdjustTargetInBounds and AdjustTargetLocal, and 0.
 int32_t chopper_high_level_planning(struct Chopper *h, ChopperTarget *t);
 
+// ---- flying (12k-4a)
+
+// 0x001e9950. The forward acceleration: toward DesiredSpeed by 10 a unit
+// when it is above 0 and the target is ahead; else AdjustByThinkTime of
+// the target's x less 0.1 (gp-28028) of the speed. Then no lower than
+// GetMaxDeceleration, which it calls again to set it, and no higher than
+// 20.
+void chopper_set_x_accel(struct Chopper *h, ChopperTarget *t);
+
+// 0x001e9a20. The sideways acceleration: 0 from 90 degrees off the nose
+// (`angle`), else AdjustByThinkTime of the target's y. DesiredRoll is 0,
+// or past 5 of acceleration either way, what is past 5, at most 20, the
+// acceleration's sign.
+void chopper_set_y_accel(struct Chopper *h, ChopperTarget *t, float angle);
+
+// 0x001e9ae8. RotRate is `rot` within `scale` times 90 either way, and
+// DesiredRoll 0.
+void chopper_set_rotate_target(struct Chopper *h, float rot, float scale);
+
+// 0x001e9b30. At most 0.001 (gp-28024) in speed, within 5 of the target
+// and below 0.1 (gp-28020) of forward acceleration, the helicopter turns
+// to face the car's way: in PURSUIT its heading, else bATan's to it from
+// the helicopter. MoveMode ROTATE, SetRotateTarget by MakeRelativeAngle of
+// Yaw - (360 - that) at scale 1, and 1. Else 0.
+int32_t chopper_hover_time(struct Chopper *h, ChopperTarget *t);
+
+// 0x001e9c68. Looks 0.1 (gp-28012) of the speed and 0.05 (gp-28016) of
+// the acceleration ahead with TestLocation. Off the sheet 4.5 to +y,
+// the sideways acceleration loses 0x3e999999 (gp-28008) of the speed;
+// else off it 4.5 to -y, it gains that. Off the sheet 4.5 ahead, the
+// forward acceleration loses it.
+void chopper_check_momentum_within_bounds(struct Chopper *h);
+
+// 0x001e9d48. MoveMode PURSUIT, then the plans; their 1, or HoverTime's,
+// ends it. With the target MakeRelativeAngle(bATan) degrees off the nose,
+// a helicopter at most 0.001 (gp-28004) in speed with that over 20 turns
+// on the spot: MoveMode ROTATE and SetRotateTarget at scale 2. Else
+// SetYAccel, SetXAccel and CheckMomentumWithinBounds.
+void chopper_think(struct Chopper *h);
+
+// 0x001e9e40. Moves *cur toward *target by `step`, or by the gap when that
+// is less.
+void chopper_calc_chopper_rotation(struct Chopper *h, float step,
+                                   const float *target, float *cur);
+
+// 0x001e9e80. Yaw less `f`; then 360 more when that is below 0, or 360
+// less when above 360.
+void chopper_subtract_from_yaw(struct Chopper *h, float f);
+
 // 0x001ea8c0, in chopperfire.c. One salvo of the run's munitions: 12k-6's.
 void chopper_fire_salvo(struct Chopper *h);
 

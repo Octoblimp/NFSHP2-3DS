@@ -159,3 +159,12 @@ void rotate_vector(bVector2 *out, const bVector2 *v, float deg)
     out->y = y * c - x * s;
     out->x = x * c + y * s;
 }
+
+float make_relative_angle(float deg)
+{
+    while (180.0f < deg)
+        deg = deg - 360.0f;
+    while (deg < -180.0f)
+        deg = deg + 360.0f;
+    return deg;
+}

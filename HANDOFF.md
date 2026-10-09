@@ -19033,3 +19033,52 @@ them in pseudocode.
   - thinks every gp-27972 seconds;
   - moves with `0x001e9ee8` and `0x001ea3b0`;
   - goes to END_CHASE after 0.5 s stuck.
+
+## Session 61 (2026-10-09) -- 12k-4a, the flying
+
+Think and the seven functions under it are now in `chopper.{c,h}`, with
+MakeRelativeAngle in `coputil.c`. `docs/formats/chopper.md` ("Flying")
+has them in pseudocode.
+
+### What it does
+
+- **Think** runs the plans and stops on their 1. Then:
+  - **HoverTime:** at rest (speed at most 0.001) within 5 of the target
+    and not speeding up, the helicopter turns to face the car's heading
+    (PURSUIT) or the way to the car, at 90 degrees a second at most.
+  - At rest with the target over 20 degrees off the nose, it turns on
+    the spot at up to 180 a second.
+  - Otherwise SetYAccel, SetXAccel and CheckMomentumWithinBounds.
+- **SetXAccel:** toward DesiredSpeed by 10 a unit when there is one and
+  the target is ahead, else 100 times the target's x less a tenth of the
+  speed; at least GetMaxDeceleration, at most 20.
+- **SetYAccel:** none from 90 degrees off the nose, else 100 times the
+  target's y. The roll is what is past 5 of it, at most 20.
+- **CheckMomentumWithinBounds:** three probes 4.5 off where the
+  helicopter will be; off the sheet to a side pushes it the other way by
+  0.3 of the speed, and ahead slows it by as much.
+- **CalcChopperRotation** and **SubtractFromYaw** are MoveChopper's
+  (12k-4b).
+- **No divergence.** The car's heading is read unsigned (`lhu`), and the
+  push is gp-28008, `0x3e999999`, one below 0.3f's.
+
+### Checked
+
+- `tools/chopper_check.py` runs the eight in mipsemu with bATan
+  (`0x0025a890`) and MakeRelativeAngle real on both sides.
+  - New ops: `relangle`, `xaccel`, `yaccel`, `rottgt`, `hover`,
+    `momentum`, `think`, `calcrot` and `subyaw`.
+- 64,934 ops, 600,739 lines, 0 differ. Of 632 mutations, 627 are caught
+  and 5 are equivalent, all from earlier slices.
+  - Two survived the first pass and were killed by new cases:
+    - `hv_bam`, the heading read signed: a PURSUIT hover past 32768
+      with a yaw whose low bits round apart;
+    - `th_abs`, Think's |Speed| without the abs: negative speeds.
+  - Two of 12k-2's mutations (`clr_mm`, `clr_accy`) matched the new code
+    as well, and now carry more context.
+- The CIA builds. `check_3dsx` and `check_shbin` pass.
+
+### Next
+
+12k-4b, Fly, DoTweakerTriggers' egg part, MoveChopper, DrawChopper and
+TriggerDustEmitter. CONTINUE's "Next: 12k-4b" has them decoded.

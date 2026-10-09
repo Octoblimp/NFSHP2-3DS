@@ -1,9 +1,11 @@
 # CONTINUE
 
-Where the next session picks up. Updated in Session 60 (2026-10-09):
-12k-3b is done: the helicopter's plans, HighLevelPlanning,
-CleverPursuitPlan and BombRunLogic (`chopper.c`;
-`docs/formats/chopper.md`, "Planning"). Before them, 12k-3a: the
+Where the next session picks up. Updated in Session 61 (2026-10-09):
+12k-4a is done: the helicopter's flying, Think and the seven functions
+under it (SetXAccel .. SubtractFromYaw, with coputil's
+MakeRelativeAngle; `chopper.c`; `docs/formats/chopper.md`, "Flying").
+Before it, 12k-3b: the helicopter's plans, HighLevelPlanning,
+CleverPursuitPlan and BombRunLogic ("Planning"). Before them, 12k-3a: the
 helicopter's chase logic, the sixteen functions under its plans
 (StartChaseLogic .. AdjustByThinkTime; "The chase logic"). Before that,
 12k-3's first part: the route planners the helicopter follows
@@ -435,19 +437,41 @@ pursuit.obj, on a 10 KB manager. Its slices:
     nothing reads unless FindZValue set them.
   - Azahar, on AC: a quick race with cops, PASS at 30.0 fps. Nothing
     calls the plans until 12k-4's Think.
-- **Next: 12k-4**, flying, in `chopper.c`:
-  - Think (`0x001e9d48`): MoveMode = 0, HighLevelPlanning, and a return
-    if it gives 1. Then HoverTime (`0x001e9b30`), bATan and
-    MakeRelativeAngle.
-  - SetXAccel (`0x001e9950`), gp-28028 (0.1).
-  - Fly, at `0x001ea7d0`:
-    - it calls `0x001ea6c8`, then MunitionEffectsHandler::DoTimestep;
-    - it returns in EATING_DONUTS;
-    - TimeUntilThink drops by dt, and below 0 it gains gp-27972 and
-      Think runs;
-    - unless START_CHASE, it moves with `0x001e9ee8` and `0x001ea3b0`.
-      A failed move adds dt to StuckTime, and 0.5 s stuck means
-      END_CHASE.
+- **12k-4a, done (Session 61):** the flying in `chopper.c`: Think
+  (`0x001e9d48`), SetXAccel (`0x001e9950`), SetYAccel (`0x001e9a20`),
+  SetRotateTarget (`0x001e9ae8`), HoverTime (`0x001e9b30`),
+  CheckMomentumWithinBounds (`0x001e9c68`), CalcChopperRotation
+  (`0x001e9e40`) and SubtractFromYaw (`0x001e9e80`), with coputil's
+  MakeRelativeAngle (`0x00231478`).
+  - No divergence. HoverTime reads the car's heading unsigned, and the
+    momentum's push is gp-28008, `0x3e999999`, kept as `0.29999998f`.
+  - `tools/chopper_check.py`: 64,934 ops, 600,739 lines, 0 differ. Of
+    632 mutations, 627 are caught and 5 are equivalent, the earlier
+    slices' five.
+  - Nothing calls Think until Fly (12k-4b).
+- **Next: 12k-4b**, Fly and the moving, in `chopper.c`:
+  - Fly (`0x001ea7d0`): DoTweakerTriggers (`0x001ea6c8`), then
+    MunitionEffectsHandler::DoTimestep (gp-18384's, 12k-6: a seam until
+    then). It returns in EATING_DONUTS. TimeUntilThink drops by dt;
+    below 0 it gains gp-27972 (0.1) and Think runs. Unless START_CHASE,
+    MoveChopper and DrawChopper; a failed move adds dt to StuckTime, and
+    0.5 s of it means StuckTime 0 and END_CHASE. A good one zeroes it.
+  - DoTweakerTriggers: with New960 (egg 5), FollowThisCar of World's
+    car at +44 when CurrentCar is not it. Its two tweaker triggers
+    (gp-17172, gp-17168) are only ever read or zeroed in code: debug,
+    left out.
+  - MoveChopper (`0x001e9ee8`, 1212 bytes): ROTATE turns by RotRate and
+    falls to the sheet; PURSUIT speeds up (0 .. 100), pitches (0.15 of
+    the speed, at most 20), yaws toward the sideways acceleration, and
+    steps by RotateVector(Speed, Yaw) * dt, turning 5 degrees toward
+    ChopperPoint's side on a miss (TimeUntilThink 0), up to 4 tries.
+    Then EmitDust, SetInterestBBox, FindGroundHeight, the TP's
+    UpdatePosition, the pitch and roll eased at 20 a second, and
+    CalcMatrix. Gives 0 after 4 misses.
+  - DrawChopper (`0x001ea3b0`): the WorldObject update (`0x001ea578`)
+    and, with EmitDust, TriggerDustEmitter (`0x001ea5c0`): the emitters
+    at (CurrentPos.x, y, GroundZ), triggered for -(11 - height) * 0.1 *
+    dt, the share within 0 .. 1.
   - Then:
     - 12k-5, drawing, dust and ChopperSound;
     - 12k-6, the salvos: FireSalvo (`0x001ea8c0`) and its launch
@@ -4886,9 +4910,9 @@ each class shows what it reaches.
 | 20 | The split-screen decision (task 30), then the final CIA, banner and hardware pass (task 31) | 1-2 |
 
 That was about 41-60 slices to the full game when the table was set.
-After 12k-3b (2026-10-09), about 25-38 are left, and the count has
+After 12k-4a (2026-10-09), about 24-37 are left, and the count has
 run low before:
-- step 12's: 12k-4 to 12k-7, 12l, 12m and 12n;
+- step 12's: 12k-4b to 12k-7, 12l, 12m and 12n;
 - steps 10, 14, 14b, 16, 17, 18 and 20.
 
 The replay (`ReplaySnapshot` and every `DoSnapshot`) is not in the
@@ -4901,8 +4925,9 @@ count. It is its own slice when it goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** step 12's 12k-4 (the helicopter's flying): 12a to 12k-2,
-  the light flares, 12k-3's planners, 12k-3a and 12k-3b are done. See
+- **Next:** step 12's 12k-4b (the helicopter's Fly and MoveChopper):
+  12a to 12k-2, the light flares, 12k-3's planners, 12k-3a, 12k-3b and
+  12k-4a are done. See
   "First" at the top.
   These are done:
   - 11a, what an AI car knows as it drives;

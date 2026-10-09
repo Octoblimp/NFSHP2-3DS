@@ -1,9 +1,10 @@
 // chopper_test -- tools/chopper_check.py's harness.
 //
-// Runs chopper.c, with coputil.c's RotateVector, emath.c's rotations,
-// bmath.c's bSinCos and bmatrix.c's bIdentity under it, over the
-// checker's script. Everything else the Chopper calls is a stub here that
-// logs its arguments and answers from the script, as the model's stubs
+// Runs chopper.c, with coputil.c's RotateVector and MakeRelativeAngle,
+// emath.c's rotations, bmath.c's bSinCos and bATan, bmatrix.c's bIdentity
+// and bvector.c's bScaleAdd under it, over the checker's script.
+// Everything else the Chopper calls is a stub here that logs its
+// arguments and answers from the script, as the model's stubs
 // do. Pointers print as names: H for the helicopter (H.topo, H.dust,
 // H.tp and H.pos for its parts), T for the ChopperTarget, C0.. for cars,
 // R0.. routes, P0.. points, S0.. signposts, and SND, WO, WOP, SHEET, TPM
@@ -967,6 +968,9 @@ static void run(char **t, int n)
     else if (!strcmp(op, "q")) {
         answer(t, n);
         return;
+    } else if (!strcmp(op, "relangle")) {
+        printf("  ret %08x\n", fb(make_relative_angle(fh(t[1]))));
+        return;
     } else if (!strcmp(op, "car")) {
         car_op(t);
         return;
@@ -1050,6 +1054,30 @@ static void run(char **t, int n)
         chopper_bomb_run_logic(h, &tgt);
     else if (!strcmp(op, "hlp"))
         printf("  ret %d\n", chopper_high_level_planning(h, &tgt));
+    else if (!strcmp(op, "xaccel"))
+        chopper_set_x_accel(h, &tgt);
+    else if (!strcmp(op, "yaccel"))
+        chopper_set_y_accel(h, &tgt, fh(t[1]));
+    else if (!strcmp(op, "rottgt"))
+        chopper_set_rotate_target(h, fh(t[1]), fh(t[2]));
+    else if (!strcmp(op, "hover"))
+        printf("  ret %d\n", chopper_hover_time(h, &tgt));
+    else if (!strcmp(op, "momentum"))
+        chopper_check_momentum_within_bounds(h);
+    else if (!strcmp(op, "think"))
+        chopper_think(h);
+    else if (!strcmp(op, "calcrot")) {
+        float r[2], s;
+
+        r[0] = fh(t[2]);
+        r[1] = fh(t[3]);
+        chopper_calc_chopper_rotation(h, fh(t[1]), &r[0], &r[1]);
+        printf("  out %08x %08x\n", fb(r[0]), fb(r[1]));
+        s = fh(t[3]);
+        chopper_calc_chopper_rotation(h, fh(t[1]), &s, &s);
+        printf("  same %08x\n", fb(s));
+    } else if (!strcmp(op, "subyaw"))
+        chopper_subtract_from_yaw(h, fh(t[1]));
     else {
         fprintf(stderr, "chopper_test: no op %s\n", op);
         exit(2);

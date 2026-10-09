@@ -11,7 +11,8 @@ helicopter. The port has it in `chopper.{c,h}`, in slices:
 | 12k-2 | the object, following and attacking a car, the target spot, placing it in the world (this page) |
 | 12k-3a | the chase logic under the plans (this page) |
 | 12k-3b | the plans: HighLevelPlanning, CleverPursuitPlan and BombRunLogic (this page) |
-| 12k-4 | flying |
+| 12k-4a | flying: Think and its helpers (this page) |
+| 12k-4b | Fly and MoveChopper |
 | 12k-5 | drawing, dust and the ChopperSound |
 | 12k-6 | the salvos: FireSalvo and its launch (`chopperfire.c`) |
 | 12k-7 | tPursuit's UpdateChopper and the manager's methods |
@@ -408,6 +409,84 @@ BombRunLogic(t)                         0x001e9398
   has a placeholder that fires nothing. The run still counts its salvos
   and ends after the last one.
 
+## Flying
+
+12k-4a ports Think and the seven functions under it. Think works out
+what the helicopter does over the next 0.1 s: it sets MoveMode, and
+either a turn rate (RotRate) or the two accelerations and the roll it
+wants. Fly (`0x001ea7d0`, 12k-4b) calls it, and MoveChopper
+(`0x001e9ee8`, 12k-4b) does the moving.
+
+The ChopperTarget comes from HighLevelPlanning in the helicopter's own
+frame (AdjustTargetLocal): x is ahead along its Yaw, y across it.
+
+```
+Think()                                 0x001e9d48
+    MoveMode = PURSUIT
+    if HighLevelPlanning(t): return
+    if HoverTime(t): return
+    a = MakeRelativeAngle(bATan(t.x, t.y) in degrees)
+    if |Speed| <= 0.001 and |a| > 20:                         (gp-28004)
+        MoveMode = ROTATE; SetRotateTarget(a, 2); return
+    SetYAccel(t, a); SetXAccel(t); CheckMomentumWithinBounds()
+
+SetXAccel(t)                            0x001e9950
+    if DesiredSpeed > 0 and t.x > 0:
+        Acceleration.x = (DesiredSpeed - Speed) * 10
+    else:
+        Acceleration.x = AdjustByThinkTime(t.x - 0.1 * Speed)  (gp-28028)
+    Acceleration.x = at least GetMaxDeceleration(), at most 20
+
+SetYAccel(t, angle)                     0x001e9a20
+    Acceleration.y = 0 if |angle| >= 90, else AdjustByThinkTime(t.y)
+    DesiredRoll = 0
+    a = |Acceleration.y|
+    if a > 5: DesiredRoll = min(a - 5, 20), with Acceleration.y's sign
+
+SetRotateTarget(rot, scale)             0x001e9ae8
+    RotRate = rot, at most scale * 90 either way; DesiredRoll = 0
+
+HoverTime(t)                            0x001e9b30
+    unless |Speed| <= 0.001, |t| < 5 and Acceleration.x < 0.1:
+        return 0                                  (gp-28024, gp-28020)
+    MoveMode = ROTATE
+    f = in PURSUIT, the car's heading (State.Angle) in degrees;
+        else bATan's way from CurrentPos to the car, in degrees
+    SetRotateTarget(MakeRelativeAngle(Yaw - (360 - f)), 1); return 1
+
+CheckMomentumWithinBounds()             0x001e9c68
+    x = (Speed + 0.05 * Acceleration.x) * 0.1     (gp-28016, gp-28012)
+    y = 0.05 * Acceleration.y
+    push = Speed * 0x3e999999                                 (gp-28008)
+    if !TestLocation(x, y + 4.5): Acceleration.y -= push
+    else if !TestLocation(x, y - 4.5): Acceleration.y += push
+    if !TestLocation(x + 4.5, y): Acceleration.x -= push
+
+CalcChopperRotation(step, target, cur)  0x001e9e40
+    *cur moves toward *target by step, or by the gap when that is less
+
+SubtractFromYaw(f)                      0x001e9e80
+    Yaw -= f; then 360 more if below 0, else 360 less if above 360
+
+MakeRelativeAngle(deg)                  0x00231478, coputil
+    deg less 360 while above 180, then more 360 while below -180
+```
+
+- **Hovering** is the helicopter at rest within 5 of its target, not
+  speeding up. It turns to face the car's way and does not move.
+- **The car's heading** is read unsigned (`lhu`), so 0 .. 65535 is 0 ..
+  360 degrees. Read signed, a heading past 32768 would be 360 less and
+  round apart by the last bit.
+- **GetMaxDeceleration** (-60, or -120 to or at a stakeout) is called
+  twice by SetXAccel, once to compare and once to set.
+- **The push** is gp-28008, whose bits are `0x3e999999`, one below
+  0.3f's. The port keeps it as `0.29999998f`.
+- **MakeRelativeAngle** gives a NaN back as it came. An infinite angle
+  would loop for ever, in the image and the port, but nothing passes one:
+  bATan's answer is a 16-bit angle and Yaw stays within a turn.
+- **The rest**: CalcChopperRotation and SubtractFromYaw are MoveChopper's
+  (12k-4b). Nothing calls Think until Fly is ported.
+
 ## The port
 
 - **No sound unless it is set.** The ChopperSound is task 29's. The port
@@ -427,9 +506,10 @@ BombRunLogic(t)                         0x001e9398
 ## The cross-check
 
 `tools/chopper_check.py` runs retail's functions in mipsemu against
-`chopper.c` and `coputil.c`'s RotateVector, with emath's rotations,
-bSinCos, bIdentity and bScaleAdd real on both sides. Everything else is
-a stub that logs its arguments and answers from the script: the
+`chopper.c` and `coputil.c`'s RotateVector and MakeRelativeAngle, with
+emath's rotations, bSinCos, bATan, bIdentity and bScaleAdd real on both
+sides. Everything else is a stub that logs its arguments and answers
+from the script: the
 TopologyCoordinate, the TrackPathCoordinate, the WorldObject, the AcidFX
 emitters, the routes and signposts (FindClosestPointAhead among them),
 the planners (FindNearbySignpost, FindPointsToTarget), the HeliSheet's
