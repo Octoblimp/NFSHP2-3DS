@@ -14,13 +14,18 @@
 #include "carinfo.h"
 #include "cartypeinfo.h"
 #include "cop.h"
+#include "copdriver.h"
 #include "copmgr.h"
+#include "coputil.h"
 #include "drivetarget.h"
 #include "hudscore.h"
+#include "playerhud.h"
 #include "race.h"
 #include "racecoord.h"
+#include "raceparams.h"
 #include "table.h"
 #include "trackpath.h"
+#include "trackroute.h"
 #include "vtable.h"
 #include "world.h"
 
@@ -44,6 +49,27 @@ void (*gSpeechRaiseFlatTireFn)(uint32_t was, uint32_t now);
 void (*gSpeechRaiseSuperRequestFn)(uint32_t speaker);
 int32_t (*gChopperNew960Fn)(struct Chopper *c);
 void    (*gChopperFollowThisCarFn)(struct Chopper *c, struct Car *car);
+void (*gPursuitDeclareSpeechFn)(tPursuit *p);
+void (*gPursuitRaiseBackupSpeechFn)(tPursuit *p);
+void (*gPursuitBeginCollisionSpeechFn)(tPursuit *p, struct Car *hit);
+void (*gSpeechRaisePursuitCopHitFn)(uint32_t speaker, int32_t where);
+void (*gSpeechRaiseSuspectCrashTrafficFn)(uint32_t speaker, int32_t b);
+void (*gCopManagerCreatePulloverFn)(tCopManager *m, tPursuit *p,
+                                    struct Car *car, int32_t b);
+void (*gPursuitCreateRoadBlockFn)(tPursuit *p);
+void (*gPursuitUpdateRoadBlocksFn)(tPursuit *p);
+void (*gPursuitUpdateChopperFn)(tPursuit *p);
+
+// fCopCaptureRadius, gp-15592: 10.0, which nothing writes.
+#define PURSUIT_CAPTURE_RADIUS  10.0f
+
+// 0x0031c588: the speed under which the cops catch a Be A Cop car, by the
+// manager's difficulty: 20, 15 and 15 mph.
+static const float fBeACopCatchSpeeds[3] = {
+    8.940545082092285f, 6.705409049987793f, 6.705409049987793f
+};
+
+#define PURSUIT_MPH  2.236999988555908f
 
 typedef void    (*DtorFn)(void *self, int32_t flags);
 typedef int32_t (*IsAIControlledFn)(void *self);
@@ -310,7 +336,7 @@ int32_t tpursuit_do_state_transition(tPursuit *p)
 float tpursuit_get_speed_mph_or_kph(const tPursuit *p)
 {
     const Car *car = p->pChasedCar;
-    float      v = car->State.VelocityMagnitude;
+    float      v = car->State.ForwardSpeed;
 
     if (car->pPlayer != NULL
         && TheRaceParameters.GlobalDisplaySettings.Units != 0)
@@ -620,6 +646,412 @@ int32_t tpursuit_get_current_landmark(const tPursuit *p)
 int32_t tpursuit_get_pursuit_level_for_hud(const tPursuit *p)
 {
     return p->nHUDPursuitLevel;
+}
+
+// --------------------------------------------------------- the Update
+
+void tpursuit_level0_sub_states(tPursuit *p)
+{
+    if (p->PursuitSubState == 0) {
+        if (p->fPursuitStateTimer < 16.0f) {
+            if (gPursuitDeclareSpeechFn != NULL)
+                gPursuitDeclareSpeechFn(p);
+            p->PursuitSubState = 1;
+        }
+    } else if (p->PursuitSubState == 1) {
+        if (p->fPursuitStateTimer < 3.0f) {
+            if (gPursuitRaiseBackupSpeechFn != NULL)
+                gPursuitRaiseBackupSpeechFn(p);
+            p->PursuitSubState = 2;
+        }
+    }
+}
+
+int32_t tpursuit_should_pursuit_be_called_off(const tPursuit *p)
+{
+    const Car *car = p->pChasedCar;
+    float      left;
+
+    if ((int8_t)car->BlownTireBits != 0)
+        return 0;
+    if (TheRaceParameters.Point2Point != 0)
+        return 0;
+    if (race_parameters_is_free_run(&TheRaceParameters))
+        return 0;
+    if (TheRaceParameters.NumLapsInRace < 4)
+        return 0;
+    left = (float)TheRaceParameters.NumLapsInRace
+           - car->pRacingCar->FinishedLapNumberExact;
+    return left * TheTrackPathManager.TrackLength <= 2000.0f;
+}
+
+void tpursuithistory_update(tPursuitHistory *h, bVector2 *out,
+                            const bVector2 *pos, const bVector2 *vel,
+                            float dt)
+{
+    int32_t i;
+
+    for (i = 29; i > 0; i--) {
+        h->v2Velocity[i] = h->v2Velocity[i - 1];
+        h->fTime[i] = h->fTime[i - 1];
+    }
+    h->v2Velocity[0].x = vel->x;
+    h->v2Velocity[0].y = vel->y;
+    h->fTime[0] = dt;
+    if (h->nCount != 30)
+        h->nCount++;
+    *out = *pos;
+}
+
+// The two targets' step: the position as a new point once the last two
+// are `apart` or more apart (`strict`: more), the oldest dropped at 20,
+// else over the last point.
+static void follow_target(DriveTarget *t, const bVector2 *pos, float apart,
+                          int strict)
+{
+    int32_t n = t->NumPoints;
+
+    if (n >= 2) {
+        const bVector3 *a = &t->Points[n - 1];
+        const bVector3 *b = &t->Points[n - 2];
+        float dx = b->x - a->x;
+        float dy = b->y - a->y;
+        float d = sqrtf(dx * dx + dy * dy);
+
+        if (strict ? !(apart < d) : !(apart <= d)) {
+            drivetarget_set_point2(t, n - 1, pos, -1, -1, -1, 0.0f);
+            return;
+        }
+        if (n == 20)
+            drivetarget_shift_left(t, 1, 1);
+    }
+    drivetarget_add_point2(t, pos, -1, -1, -1, 0, NULL);
+}
+
+void tpursuit_update_drive_targets(tPursuit *p, float dt)
+{
+    Car     *car = p->pChasedCar;
+    bVector2 pos;
+    bVector2 out;
+
+    (void)dt;
+    pos.x = car->State.Position.x;
+    pos.y = car->State.Position.y;
+    follow_target(&p->FarDriveTarget, &pos, 20.0f, 0);
+    car = p->pChasedCar;
+    tpursuithistory_update(&p->History, &out,
+                           (const bVector2 *)(const void *)
+                               &car->State.Position,
+                           (const bVector2 *)(const void *)
+                               &car->State.Velocity,
+                           WorldTimeElapsed);
+    follow_target(&p->NearDriveTarget, &pos, 1.0f, 1);
+}
+
+void trbsm_update(tRoadBlockStateMachine *s)
+{
+    if (s->State == ERBS_NONE)
+        return;
+    s->fStateTimer -= WorldTimeElapsed;
+    if (s->fStateTimer <= 0.0f)
+        s->fStateTimer = 0.0f;
+    if (s->State != ERBS_CALLED_FOR_ROAD_BLOCK || s->fStateTimer != 0.0f)
+        return;
+    if (gPursuitCreateRoadBlockFn != NULL)
+        gPursuitCreateRoadBlockFn(s->pPursuit);
+    if (s->pPursuit->pRoadBlock != NULL)
+        s->State = ERBS_ROAD_BLOCK_SET;
+}
+
+void tpursuit_do_early_chase_collision_check(tPursuit *p)
+{
+    Car     *hit;
+    uint32_t s;
+
+    if (p->pChasedCar->pPlayer == NULL || p->bAlreadyBeenHit != 0)
+        return;
+    hit = car_caused_recent_collision(p->pChasedCar);
+    if (hit == NULL)
+        return;
+    p->bAlreadyBeenHit = 1;
+    if (p->PursuitSubState == 0) {
+        if (gPursuitBeginCollisionSpeechFn != NULL)
+            gPursuitBeginCollisionSpeechFn(p, hit);
+        return;
+    }
+    if (p->Cops[0] != NULL && hit == p->Cops[0]->pMyCar) {
+        s = tpursuit_get_cop_speaker(p);
+        if (gSpeechRaisePursuitCopHitFn != NULL)
+            gSpeechRaisePursuitCopHitFn(s, p->CurrentLandmark);
+        tpursuit_switch_state(p, EPS_LEVEL2);
+        return;
+    }
+    if (hit->MyDriver->TheDriverType == DRIVER_TYPE_COP) {
+        tpursuit_switch_state(p, EPS_LEVEL2);
+        return;
+    }
+    s = tpursuit_get_cop_speaker(p);
+    if (gSpeechRaiseSuspectCrashTrafficFn != NULL)
+        gSpeechRaiseSuspectCrashTrafficFn(s, 0);
+    if (p->PursuitState == EPS_LEVEL0)
+        tpursuit_switch_state(p, EPS_LEVEL1);
+}
+
+static float distance_2d(const Car *a, const Car *b)
+{
+    float dx = a->State.Position.x - b->State.Position.x;
+    float dy = a->State.Position.y - b->State.Position.y;
+
+    return sqrtf(dx * dx + dy * dy);
+}
+
+int32_t copmanager_is_cop_nearby(tCopManager *m, Car *car, float d)
+{
+    int32_t found = 0;
+    int32_t i;
+
+    if (TheRaceParameters.BeACop != 0) {
+        tCop *pc = copmanager_get_player_cop(m);
+
+        if (pc == NULL)
+            return 0;
+        return distance_2d(pc->pMyCar, car) <= d;
+    }
+    for (i = 0; i < m->nNumCops && !found; i++) {
+        Car *cc;
+
+        switch (m->Cops[i]->DesiredLogicState) {
+        case LS_DISABLED:
+        case LS_SPEED_TRAP:
+        case LS_ROAD_BLOCK:
+        case LS_DRIVING_ON_PATROL:
+        case LS_HOT_PURSUIT:
+        case LS_GUARD_LOCATION:
+            break;
+        default:
+            continue;
+        }
+        cc = m->Cops[i]->pMyCar;
+        if (cc->pPlayer != NULL && player_is_nis_playing(cc->pPlayer))
+            continue;
+        if (distance_2d(cc, car) <= d)
+            found = 1;
+    }
+    return found;
+}
+
+int32_t copmanager_did_recently_collide_with_cop(tCopManager *m, Car *car)
+{
+    int32_t hit = 0;
+    int32_t i;
+
+    for (i = 0; i < m->nNumCops && !hit; i++)
+        if (did_these_cars_collide(car, m->Cops[i]->pMyCar))
+            hit = 1;
+    return hit;
+}
+
+// On its side or over (the body's up axis 0.1 or less upright) and under
+// 10 mph.
+static int32_t is_upset(const Car *car)
+{
+    return car->State.BodyMatrix.v2.z <= 0.10000000149011612f
+           && car->State.VelocityMagnitude * PURSUIT_MPH < 10.0f;
+}
+
+// Be A Cop's half. Retail reads the player's cop through NULL when there
+// is none; the port says the car cannot be stopped.
+static int32_t be_a_cop_stoppable(tPursuit *p, Car *car)
+{
+    tCop   *pc = copmanager_get_player_cop(pCopManager);
+    float   d, radius, slow;
+    int32_t stop = 0;
+    int32_t timing = 1;
+
+    if (pc == NULL)
+        return 0;
+    d = distance_2d(car, pc->pMyCar);
+    if (car_is_blinking(car)
+        && (car->pPlayer != NULL ? car->JustResetFrames != 0 : d < 30.0f)) {
+        stop = 1;
+    } else {
+        radius = PURSUIT_CAPTURE_RADIUS;
+        if (TheRaceParameters.NumPlayerCars == 2)
+            radius = radius * 1.100000023841858f;
+        if (d < radius) {
+            if ((int8_t)car->BlownTireBits != 0
+                && car->State.VelocityMagnitude < 0.10000000149011612f) {
+                stop = 1;
+            } else if (is_upset(car)) {
+                stop = 1;
+            } else {
+                slow = fBeACopCatchSpeeds[pCopManager->nDifficultyLevel];
+                if (TheRaceParameters.NumPlayerCars == 2)
+                    slow = slow * 1.5f;
+                if (car->State.VelocityMagnitude < slow) {
+                    timing = 0;
+                    p->fCatchCarTimer -= WorldTimeElapsed;
+                    if (p->fCatchCarTimer < 0.0f)
+                        stop = 1;
+                }
+            }
+        }
+    }
+    if (stop)
+        return pc->pMyCar->State.VelocityMagnitude < 6.705409049987793f;
+    if (timing) {
+        p->fCatchCarTimer += WorldTimeElapsed;
+        if (2.0f < p->fCatchCarTimer)
+            p->fCatchCarTimer = 2.0f;
+    }
+    return 0;
+}
+
+int32_t tpursuit_is_chased_car_stoppable(tPursuit *p)
+{
+    Car                    *car = p->pChasedCar;
+    const tCarPulloverInfo *pl;
+    int32_t                 stop = 0;
+    int32_t                 near;
+
+    if (TheRaceParameters.bTickets == 0)
+        return 0;
+    pl = (const tCarPulloverInfo *)(const void *)
+        ((const uint8_t *)pCopManager + COPMANAGER_PULLOVERS);
+    if (pl[car->CarIndex].bActive != 0)
+        return 0;
+    if (car_is_poofed(car))
+        return 0;
+    if (car->pRacingCar->FinishReason != 0)
+        return 0;
+    if (TheRaceParameters.BeACop != 0)
+        return be_a_cop_stoppable(p, car);
+
+    if (p->New1556 <= 0.0f)
+        stop = 1;
+    if (p->Cops[0] != NULL)
+        near = copmanager_is_cop_nearby(pCopManager, car,
+                                        PURSUIT_CAPTURE_RADIUS);
+    else
+        near = car->MyDriver->TheDriverType == DRIVER_TYPE_AI_RACER;
+    if (car->State.VelocityMagnitude * PURSUIT_MPH < 10.0f && near) {
+        p->fCatchCarTimer -= WorldTimeElapsed;
+        if (p->fCatchCarTimer <= 0.0f)
+            stop = 1;
+        else if (p->fCatchCarTimer <= 1.0f
+                 && copmanager_did_recently_collide_with_cop(pCopManager,
+                                                             car))
+            stop = 1;
+    } else {
+        p->fCatchCarTimer = 2.0f;
+    }
+    if ((int8_t)car->BlownTireBits != 0
+        && car->State.VelocityMagnitude < 0.10000000149011612f)
+        return 1;
+    if (car_is_blinking(car)
+        && (car->pPlayer == NULL || car->JustResetFrames != 0))
+        return 1;
+    if (is_upset(car))
+        stop = 1;
+    return stop;
+}
+
+// Be A Cop with two players: the way the chased car is going along its
+// route, which the chase takes once the car has gone 8 s against it.
+static void update_chase_direction(tPursuit *p, Car *car)
+{
+    const TrackRoutePoint *rp = car_get_route_point(car, 1);
+    float dot = car->State.Velocity.x * rp->Direction.x
+                + car->State.Velocity.y * rp->Direction.y;
+    float dir = 0.0f <= dot ? 1.0f : -1.0f;
+
+    if (0.0f < dir * p->fChaseDirection) {
+        p->fChaseDirectionTimer = 0.0f;
+        return;
+    }
+    p->fChaseDirectionTimer += WorldTimeElapsed;
+    if (8.0f <= p->fChaseDirectionTimer) {
+        p->fChaseDirectionTimer = 0.0f;
+        p->fChaseDirection = dir;
+    }
+}
+
+int32_t tpursuit_update(tPursuit *p)
+{
+    Car      *car;
+    Landmark *lm;
+    int32_t   over = 0;
+    int32_t   i;
+
+    barricademanager_count_down(p->pBarricades, WorldTimeElapsed);
+    lm = copmgr_find_landmark((const bVector2 *)(const void *)
+                                  &p->pChasedCar->State.Position);
+    p->CurrentLandmark = lm != NULL ? lm->LandmarkType : 0;
+    car = p->pChasedCar;
+    if ((int8_t)car->BlownTireBits != 0)
+        p->New1556 -= WorldTimeElapsed;
+    if (TheRaceParameters.NumPlayerCars != 1
+        && car->pRacingCar->FinishReason != 0)
+        return 1;
+    if (TheRaceParameters.BeACop != 0) {
+        if (TheRaceParameters.NumPlayerCars == 2)
+            update_chase_direction(p, car);
+    } else {
+        if (p->fChasedCarTopSpeed < car->State.ForwardSpeed)
+            p->fChasedCarTopSpeed = car->State.ForwardSpeed;
+        for (i = 0; i < p->nNumCops; i++) {
+            Car *cc = p->Cops[i]->pMyCar;
+
+            if (cc->TheMovementMode == COP_MOVEMENT)
+                ((CopMover *)(void *)cc->pCarMover)->fBaseMaxSpeed =
+                    p->fChasedCarTopSpeed;
+        }
+        tpursuit_update_drive_targets(p, WorldTimeElapsed);
+        tpursuit_select_primary_cop(p);
+        if (TheRaceParameters.RaceType == 3)
+            over = p->pChasedCar->pRacingCar->FinishReason != 0;
+        if (tpursuit_should_pursuit_be_called_off(p)) {
+            tpursuit_switch_state(p, EPS_END_PURSUIT_GIVE_UP);
+            over = 1;
+        } else if (p->nNumCops != 0 || p->PursuitState >= EPS_LEVEL3) {
+            p->fPursuitStateTimer -= WorldTimeElapsed;
+        }
+        if (p->fPursuitStateTimer <= 0.0f && tpursuit_do_state_transition(p))
+            over = 1;
+    }
+    if (!tpursuit_not_in_chasing_state(p)) {
+        if (over)
+            return over;
+        if (tpursuit_is_chased_car_stoppable(p)) {
+            if (gCopManagerCreatePulloverFn != NULL)
+                gCopManagerCreatePulloverFn(pCopManager, p, p->pChasedCar, 1);
+            over = 1;
+            tpursuit_switch_state(p, EPS_SPEEDER_CAUGHT);
+            tpursuit_release_all_cops(p);
+        }
+    }
+    if (over)
+        return over;
+    trbsm_update(&p->RoadBlockStateMachine);
+    if (gPursuitUpdateRoadBlocksFn != NULL)
+        gPursuitUpdateRoadBlocksFn(p);
+    if (gPursuitUpdateChopperFn != NULL)
+        gPursuitUpdateChopperFn(p);
+    if (TheRaceParameters.BeACop != 0)
+        return 0;
+    switch (p->PursuitState) {
+    case EPS_LEVEL0:
+        tpursuit_level0_sub_states(p);
+        tpursuit_do_early_chase_collision_check(p);
+        return 0;
+    case EPS_LEVEL1:
+        tpursuit_do_early_chase_collision_check(p);
+        return 0;
+    case EPS_END_PURSUIT_GIVE_UP:
+        return 1;
+    default:
+        return 0;
+    }
 }
 
 // --------------------------------------- tCopManager's, making pursuits

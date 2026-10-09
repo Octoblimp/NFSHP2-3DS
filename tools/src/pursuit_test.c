@@ -1,8 +1,9 @@
 // Harness for tools/pursuit_check.py: runs the checker's script on
 // pursuit.c -- tPursuit's constructor and destructor, its state switch and
-// the calls under it, RequestPursuit and the supervisor call -- with
-// barricade.c and copmgr.c's spike strips, and prints what the model
-// prints for the retail image. See the checker's docstring.
+// the calls under it, RequestPursuit and the supervisor call, the Update
+// and its helpers -- with barricade.c and copmgr.c's spike strips and
+// landmarks, and prints what the model prints for the retail image. See
+// the checker's docstring.
 //
 //     pursuit_test script.txt > out.txt
 
@@ -25,12 +26,16 @@
 #include "collisionbody.h"
 #include "configitems.h"
 #include "cop.h"
+#include "copdriver.h"
 #include "copmgr.h"
+#include "coputil.h"
 #include "drivetarget.h"
 #include "hudscore.h"
+#include "playerhud.h"
 #include "pursuit.h"
 #include "race.h"
 #include "racecoord.h"
+#include "raceparams.h"
 #include "realdriver.h"
 #include "table.h"
 #include "topology.h"
@@ -110,8 +115,8 @@ tTrackGraph     *TheTrackGraph;
 #define NCHOPPERS 2
 #define NBODIES   16
 #define BODY_SIZE 1136
-#define MAX_PURSUITS 1024
-#define MAX_BARRICADES 1024
+#define MAX_PURSUITS 2048
+#define MAX_BARRICADES 2048
 
 static World            the_world;
 static RaceCoordinator  the_rc;
@@ -133,6 +138,21 @@ static tPursuit        *pursuits[MAX_PURSUITS];
 static int              npursuits;
 static BarricadeManager *barricades[MAX_BARRICADES];
 static int              nbarricades;
+// The Update's: each car's driver, mover and route point, and what the
+// stubs answer for it.
+#define NLANDMARKS 4
+static DriverInfo       drivers[NCARS];
+static CopMover         movers[NCARS];
+static TrackRoutePoint  routepts[NCARS];
+static int32_t          blink[NCARS], poofed[NCARS], caused[NCARS];
+static int32_t          nisplay[2];
+static uint8_t          collides[NCARS][NCARS];
+static int32_t          freerun;
+static int              nextrb = -1;
+static union {
+    LandmarkChunk c;
+    uint8_t       b[sizeof(LandmarkChunk) + NLANDMARKS * sizeof(Landmark)];
+} landmarks;
 
 static void unreached(const char *f)
 {
@@ -354,6 +374,160 @@ static void poof(tSpikeStrip *s)
     printf("  poof %s\n", sym(s));
 }
 
+static void declare_speech(tPursuit *p)
+{
+    printf("  speech declare %s\n", sym(p));
+}
+
+static void backup_speech(tPursuit *p)
+{
+    printf("  speech backup %s\n", sym(p));
+}
+
+static void coll_speech(tPursuit *p, Car *hit)
+{
+    printf("  speech coll %s %s\n", sym(p), sym(hit));
+}
+
+static void cop_hit(uint32_t s, int32_t where)
+{
+    printf("  speech cophit %08x %d\n", s, (int)where);
+}
+
+static void crash_traffic(uint32_t s, int32_t b)
+{
+    printf("  speech traffic %08x %d\n", s, (int)b);
+}
+
+static void create_pullover(tCopManager *m, tPursuit *p, Car *car,
+                            int32_t b)
+{
+    printf("  pullover %s %s %s %d\n", m == &the_mgr ? "M" : "?", sym(p),
+           sym(car), (int)b);
+}
+
+// Puts the script's roadblock (or none) on the pursuit.
+static void create_road_block(tPursuit *p)
+{
+    printf("  createrb %s\n", sym(p));
+    p->pRoadBlock = nextrb < 0 ? NULL : &rbs[nextrb];
+}
+
+static void update_road_blocks(tPursuit *p)
+{
+    printf("  updaterbs %s\n", sym(p));
+}
+
+static void update_chopper(tPursuit *p)
+{
+    printf("  updatechopper %s\n", sym(p));
+}
+
+// ---- the cars, the race, the targets
+
+static int car_no(const Car *c)
+{
+    return c == NULL ? -1 : (int)(c - cars);
+}
+
+int32_t car_is_blinking(Car *c)
+{
+    printf("  blink %s -> %d\n", sym(c), (int)blink[c - cars]);
+    return blink[c - cars];
+}
+
+int32_t car_is_poofed(Car *c)
+{
+    printf("  poofed %s -> %d\n", sym(c), (int)poofed[c - cars]);
+    return poofed[c - cars];
+}
+
+Car *car_caused_recent_collision(Car *car)
+{
+    int  k = caused[car - cars];
+    Car *r = k < 0 ? NULL : &cars[k];
+
+    printf("  caused %s -> %s\n", sym(car), sym(r));
+    return r;
+}
+
+int32_t did_these_cars_collide(Car *a, Car *b)
+{
+    int r = a != NULL && b != NULL && collides[car_no(a)][car_no(b)];
+
+    printf("  collide %s %s -> %d\n", sym(a), sym(b), r);
+    return r;
+}
+
+int32_t race_parameters_is_free_run(const RaceParameters *rp)
+{
+    printf("  freerun%s -> %d\n", rp == &TheRaceParameters ? "" : " ?rp",
+           (int)freerun);
+    return freerun;
+}
+
+TrackRoutePoint *car_get_route_point(Car *c, int find)
+{
+    printf("  routept %s %d\n", sym(c), find);
+    return &routepts[c - cars];
+}
+
+int32_t player_is_nis_playing(const struct Player *p)
+{
+    int k = (int)((const uint8_t (*)[16])(const void *)p - players);
+
+    printf("  nisplaying %s -> %d\n", sym(p), (int)nisplay[k]);
+    return nisplay[k];
+}
+
+// Each stub keeps the target's points as a plain list: an add puts the
+// point after the last (at 0 when the count is out of range).
+void drivetarget_add_point2(DriveTarget *t, const bVector2 *p, int8_t route,
+                            int16_t rpn, int8_t dl, int check, Car *car)
+{
+    int k = t->NumPoints >= 0 && t->NumPoints < DRIVETARGET_MAX_POINTS
+            ? t->NumPoints : 0;
+
+    printf("  addpt %s %08x %08x %d %d %d %d %s\n", sym(t), fb(p->x),
+           fb(p->y), route, rpn, dl, check, sym(car));
+    t->Points[k].x = p->x;
+    t->Points[k].y = p->y;
+    t->NumPoints = (int8_t)(k + 1);
+}
+
+void drivetarget_shift_left(DriveTarget *t, int n, int recalc)
+{
+    int i;
+
+    printf("  shiftl %s %d %d\n", sym(t), n, recalc);
+    for (i = 0; i + n < t->NumPoints; i++) {
+        t->Points[i].x = t->Points[i + n].x;
+        t->Points[i].y = t->Points[i + n].y;
+    }
+    t->NumPoints = (int8_t)(t->NumPoints - n);
+}
+
+void drivetarget_set_point2(DriveTarget *t, int i, const bVector2 *p,
+                            int8_t route, int16_t rpn, int8_t dl, float speed)
+{
+    printf("  setpt %s %d %08x %08x %d %d %d %08x\n", sym(t), i, fb(p->x),
+           fb(p->y), route, rpn, dl, fb(speed));
+    if (i >= 0 && i < DRIVETARGET_MAX_POINTS) {
+        t->Points[i].x = p->x;
+        t->Points[i].y = p->y;
+    }
+}
+
+// Inside while the first vertex's x <= the point's x < the second's.
+int32_t is_point_in_poly(const bVector2 *p, const bVector2 *poly, int32_t n)
+{
+    int32_t r = poly[0].x <= p->x && p->x < poly[1].x;
+
+    printf("  inpoly %08x %08x %08x %d -> %d\n", fb(p->x), fb(p->y),
+           fb(poly[0].x), (int)n, (int)r);
+    return r;
+}
+
 // ---- copmgr.c's, which the script never reaches
 
 int32_t config_skip_fe(void)
@@ -422,13 +596,6 @@ void trackgraph_uncloak_all_edges(tTrackGraph *g)
 {
     (void)g;
     unreached("trackgraph_uncloak_all_edges");
-}
-
-int32_t is_point_in_poly(const bVector2 *p, const bVector2 *poly, int32_t n)
-{
-    (void)p; (void)poly; (void)n;
-    unreached("is_point_in_poly");
-    return 0;
 }
 
 struct Collision *collisionbody_get_collision(CollisionBody *b, int32_t i)
@@ -616,6 +783,33 @@ static void fades(void)
     printf("\n");
 }
 
+static void tdump_one(const DriveTarget *t)
+{
+    int n = t->NumPoints, i;
+
+    printf(" %s %d", sym(t), n);
+    for (i = 0; i < n && i < DRIVETARGET_MAX_POINTS; i++)
+        printf(" %08x %08x", fb(t->Points[i].x), fb(t->Points[i].y));
+}
+
+static void tdump(const tPursuit *p)
+{
+    printf("T");
+    tdump_one(&p->FarDriveTarget);
+    tdump_one(&p->NearDriveTarget);
+    printf("\n");
+}
+
+static void mvdump(void)
+{
+    int i;
+
+    printf("MV");
+    for (i = 0; i < NCARS; i++)
+        printf(" %08x", fb(movers[i].fBaseMaxSpeed));
+    printf("\n");
+}
+
 // --------------------------------------------------------------- the ops
 
 static uint32_t num(const char *s)
@@ -669,6 +863,14 @@ static void reset(void)
     memset(cops, 0, sizeof cops);
     memset(rbs, 0, sizeof rbs);
     memset(bodymem, 0, sizeof bodymem);
+    memset(blink, 0, sizeof blink);
+    memset(poofed, 0, sizeof poofed);
+    memset(caused, 0xff, sizeof caused);
+    memset(nisplay, 0, sizeof nisplay);
+    memset(collides, 0, sizeof collides);
+    freerun = 0;
+    nextrb = -1;
+    landmarks.c.NumLandmarks = 0;
 }
 
 static void mset(const char *f, uint32_t v)
@@ -698,8 +900,12 @@ static void mset(const char *f, uint32_t v)
         m->fPursuableTimer[k] = bf(v);
     else if (strncmp(f, "stt", 3) == 0)
         m->fSpeedTrapSpawnTimer[k] = bf(v);
+    else if (strcmp(f, "ncops") == 0)
+        m->nNumCops = (int32_t)v;
     else if (strncmp(f, "tix", 3) == 0)
         m->CarPullovers[k].nNumTickets = (int8_t)v;
+    else if (strncmp(f, "act", 3) == 0)
+        m->CarPullovers[k].bActive = (int32_t)v;
     else if (strncmp(f, "mcop", 4) == 0)
         m->Cops[k] = (int32_t)v < 0 ? NULL : &cops[v];
     else
@@ -743,6 +949,24 @@ static void pset(tPursuit *p, const char *f, uint32_t v)
         p->CurrentLandmark = i;
     else if (strcmp(f, "rbstate") == 0)
         p->RoadBlockStateMachine.State = i;
+    else if (strcmp(f, "rbsmt") == 0)
+        p->RoadBlockStateMachine.fStateTimer = bf(v);
+    else if (strcmp(f, "sub") == 0)
+        p->PursuitSubState = i;
+    else if (strcmp(f, "timer") == 0)
+        p->fPursuitStateTimer = bf(v);
+    else if (strcmp(f, "hit") == 0)
+        p->bAlreadyBeenHit = i;
+    else if (strcmp(f, "catch") == 0)
+        p->fCatchCarTimer = bf(v);
+    else if (strcmp(f, "top") == 0)
+        p->fChasedCarTopSpeed = bf(v);
+    else if (strcmp(f, "dir") == 0)
+        p->fChaseDirection = bf(v);
+    else if (strcmp(f, "dirt") == 0)
+        p->fChaseDirectionTimer = bf(v);
+    else if (strcmp(f, "n1556") == 0)
+        p->New1556 = bf(v);
     else
         unreached(f);
 }
@@ -821,6 +1045,10 @@ static void op(char **a, int na)
             TheRaceParameters.BeACop = v;
         else if (strcmp(a[1], "Units") == 0)
             TheRaceParameters.GlobalDisplaySettings.Units = (int8_t)v;
+        else if (strcmp(a[1], "bTickets") == 0)
+            TheRaceParameters.bTickets = v;
+        else if (strcmp(a[1], "RaceType") == 0)
+            TheRaceParameters.RaceType = v;
         else
             unreached(a[1]);
     } else if (strcmp(o, "g") == 0) {
@@ -828,6 +1056,14 @@ static void op(char **a, int na)
 
         if (strcmp(a[1], "tracklen") == 0)
             TheTrackPathManager.TrackLength = bf(v);
+        else if (strcmp(a[1], "dt") == 0)
+            WorldTimeElapsed = bf(v);
+        else if (strcmp(a[1], "landmarks") == 0)
+            landmarks.c.NumLandmarks = v;
+        else if (strcmp(a[1], "freerun") == 0)
+            freerun = (int32_t)v;
+        else if (strcmp(a[1], "nextrb") == 0)
+            nextrb = (int)(int32_t)v;
         else if (strcmp(a[1], "rc") == 0)
             the_rc.CurrentRCState = (RCState)v;
         else if (strcmp(a[1], "seed") == 0)
@@ -847,12 +1083,113 @@ static void op(char **a, int na)
         c->pPlayer = pl < 0 ? NULL : (Player *)(void *)players[pl];
         c->State.Position.x = bf(num(a[4]));
         c->State.Position.y = bf(num(a[5]));
-        c->State.VelocityMagnitude = bf(num(a[6]));
+        c->State.ForwardSpeed = bf(num(a[6]));
         c->BlownTireBits = (uint8_t)num(a[7]);
         rcars[k].FinishReason = (int16_t)num(a[8]);
         rides[k].Type = (int32_t)num(a[9]);
         ctis[k].Aero.Drag = bf(num(a[10]));
         ctis[k].Body.Mass = bf(num(a[11]));
+    } else if (strcmp(o, "car2") == 0) {
+        int  k = (int)num(a[1]);
+        Car *c = &cars[k];
+
+        c->State.VelocityMagnitude = bf(num(a[2]));
+        c->State.Velocity.x = bf(num(a[3]));
+        c->State.Velocity.y = bf(num(a[4]));
+        c->State.BodyMatrix.v2.z = bf(num(a[5]));
+        c->JustResetFrames = (int32_t)num(a[6]);
+        drivers[k].TheDriverType = (DriverType)num(a[7]);
+        c->TheMovementMode = (MovementMode)num(a[8]);
+        rcars[k].FinishedLapNumberExact = bf(num(a[9]));
+    } else if (strcmp(o, "cflags") == 0) {
+        int k = (int)num(a[1]);
+
+        blink[k] = (int32_t)num(a[2]);
+        poofed[k] = (int32_t)num(a[3]);
+        caused[k] = (int32_t)num(a[4]);
+    } else if (strcmp(o, "rpdir") == 0) {
+        int k = (int)num(a[1]);
+
+        routepts[k].Direction.x = bf(num(a[2]));
+        routepts[k].Direction.y = bf(num(a[3]));
+    } else if (strcmp(o, "collide") == 0) {
+        collides[num(a[1])][num(a[2])] = (uint8_t)num(a[3]);
+    } else if (strcmp(o, "nisp") == 0) {
+        nisplay[num(a[1])] = (int32_t)num(a[2]);
+    } else if (strcmp(o, "cstate") == 0) {
+        cops[num(a[1])].DesiredLogicState = (eLogicState)num(a[2]);
+    } else if (strcmp(o, "mover") == 0) {
+        movers[num(a[1])].fBaseMaxSpeed = bf(num(a[2]));
+    } else if (strcmp(o, "lm") == 0) {
+        Landmark *l = &landmarks.c.LandmarkArray[num(a[1])];
+
+        l->NumVerts = (int32_t)num(a[2]);
+        l->VertsForArea[0].x = bf(num(a[3]));
+        l->VertsForArea[1].x = bf(num(a[4]));
+        l->LandmarkType = (int32_t)num(a[5]);
+    } else if (strcmp(o, "tset") == 0) {
+        DriveTarget *t = strcmp(a[2], "far") == 0 ? &p->FarDriveTarget
+                                                  : &p->NearDriveTarget;
+        int          i;
+
+        t->NumPoints = (int8_t)num(a[3]);
+        for (i = 0; 5 + 2 * i < na; i++) {
+            t->Points[i].x = bf(num(a[4 + 2 * i]));
+            t->Points[i].y = bf(num(a[5 + 2 * i]));
+        }
+    } else if (strcmp(o, "btimer") == 0) {
+        p->pBarricades->fFadeTimer[num(a[2])] = bf(num(a[3]));
+    } else if (strcmp(o, "upd") == 0) {
+        int32_t r = tpursuit_update(p);
+
+        printf("upd U%d -> %d\n", pursuit_index(p), (int)r);
+    } else if (strcmp(o, "nic") == 0) {
+        printf("nic U%d -> %d\n", pursuit_index(p),
+               (int)tpursuit_not_in_chasing_state(p));
+    } else if (strcmp(o, "l0") == 0) {
+        tpursuit_level0_sub_states(p);
+        printf("l0 U%d\n", pursuit_index(p));
+    } else if (strcmp(o, "calloff") == 0) {
+        printf("calloff U%d -> %d\n", pursuit_index(p),
+               (int)tpursuit_should_pursuit_be_called_off(p));
+    } else if (strcmp(o, "rbsmu") == 0) {
+        trbsm_update(&p->RoadBlockStateMachine);
+        printf("rbsmu U%d\n", pursuit_index(p));
+    } else if (strcmp(o, "bcount") == 0) {
+        barricademanager_count_down(p->pBarricades, bf(num(a[2])));
+        printf("bcount U%d %08x\n", pursuit_index(p), num(a[2]));
+    } else if (strcmp(o, "udt") == 0) {
+        tpursuit_update_drive_targets(p, bf(num(a[2])));
+        printf("udt U%d\n", pursuit_index(p));
+    } else if (strcmp(o, "hist") == 0) {
+        bVector2 pos, vel, out;
+
+        pos.x = bf(num(a[2]));
+        pos.y = bf(num(a[3]));
+        vel.x = bf(num(a[4]));
+        vel.y = bf(num(a[5]));
+        tpursuithistory_update(&p->History, &out, &pos, &vel,
+                               bf(num(a[6])));
+        printf("hist U%d -> %08x %08x\n", pursuit_index(p), fb(out.x),
+               fb(out.y));
+    } else if (strcmp(o, "early") == 0) {
+        tpursuit_do_early_chase_collision_check(p);
+        printf("early U%d\n", pursuit_index(p));
+    } else if (strcmp(o, "stop") == 0) {
+        printf("stop U%d -> %d\n", pursuit_index(p),
+               (int)tpursuit_is_chased_car_stoppable(p));
+    } else if (strcmp(o, "near") == 0) {
+        printf("near %s %08x -> %d\n", sym(car_arg(a[1])), num(a[2]),
+               (int)copmanager_is_cop_nearby(&the_mgr, car_arg(a[1]),
+                                             bf(num(a[2]))));
+    } else if (strcmp(o, "coll") == 0) {
+        printf("coll %s -> %d\n", sym(car_arg(a[1])),
+               (int)copmanager_did_recently_collide_with_cop(
+                   &the_mgr, car_arg(a[1])));
+    } else if (strcmp(o, "tdump") == 0) {
+        tdump(p);
+    } else if (strcmp(o, "mvdump") == 0) {
+        mvdump();
     } else if (strcmp(o, "acc") == 0) {
         int k = (int)num(a[1]);
 
@@ -1006,10 +1343,13 @@ int main(int argc, char **argv)
     name(pool_token, "pool", 0);
     name(&the_mgr.PursuitList, "M.plist", 0);
     name(&the_mgr.SpikeStripList, "M.slist", 0);
+    LandmarkData = &landmarks.c;
     for (i = 0; i < NCARS; i++) {
         cars[i].pCarTypeInfo = &ctis[i];
         cars[i].pRideInfo = &rides[i];
         cars[i].pRacingCar = &rcars[i];
+        cars[i].MyDriver = &drivers[i];
+        cars[i].pCarMover = (CarMover *)(void *)&movers[i];
         name(&cars[i], "A%d", i);
     }
     for (i = 0; i < 2; i++)
@@ -1041,15 +1381,24 @@ int main(int argc, char **argv)
     gSpikeStripBlinkBlinkPoofFn = poof;
     gBarricadeDeleteBarrelFn = delete_barrel;
     gBarricadeMarkBodyFadingFn = mark_fading;
+    gPursuitDeclareSpeechFn = declare_speech;
+    gPursuitRaiseBackupSpeechFn = backup_speech;
+    gPursuitBeginCollisionSpeechFn = coll_speech;
+    gSpeechRaisePursuitCopHitFn = cop_hit;
+    gSpeechRaiseSuspectCrashTrafficFn = crash_traffic;
+    gCopManagerCreatePulloverFn = create_pullover;
+    gPursuitCreateRoadBlockFn = create_road_block;
+    gPursuitUpdateRoadBlocksFn = update_road_blocks;
+    gPursuitUpdateChopperFn = update_chopper;
     reset();
     while (fgets(line, sizeof line, f) != NULL) {
-        char *a[16], *s = line;
+        char *a[64], *s = line;
         int   na = 0;
 
         line[strcspn(line, "\r\n")] = 0;
         if (line[0] == 0)
             continue;
-        while (na < 16) {
+        while (na < 64) {
             a[na++] = s;
             s = strchr(s, '|');
             if (s == NULL)

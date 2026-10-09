@@ -214,6 +214,7 @@ void copmanager_reclaim_patrollers(tCopManager *m);
 // What Think reaches that later slices port. NULL seams do nothing, and
 // return 0.
 //   - tPursuit::Update (0x00229288): nonzero when the pursuit is over.
+//     main.c binds tpursuit_update (pursuit.h).
 //   - 0x0022aaf0, the supervisor's test: the chased car can be told
 //     (GetExactDescription is not -1) and the pursuit is at LEVEL2 or 3.
 //   - SuperInitiates (0x0022b908) and SayFillerSpeech (0x00231760), the

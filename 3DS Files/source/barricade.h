@@ -9,7 +9,7 @@
 //   0x0024efd8  the destructor: each barrel still there deleted
 //   0x0024f0a8  spawns a barrel (12i)
 //   0x0024f1e0  starts every barrel fading
-//   0x0024f268  counts the fades down (tPursuit::Update, 12h-2)
+//   0x0024f268  counts the fades down (tPursuit::Update)
 //
 // Nothing in the port spawns a barrel before 12i, so every id stays -1
 // and the two calls into the smokeables below are seams that abort.
@@ -50,6 +50,11 @@ void barricademanager_destruct(BarricadeManager *b, int32_t flags);
 // collision body of each one CollisionBody::FindCollisionBody finds is
 // marked (its byte at 1123 set to 1).
 void barricademanager_fade(BarricadeManager *b, float t);
+
+// 0x0024f268, from tPursuit::Update with the frame's seconds: each barrel
+// there that is fading counts `dt` down, and one that goes below 0 is
+// deleted (as the destructor does) and its slot and timer set back to -1.
+void barricademanager_count_down(BarricadeManager *b, float dt);
 
 // The smokeables' side, not ported before 12i; NULL aborts.
 //   - 0x0021ef88(id, info): deletes the barrel's smokeable. FindSmokeable

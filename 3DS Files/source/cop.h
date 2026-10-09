@@ -291,9 +291,9 @@ extern void (*gPursuitRemoveCopFromPursuitFn)(tPursuit *p, tCop *c);
 extern void (*gPursuitRemovePrimarySpeakerFn)(tPursuit *p, int32_t b);
 extern void (*gCarDamageWreckFn)(void *damage);
 
-// tCopManager::RequestPursuit(tCop *, Car *), 0x00225078, 12h: nonzero
-// when the cop may chase the car. NULL grants none, so no patrol or radar
-// trap starts a chase yet.
+// tCopManager::RequestPursuit(tCop *, Car *), 0x00225078: nonzero when
+// the cop may chase the car. main.c binds copmanager_request_pursuit
+// (pursuit.h); NULL grants none.
 extern int32_t (*gCopManagerRequestPursuitFn)(tCopManager *m, tCop *c,
                                               struct Car *car);
 

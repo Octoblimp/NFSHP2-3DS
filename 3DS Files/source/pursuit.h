@@ -5,9 +5,9 @@
 // The manager makes a pursuit in RequestPursuit, from its slot pool, and
 // deletes it (copmgr.c) through the table at 0x002bd460. RequestPursuit
 // and the two calls under it are tCopManager's, but are here with what
-// they make, so copmgr.c's harnesses need none of this. Update (0x00229288)
-// and the state machines under it are 12h-2's; the roadblock and chopper
-// calls are 12i's.
+// they make, so copmgr.c's harnesses need none of this; IsCopNearby and
+// DidRecentlyCollideWithCop are here with IsChasedCarStoppable for the
+// same reason. The roadblocks (12i) and the helicopter (12k) are seams.
 
 #ifndef PURSUIT_H
 #define PURSUIT_H
@@ -74,8 +74,8 @@ float tpursuit_state_time(float f);
 // nothing switched for END_PURSUIT_GIVE_UP.
 int32_t tpursuit_do_state_transition(tPursuit *p);
 
-// GetSpeedMPHOrKPH, 0x0022a220: the chased car's speed in the player's
-// units, mph for an AI car.
+// GetSpeedMPHOrKPH, 0x0022a220: the chased car's ForwardSpeed (retail's
+// car+960) in the player's units, mph for an AI car.
 float tpursuit_get_speed_mph_or_kph(const tPursuit *p);
 
 // ReleaseAllCops, 0x0022a260. Retail walks Cops by index while removing
@@ -136,6 +136,90 @@ void     tpursuit_allow_behaviour(tPursuit *p, uint32_t a);
 int32_t  tpursuit_get_current_landmark(const tPursuit *p);
 int32_t  tpursuit_get_pursuit_level_for_hud(const tPursuit *p);
 
+// --------------------------------------------------------- the Update
+
+// tPursuit::Update, 0x00229288, from the manager's PursuitManagement each
+// frame; nonzero when the pursuit is over and is to be deleted. In order:
+//   - the barrels' fades count down, and the chased car's landmark is
+//     looked up again;
+//   - a car with a blown tyre counts New1556 down;
+//   - with more than one player, a car that has finished ends it;
+//   - in Be A Cop with two players, the chase direction follows the car's
+//     velocity along its route, flipping after 8 s against it;
+//   - outside Be A Cop: the car's top speed so far goes to every cop car
+//     on its CopMover, the drive targets are updated and the primary cop
+//     chosen; a finished car ends a race of type 3; the chase is called
+//     off near the end of a long race (ShouldPursuitBeCalledOff), and the
+//     state's timer runs while there are cops (or from LEVEL3 on), taking
+//     the next state at 0;
+//   - while still chasing, a car the cops can stop is pulled over: the
+//     pullover (12l), SPEEDER_CAUGHT and every cop released;
+//   - the roadblock state machine, the roadblocks (12i) and the
+//     helicopter (12k); then, outside Be A Cop, LEVEL0's speeches and the
+//     early collision check through LEVEL1, and END_PURSUIT_GIVE_UP is
+//     over.
+int32_t tpursuit_update(tPursuit *p);
+
+// Level0SubStates, 0x002295d8: the pursuit declared (sub-state 0 to 1)
+// under 16 s left at LEVEL0, and backup called (1 to 2) under 3.
+void tpursuit_level0_sub_states(tPursuit *p);
+
+// ShouldPursuitBeCalledOff, 0x0022c2d0: never with a blown tyre, point to
+// point, a free run or under 4 laps; else when the laps left, less the
+// car's RacingCar word at 32, come to 2000 or less round the track.
+int32_t tpursuit_should_pursuit_be_called_off(const tPursuit *p);
+
+// UpdateDriveTargets, 0x0022a360. The chased car's position goes on the
+// end of the far target, as a new point once the last two are 20 apart
+// (the first dropped at 20 points), else over the last; then the history
+// takes its velocity; then the near target the same, every 1.0. Retail's
+// float argument is never read: the history gets WorldTimeElapsed.
+void tpursuit_update_drive_targets(tPursuit *p, float dt);
+
+// tPursuitHistory's Update, 0x0022cf90: the velocities and times moved
+// down a place, `vel` and `dt` put first, nCount up to 30. Retail then
+// sums the times from the newest until they reach 0.65 (gp-15596) and
+// returns `pos` through `out`; the sum is never used, and UpdateDriveTargets
+// drops `out`.
+void tpursuithistory_update(tPursuitHistory *h, bVector2 *out,
+                            const bVector2 *pos, const bVector2 *vel,
+                            float dt);
+
+// tRoadBlockStateMachine's Update, 0x0022cdd8: the timer down to 0 while
+// there is a state, and a called-for roadblock made (CreateRoadBlock,
+// 12i) once it is 0, the state ROAD_BLOCK_SET if one was.
+void trbsm_update(tRoadBlockStateMachine *s);
+
+// DoEarlyChaseCollisionCheck, 0x0022aba0: the first time a player's car
+// hits something in the chase. Before the pursuit is declared the
+// collision speech; else hitting the primary cop's car, or any cop's,
+// goes to LEVEL2 (the first with its speech), and anything else is
+// traffic: its speech, and LEVEL1 from LEVEL0.
+void tpursuit_do_early_chase_collision_check(tPursuit *p);
+
+// IsChasedCarStoppable, 0x0022bea0: whether the cops have caught the car,
+// never without tickets, while it is pulled over, poofed or finished. In
+// Be A Cop the player's cop must be slower than 15 mph when the car is
+// blinking (a player's on its reset frames, an AI one within 30), or
+// within the capture radius (10, 11 with two players) and has a blown
+// tyre and stopped, is on its side under 10 mph, or held under the
+// difficulty's speed until fCatchCarTimer runs out (which climbs back to
+// 2 s otherwise). Elsewhere: New1556 run out; under 10 mph with a cop near
+// (or, with none, an AI racer) until fCatchCarTimer runs out, or in its
+// last second with a cop just hit; a blown tyre and stopped; blinking but
+// for a player off its reset frames; or on its side under 10 mph.
+int32_t tpursuit_is_chased_car_stoppable(tPursuit *p);
+
+// tCopManager's IsCopNearby (0x00225d30) and DidRecentlyCollideWithCop
+// (0x002286b8), here with their one caller. IsCopNearby: in Be A Cop the
+// player's cop within `d` (none here is not); else any cop wanting to be
+// disabled, on a trap, a roadblock, patrol, a chase or a guard, whose car
+// is not a player's in a NIS. DidRecentlyCollideWithCop: DidTheseCarsCollide
+// with any cop's car.
+int32_t copmanager_is_cop_nearby(tCopManager *m, struct Car *car, float d);
+int32_t copmanager_did_recently_collide_with_cop(tCopManager *m,
+                                                 struct Car *car);
+
 // --------------------------------------- tCopManager's, making pursuits
 
 // Retail's 0x002244e0: a pursuit of `car` out of PursuitSlotPool, built
@@ -185,6 +269,30 @@ extern void (*gSpeechRaiseCrashTowFn)(uint32_t was, uint32_t now);
 extern void (*gSpeechRaiseCrashFn)(uint32_t was, uint32_t now);
 extern void (*gSpeechRaiseFlatTireFn)(uint32_t was, uint32_t now);
 extern void (*gSpeechRaiseSuperRequestFn)(uint32_t speaker);
+
+// Update's speeches, the same: DeclarePursuitSpeech (0x0022ad30),
+// RaiseBackupSpeech (0x0022acc0) and BeginPursuitCollisionSpeech
+// (0x0022aef8, with the car hit), tPursuit's own; raisePursuitCopHit
+// (0x0020a3e0, the speaker and the landmark) and raiseSuspectCrashTraffic
+// (0x0020b758, the speaker and 0).
+extern void (*gPursuitDeclareSpeechFn)(tPursuit *p);
+extern void (*gPursuitRaiseBackupSpeechFn)(tPursuit *p);
+extern void (*gPursuitBeginCollisionSpeechFn)(tPursuit *p, struct Car *hit);
+extern void (*gSpeechRaisePursuitCopHitFn)(uint32_t speaker, int32_t where);
+extern void (*gSpeechRaiseSuspectCrashTrafficFn)(uint32_t speaker,
+                                                 int32_t b);
+
+// What Update reaches that later slices port; NULL does nothing.
+//   - tCopManager::CreatePullover (0x00226f30), 12l: the caught car
+//     pulled over, with 1.
+//   - CreateRoadBlock (0x00229e30) and UpdateRoadBlocks (0x00229b58),
+//     12i. Nothing calls for a roadblock before UpdateRoadBlocks is in.
+//   - UpdateChopper (0x00229678), 12k.
+extern void (*gCopManagerCreatePulloverFn)(tCopManager *m, tPursuit *p,
+                                           struct Car *car, int32_t b);
+extern void (*gPursuitCreateRoadBlockFn)(tPursuit *p);
+extern void (*gPursuitUpdateRoadBlocksFn)(tPursuit *p);
+extern void (*gPursuitUpdateChopperFn)(tPursuit *p);
 
 // The helicopter (12k): its word at 960, and FollowThisCar (0x001e7f80).
 // Nothing sets pChopper before then; NULL aborts.

@@ -290,8 +290,8 @@ threshold of 0.9.
     `0x00224ec0` decides that: the World has one (`World+24`), the race
     allows it (`New624`), its word at +960 is 0, and the manager's
     `bChopperBusy` is clear.
-  - A roadblock counts as coming when the player cop's pursuit has
-    `New1560` set.
+  - A roadblock counts as coming when the player cop's pursuit's
+    roadblock state machine (at 1560) is not in its `eRBS_None` state.
 - **The chased car's damage** sets five lights (`ff000070` on, `ff000020`
   off). The number on is damage × 5, truncated, plus 1 for any damage at
   all, and at most 5.

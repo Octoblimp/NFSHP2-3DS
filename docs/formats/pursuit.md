@@ -11,8 +11,9 @@ BarricadeManager in `barricade.c`.
 Slice 12h-1 ports the object and how a chase is granted: the
 constructor and destructor, the state switch and its timers, the cops
 joining and leaving, the speakers, and the one-liners the cops' logic
-asks. Update (`0x00229288`) and the state machines under it are 12h-2's;
-the roadblock and helicopter calls are 12i's and 12k's.
+asks. Slice 12h-2 ports Update (`0x00229288`), each chase's step, and
+the state machines under it. The roadblock and helicopter calls are
+12i's and 12k's, the pullover 12l's.
 
 | function | address | port |
 |----------|---------|------|
@@ -47,6 +48,18 @@ the roadblock and helicopter calls are 12i's and 12k's.
 | BarricadeManager::BarricadeManager | `0x0024ef88` | `barricademanager_construct` |
 | BarricadeManager::~BarricadeManager | `0x0024efd8` | `barricademanager_destruct` |
 | (start the barrels fading) | `0x0024f1e0` | `barricademanager_fade` |
+| tPursuit::Update | `0x00229288` | `tpursuit_update` |
+| NotInChasingState | `0x002295c8` | `tpursuit_not_in_chasing_state` (copmanager.c) |
+| Level0SubStates | `0x002295d8` | `tpursuit_level0_sub_states` |
+| UpdateDriveTargets | `0x0022a360` | `tpursuit_update_drive_targets` |
+| DoEarlyChaseCollisionCheck | `0x0022aba0` | `tpursuit_do_early_chase_collision_check` |
+| IsChasedCarStoppable | `0x0022bea0` | `tpursuit_is_chased_car_stoppable` |
+| ShouldPursuitBeCalledOff | `0x0022c2d0` | `tpursuit_should_pursuit_be_called_off` |
+| tRoadBlockStateMachine::Update | `0x0022cdd8` | `trbsm_update` |
+| tPursuitHistory::Update | `0x0022cf90` | `tpursuithistory_update` |
+| tCopManager::IsCopNearby | `0x00225d30` | `copmanager_is_cop_nearby` |
+| tCopManager::DidRecentlyCollideWithCop | `0x002286b8` | `copmanager_did_recently_collide_with_cop` |
+| (the barrels' fades counted down) | `0x0024f268` | `barricademanager_count_down` |
 
 ## The record
 
@@ -59,7 +72,8 @@ Retail's tPursuit is 1600 bytes from the manager's slot pool
   `bMalloc(64, "CopMgr", 0, 16)`.
 - The two speakers (1496, 1500) are the cop speech manager's voices,
   with 5 for none.
-- `New1556` is 10 from the start; only Update reads it (12h-2).
+- `New1556` is 10 from the start. Update counts it down while a tyre
+  is blown, and the car can be stopped once it reaches 0.
 - `BehaviourFlags` (1588) are the moves the cops may make. The cops'
   flank tests bit 4.
 
@@ -158,9 +172,123 @@ timer is within 0.001 of -50. It also needs roadblocks on and a
 player's car chased. Then, one time in two, it asks for the supervisor
 in the pursuit's speaker's voice and sets the timer to 7.
 
-GetSpeedMPHOrKPH gives the chased car's speed in km/h for a player
+GetSpeedMPHOrKPH gives the chased car's ForwardSpeed in km/h for a player
 whose units are metric, and in mph otherwise, including for every AI
-car.
+car. Until 12h-2 the port read VelocityMagnitude (car+964) here; retail
+reads car+960, ForwardSpeed. The 12h-1 check had hidden that: its
+harness set the one field and the model the other.
+
+## The Update
+
+The manager's Think calls Update (`0x00229288`) once a frame for each
+pursuit, and deletes the pursuit when it returns nonzero. In order:
+
+1. The barrels count their fades down by the frame's seconds
+   (`0x0024f268`). One that goes below 0 is deleted and its slot freed.
+2. `CurrentLandmark` becomes the type of the landmark the chased car is
+   in (FindLandmark), or 0.
+3. A blown tyre counts `New1556` down.
+4. With other than one player, a chased car that has finished ends the
+   chase at once.
+5. In Be A Cop, only the chase direction, and only with two players.
+   Otherwise:
+   - The chase's top speed is the most ForwardSpeed seen. Each of its
+     cops in COP_MOVEMENT takes it as its mover's base speed (+52).
+   - The drive targets are updated, and SelectPrimaryCop runs.
+   - In a race of type 3, the chase is over once the car has finished.
+   - Called off (below), the chase gives up and is over. Otherwise the
+     state timer runs down while a cop is chasing, or from LEVEL3 on.
+   - When the timer is out (0 or less), DoStateTransition runs. A
+     chase that has given up is over.
+6. Still chasing (neither SPEEDER_CAUGHT nor given up) and not over:
+   when the car can be stopped, it is pulled over (CreatePullover, with
+   1). The chase goes to SPEEDER_CAUGHT, every cop is released, and the
+   chase is over.
+7. Not over: the roadblock state machine steps, then UpdateRoadBlocks and
+   UpdateChopper. That is all in Be A Cop. Otherwise LEVEL0 steps its
+   speeches and runs the early check, LEVEL1 runs the early check, a
+   chase that has given up returns 1, and the rest return 0.
+
+Level0SubStates (`0x002295d8`) declares the pursuit
+(DeclarePursuitSpeech) once the state timer is under 16 s, and asks for
+backup (RaiseBackupSpeech) once it is under 3 s. These move the
+sub-state from 0 to 1 and then to 2.
+
+ShouldPursuitBeCalledOff (`0x0022c2d0`) never calls off with a tyre
+blown, in a point-to-point race, in free run, or in a race of fewer than
+4 laps. Otherwise it calls off when the distance left, the laps left
+times the track's length, is 2000 or less.
+
+UpdateDriveTargets (`0x0022a360`) feeds the chased car's position to
+the two targets. Its float argument is unused.
+
+- The far target gets a new point once its last two points are 20 or
+  more apart. Until then the position replaces the last point.
+- The near target does the same at more than 1 apart.
+- With twenty points, the oldest is dropped before a point is added.
+- Between the two, tPursuitHistory::Update (`0x0022cf90`) shifts its
+  thirty entries on and puts the car's velocity and the frame's seconds
+  first. The count stops at 30. Retail then sums the history in a loop
+  whose result nothing reads; the port leaves the loop out.
+
+The roadblock state machine's Update (`0x0022cdd8`) does nothing at
+NONE. Otherwise its timer counts down and stops at 0. A machine that
+CALLED_FOR_ROAD_BLOCK with the timer at 0 asks for the roadblock
+(CreateRoadBlock). If the pursuit then has one, the machine goes to
+ROAD_BLOCK_SET.
+
+DoEarlyChaseCollisionCheck (`0x0022aba0`) runs once per chase, for a
+player's car, when the car has caused a collision recently:
+
+- At sub-state 0, the car hit only gets BeginPursuitCollisionSpeech.
+- Hitting the first cop's car says raisePursuitCopHit, with the
+  landmark, and goes to LEVEL2.
+- Hitting another cop's car goes to LEVEL2.
+- Anything else is traffic: raiseSuspectCrashTraffic, and LEVEL0 goes to
+  LEVEL1.
+
+IsChasedCarStoppable (`0x0022bea0`) is never true without tickets,
+while the car's pullover is active, once the car is poofed, or once it
+has finished. Otherwise:
+
+- In Be A Cop, against the player's cop:
+  - It counts as stopped in any of these cases:
+    - blinking, and just reset (a player) or within 30 (an AI car);
+    - within the capture radius, 10 (11 with two players), and either
+      blown and under 0.1 m/s, or upset;
+    - within the capture radius and slower than the difficulty's catch
+      speed (times 1.5 with two players), with the catch timer
+      counted below 0.
+  - A stopped car counts only while the player's cop is under 6.7054
+    m/s (15 mph).
+  - When the timer was not counted, it goes back up, to at most 2.
+  - With no player's cop, retail reads through NULL; the port says no.
+- Otherwise, stopped when:
+  - `New1556` is 0 or less;
+  - under 10 mph near a cop, as the catch timer reaches 0, or at 1 or
+    less just after hitting a cop. Away from cops or faster, the timer
+    is set back to 2. "Near" is a cop within 10 (IsCopNearby) while the
+    chase has a first cop, and the car being an AI racer while it has
+    none;
+  - blown and under 0.1 m/s, or blinking and an AI car or just reset;
+  - upset: the body's up axis 0.1 or less, and under 10 mph.
+
+IsCopNearby (`0x00225d30`):
+
+- In Be A Cop: the player's cop within the distance, on the ground
+  plane.
+- Otherwise: any of the manager's cops within the distance. The cop's
+  logic state must be DISABLED, SPEED_TRAP, ROAD_BLOCK,
+  DRIVING_ON_PATROL, HOT_PURSUIT or GUARD_LOCATION. A player's cop
+  whose NIS is playing does not count.
+
+DidRecentlyCollideWithCop (`0x002286b8`) asks DidTheseCarsCollide of
+each of the manager's cops' cars.
+
+The chase direction, in Be A Cop with two players, is the car's
+velocity against its route point's direction: 1 along it (0 counts as
+along), -1 against. Going the chase's way resets the timer. Otherwise,
+after 8 seconds the chase takes the car's direction.
 
 ## The cops
 
@@ -260,14 +388,23 @@ Bound in `main.c` since 12h-1:
 - the two tables, through `pursuit_install_vtables` and
   `barricade_install_vtables`.
 
+Bound since 12h-2: `gCopManagerRequestPursuitFn`, to
+`copmanager_request_pursuit`, and `gPursuitUpdateFn`, to
+`tpursuit_update`. Cops now start chases in a race, and each chase runs
+its Update.
+
 Not bound yet:
 
-- `gCopManagerRequestPursuitFn` stays NULL until Update is in (12h-2).
-  Until then no cop is granted a chase, and no pursuit is made in a
-  race.
 - The cop speech manager's calls do nothing while NULL:
   StartPursuitSpeech, JoinPursuitSpeech, CopBackOffSpeech, raiseCrashTow,
-  raiseCrash, raiseFlatTire and raiseSuperRequest.
+  raiseCrash, raiseFlatTire and raiseSuperRequest. Update's speeches do
+  the same: DeclarePursuitSpeech, RaiseBackupSpeech,
+  BeginPursuitCollisionSpeech, raisePursuitCopHit and
+  raiseSuspectCrashTraffic.
+- Update's later slices do nothing while NULL: CreatePullover (12l),
+  CreateRoadBlock and UpdateRoadBlocks (12i), and UpdateChopper (12k).
+  So nothing calls for a roadblock yet, and a caught car is not pulled
+  over.
 - So does `gPlayerLoadNextNisFn`, the Busted NIS (12l).
 - These abort if reached:
   - the helicopter's word at 960 and FollowThisCar (12k);
@@ -321,13 +458,44 @@ cover:
   barrels in the first and last places, and with id -1;
 - the spike strips by roadblock id, and the barrels' fade with NaN and
   huge times;
+- the Update's parts:
+  - NotInChasingState over every state;
+  - Level0SubStates at the 16 and 3 edges;
+  - the call-off over each gate and the 2000 edge;
+  - the roadblock machine over state, timer, frame and roadblock;
+  - the barrels counting down through NaN, -0 and huge times;
+  - 33 history updates;
+  - both drive targets at their 20 and 1 edges, full and from empty,
+    then 40 frames on;
+  - the early check over 15 layouts;
+- IsCopNearby over every logic state, NIS, distance edges and Be A Cop,
+  and DidRecentlyCollideWithCop over seven collision sets;
+- IsChasedCarStoppable:
+  - each gate;
+  - about 30 setups beside a slow car, including the 10 mph and 0.1 m/s
+    edges, the up-axis edge, blinking and NaN;
+  - with no first cop;
+  - Be A Cop at each difficulty, with one and two players, at the
+    radius and the 30 m edges;
+- then Update frame by frame (the movers, targets, cops and manager
+  dumped each frame):
+  - the timer out, to exactly 0, and given up;
+  - the barrels;
+  - split screen and finish reasons;
+  - a blown tyre, race type 3, and the call-off;
+  - the top speed;
+  - caught in four states;
+  - the roadblock called and set;
+  - the early check by state;
+  - the landmarks;
+  - Be A Cop with the chase direction at the dot product's 0 edge;
 - RequestPursuit, last: seven configurations, each with 14 asks, then
   the give-up, backup, CopCarPos, each finish reason, Be A Cop with the
   player's cop in four places, and split screen.
 
-22906 operations, 51040 lines, 0 differ.
+35524 operations, 66839 lines, 0 differ.
 
-`--mutate` runs out of the tree through `mutpar`: 265 mutations, 262
+`--mutate` runs out of the tree through `mutpar`: 425 mutations, 422
 caught and three equivalent:
 
 - `super_lt` (`<=` to `<` against 0.001): within 25 of -50 the timer
@@ -340,4 +508,5 @@ caught and three equivalent:
 
 The checkers that link `copmgr.c` still have 0 differ: carmode, cop,
 copdriver, copmanager, copmover, drivecam, hudfeatures, hudrender,
-raceupdate and trackgraph.
+raceupdate and trackgraph (12h-1). After 12h-2, cop and copdriver, the
+other two that link `pursuit.c`, still have 0 differ.

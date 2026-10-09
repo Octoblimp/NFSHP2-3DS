@@ -65,6 +65,24 @@ void barricademanager_fade(BarricadeManager *b, float t)
     }
 }
 
+void barricademanager_count_down(BarricadeManager *b, float dt)
+{
+    int32_t i;
+
+    for (i = 0; i < BARRICADE_MAX_BARRELS; i++) {
+        if (b->nBarrel[i] == -1 || b->fFadeTimer[i] == -1.0f)
+            continue;
+        b->fFadeTimer[i] -= dt;
+        if (b->fFadeTimer[i] < 0.0f) {
+            if (gBarricadeDeleteBarrelFn == NULL)
+                unported("the barrel's delete (0x0021ef88)");
+            gBarricadeDeleteBarrelFn(b->nBarrel[i]);
+            b->fFadeTimer[i] = -1.0f;
+            b->nBarrel[i] = -1;
+        }
+    }
+}
+
 typedef void (*DtorFn)(void *self, int32_t flags);
 
 static void barricademanager_dtor_entry(void *self, int32_t flags)

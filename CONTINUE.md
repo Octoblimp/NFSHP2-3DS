@@ -1,10 +1,11 @@
 # CONTINUE
 
 Where the next session picks up. Updated in Session 59 (2026-10-08):
-12h-1, tPursuit's object and RequestPursuit, is done
-(`docs/formats/pursuit.md`). RequestPursuit stays unbound until
-12h-2 ports the pursuit's Update, so the cops' cars still wait in limbo
-until the pursuits (12h-2) and the radar traps (12j) ask them out.
+12h-2, tPursuit::Update, is done, and RequestPursuit and Update are
+bound (`docs/formats/pursuit.md`, "The Update"). Before it, 12h-1
+ported tPursuit's object and RequestPursuit. The cops' cars still wait
+in limbo until something asks them out: a patrol's or radar trap's
+search (12j's SpawnSpeedTraps) is what starts a chase.
 Session 58, continued: 12g-3, the chase (the hot pursuit and caught
 speeder logics), so all of tAICop's logic is in. 12g-2 (the radar traps', roadblocks' and patrols' logic) and
 12g-1 (tAICop::Think, which made a race with cops make their cars) were
@@ -198,33 +199,40 @@ pursuit.obj, on a 10 KB manager. Its slices:
   PossibleCallSupervisor, DeleteRoadBlockSpikeStrips, GetTopSpeed and
   retail's new BarricadeManager (`docs/formats/pursuit.md`).
   - `main.c` binds RemoveCopFromPursuit and RemovePrimarySpeaker.
-  - `gCopManagerRequestPursuitFn` stays NULL: a granted chase would
-    need the pursuit's Update, which nothing calls yet.
   - Retail quirks kept: ReleaseAllCops releases only the first of two
     cops. An empty speaker queue gives the constructor 0x41a00000
     (its a2, 20.0f).
-- **Next: 12h-2** tPursuit::Update (`0x00229288`), and with it bind
-  `gCopManagerRequestPursuitFn` and the manager's Update seam. Update
-  runs these:
-  - the barrels' fade countdown (`0x0024f268`) and FindLandmark;
-  - the chase direction, from GetRoutePoint;
-  - the top speed and cop limits;
-  - UpdateDriveTargets (`0x0022a360`) and SelectPrimaryCop;
-  - ShouldPursuitBeCalledOff (`0x0022c2d0`) and the state timer;
-  - NotInChasingState, IsChasedCarStoppable (`0x0022bea0`) with
-    CreatePullover (12l);
-  - the roadblock state machine's Update (`0x0022cdd8`),
-    UpdateRoadBlocks (`0x00229b58`) and UpdateChopper (`0x00229678`);
-  - by state: Level0SubStates (`0x002295d8`, DeclarePursuitSpeech and
-    RaiseBackupSpeech) and DoEarlyChaseCollisionCheck.
+- **12h-2, done (Session 59):** tPursuit::Update (`0x00229288`) in
+  `pursuit.c`, with its parts:
+  - Level0SubStates, ShouldPursuitBeCalledOff, UpdateDriveTargets and
+    tPursuitHistory::Update;
+  - the roadblock state machine's Update, and the barrels' count down
+    (`0x0024f268`, `barricade.c`);
+  - DoEarlyChaseCollisionCheck and IsChasedCarStoppable, with Be A
+    Cop's half and the chase direction;
+  - the manager's IsCopNearby and DidRecentlyCollideWithCop.
 
-  Split it: Update and the small helpers first, with UpdateDriveTargets
-  next, and the roadblock and chopper parts as seams for 12i and 12k.
-  **12i** roadblocks; **12j** SpawnSpeedTraps, roadblocks and spike strips;
-  **12k** the helicopter; **12l** pullovers and Busted; **12m** Be A
-  Cop; **12n** the radar detector's intensity. Nothing takes a cop out
-  of limbo until 12j's SpawnSpeedTraps or 12h's pursuits, so the cops
-  stay unseen until then.
+  `main.c` binds `gCopManagerRequestPursuitFn` and `gPursuitUpdateFn`.
+  These are NULL seams that do nothing:
+  - Update's five speeches;
+  - CreatePullover (12l);
+  - CreateRoadBlock and UpdateRoadBlocks (12i);
+  - UpdateChopper (12k).
+
+  12h-1's GetSpeedMPHOrKPH read VelocityMagnitude; retail reads
+  ForwardSpeed (car+960), now fixed.
+- **Next: 12i** roadblocks: CreateRoadBlock (`0x00229e30`),
+  UpdateRoadBlocks (`0x00229b58`) and the barrels' spawn
+  (`0x0024f0a8`).
+  Then:
+  - **12j** SpawnSpeedTraps and spike strips;
+  - **12k** the helicopter (UpdateChopper, `0x00229678`);
+  - **12l** pullovers and Busted (CreatePullover, `0x00226f30`);
+  - **12m** Be A Cop;
+  - **12n** the radar detector's intensity.
+
+  Nothing takes a cop out of limbo until 12j's SpawnSpeedTraps, so the
+  cops stay unseen until then.
 
 The test config for a race with cops is parked as
 `nfshp2_config.txt.cops` (SkipFE, track 12, 3 AI, traffic 0.5,
@@ -4652,8 +4660,8 @@ goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** step 12, the cops: 12a to 12h-1 are done, 12h-2 (tPursuit's
-  Update) is next. See "First" at the top.
+- **Next:** step 12, the cops: 12a to 12h-2 are done, 12i (roadblocks)
+  is next. See "First" at the top.
   These are done:
   - 11a, what an AI car knows as it drives;
   - 11b-1, retail's DriveTarget;

@@ -996,7 +996,8 @@ static void set_cop(const char *n, char **a, int na)
         uint32_t    x = num(a[2]);
         if (!strcmp(f, "chased")) pu->pChasedCar = car_or_none(x);
         else if (!strcmp(f, "level")) pu->nHUDPursuitLevel = (int32_t)x;
-        else if (!strcmp(f, "n1560")) pu->New1560 = (int32_t)x;
+        else if (!strcmp(f, "n1560"))
+            pu->RoadBlockStateMachine.State = (int32_t)x;
         else {
             printf("  no pursuit field %s\n", f);
             exit(2);

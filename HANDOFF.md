@@ -18120,3 +18120,88 @@ abort if reached, and nothing reaches them yet:
 
 12h-2: tPursuit::Update (`0x00229288`) and its helpers. Then bind
 `gCopManagerRequestPursuitFn`, so the cops chase.
+
+## Session 59, continued (2026-10-08) -- 12h-2, tPursuit::Update
+
+Each chase's step, ported from retail into `pursuit.c`, with the
+barrels' count down in `barricade.c`. `docs/formats/pursuit.md` has a
+new section, "The Update".
+
+### What it does
+
+- **Update** (`0x00229288`), once a frame for each pursuit, from the
+  manager's Think:
+  - counts the barrels' fades down;
+  - finds the landmark under the chased car;
+  - keeps the chase's top speed in its cops' movers;
+  - updates the drive targets and the primary cop;
+  - calls the chase off near the end of a long race;
+  - runs the state timer into DoStateTransition;
+  - pulls a stoppable car over (SPEEDER_CAUGHT);
+  - steps the roadblock machine, then the level-0 speeches and the
+    early collision check.
+- **Its parts:**
+  - Level0SubStates and ShouldPursuitBeCalledOff;
+  - UpdateDriveTargets with tPursuitHistory::Update;
+  - the roadblock state machine's Update;
+  - DoEarlyChaseCollisionCheck;
+  - IsChasedCarStoppable, with Be A Cop's half and the chase direction
+    for two players;
+  - the manager's IsCopNearby and DidRecentlyCollideWithCop.
+- `main.c` binds `gCopManagerRequestPursuitFn` and `gPursuitUpdateFn`.
+  A cop's search can now start a chase. No cop leaves limbo before
+  12j, so a race plays as before.
+- These do nothing while NULL:
+  - Update's five speeches;
+  - CreatePullover (12l);
+  - CreateRoadBlock and UpdateRoadBlocks (12i);
+  - UpdateChopper (12k).
+
+Two port decisions: a Be A Cop chase with no player's cop cannot be
+stopped (retail reads through NULL), and the history's summing loop,
+whose result nothing reads, is left out.
+
+### A 12h-1 bug
+
+GetSpeedMPHOrKPH read VelocityMagnitude (car+964). Retail reads
+ForwardSpeed (car+960). The 12h-1 check had hidden it, because the
+harness set one field and the model wrote the other. Both now set
+ForwardSpeed.
+
+### Checked
+
+- `tools/pursuit_check.py` grows the Update's ops (see the doc's "The
+  check"): 35524 operations, 66839 lines, 0 differ.
+- `--mutate`: 425 mutations, 422 caught, 3 equivalent (the same three).
+  - The first pass of the 160 new ones left 8 alive. One, `st_radius`,
+    had replaced the capture radius with its own value, 10; it now
+    uses 12. The other seven needed new cases:
+    - a car at 10.5 mph beside a cop (with the fix below);
+    - the timer run out to exactly 0;
+    - a chase given up with the timer out;
+    - barrels fading during Update;
+    - the chase direction's dot product at 0;
+    - an AI car blinking 35 m from the player's cop (the 30 m case
+      had been measured from the wrong car).
+  - stop_base's cop had no logic state, so "near" was never true. It is
+    now in HOT_PURSUIT.
+  - Seven 12h-1 mutations whose text the new code repeated now carry
+    more context.
+- These still have 0 differ: cop and copdriver (the other two that
+  link `pursuit.c`), and carmode, collisionbody, copmanager and
+  drivecam; hudrender and hudfeatures too. The rest of the usual list
+  sees only comment changes in headers.
+- Committed with it, a 12h-1 leftover: that commit made the pursuit's
+  1560 the roadblock state machine, but not `hudrender.c`'s read of
+  it (Be The Cop's coming roadblock), so 12h-1 alone does not build.
+  `hudrender.c`, its harness and `hud-render.md` now read the machine's
+  State against ERBS_NONE.
+- The CIA builds.
+- `run_azahar_quickrace.ps1 -HoldKeys 65`: PASS. A Hot Pursuit quick
+  race from the frontend, with 4 cops, ran at 30 FPS and Speed 99%,
+  with the AI racing and the HUD up.
+
+### Next
+
+12i: roadblocks. CreateRoadBlock (`0x00229e30`), UpdateRoadBlocks
+(`0x00229b58`) and the barrels' spawn (`0x0024f0a8`).

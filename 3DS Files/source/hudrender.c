@@ -897,7 +897,7 @@ static void render_be_the_cop(struct Player *p, tCopManager *m)
     if (i < used)
         i = used;
     pur = player_cop_pursuit(m);
-    if (pur != NULL && pur->New1560 != 0) {
+    if (pur != NULL && pur->RoadBlockStateMachine.State != ERBS_NONE) {
         if (i < 3)
             set_bitmap_colour(p->pFlailerBeTheCopRoadblock[i],
                               COLOUR_BTC_COMING);
