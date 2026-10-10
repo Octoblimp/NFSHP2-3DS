@@ -458,6 +458,14 @@ class Emu(object):
             reg[rt] = self._ldl(reg[rt], s32(reg[rs]) + simm)
         elif op == 0x1b:                              # ldr
             reg[rt] = self._ldr(reg[rt], s32(reg[rs]) + simm)
+        elif op == 0x22:                              # lwl
+            reg[rt] = s32(self._lwl(reg[rt], s32(reg[rs]) + simm)) & M64
+        elif op == 0x26:                              # lwr
+            reg[rt] = s32(self._lwr(reg[rt], s32(reg[rs]) + simm)) & M64
+        elif op == 0x2a:                              # swl
+            self._swl(reg[rt], s32(reg[rs]) + simm)
+        elif op == 0x2e:                              # swr
+            self._swr(reg[rt], s32(reg[rs]) + simm)
         elif op == 0x1e:                              # lq
             a = (s32(reg[rs]) + simm) & ~15
             reg[rt] = int.from_bytes(self.mem[a:a + 16], "little")
@@ -642,6 +650,31 @@ class Emu(object):
     def _sdr(self, val, addr):
         n = 8 - (addr & 7)
         b = (val & M64).to_bytes(8, "little")
+        self.mem[addr:addr + n] = b[:n]
+
+    # The same for four bytes, lwl/lwr and swl/swr: a short string copied
+    # onto the stack (CarSounds' "Horn01"). The word the pair builds is
+    # sign-extended, as lw's is.
+
+    def _lwl(self, old, addr):
+        n = (addr & 3) + 1
+        val = int.from_bytes(self.mem[addr - n + 1:addr + 1], "little")
+        return ((val << ((4 - n) * 8)) | (old & ((1 << ((4 - n) * 8)) - 1))) & M32
+
+    def _lwr(self, old, addr):
+        n = 4 - (addr & 3)
+        val = int.from_bytes(self.mem[addr:addr + n], "little")
+        keep = old & M32 & ~((1 << (n * 8)) - 1) if n < 4 else 0
+        return (val | keep) & M32
+
+    def _swl(self, val, addr):
+        n = (addr & 3) + 1
+        b = (val & M32).to_bytes(4, "little")
+        self.mem[addr - n + 1:addr + 1] = b[4 - n:]
+
+    def _swr(self, val, addr):
+        n = 4 - (addr & 3)
+        b = (val & M32).to_bytes(4, "little")
         self.mem[addr:addr + n] = b[:n]
 
     # ---- COP1 -------------------------------------------------------------

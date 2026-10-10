@@ -15,7 +15,7 @@
 // SoundEnabled (gp-23056), carinit.c's.
 extern int32_t SoundEnabled;
 
-uint16_t CarSoundMultiPlayerAzimuth;            // gp-20464
+uint16_t CarSoundMultiPlayerAzimuth = 10922;    // gp-20464, 0x0018f0f8
 float    SpeedOfSound = 350.0f;                 // gp-16480
 BSlotPool *Sound3dSampleSlotPool;               // gp-16448
 // _GLOBAL_$I$ (0x00209da8): empty, its own sentinel.

@@ -124,6 +124,27 @@ typedef struct ControlInfo {
     float dummy[3];             // 36
 } ControlInfo;
 
+// SoundInfo, 144 bytes, as the stabs give it (`SoundInfo:Tt1030=s144`).
+// BaseName is the car's own sound region, which sound::LoadRegionsInGame
+// loads; the player's horn is that region's sample named Prefix + "Horn"
+// (BasePlayerCarSound::GetHornSample, carsound.h). The engine's fields are
+// step 14-4's.
+typedef struct SoundInfo {
+    char    BaseName[32];       //   0
+    float   HornPitch;          //  32
+    int16_t AIEngineNumber;     //  36
+    char    Prefix[8];          //  38
+    int16_t IdleOffset;         //  46
+    char    Timbre[4];          //  48
+    int16_t BendRange;          //  52
+    int16_t BaseAdd;            //  54
+    int16_t Detune[12];         //  56
+    float   Volume[12];         //  80
+    int16_t RedLineOffset;      // 128
+    int16_t TopGearOffset;      // 130
+    uint8_t pad[12];            // 132
+} SoundInfo;                    // 144
+
 // The record at CarTypeInfo+1368: a row of retail's CarLanguageInfo table
 // (0x0030d578, carinfo.h), 28 bytes. The car type it is for, then six
 // translated-string ids. Retail has one more word than the demo's 24: the
@@ -169,7 +190,7 @@ typedef struct CarTypeInfo {
     EngineInfo      Engine;                              //  688
     AeroInfo        Aero;                                //  752
     ControlInfo     Control;                             //  768
-    uint8_t         Sound[144];                          //  816  task 29
+    SoundInfo       Sound;                               //  816
     CameraInfo      Camera;                              //  960
     uint8_t         HudInfo[80];                         // 1232  task 21
     uint8_t         LocationProb[20];                    // 1312
@@ -227,6 +248,8 @@ typedef char cartypeinfo_layout_check[
      && sizeof(SuspensionInfo) == 32 && sizeof(DriveTrainInfo) == 64
      && sizeof(RigidBodyInfo) == 80 && sizeof(AeroInfo) == 16
      && sizeof(ControlInfo) == 48 && sizeof(CarSpecs) == 28
+     && offsetof(SoundInfo, Prefix) == 38 && offsetof(SoundInfo, Volume) == 80
+     && sizeof(SoundInfo) == 144
      ) ? 1 : -1];
 #endif
 

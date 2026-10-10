@@ -32,6 +32,7 @@
 // the cardriver.h -> drivetarget.h -> car.h cycle. This file declares one
 // by value and reads Steering out of it, so it needs the complete record.
 #include "cardriver.h"
+#include "carsound.h"
 #include "sound3d.h"
 #include "vtable.h"
 #include "world.h"

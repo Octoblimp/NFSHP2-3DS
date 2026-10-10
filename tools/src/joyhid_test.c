@@ -246,6 +246,37 @@ int main(void)
     expect_not("X+ZR", JOY_EVENT_SHIFTUP);
     release();
 
+    // The race layout: X and Y swap, so X is the horn and Y the camera and
+    // the combo modifier.
+    pad.race = 1;
+    pad.keys = JOYHID_X;
+    frame();
+    expect("race X", JOY_EVENT_HONK_HORN, 1, 1);
+    expect_not("race X", JOY_EVENT_MENU_BACK);
+    pad.keys = 0;
+    frame();
+    expect("race X up", JOY_EVENT_HONK_HORN, 0, 0);
+    expect_not("race X up", JOY_EVENT_CAMERA_POV_CHANGE);
+    pad.race = 1;
+    frame();
+    pad.keys = JOYHID_Y;
+    frame();
+    expect("race Y", JOY_EVENT_MENU_BACK, 1, 1);
+    expect_not("race Y", JOY_EVENT_HONK_HORN);
+    pad.keys = 0;
+    frame();
+    expect("race Y up", JOY_EVENT_CAMERA_POV_CHANGE, 1, 1);
+    pad.race = 1;
+    frame();
+    pad.keys = JOYHID_Y;
+    frame();
+    frame();
+    pad.keys = JOYHID_Y | JOYHID_ZL;
+    frame();
+    expect("race Y+ZL", JOY_EVENT_ZONE_FREEZE, 1, 1);
+    expect_not("race Y+ZL", JOY_EVENT_SHIFTDOWN);
+    release();
+
     // The D-pad.
     pad.keys = JOYHID_DDOWN;
     frame();

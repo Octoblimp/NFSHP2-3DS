@@ -78,6 +78,7 @@
 #include "carloader.h"
 #include "carmodes.h"
 #include "carrenderinfo.h"
+#include "carsound.h"
 #include "carstate.h"
 #include "characterinfo.h"
 #include "collision.h"
@@ -192,6 +193,7 @@
 #include "trafficdriver.h"
 #include "traffictele.h"
 #include "uirender.h"
+#include "vtable.h"
 #include "warp.h"
 #include "wheel.h"
 #include "world.h"
@@ -730,7 +732,7 @@ static const char* sndDriverRegion(void* c, int driver)
         race_parameters_get_driver_info_by_driver_number(driver);
     (void)c;
     if (d == NULL || d->EliminatedRank > 0) return NULL;
-    return (const char*)cartypeinfo_get(d->CurrentRideInfo.Type)->Sound;
+    return cartypeinfo_get(d->CurrentRideInfo.Type)->Sound.BaseName;
 }
 
 static int sndHelicopter(void* c)
@@ -762,6 +764,52 @@ static void sndOneshotMute(void* c, int on)
     sound3d_oneshot_mute(on);
 }
 
+// The car sounds (14-3): UpdateCarSounds, and Mute's walk of
+// pCurrentWorld's CarList, each car's BaseCarSound muted through its table.
+static void sndCarSoundsUpdate(void* c)
+{
+    (void)c;
+    carsound_update_car_sounds();
+}
+static int sndNumCars(void* c)
+{
+    const Car* car;
+    int n = 0;
+    (void)c;
+    if (pCurrentWorld == NULL) return 0;
+    for (car = (const Car*)pCurrentWorld->CarList.next;
+         car != (const Car*)&pCurrentWorld->CarList;
+         car = (const Car*)car->Link.next)
+        n++;
+    return n;
+}
+static void* sndCarSound(void* c, int i)
+{
+    const Car* car;
+    (void)c;
+    if (pCurrentWorld == NULL) return NULL;
+    for (car = (const Car*)pCurrentWorld->CarList.next;
+         car != (const Car*)&pCurrentWorld->CarList;
+         car = (const Car*)car->Link.next)
+        if (i-- == 0) return car->pBaseCarSound;
+    return NULL;
+}
+static void sndCarSoundMute(void* c, void* sound, int on)
+{
+    const VtEntry* e = vt_slot(((Sound3d*)sound)->_vtable, SOUND3D_VT_MUTE);
+    (void)c;
+    ((void (*)(void*, int32_t))e->fn)(vt_this(sound, e), on);
+}
+
+// joyhid's race layout, X the horn: only while the race runs, so every
+// menu -- the pause screen's included -- keeps X as "back".
+static int32_t joyhidRaceLayout(void)
+{
+    return pRaceCoordinator != NULL
+        && racecoordinator_get_current_state(pRaceCoordinator)
+           == RCSTATE_RACE_IN_PROGRESS;
+}
+
 static SoundHooks gSoundHooks = {
     .game_state       = sndGameState,
     .paused           = sndPaused,
@@ -778,6 +826,10 @@ static SoundHooks gSoundHooks = {
     .joylog_replaying = sndJoylogReplaying,
     .joylog_get       = sndJoylogGet,
     .joylog_add       = sndJoylogAdd,
+    .num_cars         = sndNumCars,
+    .car_sound        = sndCarSound,
+    .car_sounds_update = sndCarSoundsUpdate,
+    .car_sound_mute   = sndCarSoundMute,
     .oneshot_init     = sndOneshotInit,
     .oneshot_close    = sndOneshotClose,
     .oneshot_update   = sndOneshotUpdate,
@@ -4196,6 +4248,19 @@ int main(int argc, char** argv)
     trafficdriver_install_vtables();
     cameracoord_install_vtables();
     sound3d_install_vtables();
+    carsound_install_vtables();
+
+    // The car sounds (14-3): Car's constructor and destructor, the splash
+    // and the tyre pop, and the drivers' horn.
+    gCreatePlayerCarSoundFn = carsound_create_player;
+    gCreateAICarSoundFn = carsound_create_ai;
+    gCreateAICopCarSoundFn = carsound_create_ai_cop;
+    gBaseCarSoundDestroyFn = carsound_delete;
+    gBaseCarSoundTriggerSplashFn = basecarsound_trigger_splash;
+    gBaseCarSoundTriggerTireBlowOutFn = basecarsound_trigger_tire_blow_out;
+    gBaseCarSoundStartHonkHornFn = basecarsound_start_honk_horn;
+    gBaseCarSoundStopHonkHornFn = basecarsound_stop_honk_horn;
+    gBaseCarSoundIsHonkingFn = basecarsound_is_honking;
 
     // Car::SetControlMode reaches the controllers task 26 brings through
     // seams; a NULL one is a class not ported yet, and the arm aborts.
@@ -4490,6 +4555,7 @@ int main(int argc, char** argv)
     // kDown -- so for now it runs the type detection, which logs
     // "joystick: port 0 type 121" once ten reads have agreed.
     joyhid_install();
+    gJoyHidRaceLayoutFn = joyhidRaceLayout;
     InitJoystick();
 
     logPrintf("NFSHP2-3DS -- boot flow\n");

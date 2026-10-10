@@ -629,7 +629,22 @@ pursuit.obj, on a 10 KB manager. Its slices:
     against the port: 1425 ops, 3323 lines, 0 differ; 193 mutations, 193
     caught. Play's only callers are collision_sound's (14-6). Azahar, on
     AC: a Hot Pursuit quick race, PASS at 30 fps.
-  - **14-3:** car sounds, the horn and the siren.
+  - **14-3, done:** the car sounds, CarSounds.obj (0x0018d0a8 ..
+    0x0018f800): BaseCarSound, BasePlayerCarSound, BaseAICarSound,
+    HornSound3d, SirenSound3d, UpdateCarSounds and the closest list
+    (`carsound.c`, docs/formats/carsound.md). The five vtables are
+    installed at boot. Car's constructor and destructor, the splash,
+    the tyre pop and the drivers' horn are bound, and sound::Update
+    runs UpdateCarSounds. The engines and the tyres are NULL hooks
+    until 14-4 and 14-5. In a race X and Y swap, so the horn is on X
+    (the user's ask). `tools/carsound_check.py` runs retail's
+    CarSounds.obj in mipsemu, with the EE's divide, product and root,
+    against the port: 592 ops, 3388 lines, 0 differ; 313 mutations,
+    313 caught, run out of the tree by mutpar. mipsemu gained lwl, lwr,
+    swl and swr, for ChooseHornSample's copy of "Horn01".
+Azahar, on AC: a Hot Pursuit quick race with two presses of X and
+    then the gas, PASS at 29.9 fps (speed 99%), sound 0.5 ms a frame,
+    a chase up with four cop cars.
   - **14-4:** the engines.
   - **14-5:** the tyres.
   - **14-6:** collision_sound.
@@ -5062,7 +5077,7 @@ each class shows what it reaches.
 | 12 | The cops and the pursuit: CopManager, the cop drivers, roadblocks and spikes | 4-6 |
 | 13 | ~~The two-screen HUD, to the split decided below~~ done as 8m: 8m-1 to 8m-6c | 10 |
 | 13b | New 3DS mode in full and a steady 30 FPS race (task 28), right after step 13: the real clock and the pacing, a frame profiler, New 3DS mode checked part by part, then only the optimizations the New 3DS needs. Set by the user on 2026-10-03 | 4 |
-| 14 | The car and world sounds and the speech, and the ChopperSound (12k-5) | 10 (14-1, 14-2a and 14-2b done) |
+| 14 | The car and world sounds and the speech, and the ChopperSound (12k-5) | 10 (14-1, 14-2a, 14-2b and 14-3 done) |
 | 14b | The smokeables: FindSmokeableInfo, the spawner (`0x0021ed28`) and delete (`0x0021ef88`), Smokeable's Break and DeleteFarAway, and their collision. The roadblock's barrels wait for it (12i-2), and the helicopter's munitions (12k-6) come after it | 1-2 |
 | 15 | **A whole race with the AI and the cops.** Steps 10-14 add about 15-23 slices | |
 | 16 | The full frontend from retail: the 44 screens still plain or unregistered (`screen_registry.py --check-port`), the event tree (the career), the tourneys and the car selector | 6-10 |
@@ -5088,8 +5103,8 @@ count. It is its own slice when it goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** step 14, the audio in full, at 14-3 (the car sounds, the horn
-  and the siren); 14-1, 14-2a and 14-2b are done. Of step 12,
+- **Next:** step 14, the audio in full, at 14-4 (the engines); 14-1,
+  14-2a, 14-2b and 14-3 are done. Of step 12,
   12a to 12k-2, the light flares, 12k-3's planners, 12k-3a, 12k-3b,
   12k-4a, 12k-4b, 12k-7, 12l-1 and 12l-2 are done. See
   "First" at the top.

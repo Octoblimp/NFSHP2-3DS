@@ -14,8 +14,13 @@
 //     B          Square    menu square, brake
 //     X          Triangle  menu back, camera (on release), combo modifier
 //     Y          Circle    menu help, horn
+//     -- while a race runs, X and Y swap: X is Circle, the horn (a cop
+//        car's lights and siren), and Y is Triangle, the camera and the
+//        combo modifier. The user asked for the horn on X (2026-10-09);
+//        the menus, the pause screen and the rest keep the layout above.
 //     L / R      L1 / R1   look back / e-brake
-//     ZL / ZR    L2 / R2   shift down / up; with X held, zone and pursuit
+//     ZL / ZR    L2 / R2   shift down / up; with X (Y racing) held, zone
+//                          and pursuit
 //     D-pad      D-pad     menus, digital steer; Up cycles the HUD
 //     D-pad Down also R3   nitro -- nothing in a menu reads R3
 //     START      START
@@ -63,7 +68,12 @@ typedef struct JoyHidState {
     uint32_t keys;      // hidKeysHeld()
     int32_t  cx, cy;    // the Circle Pad, +y up
     int32_t  sx, sy;    // the C-Stick, +y up; 0 on an Old 3DS
+    int32_t  race;      // the race layout: X and Y swapped
 } JoyHidState;
+
+// Whether the race layout is on, asked once a reading; NULL is never.
+// main.c's answers while the race coordinator is in RACE_IN_PROGRESS.
+extern int32_t (*gJoyHidRaceLayoutFn)(void);
 
 // The DualShock 2 buffer for one reading.
 void joyhid_build(const JoyHidState *s, uint8_t buf[32]);

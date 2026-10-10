@@ -766,6 +766,16 @@ def sym(name):
     return SYM[name][0]
 
 
+# The car sounds' tables are retail's in the port (carsound.h, step 14-3):
+# carsound.c installs them there, so the demo's addresses would name no
+# table.
+RETAIL_VT = {
+    "_vt$12BaseCarSound": 0x002b4968,
+    "_vt$18BasePlayerCarSound": 0x002b4920,
+    "_vt$14BaseAICarSound": 0x002b48d8,
+}
+
+
 def sym_at(addr):
     names = sorted(k for k, v in SYM.items() if v[0] == addr
                    and not k.startswith("_GLOBAL_"))
@@ -989,7 +999,7 @@ def model_slice2():
             ("vt CollisionBody", "_vt$13CollisionBody"),
             ("vt DynamicCollisionBody", "_vt$20DynamicCollisionBody"),
             ("vt CarCollisionBody", "_vt$16CarCollisionBody")):
-        emit("  %-28s %08x" % (tag, sym(name)))
+        emit("  %-28s %08x" % (tag, RETAIL_VT.get(name) or sym(name)))
 
     p("slot Think", SLOT_THINK)
     p("slot GetCurrentRoute", SLOT_ROUTE)
@@ -2379,8 +2389,8 @@ MUTATIONS = [
      "    Timer     LastYawControlCollisionTime;      // 260" + NL +
      "    Timer     LastPenetrationTime;              // 264"),
     ("s3d-update-32", S3,
-     "#define SOUND3D_VT_UPDATE 24",
-     "#define SOUND3D_VT_UPDATE 32"),
+     "#define SOUND3D_VT_UPDATE        24",
+     "#define SOUND3D_VT_UPDATE        32"),
     ("world-13-cars", WH,
      "#define WORLD_MAX_CARS    14",
      "#define WORLD_MAX_CARS    13"),

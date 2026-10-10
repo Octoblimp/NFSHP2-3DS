@@ -812,6 +812,8 @@ uint16_t bsample_calc_volume(const BSample* s, float volume)
 
 void bsample_set_azimuth(BSample* s, uint16_t azimuth)
 {
+    if (s == NULL)                  // the port's, as bregion_sample's
+        return;
     if (s->voice != NULL)
         bsnd_set_voice_azimuth(drv(), s->voice->id, azimuth);
 }
@@ -888,6 +890,8 @@ void bsample_pause(BSample* s, bool pause)
     // 0x00274488. The paused flag only changes when the channel is busy.
     BsndDriver* d = drv();
 
+    if (s == NULL)                  // the port's, as bregion_sample's
+        return;
     if (s->voice == NULL)
         return;
     if (pause) {

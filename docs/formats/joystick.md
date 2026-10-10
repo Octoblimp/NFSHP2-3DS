@@ -219,10 +219,10 @@ and leaves port 1 empty, which reads as nothing plugged in.
 |-----|-------------|------------------------------|
 | A | Cross | throttle; menu select |
 | B | Square | brake |
-| X | Triangle | camera (on release), combo modifier; menu back |
-| Y | Circle | horn; menu help |
+| X | Triangle; Circle racing | menu back; horn while racing |
+| Y | Circle; Triangle racing | menu help; camera (on release), combo modifier while racing |
 | L, R | L1, R1 | look back, e-brake |
-| ZL, ZR | L2, R2 | shift down, up; with X held, zone / pursuit calls |
+| ZL, ZR | L2, R2 | shift down, up; with Y (X in a menu) held, zone / pursuit calls |
 | D-pad | D-pad | digital steer, HUD (Up); menus |
 | D-pad Down | Down and R3 | nitro |
 | START, SELECT | START, SELECT | |
@@ -231,7 +231,16 @@ and leaves port 1 empty, which reads as nothing plugged in.
 
 A and B take the throttle and brake because they sit next to each other,
 as Cross and Square do; the price is that the frontend's "back", which is
-`MENU_BACK` and so Triangle, is X rather than B. R3 goes on D-pad Down
+`MENU_BACK` and so Triangle, is X rather than B.
+
+**The race layout.** While the race coordinator is in `RACE_IN_PROGRESS`
+(`gJoyHidRaceLayoutFn`, which `main.c` binds), `joyhid_build` swaps X and
+Y before the map: X reads as Circle, the horn -- or a cop car's lights and
+siren -- and Y as Triangle, the camera and the combo modifier. The user
+asked for the horn on X (2026-10-09). The flyby, the countdown, the pause
+screen, the replays and the results keep the menu layout, so X is "back"
+wherever there is a menu. The swap is upstream of the scanners, so the
+joylog and replays see the DualShock buttons as before. R3 goes on D-pad Down
 because nothing reads R3 in a menu or Down in a race. A held button's
 pressure byte reads 255 and a released one 0. A stick maps
 ±`JOYHID_STICK_FULL` (144 of the Circle Pad's nominal 156, which a worn pad
@@ -241,7 +250,8 @@ them as released and centred.
 
 `joyhid_check.py` presses each key and stick through `joyhid_build`, the
 ring, the scanners and the tables, and checks that each raises the event
-above -- including that X + ZL is the zone freeze and not a downshift.
+above -- including that X + ZL is the zone freeze and not a downshift,
+and that in the race layout X honks and Y + ZL is the zone freeze.
 
 `main.c` installs the map and calls `InitJoystick` at boot, and runs
 `ReadJoystickData` and `GenerateJoyEvents` once a frame after the HID scan,

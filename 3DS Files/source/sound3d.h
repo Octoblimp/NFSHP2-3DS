@@ -18,8 +18,8 @@
 // Car reaches Sound3d once: UpdateSound calls `Update` on the BaseCarSound,
 // and BaseCarSound's first base is Sound3d at offset 0
 // (`BaseCarSound:Tt824=s80!1,020,3181`), so the vptr Car reads at +28 of
-// the BaseCarSound is this record's. BaseCarSound itself stays opaque until
-// 14-3 brings it. docs/formats/sound3d.md has the rest.
+// the BaseCarSound is this record's. carsound.h has BaseCarSound itself.
+// docs/formats/sound3d.md has the rest.
 
 #ifndef SOUND3D_H
 #define SOUND3D_H
@@ -56,12 +56,6 @@ typedef char sound3d_layout_check[
 // _vt$7Sound3d and _vt$13Sound3dSample, retail's.
 #define SOUND3D_VTABLE        0x002bb2b0u
 #define SOUND3DSAMPLE_VTABLE  0x002bb358u
-
-// _vt$12BaseCarSound. Slot 24 is BaseCarSound::Update(float, unsigned
-// short, float), overriding Sound3d's.
-#define BASECARSOUND_VTABLE        0x00297dc8u
-#define BASEPLAYERCARSOUND_VTABLE  0x00297d80u
-#define BASEAICARSOUND_VTABLE      0x00297d38u
 
 // The slots, by byte offset. Sound3d's table has `__pure_virtual` at 24,
 // 32, 40 and 48.
@@ -156,8 +150,9 @@ uint16_t sound3d_pan_to_azimuth(float pan);
 // 0x00209150: the azimuth, as a float.
 float sound3d_get_azimuth(const Sound3d *s);
 
-// The globals it reads. CarSoundMultiPlayerAzimuth (gp-20464) is 0 on the
-// disc and nothing writes it; SpeedOfSound (gp-16480) is 350.
+// The globals it reads. CarSoundMultiPlayerAzimuth (gp-20464) is 10922,
+// a sixth of a turn, from CarSounds.obj's static constructor (0x0018f0f8);
+// SpeedOfSound (gp-16480) is 350.
 extern uint16_t CarSoundMultiPlayerAzimuth;
 extern float    SpeedOfSound;
 

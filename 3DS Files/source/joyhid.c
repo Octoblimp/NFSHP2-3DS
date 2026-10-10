@@ -53,6 +53,8 @@ static const struct {
     { JOYHID_SELECT, DS2_SELECT,   P_NONE },
 };
 
+int32_t (*gJoyHidRaceLayoutFn)(void);
+
 // -JOYHID_STICK_FULL .. +JOYHID_STICK_FULL onto 0 .. 255, 128 the centre.
 static uint8_t axis(int32_t v)
 {
@@ -64,12 +66,24 @@ static uint8_t axis(int32_t v)
 void joyhid_build(const JoyHidState *s, uint8_t buf[32])
 {
     uint32_t buttons = 0xffff;   // active low
+    uint32_t keys = s->keys;
     size_t i;
+
+    // The race layout: X reads as Y (Circle, the horn) and Y as X.
+    if (s->race) {
+        uint32_t xy = keys & (JOYHID_X | JOYHID_Y);
+
+        keys &= ~(JOYHID_X | JOYHID_Y);
+        if (xy & JOYHID_X)
+            keys |= JOYHID_Y;
+        if (xy & JOYHID_Y)
+            keys |= JOYHID_X;
+    }
 
     memset(buf, 0, 32);
     buf[1] = 0x79;
     for (i = 0; i < sizeof(kMap) / sizeof(kMap[0]); i++) {
-        if (!(s->keys & kMap[i].key))
+        if (!(keys & kMap[i].key))
             continue;
         buttons &= ~(1u << kMap[i].button);
         if (kMap[i].pressure != P_NONE)
@@ -100,6 +114,7 @@ void joyhid_read(int32_t port, uint8_t *buf)
     s.cy = cp.dy;
     s.sx = cs.dx;
     s.sy = cs.dy;
+    s.race = gJoyHidRaceLayoutFn != NULL && gJoyHidRaceLayoutFn();
     joyhid_build(&s, buf);
 #else
     (void)port;
