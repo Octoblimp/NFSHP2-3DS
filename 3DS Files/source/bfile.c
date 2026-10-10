@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "bmem.h"
 #include "gamedata.h"
 
 struct bFile {
@@ -157,4 +158,21 @@ void bServiceFileSystem(void)
     for (i = n; i < ndone; i++)
         done[i - n] = done[i];
     ndone -= n;
+}
+
+void *bGetFile(const char *name, int32_t *size, int32_t pool)
+{
+    bFile *f = bOpen(name);
+    void  *buf;
+
+    if (f == NULL) {
+        fprintf(stderr, "bGetFile: %s is not on the card\n", name);
+        abort();
+    }
+    if (size != NULL)
+        *size = bFileSize(f);
+    buf = bMalloc(bFileSize(f), name, 0, pool | 0x40);
+    bRead(f, buf, bFileSize(f));
+    bClose(f);
+    return buf;
 }

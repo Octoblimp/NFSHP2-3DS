@@ -11,7 +11,8 @@ folds `table + negative constant` into a literal. The first one found was
 in bFixATan1 (bmath.c), on a path only INT32_MIN takes.
 
 This walks the relocations the way the loader does and names the word that
-would fail, with the ELF symbol it sits in when the .elf is beside it.
+would fail, with the ELF symbol it sits in when the link's .elf is in the
+build directory beside the .3dsx.
 
 Usage: check_3dsx.py path/to/app.3dsx      (exit 1 on a bad word)
 """
@@ -83,7 +84,9 @@ def main():
     if bad and isinstance(bad[0], str):
         print("check_3dsx: %s: %s" % (path, bad[0]))
         return 1
-    elf = os.path.splitext(path)[0] + ".elf"
+    # The link's .elf is an intermediate in build, beside the objects.
+    stem = os.path.splitext(os.path.basename(path))[0]
+    elf = os.path.join(os.path.dirname(path), "build", stem + ".elf")
     for addr, word, tab in bad:
         where = ""
         if os.path.exists(elf) and os.path.exists(ADDR2LINE):

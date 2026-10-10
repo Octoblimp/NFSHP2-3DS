@@ -179,25 +179,32 @@ cia: all
 	@"$(BANNERTOOL)" makebanner -i meta/banner.png -a meta/silence.wav -o meta/banner.bnr
 	@"$(BANNERTOOL)" makesmdh -s "$(APP_TITLE)" -l "$(APP_DESCRIPTION)" -p "$(APP_AUTHOR)" -i meta/icon.png -o meta/icon.icn
 	@"$(MAKEROM)" -f cia -o "$(TARGET).cia" -DAPP_ENCRYPTED=false -target t \
-		-elf "$(OUTPUT).elf" -icon meta/icon.icn -banner meta/banner.bnr \
+		-elf "$(BUILD)/$(TARGET).elf" -icon meta/icon.icn -banner meta/banner.bnr \
 		-rsf meta/app.rsf
 	@echo built ... $(TARGET).cia
 
 #---------------------------------------------------------------------------------
 clean:
 	@echo clean ...
-	@rm -fr "$(BUILD)" "$(TARGET).3dsx" "$(OUTPUT).smdh" "$(TARGET).elf" "$(TARGET).cia" meta/banner.bnr meta/icon.icn
+	@rm -fr "$(BUILD)" "$(TARGET).3dsx" "$(OUTPUT).smdh" "$(TARGET).cia" meta/banner.bnr meta/icon.icn
 
 #---------------------------------------------------------------------------------
 else
 #---------------------------------------------------------------------------------
 # main targets
 #---------------------------------------------------------------------------------
-$(OUTPUT).3dsx	:	$(OUTPUT).elf $(_3DSXDEPS)
+# The link's output, which 3dsxtool and makerom turn into the .3dsx and the
+# .cia. Nothing on the 3DS loads it, so it stays in build with the objects
+# and only the .3dsx, .smdh and .cia land beside the Makefile.
+ELFFILE	:=	$(CURDIR)/$(TARGET).elf
+
+$(OUTPUT).3dsx	:	$(ELFFILE) $(_3DSXDEPS)
+	$(SILENTCMD)3dsxtool $< $@ $(_3DSXFLAGS)
+	$(SILENTMSG) built ... $(notdir $@)
 
 $(OFILES_SOURCES) : $(HFILES)
 
-$(OUTPUT).elf	:	$(OFILES)
+$(ELFFILE)	:	$(OFILES)
 
 #---------------------------------------------------------------------------------
 # you need a rule like this for each extension you use as binary data

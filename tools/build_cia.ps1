@@ -1,4 +1,5 @@
-# Builds 3DS Files/NFSHP2-3DS.cia (.elf/.3dsx/.smdh too).
+# Builds 3DS Files/NFSHP2-3DS.cia (.3dsx/.smdh too). The link's .elf, which
+# the 3DS never loads, is an intermediate in 3DS Files/build.
 #
 # Why this script exists: the project lives under a path containing spaces
 # ("My Stuff", "3DS Files"), and devkitPro's Makefile template can't be

@@ -55,4 +55,11 @@ void    bReadAsync(bFile *f, void *buf, int32_t n, bFileCallback cb,
 void    bRead(bFile *f, void *buf, int32_t n);
 void    bServiceFileSystem(void);
 
+// bGetFile(const char *, int *, int), 0x00254908: the whole file in a
+// block of its own, bMalloc(size, name, 0, pool | 0x40), with the size to
+// *size unless that is NULL. Retail asserts on a file that is not there
+// (bfile.cpp, line 831) and the game stops; the port's says which file to
+// stderr and aborts.
+void   *bGetFile(const char *name, int32_t *size, int32_t pool);
+
 #endif
