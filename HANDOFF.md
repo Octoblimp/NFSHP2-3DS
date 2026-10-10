@@ -19521,3 +19521,40 @@ Picked up from Session 64's steps:
   - a frontend Hot Pursuit quick race at 30 fps, logging "speech bank 0:
     loaded".
 - Committed as c8b0d26. Next: 14-9, speech::mgr_t.
+
+## Session 67 (2026-10-10) -- 14-9, speech::mgr_t
+
+- `speechmgr.{c,h}`: speech::mgr_t ported from retail:
+  - the queue (two events) and the four contexts;
+  - update, FlushQueue, AllocateVoices, fade and Mute;
+  - the 54 raise functions something calls;
+  - nfsFsm's 25 states and their transitions, as const tables generated
+    from a dump of retail's constructor (scratchpad gentables.py);
+  - the five conditions and 83 actions (the four no transition uses are
+    left out);
+  - speechContext_t's cop ids, and ConvertSpeed.
+- `tools/speechmgr_check.py` with `tools/src/speechmgr_test.c`: 4145
+  ops, 27220 lines, 0 differ. 885 mutations, 876 caught. Most are
+  generated from the source: every sentence's id and parameters, every
+  transition's four fields, and every raise's event and stores. The 9
+  equivalents are:
+  - six second transitions' supervisor conditions;
+  - the state set before the action;
+  - ConvertSpeed's `<=` at 340;
+  - `/ 20` for `* 0.05`.
+- docs/formats/speechmgr.md has every raised event's sentences (the
+  speech library's event ids) and what follows them.
+- main.c binds:
+  - sound's speech_update, speech_mute, speech_flush and
+    speech_sed_playing;
+  - gSpeechFlushQueueFn, gCopSpeechFlushQueueFn,
+    gCopSpeechAllocateVoicesFn and gCopSpeechPlaybackStateFn;
+  - the car selector's speechFade and soundEnabled (SoundEnabled).
+  AllocateVoices now draws on bDefaultSeed at the cop manager's set-up,
+  as retail does.
+- Built; check_3dsx and check_shbin pass. Azahar, on AC: a frontend Hot
+  Pursuit quick race (`run_azahar_quickrace.ps1 -HoldKeys 65`), PASS at
+  29.9 fps.
+- Committed as a7f8f4b. Next: 14-10, binding the raises: pursuit.h's,
+  pullover.h's, pursuitchopper.h's, raceupdate.h's and playerhud.h's
+  speech seams, the filler speech, and bcarsel's speakCar.

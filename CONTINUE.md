@@ -759,7 +759,20 @@ pursuit.obj, on a 10 KB manager. Its slices:
       the card: a gas-only SkipFE race at 30 fps, and a frontend Hot
       Pursuit quick race at 30 fps with "speech bank 0: loaded". No
       event is queued until 14-9, so nothing speaks yet.
-  - **14-9:** speech::mgr_t.
+  - **14-9, done (a7f8f4b):** speech::mgr_t (0x00209ef0 ..
+    0x0020b868), its nfsFsm, conditions and actions (0x0020bf00 ..
+    0x0020f7c0), speechContext_t (0x0020f7f8 .. 0x0020fac8) and
+    ConvertSpeed (0x00223528) in `speechmgr.c`
+    (docs/formats/speechmgr.md). The transition tables are generated
+    from retail's constructor. main.c binds sound's speech_update,
+    speech_mute, speech_flush and speech_sed_playing,
+    gSpeechFlushQueueFn, gCopSpeechFlushQueueFn,
+    gCopSpeechAllocateVoicesFn, gCopSpeechPlaybackStateFn and the car
+    selector's speechFade and soundEnabled.
+    `tools/speechmgr_check.py`: 4145 ops, 27220 lines, 0 differ; 885
+    mutations, 876 caught, 9 equivalent. Azahar, on AC: a frontend
+    Hot Pursuit quick race at 30 fps. Nothing raises an event until
+    14-10, so nothing speaks yet.
   - **14-10:** the pursuit, race and filler speech, retiring the
     gSpeech* seams.
 
@@ -5212,9 +5225,9 @@ count. It is its own slice when it goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** step 14, the audio in full, at 14-9 (speech::mgr_t).
+- **Next:** step 14, the audio in full, at 14-10 (the raises bound).
   14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5, 14-6, 14-7, 14-8a, 14-8b,
-  14-8c and 14-8d are done. Of step 12,
+  14-8c, 14-8d and 14-9 are done. Of step 12,
   12a to 12k-2, the light flares, 12k-3's planners, 12k-3a, 12k-3b,
   12k-4a, 12k-4b, 12k-7, 12l-1 and 12l-2 are done. See
   "First" at the top.
