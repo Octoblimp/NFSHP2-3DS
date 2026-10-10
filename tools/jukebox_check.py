@@ -32,8 +32,9 @@ statuses; and one of 130 tunes, past m_pTune's 128.
 menu tune, runs the callbacks through play end, fade end and the buffer
 events, the first-pick one-shots in the menu, a race and a pursuit, the
 random first advance, the pause rules under each music volume, the
-delayed start through sound::Update paused, muted and in the frontend,
-sound::Mute under each enable and category volume, the playlist's statuses and genre mask, and each assert. After an op the
+playlist's statuses and genre mask, and each assert. (DelayedStart's
+count through sound::Update and sound::Mute's pause are sound.c's, in
+tools/sound_check.py.) After an op the
 harness and the model print the same lines; `dump` prints the player,
 its categories and tunes, the sound statics and Fred's 176 bytes.
 
@@ -97,7 +98,6 @@ F = {
     "genre": 0x001aef80, "status": 0x001aefd0, "current": 0x001af040,
     "savedvol": 0x001ae028, "saved": 0x001af7e0,
     "defvol": 0x001afab8,
-    "soundupdate": 0x001af4c0, "mute": 0x001af850,
     "fromsound": 0x001eef60, "defaults": 0x001ef1c8, "apply": 0x001ef120,
 }
 TRACK = ("artist", "trackname", "label", "genre")
@@ -278,34 +278,7 @@ def script():
                 ext(["setcatvol|4|" + v4, "setcatvol|5|" + v5, "saved",
                      "state|%d" % st, "stopj", "mstart", "misplaying"])
     ext(["setcatvol|4|3f800000", "setcatvol|5|3f800000", "saved"])
-    # sound::Mute, the pause's: the flag, and the jukebox's Pause by the
-    # volume of its category, up, down to nothing and below, under each
-    # enable; and stopped, with no sample to pause.
-    for se, me in ((0, 1), (1, 0), (1, 1)):
-        a("enable|%d|%d" % (se, me))
-        for cat in (5, 4):
-            a("select|%d" % cat)
-            for v in ("3f000000", "0", "bf800000"):
-                a("setcatvol|%d|%s" % (cat, v))
-                for on in (1, 0, 2):
-                    ext(["starttune|0|1|1", "event|4", "update",
-                         "mute|%d" % on, "dump"])
-            a("setcatvol|%d|3f800000" % cat)
-    ext(["enable|1|1", "stopj", "mute|1", "dump", "mute|0", "dump",
-         "muted|0", "select|5"])
-    # DelayedStart through sound::Update.
-    ext(["stopj", "delayed|3fc00000", "dt|3f000000", "state|6",
-         "soundupdate", "dump", "paused|1", "soundupdate", "dump",
-         "paused|0", "muted|1", "soundupdate", "muted|0", "state|3",
-         "soundupdate", "state|6", "soundupdate", "soundupdate", "dump",
-         "soundupdate", "dump", "delayed|bf800000", "soundupdate", "dump",
-         "delayed|0", "soundupdate", "event|4", "soundupdate", "dump",
-         "enable|0|1", "delayed|3f000000", "soundupdate", "dump",
-         "enable|1|1"])
-    ext(["stopj", "delayed|3f800000", "dt|3ec00000", "state|6", "soundupdate",
-         "muted|1", "soundupdate", "muted|0", "dump", "state|3", "soundupdate",
-         "state|6", "dump", "soundupdate", "dump", "soundupdate", "dump",
-         "stopj", "dt|3f000000"])
+    ext(["enable|1|1", "stopj", "muted|0", "select|5", "state|6"])
     # The volumes and the options block.
     ext(["setvol|3f000000", "dump", "setcatvol|0|3f000000",
          "setcatvol|1|3e000000", "setcatvol|2|3d000000",
@@ -405,7 +378,6 @@ class Model(object):
         self.pos = 0
         self.sound_up = 1
         self.mode = 0
-        self.paused = 0
         self.fileobj = e.alloc(64)
         self.path = e.alloc(64)
         self.write_str(self.path, "SOUND\\JukeboxM.JBC")
@@ -440,7 +412,6 @@ class Model(object):
         e.stub(0x00250f48, self.ticker_diff)
         e.stub(0x00209ef0, lambda em: self.speech)
         e.stub(0x001b0188, lambda em: self.speech)
-        e.stub(0x001680b8, lambda em: self.paused)
         e.put32(CHOPPER, 0)
         e.put32(VOICEUSAGE, 0)
         e.put32(DEMODISC, 0)
@@ -665,25 +636,12 @@ class Model(object):
         elif o == "setcatvol":
             if arg(1) < 16:
                 self.vol[arg(1)] = fl(2)
-        elif o == "soundupdate":
-            self.call("soundupdate")
-        elif o == "mute":
-            # Mute reads TheChopperManager's chopper (+24) with no test of
-            # the manager; Update's test of it wants it NULL.
-            keep = e.u32(CHOPPER)
-            e.put32(CHOPPER, self.chopper)
-            try:
-                self.call("mute", arg(1))
-            finally:
-                e.put32(CHOPPER, keep)
         elif o == "state":
             e.put32(STATE, arg(1))
         elif o == "cops":
             e.put32(COPS, arg(1))
         elif o == "vblank":
             e.put32(VBLANK, arg(1))
-        elif o == "paused":
-            self.paused = arg(1)
         elif o == "muted":
             e.put32(MUTED, arg(1))
         elif o == "dt":
@@ -1105,7 +1063,9 @@ MUTATIONS = [
 
     # ---- sound::jukebox state
     _m("saved-list", "{0, 1, 2, 5, 4};", "{0, 1, 2, 4, 5};"),
-    _m("sinit-sound", "    s->soundEnabled = 1;\n", ""),
+    _m("getcatvol-cat", "return bsound_get_category_volume(bsound_get(), cat);",
+       "return bsound_get_category_volume(bsound_get(), cat + 1);"),
+    _m("setcatvol-store", "    bsound_set_category_volume(bsound_get(), cat, v);\n", ""),
     _m("sinit-music", "    s->musicEnabled = 1;\n", ""),
     _m("sinit-menu", "    s->firstMenuTune = 1;\n", ""),
     _m("sinit-pursuit", "    s->firstPursuitTune = 1;\n", ""),
@@ -1113,12 +1073,7 @@ MUTATIONS = [
     _m("sinit-advance", "    s->firstAdvance = 1;\n", ""),
     _m("sinit-saved", "s->savedVolume[i] = -1.0f;", "s->savedVolume[i] = 0.0f;"),
     _m("sinit-speech", "    s->savedSpeechVolume = -1.0f;\n", ""),
-    _m("sinit-catvol", "s->categoryVolume[i] = 1.0f;", "s->categoryVolume[i] = 0.5f;"),
     _m("sinit-key", "    s->trackKey = -1;\n", ""),
-    _m("getcatvol-bound", "return cat < 16 ? s->categoryVolume[cat] : 1.0f;",
-       "return cat < 16 ? s->categoryVolume[cat] : 0.0f;"),
-    _m("setcatvol-store", "    if (cat < 16) {\n        s->categoryVolume[cat] = v;",
-       "    if (cat < 15) {\n        s->categoryVolume[cat] = v;"),
     _m("saved-0", "case 0: return s->savedVolume[0];", "case 0: return s->savedVolume[1];"),
     _m("saved-1", "case 1: return s->savedVolume[1];", "case 1: return s->savedVolume[0];"),
     _m("saved-2", "case 2: return s->savedVolume[2];", "case 2: return s->savedVolume[1];"),
@@ -1154,10 +1109,10 @@ MUTATIONS = [
        "return 1u << (((uint32_t)genre + 1) & 31);"),
 
     # ---- Start
-    _m("mstart-sound", "if (!s->soundEnabled || !s->musicEnabled) {\n        return;\n    }\n    jb_update(p);",
+    _m("mstart-sound", "if (!SoundEnabled || !s->musicEnabled) {\n        return;\n    }\n    jb_update(p);",
        "if (!s->musicEnabled) {\n        return;\n    }\n    jb_update(p);"),
-    _m("mstart-music", "if (!s->soundEnabled || !s->musicEnabled) {\n        return;\n    }\n    jb_update(p);",
-       "if (!s->soundEnabled) {\n        return;\n    }\n    jb_update(p);"),
+    _m("mstart-music", "if (!SoundEnabled || !s->musicEnabled) {\n        return;\n    }\n    jb_update(p);",
+       "if (!SoundEnabled) {\n        return;\n    }\n    jb_update(p);"),
     _m("mstart-fading", "    if (p->statePlay == JB_PLAYING || jb_is_fading(p)) {\n        return;",
        "    if (p->statePlay == JB_PLAYING) {\n        return;"),
     _m("mstart-status", "& ao[JB_AO_GENRE_MASK]) && e[2]) {",
@@ -1245,22 +1200,6 @@ MUTATIONS = [
     _m("status-empty", "    if (!st || !*st) {\n        return 0;", "    if (!st || !*st) {\n        return 1;"),
     _m("current-track", "return s->jukebox.curTuneNum;\n}", "return s->jukebox.curCatNum;\n}"),
 
-    # ---- per-frame
-    _m("mupdate-sound", "    if (!s->soundEnabled) {\n        return;\n    }\n"
-       "    jb_update(&s->jukebox);", "    jb_update(&s->jukebox);"),
-    _m("mupdate-update", "    jb_update(&s->jukebox);\n    int paused", "    int paused"),
-    _m("mupdate-paused", "if (paused || jb_state(s) == JB_STATE_IN_FRONTEND || s->muted) {",
-       "if (jb_state(s) == JB_STATE_IN_FRONTEND || s->muted) {"),
-    _m("mupdate-fe", "if (paused || jb_state(s) == JB_STATE_IN_FRONTEND || s->muted) {",
-       "if (paused || s->muted) {"),
-    _m("mupdate-muted", "if (paused || jb_state(s) == JB_STATE_IN_FRONTEND || s->muted) {",
-       "if (paused || jb_state(s) == JB_STATE_IN_FRONTEND) {"),
-    _m("mupdate-positive", "if (0.0f < s->delayedStart) {", "if (0.0f <= s->delayedStart) {"),
-    _m("mupdate-count", "if (0.0f < s->delayedStart) {", "if (1) {"),
-    _m("mupdate-dt", "s->delayedStart -= dt;", "s->delayedStart -= dt * 2.0f;"),
-    _m("mupdate-fire", "if (s->delayedStart < 0.0f) {", "if (s->delayedStart <= 0.0f) {"),
-    _m("mupdate-reset", "        s->delayedStart = 0.0f;\n    }\n}", "    }\n}"),
-
     # ---- DataAudioOptionsScreen
     _m("from-menu", "wrf(ao + JB_AO_MENU_MUSIC, jb_get_category_volume(s, 5));",
        "wrf(ao + JB_AO_MENU_MUSIC, jb_get_category_volume(s, 4));"),
@@ -1323,28 +1262,10 @@ MUTATIONS = [
        "ao[JB_AO_AUDIO_MODE]);"),
     _m("apply-mode-sign", "return (int16_t)(ao[JB_AO_AUDIO_MODE]",
        "return (uint16_t)(ao[JB_AO_AUDIO_MODE]"),
-    _m("mute-sound", "    if (!s->soundEnabled) return;\n    s->muted = on;",
-       "    s->muted = on;"),
-    _m("mute-flag", "    s->muted = on;\n    if (s->musicEnabled) {",
-       "    if (s->musicEnabled) {"),
-    _m("mute-music", "    s->muted = on;\n    if (s->musicEnabled) {",
-       "    s->muted = on;\n    if (1) {"),
-    _m("mute-flag-late", "    s->muted = on;\n    if (s->musicEnabled) {",
-       "    if (s->musicEnabled) {\n        s->muted = on;"),
-    _m("mute-strict", "int pause = 0.0f < jb_get_category_volume",
-       "int pause = 0.0f <= jb_get_category_volume"),
-    _m("mute-cat", "jb_get_category_volume(s, p->soundCategory)\n",
-       "jb_get_category_volume(s, 5)\n"),
-    _m("mute-down", "? on : (on ? on : 1);", "? on : 1;"),
-    _m("mute-down-on", "? on : (on ? on : 1);", "? on : on;"),
-    _m("mute-up", "? on : (on ? on : 1);", "? (on ? on : 1) : (on ? on : 1);"),
 ]
 EQUIVALENT = {
-    "mute-down": "with the category at nothing `on ? on : 1` is nonzero "
-                 "either way, and cJukeboxPlayer::Pause takes a bool",
     "copy-name-cap":"a name off the cartridge is at most 84 bytes, a "
                      "category's 60; only a name made by hand reaches 96",
-    "getcatvol-bound": "every caller asks for a category 0 to 6",
     "select-col-menu": "SetSelection is only ever called with 4 or 5",
     "track-field": "retail has a getter for each of fields 0 to 3 and the "
                    "status for 4; nothing asks for another",

@@ -270,6 +270,13 @@ typedef struct {
     // carloader.h). Neither is traced: the boot transcript predates them.
     void (*initSelectCar)(void* user);
     void (*closeSelectCar)(void* user);
+    // InitFrontendSounds (0x0016df60), just before InitSelectCarScreen;
+    // and UnInitFrontendSounds (0x0016dff8) and UnLoadSoundRegions
+    // (0x001af420), after CloseSelectCarScreen (fesound.h, sound.h). Not
+    // traced.
+    void (*initFrontendSounds)(void* user);
+    void (*unInitFrontendSounds)(void* user);
+    void (*unloadSoundRegions)(void* user);
     // NewMainMenu's Hot Pursuit and World Racing store CopsOn in
     // Fred.MainMenuOpts.mPolice (0x002fc070), which StartQuickRace reads;
     // the flow keeps its own copy in copsOn. Not traced.

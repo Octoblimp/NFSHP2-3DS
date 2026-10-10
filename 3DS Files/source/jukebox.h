@@ -123,8 +123,6 @@ typedef struct {
     int      (*max_cops)(void* ctx);
     // gp-19616, the VBlank count PSX2VBlank keeps.
     uint32_t (*vblank)(void* ctx);
-    // IsGameFlowPaused, 0x001680b8.
-    int      (*paused)(void* ctx);
 } JBWorld;
 
 #define JB_STATE_IN_FRONTEND 3
@@ -140,12 +138,12 @@ typedef struct {
 #define JB_CAT_MENU_MUSIC    5
 #define JB_CAT_SPEECH        6
 
-// The sound module's share: sound::jukebox's statics, bSound's category
-// volumes (+12, sixteen floats, 1.0 from the constructor), and the saved
-// volumes jukebox::Start reads instead of bSound's.
+// The sound module's share: sound::jukebox's statics and the saved volumes
+// jukebox::Start reads instead of bSound's. SoundEnabled (gp-23056) is
+// carinit.c's and the category volumes are bSound's own (bsound_get()),
+// so each has the one copy retail has.
 typedef struct {
     JBPlayer    jukebox;
-    int         soundEnabled;         // gp-23056
     int         musicEnabled;         // gp-23048
     int         firstMenuTune;        // gp-18928: the menu's first is list 5
     int         firstPursuitTune;     // gp-18924: a pursuit's, list 14
@@ -155,7 +153,6 @@ typedef struct {
     int         muted;                // gp-19040, sound::Mute's
     float       savedVolume[5];       // 0x00313878: categories 0,1,2,5,4
     float       savedSpeechVolume;    // gp-19024, -1.0 too
-    float       categoryVolume[16];   // bSound+12
     int32_t     trackKey;             // gp-18912, -1
     char        trackName[JB_NAME_MAX];     // 0x003138a8
     const char* track[16];                  // 0x00334208
@@ -223,8 +220,8 @@ int32_t     jb_add_tune(JBPlayer* p, const char* cat, const char* name,
 
 void jb_sound_init(JBSound* s, const JBHost* host, const JBWorld* world);
 
-// bSound::GetCategoryVolume / SetCategoryVolume: 16 categories, 1.0 past
-// the end on a read, a write past it dropped.
+// bSound::GetCategoryVolume / SetCategoryVolume on bsound_get(): 16
+// categories, 1.0 past the end on a read, a write past it dropped.
 float jb_get_category_volume(const JBSound* s, uint32_t cat);
 void  jb_set_category_volume(JBSound* s, uint32_t cat, float v);
 // 0x001ae028: a saved volume, by category; 0 for 3 and past 5.
@@ -239,12 +236,6 @@ void jb_music_start(JBSound* s, const uint8_t* fredAudio, int arg);
 void jb_music_stop(JBSound* s);                           // 0x001aec90
 void jb_music_delayed_start(JBSound* s, float seconds);   // 0x001aec88
 bool jb_music_is_playing(JBSound* s);                     // 0x001aecb0
-// sound::Mute (0x001af850), the music's share: with sound up, the flag
-// jb_music_update reads, and the jukebox paused -- always, when its
-// category's volume is 0. Retail then mutes the speech, the soundscape,
-// the cars, the one-shots, the collisions and the chopper, which the port
-// does not have.
-void jb_sound_mute(JBSound* s, int on);
 // SetSelection (0x001af050): the bSound category, then every tune on the
 // list turned on or off by its status and genre.
 void jb_music_set_selection(JBSound* s, const uint8_t* fredAudio, int cat);
@@ -262,10 +253,8 @@ const char* jb_track_string(JBSound* s, int cat, int tune, int field);
 int         jb_track_status(JBSound* s, int cat, int tune);
 uint32_t    jb_current_track(const JBSound* s);           // 0x001af040
 
-// The music's share of sound::Update (0x001af4c0), past its 8 ms gate:
-// Jukebox's Update, then -- in a race that is neither paused nor muted --
-// DelayedStart's count, by dt (gp-19560, the frame's seconds).
-void jb_music_update(JBSound* s, const uint8_t* fredAudio, float dt);
+// sound::Update (Jukebox's Update and DelayedStart's count) and sound::Mute
+// (the pause) are sound.c's.
 
 // ------------------------------------------- DataAudioOptionsScreen
 

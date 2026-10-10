@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "bsound.h"
 #include "jukebox.h"
 
 static JBSound   snd;
@@ -24,7 +25,7 @@ static int       cart_now = 0;
 static long      cart_pos;
 static int       sound_up = 1;
 static int       audio_mode;
-static int       g_state, g_cops, g_paused;
+static int       g_state, g_cops;
 static uint32_t  g_vblank;
 static float     g_dt;
 
@@ -110,9 +111,33 @@ static const JBHost host = {
 static int      w_state(void* c) { (void)c; return g_state; }
 static int      w_cops(void* c) { (void)c; return g_cops; }
 static uint32_t w_vblank(void* c) { (void)c; return g_vblank; }
-static int      w_paused(void* c) { (void)c; return g_paused; }
 
-static const JBWorld world = { NULL, w_state, w_cops, w_vblank, w_paused };
+static const JBWorld world = { NULL, w_state, w_cops, w_vblank };
+
+// ------------------------------------------------------------- bSound
+
+// SoundEnabled is carinit.c's, the category volumes bSound's: the
+// checker's model keeps the volumes in a table of its own, so does this.
+int32_t SoundEnabled = 1;
+static float g_volume[16] = {
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+};
+
+BSound* bsound_get(void) { return NULL; }
+
+float bsound_get_category_volume(const BSound* s, uint32_t cat)
+{
+    (void)s;
+    return cat < 16 ? g_volume[cat] : 1.0f;
+}
+
+void bsound_set_category_volume(BSound* s, uint32_t cat, float v)
+{
+    (void)s;
+    if (cat < 16) {
+        g_volume[cat] = v;
+    }
+}
 
 // ------------------------------------------------------------- the dump
 
@@ -146,7 +171,7 @@ static void dump(void)
     }
     printf("  sound se=%d me=%d first=%d,%d,%d,%d delay=%08x muted=%d "
            "saved=%08x,%08x,%08x,%08x,%08x speech=%08x key=%d\n",
-           snd.soundEnabled, snd.musicEnabled, snd.firstMenuTune,
+           SoundEnabled, snd.musicEnabled, snd.firstMenuTune,
            snd.firstPursuitTune, snd.firstRaceTune, snd.firstAdvance,
            bits(snd.delayedStart), snd.muted, bits(snd.savedVolume[0]),
            bits(snd.savedVolume[1]), bits(snd.savedVolume[2]),
@@ -154,7 +179,7 @@ static void dump(void)
            bits(snd.savedSpeechVolume), snd.trackKey);
     printf("  vol");
     for (int i = 0; i < 16; i++) {
-        printf(" %08x", bits(snd.categoryVolume[i]));
+        printf(" %08x", bits(g_volume[i]));
     }
     printf("\n");
     printf("  ao ");
@@ -276,24 +301,18 @@ static void run(void)
         jb_save_volumes_for_speech(&snd);
     } else if (!strcmp(op, "setcatvol")) {
         jb_set_category_volume(&snd, unum(1), fnum(2));
-    } else if (!strcmp(op, "soundupdate")) {
-        jb_music_update(&snd, ao, g_dt);
     } else if (!strcmp(op, "state")) {
         g_state = (int)num(1);
     } else if (!strcmp(op, "cops")) {
         g_cops = (int)num(1);
     } else if (!strcmp(op, "vblank")) {
         g_vblank = unum(1);
-    } else if (!strcmp(op, "paused")) {
-        g_paused = (int)num(1);
     } else if (!strcmp(op, "muted")) {
         snd.muted = (int)num(1);
-    } else if (!strcmp(op, "mute")) {
-        jb_sound_mute(&snd, (int)num(1));
     } else if (!strcmp(op, "dt")) {
         g_dt = fnum(1);
     } else if (!strcmp(op, "enable")) {
-        snd.soundEnabled = (int)num(1);
+        SoundEnabled = (int)num(1);
         snd.musicEnabled = (int)num(2);
     } else if (!strcmp(op, "aob")) {
         ao[num(1)] = (uint8_t)num(2);

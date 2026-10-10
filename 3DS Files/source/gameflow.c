@@ -722,9 +722,11 @@ void bgf_end_loading_frontend(BGameFlow* gf)
 {
     // eFixUpTables, InitCarEffects, InitFrontendSounds, InitSelectCarScreen
     // and InitMoviePlayer run here in the original. On the 3DS the renderer
-    // and the bundles are already up by the time the flow starts, so the
-    // only part of this that has an effect is the visibility and the launch.
-    // (The demo disc hid its slideshow's last panel instead.)
+    // and the bundles are already up by the time the flow starts, so what
+    // is left is the frontend's sounds, the car selector, the visibility
+    // and the launch. (The demo disc hid its slideshow's last panel
+    // instead.)
+    HOOK_VOID0(gf, initFrontendSounds);
     HOOK_VOID0(gf, initSelectCar);
     screenVisible(gf, BGF_SCREEN_LOADING_TRACK, 0);
     objectVisible(gf, BGF_SCREEN_LOADING_TRACK, BGF_OBJ_COPYRIGHT, 0);
@@ -742,6 +744,8 @@ void bgf_begin_unloading_frontend(BGameFlow* gf)
 {
     bgf_unlaunch_frontend_menus(gf);
     HOOK_VOID0(gf, closeSelectCar);
+    HOOK_VOID0(gf, unInitFrontendSounds);
+    HOOK_VOID0(gf, unloadSoundRegions);
     HOOK_VOID0(gf, unloadFrontEnd);
     bgf_change_state(gf, BGF_LOADING_TRACK_COMMON, BGF_NONE);
 }

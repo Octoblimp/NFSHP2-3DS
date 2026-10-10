@@ -1,54 +1,93 @@
 #include "fesound.h"
 
-#include <string.h>
+#include "bticker.h"
+#include "jukebox.h"
 
-// The one bSound the frontend talked to (gp-23628, tested at the head of
-// every function in this family). A static here for the same reason: the
-// BMenuSoundFn signature passes BMenu::user, which belongs to the screen.
-static BsndDriver* gDriver;
+// SoundEnabled (gp-23056), carinit.c's.
+extern int32_t SoundEnabled;
 
-// InitGlobalMenuSound (0x00169160) and InitFrontendSounds (0x001691e8) walk
-// the same table twice, once per region, building a bSample for every entry
-// that belongs to theirs. Here the bank is the unit, so the walk is only to
-// find out which banks the table mentions at all -- two, on this disc, but the
-// loop does not assume that.
-void fesound_init(BsndDriver* d)
+// Each entry's bSample, the table's fourth word in the image (+12).
+static BSample* s_sample[FESOUND_EVENT_COUNT];
+// MakeFrontendSound's last sample and when it played (gp-21204, gp-21208).
+static BSample* s_lastSample;
+static uint32_t s_lastTime;
+
+void fesound_init_global(void)
 {
-    int i, j;
+    int i;
 
-    gDriver = d;
-    if (!d) return;
-
+    if (!SoundEnabled)
+        return;
     for (i = 0; i < FESOUND_EVENT_COUNT; i++) {
-        const char* bank = fesound_events[i].bank;
-        if (!bank) continue;
-        for (j = 0; j < i; j++)
-            if (fesound_events[j].bank
-                && strcmp(fesound_events[j].bank, bank) == 0) break;
-        if (j < i) continue;                    // already asked for this one
-        bsnd_bank_load(d, bank);                // false just means silence
+        // CommonRegion is asked for again on every pass.
+        BRegion* r = bsound_common_region(bsound_get());
+        const FeSoundEntry* e = &fesound_events[i];
+
+        if (e->fromFrontEnd != 0 || e->name == NULL)
+            continue;
+        s_sample[i] = bregion_sample(r, e->name);
+        bsample_set_category(s_sample[i], JB_CAT_MENU_SFX);
     }
+}
+
+void fesound_init_frontend(void)
+{
+    int i;
+
+    if (!SoundEnabled)
+        return;
+    for (i = 0; i < FESOUND_EVENT_COUNT; i++) {
+        BRegion* r = bsound_region(bsound_get(), "FrontEnd");
+        const FeSoundEntry* e = &fesound_events[i];
+
+        // No SetCategory here: MakeFrontendSound sets it on every play.
+        if (e->fromFrontEnd != 1 || e->name == NULL)
+            continue;
+        s_sample[i] = bregion_sample(r, e->name);
+    }
+}
+
+void fesound_uninit_frontend(void)
+{
+    int i;
+
+    for (i = 0; i < FESOUND_EVENT_COUNT; i++)
+        if (fesound_events[i].fromFrontEnd == 1)
+            s_sample[i] = NULL;
 }
 
 void fesound_play(int soundEvent, void* user)
 {
-    BsndDriver* d = gDriver;
-    const FeSoundEntry* e;
+    BSample* s;
 
     (void)user;
+    if (!SoundEnabled)
+        return;
+    // Retail indexes the table unbounded; every event bmenu.c raises is in
+    // it. The bound is the port's.
+    if (soundEvent < 0 || soundEvent >= FESOUND_EVENT_COUNT)
+        return;
+    s = s_sample[soundEvent];
+    if (s == NULL)
+        return;
+    if (s == s_lastSample
+        && bGetTickerDifference(s_lastTime, bGetTicker()) < 34.0f)
+        return;
+    s_lastTime = bGetTicker();
+    bsample_set_category(s, JB_CAT_MENU_SFX);
+    bsample_play(s, 1.0f, 0.0f, 0.0f);
+    s_lastSample = s;
+}
 
-    // MakeFrontendSound returns without touching anything when the event has
-    // no sample (0x001692e8), and every callback that does not pick a noise
-    // leaves BScreenCallbackData::noise at 0 -- so this is the path most menu
-    // input takes.
-    if (!d || soundEvent <= 0 || soundEvent >= FESOUND_EVENT_COUNT) return;
-    e = &fesound_events[soundEvent];
-    if (!e->bank || !e->patch) return;
+void fesound_stop(int soundEvent)
+{
+    BSample* s;
 
-    // The patch's own rate, volume and pan, an azimuth of 0, and any free
-    // voice: the disc's Play(1.0f, 0.0f, 0.0f) is full volume, centred, and
-    // bSample::Play picks the channel. A miss -- bank not on the card, no free
-    // voice -- is silence, which is the right failure for a menu bleep.
-    bsnd_voice_play(d, e->bank, e->patch, BSND_RATE_PATCH, BSND_VOLUME_PATCH,
-                    0, BSND_VOICE_ALLOC);
+    if (!SoundEnabled)
+        return;
+    if (soundEvent < 0 || soundEvent >= FESOUND_EVENT_COUNT)
+        return;                     // the port's, as fesound_play's
+    s = s_sample[soundEvent];
+    if (s != NULL)
+        bsample_stop(s);
 }

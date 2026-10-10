@@ -457,7 +457,10 @@ float bsound_get_category_volume(const BSound* s, uint32_t category)
 void bsound_set_path(BSound* s, const char* path)
 {
     b_strncpy(s->path, path, 63);
-    bsnd_set_load_path(s->driver, path);
+    // The port's: with no ndsp there is no driver to tell. Retail's bSnd
+    // calls take no instance, so it never needed to ask.
+    if (s->driver != NULL)
+        bsnd_set_load_path(s->driver, path);
 }
 
 int32_t bsound_get_status(const BSound* s)
@@ -467,6 +470,8 @@ int32_t bsound_get_status(const BSound* s)
 
 void bsound_set_mode(BSound* s, int32_t mode)
 {
+    if (s->driver == NULL)          // the port's, as bsound_set_path's
+        return;
     switch (mode) {
     case 0: bsnd_set_mode(s->driver, BSND_MODE_MONO); break;
     case 1: bsnd_set_mode(s->driver, BSND_MODE_STEREO); break;
@@ -547,6 +552,10 @@ BSample* bregion_sample(const BRegion* r, const char* name)
 {
     int32_t i;
 
+    // The port's: a region that never loaded -- no bank on the card, or no
+    // ndsp -- has no samples, where retail would read through NULL.
+    if (r == NULL)
+        return NULL;
     for (i = 0; i < r->samples.count; i++) {
         BSample* s = (BSample*)r->samples.items[i];
 
@@ -627,6 +636,9 @@ void bsample_delete(BSample* s)
 
 void bsample_initialize_copy(BSample* s, const BSample* other)
 {
+    // The port's, as bregion_sample's: no slot, or no sample to copy.
+    if (s == NULL || other == NULL)
+        return;
     bsample_set_name(s, bsample_get_name(other));
     bsample_set_bank_name(s, bsample_get_bank_name(other));
 }
@@ -682,6 +694,8 @@ const char* bsample_get_bank_name(const BSample* s)
 
 void bsample_set_category(BSample* s, uint32_t category)
 {
+    if (s == NULL)                  // the port's, as bregion_sample's
+        return;
     s->category = category;
 }
 
@@ -826,6 +840,8 @@ BVoice* bsample_play(BSample* s, float volume, float pan, float pitch)
     uint16_t vol;
     int8_t p;
 
+    if (s == NULL)                  // the port's, as bregion_sample's
+        return NULL;
     if (s->voice != NULL) {
         if (s->voice->id == VOICE_NONE)
             return NULL;
@@ -894,7 +910,7 @@ void bsample_stop(BSample* s)
     // the sample's own callback hear that it stopped.
     BsndDriver* d = drv();
 
-    if (s->voice == NULL)
+    if (s == NULL || s->voice == NULL)  // NULL: the port's
         return;
     s->voiceLockPlaying = 0;
     bsnd_voice_stop(d, s->voice->id);

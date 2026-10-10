@@ -1,7 +1,8 @@
-"""Emit 3DS Files/source/bsndtab.c from bSnd_nArraydBPanTable in the ELF.
+"""Emit 3DS Files/source/bsndtab.c from two tables in the retail image.
 
-One table, 256 unsigned 16-bit entries at 0x00317d00, and the only lookup in
-the whole bSnd driver. `GetVolumesFromPan` (0x0024d928) reads it twice:
+The first is bSnd_nArraydBPanTable, 256 unsigned 16-bit entries at
+0x00322830 (the demo disc's 0x00317d00, the same bytes), and the only lookup
+in the whole bSnd driver. `GetVolumesFromPan` (0x0024d928) reads it twice:
 
     left  = (volume * bSnd_nArraydBPanTable[pan + 127]) >> 14
     right = (volume * bSnd_nArraydBPanTable[127 - pan]) >> 14
@@ -22,6 +23,10 @@ for the taper and it looks hand-tuned, so the file carries all 256 entries
 verbatim and the check covers the part that does regenerate. That is the same
 arrangement bSinTable gets in gen_bmath_tables.py, and for the same reason.
 
+The second is the FrontendSoundEvent table at 0x002fb098, which fesound.c's
+MakeFrontendSound indexes: 31 records of an id, the region (0 common, 1
+"FrontEnd"), the sample's name and the bSample the init functions store.
+
     python tools/gen_bsnd_tables.py            # write the file
     python tools/gen_bsnd_tables.py --check    # verify it is up to date
 """
@@ -33,16 +38,17 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mipsdis
 
-OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                   "3DS Files", "source", "bsndtab.c")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OUT = os.path.join(ROOT, "3DS Files", "source", "bsndtab.c")
+RETAIL = os.path.join(ROOT, "PS2 Files", "Full Game", "SLES_507.31")
 
-PAN_TABLE = 0x00317d00       # bSnd_nArraydBPanTable, 256 x u16
+PAN_TABLE = 0x00322830       # bSnd_nArraydBPanTable, 256 x u16
 PAN_FULL = 16383             # the table's own maximum, and its entry 0
 COSINE_ENTRIES = 225         # 0..224 regenerate; 225..255 are the taper
 
 
 def read_table():
-    elf = mipsdis.Elf()
+    elf = mipsdis.Elf(RETAIL)
     table = list(struct.unpack("<256H", elf.read(PAN_TABLE, 512)))
 
     for i in range(COSINE_ENTRIES):
@@ -58,36 +64,39 @@ def read_table():
     return table
 
 
-SOUND_EVENTS = 0x002f30ac    # the FrontendSoundEvent table, 16 bytes each
-SOUND_EVENT_COUNT = 33       # InitFrontendSounds loops while i < 33 (0x00169254)
+SOUND_EVENTS = 0x002fb098    # the FrontendSoundEvent table, 16 bytes each
+SOUND_EVENT_COUNT = 31       # every loop over it runs while i < 31 (0x0016df3c)
 
 
 def read_events():
-    """The table MakeFrontendSound indexes (0x001692c0): one record per
-    FrontendSoundEvent, holding which region the patch comes from and its
-    name. `fromFrontEnd` is what InitGlobalMenuSound tests to decide between
-    CommonRegion (0x00169188) and Region("FrontEnd") (0x00169224), which is
-    COMMON.SBK and FRONTEND.SBK here."""
-    elf = mipsdis.Elf()
+    """The table MakeFrontendSound indexes (0x0016e038): one record per
+    FrontendSoundEvent -- its id, which region the sample comes from, its
+    name and the bSample. `fromFrontEnd` is what InitGlobalMenuSound
+    (0x0016ded8) and InitFrontendSounds (0x0016df60) test to take the entry
+    from CommonRegion or from Region("FrontEnd")."""
+    elf = mipsdis.Elf(RETAIL)
     out = []
     for i in range(SOUND_EVENT_COUNT):
         rec = elf.read(SOUND_EVENTS + i * 16, 16)
-        fromFE, nameAddr, sample, nxt = struct.unpack("<4I", rec)
+        ident, fromFE, nameAddr, sample = struct.unpack("<4I", rec)
         if sample:
             sys.exit("event %d already has a bSample in the image at %08x -- "
                      "this is not the table this script documents" % (i, sample))
+        if ident != i or fromFE not in (0, 1):
+            sys.exit("event %d reads id %d, region %d -- this is not the "
+                     "table this script documents" % (i, ident, fromFE))
         if nameAddr:
             raw = elf.read(nameAddr, 64)
             name = raw[:raw.index(b"\0")].decode("latin-1")
         else:
             name = None
-        out.append((name, fromFE))
+        out.append((ident, name, fromFE))
     # Event 0 is the "no sound" slot every callback leaves in place, and the
     # engine indexes this table with it. If it ever names a patch, silence has
     # stopped being free and every caller needs looking at.
-    if out[0][0] is not None:
+    if out[0][1] is not None:
         sys.exit("FrontendSoundEvent 0 names %r -- it is meant to be silence"
-                 % out[0][0])
+                 % out[0][1])
     return out
 
 
@@ -100,13 +109,9 @@ def rows(values, per, fmt):
 
 def event_rows(events):
     out = []
-    for i, (name, fromFE) in enumerate(events):
-        if name is None:
-            out.append("    { NULL, NULL },%s" % (" " * 27 + "// %d" % i))
-        else:
-            bank = "kFrontend" if fromFE else "kCommon"
-            out.append('    { %s, "%s" },%s// %d'
-                       % (bank, name, " " * max(1, 34 - len(bank) - len(name)), i))
+    for ident, name, fromFE in events:
+        text = '"%s"' % name if name is not None else "NULL"
+        out.append("    { %2d, %d, %s }," % (ident, fromFE, text))
     return "\n".join(out)
 
 
@@ -116,7 +121,7 @@ def render():
     return """\
 // Generated by tools/gen_bsnd_tables.py -- do not edit.
 //
-// bSnd_nArraydBPanTable, read out of NFSHP2.ELF at 0x00317d00. Entries 0..224
+// bSnd_nArraydBPanTable, read out of SLES_507.31 at 0x00322830. Entries 0..224
 // are floor(16383 * cos(i * pi / 512)); 225..255 add a hand-tuned taper that
 // takes the far edge down to silence. docs/formats/sound-driver.md has the
 // numbers; the generator re-checks the cosine half every time it runs.
@@ -130,13 +135,9 @@ const uint16_t bsnd_pan_table[256] = {
 %s
 };
 
-// The FrontendSoundEvent table at 0x002f30ac, which MakeFrontendSound indexes
-// straight (0x001692c0). Entry 0 is silence; the rest name a patch and the
-// region it lives in, which is COMMON.SBK for the menu's own noises and
-// FRONTEND.SBK for the screens that have their own.
-static const char kCommon[] = "COMMON";
-static const char kFrontend[] = "FRONTEND";
-
+// The FrontendSoundEvent table at 0x002fb098, which MakeFrontendSound
+// indexes straight (0x0016e038): the id, the region (0 the common one, 1
+// "FrontEnd") and the sample's name. Entry 0 is silence.
 const FeSoundEntry fesound_events[FESOUND_EVENT_COUNT] = {
 %s
 };

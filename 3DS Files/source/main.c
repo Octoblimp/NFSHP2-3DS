@@ -135,6 +135,11 @@
 #include "jbstream.h"
 #include "jukebox.h"
 #include "songmon.h"
+#include "sound.h"
+#include "selcam.h"
+#include "player.h"
+#include "playerfinish.h"
+#include "cartypeinfo.h"
 #include "avimovie.h"
 #include "mainloop.h"
 #include "mellowmover.h"
@@ -634,19 +639,224 @@ static BSound gSound;
 
 // sound::jukebox (0x003115d0), the EA TRAX player, and what it asks of the
 // game. The flow's CurrentGameFlowState is its gp-21420; the VBlank count
-// is FrameCounter; nothing pauses the flow or sets cops yet.
+// is FrameCounter; nothing sets cops yet.
 static JBSound g_jukebox;
-static int     g_audioMode = 1;     // gp-18892, stereo
 
 static int      jbState(void* c) { (void)c; return g_flow.current; }
 // TheLanguageManager's CurrLanguage, for GetSkinNumber's cop skins.
 static int32_t  currLanguage(void) { return g_flow.currLanguage; }
 static int      jbMaxCops(void* c) { (void)c; return 0; }
 static uint32_t jbVBlank(void* c) { (void)c; return (uint32_t)FrameCounter; }
-static int      jbPaused(void* c) { (void)c; return 0; }
 
 static const JBWorld kJukeboxWorld = {
-    NULL, jbState, jbMaxCops, jbVBlank, jbPaused,
+    NULL, jbState, jbMaxCops, jbVBlank,
+};
+
+// Sound.obj's statics (sound.h): the game's own sound module over gSound,
+// the regions it loads and the per-frame update, and what it reads of the
+// game. The modules it drives that are not ported yet stay NULL.
+static SoundModule gSoundModule;
+static char        gSoundDir[GAMEDATA_MAX_PATH];
+
+static int   sndGameState(void* c) { (void)c; return g_flow.current; }
+static int   sndPaused(void* c) { (void)c; return is_game_flow_paused(); }
+static float sndDt(void* c) { (void)c; return WorldTimeElapsed; }
+// The wait loops step bSound once a vertical blank. The port's banks load
+// in the call that asks for them, so there is nothing to wait a blank
+// for: each ask is a new one.
+static uint32_t sndVBlank(void* c)
+{
+    static uint32_t n;
+    (void)c;
+    return ++n;
+}
+
+// bFileExists("sound\\NAME.msh"): the card has NAME.SBK where the disc has
+// NAME.MSH and .MSB (tools/audio_pack.py).
+static int sndFileExists(void* c, const char* path)
+{
+    char        file[GAMEDATA_MAX_PATH + 40];
+    const char* name = strrchr(path, '\\');
+    const char* dot;
+    struct stat st;
+    (void)c;
+    name = name ? name + 1 : path;
+    dot = strrchr(name, '.');
+    snprintf(file, sizeof(file), "%s/%.*s.SBK", gSoundDir,
+             (int)(dot ? dot - name : (ptrdiff_t)strlen(name)), name);
+    return stat(file, &st) == 0;
+}
+
+// eFlashScreen's colour is a debug build's cue; the log says why.
+static void sndFlash(void* c, int r, int g, int b, const char* why,
+                     float seconds)
+{
+    (void)c; (void)seconds;
+    logLine("sound: flash %d,%d,%d \"%s\"", r, g, b, why);
+}
+
+static int sndRaceState(void* c)
+{
+    (void)c;
+    return pRaceCoordinator
+        ? (int)racecoordinator_get_current_state(pRaceCoordinator) : -1;
+}
+
+static int sndNumPlayers(void* c) { (void)c; return PlayerNumPlayers; }
+
+static void sndPlayerZone(void* c, int i, int* muffle, int* zone,
+                          float* volume)
+{
+    const struct Player* p = PlayerPlayersByNumber[i];
+    (void)c;
+    if (p == NULL) return;          // the port's; retail reads it untested
+    *muffle = p->bZoneMuffleSound;
+    *zone   = p->nZoneCurrent;
+    *volume = p->fZoneMuffleVolume;
+}
+
+static const char* sndTrackRegion(void* c)
+{
+    (void)c;
+    return CurrentTrackInfo ? CurrentTrackInfo->SoundRegion : NULL;
+}
+
+// The driver's car type's Sound, the name of its engine's region.
+static const char* sndDriverRegion(void* c, int driver)
+{
+    const DriverInfo* d =
+        race_parameters_get_driver_info_by_driver_number(driver);
+    (void)c;
+    if (d == NULL || d->EliminatedRank > 0) return NULL;
+    return (const char*)cartypeinfo_get(d->CurrentRideInfo.Type)->Sound;
+}
+
+static int sndHelicopter(void* c)
+{
+    (void)c;
+    return pCurrentWorld != NULL && pCurrentWorld->Helicopter != NULL;
+}
+
+static int sndJoylogReplaying(void* c) { (void)c; return Joylog_ReplayingFlag; }
+static int32_t sndJoylogGet(void* c, int bits, int channel)
+{
+    (void)c;
+    return Joylog_GetData(bits, channel);
+}
+static void sndJoylogAdd(void* c, int32_t value, int bits, int channel)
+{
+    (void)c;
+    Joylog_AddData(value, bits, channel);
+}
+
+static SoundHooks gSoundHooks = {
+    .game_state       = sndGameState,
+    .paused           = sndPaused,
+    .dt               = sndDt,
+    .vblank           = sndVBlank,
+    .file_exists      = sndFileExists,
+    .flash            = sndFlash,
+    .race_state       = sndRaceState,
+    .num_players      = sndNumPlayers,
+    .player_zone      = sndPlayerZone,
+    .track_region     = sndTrackRegion,
+    .driver_region    = sndDriverRegion,
+    .helicopter       = sndHelicopter,
+    .joylog_replaying = sndJoylogReplaying,
+    .joylog_get       = sndJoylogGet,
+    .joylog_add       = sndJoylogAdd,
+    .sound_path       = gSoundDir,
+    .skip_missing     = 1,
+};
+
+// The bSample calls the race's modules make through their seams
+// (playerinit.h, playerzone.h, rcstates.h): `struct bSample` there is
+// bsound.h's BSample.
+static struct bSample* sndGetInGameSample(const char* name)
+{
+    return (struct bSample*)sound_get_in_game_sample(&gSoundModule, name);
+}
+static void sndSampleDelete(struct bSample* s)
+{
+    if (s) bsample_delete((BSample*)s);
+}
+static float sndGetCategoryVolume(uint32_t category)
+{
+    return bsound_get_category_volume(&gSound, category);
+}
+static struct bSample* sndNewSample(void)
+{
+    return (struct bSample*)bsample_new(0);
+}
+static void sndSampleInitialize(struct bSample* s, struct bSample* from)
+{
+    bsample_initialize_copy((BSample*)s, (const BSample*)from);
+}
+static void sndSampleSetCategory(struct bSample* s, uint32_t category)
+{
+    bsample_set_category((BSample*)s, category);
+}
+static struct bSample* sndCommonRegionSample(const char* name)
+{
+    return (struct bSample*)bregion_sample(bsound_common_region(&gSound),
+                                           name);
+}
+static int32_t sndSampleIsPlaying(struct bSample* s)
+{
+    return s != NULL && bsample_is_playing((const BSample*)s);
+}
+static void sndSamplePlay(struct bSample* s, float volume, float a, float b)
+{
+    bsample_play((BSample*)s, volume, a, b);
+}
+static void sndTriggerFinishLine(struct Player* p)
+{
+    (void)p;
+    sound_trigger_finish_line_sound(&gSoundModule);
+}
+static void sndMuteReplay(int32_t on)
+{
+    sound_mute_replay(&gSoundModule, on);
+    logLine("sound mute replay %d", (int)on);
+}
+
+// SelectCarCameraMover's four (selcam.h): each a new bSample copied from
+// the "FrontEnd" region's, at category 3, deleted by its destructor.
+static const char* const kSelCamSample[SELCAM_SND_COUNT] = {
+    "MenuCarDisplayOn", "MenuCarDisplayOff", "MenuCarDisplayActive",
+    "MenuCarOrbitBump",
+};
+static BSample* gSelCamSample[SELCAM_SND_COUNT];
+
+static void selcamCreate(int i)
+{
+    BRegion* r = bsound_region(&gSound, "FrontEnd");
+    BSample* s = bsample_new(0);
+    gSelCamSample[i] = s;
+    bsample_initialize_copy(s, bregion_sample(r, kSelCamSample[i]));
+    bsample_set_category(s, JB_CAT_MENU_SFX);
+}
+static void selcamDestroy(int i)
+{
+    if (gSelCamSample[i]) bsample_delete(gSelCamSample[i]);
+    gSelCamSample[i] = NULL;
+}
+static void selcamPlay(int i, float volume, float a, float b)
+{
+    bsample_play(gSelCamSample[i], volume, a, b);
+}
+static void selcamStop(int i) { bsample_stop(gSelCamSample[i]); }
+static void selcamSetVolume(int i, float volume)
+{
+    if (gSelCamSample[i]) bsample_set_volume(gSelCamSample[i], volume);
+}
+static void selcamSetPitch(int i, float pitch)
+{
+    if (gSelCamSample[i]) bsample_set_pitch(gSelCamSample[i], pitch);
+}
+static const SelCamSoundFns kSelCamSound = {
+    selcamCreate, selcamDestroy, selcamPlay, selcamStop, selcamSetVolume,
+    selcamSetPitch,
 };
 
 static void jukeboxAssert(int line)
@@ -960,14 +1170,50 @@ static void hookLoadResource(void* user, const char* path, BGameFlowDone done)
     bootQueue((Boot*)user, path, done);
 }
 
-// LoadSoundRegions. fesound_init loaded the frontend's banks at boot;
-// LoadSoundRegionsFrontEnd (0x001ae9a0) starts with the jukebox's list, the
-// menu's.
+// LoadSoundRegionsFrontEnd (0x001ae9a0): the jukebox to the menu's list
+// and the "FrontEnd" region asked for; sound::Update calls the flow back
+// once it is in.
+static BGameFlowDone gFeSoundsDone;
+
+static void feSoundsLoaded(intptr_t param)
+{
+    BGameFlowDone done = gFeSoundsDone;
+    gFeSoundsDone = NULL;
+    logLine("loaded sound regions");
+    if (done) done((BGameFlow*)param);
+}
+
 static void hookLoadSoundRegions(void* user, BGameFlowDone done)
 {
-    jb_music_set_selection(&g_jukebox, Fred.AudioOptionsScreenData,
-                           JB_CAT_MENU_MUSIC);
-    bootQueue((Boot*)user, "sound regions", done);
+    (void)user;
+    gFeSoundsDone = done;
+    sound_load_regions_front_end(&gSoundModule, feSoundsLoaded,
+                                 (intptr_t)&g_flow);
+}
+
+// UnLoadSoundRegions (0x001af420): the frontend's region, or the race's.
+static void soundUnloadRegions(void)
+{
+    sound_unload_regions(&gSoundModule);
+    logLine("sound regions unloaded");
+}
+
+static void hookUnloadSoundRegions(void* user)
+{
+    (void)user;
+    soundUnloadRegions();
+}
+
+static void hookInitFrontendSounds(void* user)
+{
+    (void)user;
+    fesound_init_frontend();
+}
+
+static void hookUnInitFrontendSounds(void* user)
+{
+    (void)user;
+    fesound_uninit_frontend();
 }
 
 // The callbacks due this frame. Ones they queue wait for the next.
@@ -1172,7 +1418,7 @@ static void hookFredLoaded(void* user, uint8_t* fred)
 {
     (void)user;
     int mode = jb_audio_apply(&g_jukebox, fred + FRED_AUDIO_OPTIONS);
-    g_audioMode = mode;             // sound::SetAudioMode
+    sound_set_audio_mode(&gSoundModule, mode);
     logLine("audio options loaded: mode %d", mode);
 }
 
@@ -1181,7 +1427,8 @@ static void hookFredLoaded(void* user, uint8_t* fred)
 // GetTranslatedString (0x0021e560) for the two players' default names.
 static void fredAudioDefaults(uint8_t* ao)
 {
-    jb_audio_init_with_defaults(&g_jukebox, ao, g_audioMode);
+    jb_audio_init_with_defaults(&g_jukebox, ao,
+                                sound_get_audio_mode(&gSoundModule));
 }
 
 static const char* fredTranslate(int32_t id)
@@ -2062,7 +2309,7 @@ static int hookRaceDemo(void* user)
 
 // The race's music. RaceCoordinator's cleanup stops it (sound::jukebox::Stop,
 // 0x001aec90); RACE_IN_PROGRESS's first TICK at RACING starts it six seconds
-// on (DelayedStart, 0x001aec88), which jb_music_update counts down; and
+// on (DelayedStart, 0x001aec88), which sound::Update counts down; and
 // RESTART_RACE parks the timer at 9e9 for the next start.
 static void raceJukeboxStop(void)
 {
@@ -2076,22 +2323,16 @@ static void raceJukeboxDelayedStart(float seconds)
     logLine("jukebox delayed start: %.1f s", (double)seconds);
 }
 
-// LoadSoundRegionsInGame (0x001ae798), the music's part: with sound up it
-// clears DelayedStart's timer (gp-19028) and sound::Mute's flag (gp-19040)
-// and turns the jukebox to the racing list, category 4, so the race's first
-// tune is the audio options' list 7 -- 14 in a pursuit -- or a random one.
-// Retail then loads the cars' engine regions and calls the callback when
-// they are in; the port has no regions to wait for, so it calls it now.
+// LoadSoundRegionsInGame (0x001ae798): DelayedStart's timer and the mute
+// cleared, the jukebox to the racing list, then "InGame", the track's
+// region and the two drivers' cars', one after another; sound::Update
+// calls `done` once they are in.
 static void hookLoadSoundRegionsInGame(void (*done)(intptr_t), intptr_t param)
 {
-    if (g_jukebox.soundEnabled) {
-        g_jukebox.delayedStart = 0.0f;
-        g_jukebox.muted = 0;
-        jb_music_set_selection(&g_jukebox, Fred.AudioOptionsScreenData,
-                               JB_CAT_RACING_MUSIC);
-        logLine("jukebox selection: racing music");
-    }
-    done(param);
+    sound_load_regions_in_game(&gSoundModule, done, param);
+    logLine("sound regions: %s %s %s %s", gSoundModule.region[0].name,
+            gSoundModule.region[1].name, gSoundModule.region[2].name,
+            gSoundModule.region[3].name);
 }
 
 // TheEasterEggs' Start and Stop, NewMainMenu's. The 78 codes it listens for
@@ -2596,12 +2837,11 @@ static void hookCarSelSound(void* user, int32_t event)
     fesound_play((int)event, user);
 }
 
-// StopFrontendSound: the port's frontend sounds are one-shots with nothing
-// to stop.
+// StopFrontendSound (0x0016e0e8), CarSelector's destructor's.
 static void hookCarSelStopSound(void* user, int32_t event)
 {
     (void)user;
-    (void)event;
+    fesound_stop((int)event);
 }
 
 static int hookCarSelSummonPopup(void* user, BPopupConfig* cfg)
@@ -3805,7 +4045,7 @@ static void raceChangeGameFlow(int32_t desired, int32_t pending)
 // sound::Mute (0x001af850): the pause's, and RESTART_RACE's unmute.
 static void raceSoundMute(int32_t on)
 {
-    jb_sound_mute(&g_jukebox, on);
+    sound_mute(&gSoundModule, on);
     logLine("sound mute %d", (int)on);
 }
 
@@ -4016,6 +4256,19 @@ int main(int argc, char** argv)
     gPauseMenuAnimFn = pauseMenuAnim;
     gChangeGameFlowFn = raceChangeGameFlow;
     gSoundMuteFn = raceSoundMute;
+    gSoundMuteReplayFn = sndMuteReplay;
+    // The bSamples the race's modules make and play, on gSound.
+    gGetInGameSampleFn        = sndGetInGameSample;
+    gSampleDeleteFn           = sndSampleDelete;
+    gSoundGetCategoryVolumeFn = sndGetCategoryVolume;
+    gNewSampleFn              = sndNewSample;
+    gSampleInitializeFn       = sndSampleInitialize;
+    gSampleSetCategoryFn      = sndSampleSetCategory;
+    gCommonRegionSampleFn     = sndCommonRegionSample;
+    gSampleIsPlayingFn        = sndSampleIsPlaying;
+    gSamplePlayFn             = sndSamplePlay;
+    gTriggerFinishLineSoundFn = sndTriggerFinishLine;
+    gSelCamSound              = &kSelCamSound;
 
     // World::DoTimestep's Race::Update and SimulateRaceFinish's
     // Race::FinishCar (11g-2b): the countdown's end, the laps and the
@@ -4269,33 +4522,38 @@ int main(int argc, char** argv)
     }
     logPrintf("Data: %s\n", gamedata_root());
 
-    // ndsp and the menu banks. Silence is a survivable failure -- a card with
-    // no SOUND directory still runs the frontend -- so nothing below checks.
+    // ndsp. Silence is a survivable failure -- a card with no SOUND
+    // directory still runs the frontend -- so nothing below checks.
     bool soundUp = bsnd_hw_init(&gSnd);
-    // bSound::Initialize, the first thing InitializeSoundDriver (0x001ae608)
-    // does. Its client, sound's callback (0x001ae3c8), comes with the game's
-    // sound module; with no ndsp there is no driver, and the status stays 0.
-    bsound_init(&gSound, soundUp ? &gSnd : NULL, NULL, NULL);
-    if (soundUp) {
-        fesound_init(&gSnd);
-        logPrintf("Sound: %u patches in %u voices\n",
-                  (unsigned)gSnd.patchCount, gSnd.voices);
-    } else {
-        logPrintf("Sound: ndsp unavailable, running silent\n");
-    }
-    // InitializeSoundDriver's jukebox half (0x001ae608): the EA TRAX
-    // cartridge off the disc, then each category's shipped volume. With no
-    // ndsp the jukebox is still made, with no host: GetStatus is not 1, so
-    // LoadCartridge does nothing and every Start finds no cartridge.
+    if (!gamedata_path("SOUND", gSoundDir, sizeof(gSoundDir)))
+        gSoundDir[0] = '\0';
+    // Sound.obj's statics, bSound's constructor and sound::jukebox's: with
+    // no ndsp there is no driver, bSound's status stays 0 and the jukebox
+    // has no host -- LoadCartridge does nothing and every Start finds no
+    // cartridge.
+    sound_init(&gSoundModule, &gSound, soundUp ? &gSnd : NULL, &g_jukebox,
+               Fred.AudioOptionsScreenData, &gSoundHooks);
+    bsound_init(&gSound, NULL, NULL, NULL);
     jb_sound_init(&g_jukebox,
-                  soundUp ? jbstream_host(g_jukebox.categoryVolume,
+                  soundUp ? jbstream_host(gSound.categoryVolume,
                                           jukeboxAssert)
                           : &kNoJukeboxHost,
                   &kJukeboxWorld);
-    jb_load_cartridge(&g_jukebox.jukebox, "SOUND\\JukeboxM.JBC", false);
     g_jukebox.randomRaceOpener = 1;     // jukebox.md, "The race's music"
     g_jukebox.quietSkip = 1;
-    jb_default_category_volumes(&g_jukebox);
+    // InitializeEverything's (0x0012ee98): InitializeSoundDriver
+    // (0x001ae608) -- bSound up, "common" in, the EA TRAX cartridge, each
+    // category's shipped volume -- and InitFlailerMenuSystem's
+    // InitGlobalMenuSound (0x0016ded8), the menus' own noises.
+    sound_initialize_driver(&gSoundModule);
+    fesound_init_global();
+    if (soundUp) {
+        logPrintf("Sound: %u patches in %u voices, common %s\n",
+                  (unsigned)gSnd.patchCount, gSnd.voices,
+                  gSoundModule.commonLoaded ? "in" : "missing");
+    } else {
+        logPrintf("Sound: ndsp unavailable, running silent\n");
+    }
     logPrintf("Jukebox: %s, %u tunes\n",
               jb_is_cartridge_loaded(&g_jukebox.jukebox) ? "loaded" : "none",
               (unsigned)g_jukebox.jukebox.numTunes);
@@ -4389,6 +4647,9 @@ int main(int argc, char** argv)
     hooks.easterEggs       = hookEasterEggs;
     hooks.initSelectCar    = hookCarSelInit;
     hooks.closeSelectCar   = hookCarSelClose;
+    hooks.initFrontendSounds   = hookInitFrontendSounds;
+    hooks.unInitFrontendSounds = hookUnInitFrontendSounds;
+    hooks.unloadSoundRegions   = hookUnloadSoundRegions;
     hooks.setPolice        = hookSetPolice;
     hooks.unloadFrontEnd   = hookUnloadFrontEnd;
     hooks.moveBrackets     = hookMoveBrackets;   // NewMainMenu's highlight
@@ -4519,10 +4780,12 @@ int main(int argc, char** argv)
     gReplayManagerAddData    = replayAddData;
     gReplayGetBeginningOfTimeFn     = replayGetBeginningOfTime;
     gReplayMarkTheBeginningOfTimeFn = replayMarkTheBeginningOfTime;
-    // The race's music: the regions hook turns the jukebox to the racing
-    // list as the track loads, the TICK starts it six seconds after GO and
-    // the cleanup stops it.
+    // The race's sound: the regions hook loads the race's banks and turns
+    // the jukebox to the racing list as the track loads, the TICK starts
+    // the music six seconds after GO, the cleanup stops it and the
+    // unloading lets the banks go.
     gLoadSoundRegionsInGameFn = hookLoadSoundRegionsInGame;
+    gUnLoadSoundRegionsFn     = soundUnloadRegions;
     gJukeboxDelayedStartFn    = raceJukeboxDelayedStart;
     gJukeboxDelayedStartTimer = &g_jukebox.delayedStart;
     gJukeboxStopFn            = raceJukeboxStop;
@@ -4859,20 +5122,15 @@ int main(int argc, char** argv)
         hidScanInput();
         u32 kDown = hidKeysDown();
 
-        // sound::Update (0x001af4c0). First the jukebox: its Update and a
-        // delayed start, then bSound::Update's -- the sample's callbacks.
-        // Its 8 ms gate passes at any frame rate up to 125. The delayed
-        // start counts down by the world's step (gp-19560), which is still
-        // the last frame's here: the clocks advance below.
+        // sound::Update (0x001af4c0): the regions' poll, then -- past its
+        // 8 ms gate, which passes at any frame rate up to 125 -- the
+        // jukebox's Update, a delayed start, bSound::Update and the
+        // muffler. The delayed start counts down by the world's step
+        // (gp-19560), which is still the last frame's here: the clocks
+        // advance below. Then the port's stream feed for the jukebox.
         hangwatch_mark("sound");
-        jb_music_update(&g_jukebox, Fred.AudioOptionsScreenData,
-                        WorldTimeElapsed);
+        sound_update(&gSoundModule);
         if (soundUp) jbstream_poll(&g_jukebox.jukebox);
-        // bSound::Update, last in sound::Update: the driver's sweep of the
-        // voices that have ended (without it the allocator hands out every
-        // channel once and never again), the regions whose banks have come
-        // in, and the voice records' own Update.
-        bsound_update(&gSound);
         {
             // The log's note of each tune that starts, the race's too.
             static uint32_t lastTune = 0xffffffffu;

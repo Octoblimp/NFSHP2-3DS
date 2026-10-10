@@ -11,6 +11,10 @@
 #include <string.h>
 
 #include "bmath.h"
+#include "bsound.h"
+
+// SoundEnabled (gp-23056), carinit.c's.
+extern int32_t SoundEnabled;
 
 static void jb_fail(const JBPlayer* p, int line)
 {
@@ -555,7 +559,6 @@ void jb_sound_init(JBSound* s, const JBHost* host, const JBWorld* world)
 {
     memset(s, 0, sizeof *s);
     jb_player_init(&s->jukebox, host);
-    s->soundEnabled = 1;
     s->musicEnabled = 1;
     s->firstMenuTune = 1;
     s->firstPursuitTune = 1;
@@ -565,23 +568,20 @@ void jb_sound_init(JBSound* s, const JBHost* host, const JBWorld* world)
         s->savedVolume[i] = -1.0f;
     }
     s->savedSpeechVolume = -1.0f;
-    for (int i = 0; i < 16; i++) {
-        s->categoryVolume[i] = 1.0f;
-    }
     s->trackKey = -1;
     s->world = world;
 }
 
 float jb_get_category_volume(const JBSound* s, uint32_t cat)
 {
-    return cat < 16 ? s->categoryVolume[cat] : 1.0f;
+    (void)s;
+    return bsound_get_category_volume(bsound_get(), cat);
 }
 
 void jb_set_category_volume(JBSound* s, uint32_t cat, float v)
 {
-    if (cat < 16) {
-        s->categoryVolume[cat] = v;
-    }
+    (void)s;
+    bsound_set_category_volume(bsound_get(), cat, v);
 }
 
 float jb_saved_volume(const JBSound* s, uint32_t cat)
@@ -672,7 +672,7 @@ void jb_music_start(JBSound* s, const uint8_t* ao, int arg)
 {
     (void)arg;
     JBPlayer* p = &s->jukebox;
-    if (!s->soundEnabled || !s->musicEnabled) {
+    if (!SoundEnabled || !s->musicEnabled) {
         return;
     }
     jb_update(p);
@@ -748,19 +748,6 @@ bool jb_music_is_playing(JBSound* s)
     jb_update(p);
     bool playing = p->statePlay == JB_PLAYING || jb_is_fading(p);
     return playing && 0.0f < jb_saved_volume(s, 4);
-}
-
-void jb_sound_mute(JBSound* s, int on)
-{
-    if (!s->soundEnabled) return;
-    s->muted = on;
-    if (s->musicEnabled) {
-        JBPlayer* p = &s->jukebox;
-        // A category turned down to nothing stays paused either way.
-        int pause = 0.0f < jb_get_category_volume(s, p->soundCategory)
-                    ? on : (on ? on : 1);
-        jb_pause(p, (uint32_t)pause);
-    }
 }
 
 // 0x002b6300: whether a tune plays, by its status (the rows) and the list
@@ -864,26 +851,6 @@ int jb_track_status(JBSound* s, int cat, int tune)
 uint32_t jb_current_track(const JBSound* s)
 {
     return s->jukebox.curTuneNum;
-}
-
-void jb_music_update(JBSound* s, const uint8_t* ao, float dt)
-{
-    if (!s->soundEnabled) {
-        return;
-    }
-    jb_update(&s->jukebox);
-    int paused = s->world && s->world->paused
-        ? s->world->paused(s->world->ctx) : 0;
-    if (paused || jb_state(s) == JB_STATE_IN_FRONTEND || s->muted) {
-        return;
-    }
-    if (0.0f < s->delayedStart) {
-        s->delayedStart -= dt;
-    }
-    if (s->delayedStart < 0.0f) {
-        jb_music_start(s, ao, 0);
-        s->delayedStart = 0.0f;
-    }
 }
 
 // ---------------------------------------------- DataAudioOptionsScreen

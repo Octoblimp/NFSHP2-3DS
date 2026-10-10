@@ -12,8 +12,8 @@ round trip, which patch's bytes were handed to the mixer, and when a voice came
 back. A driver can be wrong in every one of those ways without crashing, and
 none of them is visible in a screenshot.
 
-The pan table is read out of `PS2 Files/NFSHP2.ELF` here rather than out of the
-generated `bsndtab.c`, so the table the port compiles in is checked too.
+The pan table is read out of the retail `SLES_507.31` here rather than out of
+the generated `bsndtab.c`, so the table the port compiles in is checked too.
 
     python tools/bsnd_check.py out/SOUND
     python tools/bsnd_check.py out/SOUND --mutate
@@ -44,7 +44,8 @@ SOURCES = ["tools/src/bsnd_test.c", "3DS Files/source/bsnd.c",
 NL = chr(10)
 CR = chr(13)
 
-PAN_TABLE_ADDR = 0x00317d00
+PAN_TABLE_ADDR = 0x00322830    # the demo's 0x00317d00, the same bytes
+RETAIL = ROOT / "PS2 Files" / "Full Game" / "SLES_507.31"
 
 # The port's sentinels (bsnd.h); the PS2 spells the first four as out-of-range
 # values of the real argument -- 48, 0xffffffff, 0xffff, -128.
@@ -923,7 +924,7 @@ def main():
             sys.exit("no %s -- run tools/audio_pack.py first" % p)
 
     # Straight out of the ELF, so the generated bsndtab.c is under test too.
-    table = list(struct.unpack("<256H", mipsdis.Elf().read(PAN_TABLE_ADDR, 512)))
+    table = list(struct.unpack("<256H", mipsdis.Elf(str(RETAIL)).read(PAN_TABLE_ADDR, 512)))
     for i in range(225):
         if table[i] != int(16383 * math.cos(i * math.pi / 512.0)):
             sys.exit("the ELF read is wrong: pan table entry %d is %d" % (i, table[i]))
