@@ -59,6 +59,7 @@
 #include "bmenu.h"
 #include "bsnd.h"
 #include "bslotpool.h"
+#include "bsound.h"
 #include "bticker.h"
 #include "c3dwrap.h"
 #include "bumpercam.h"
@@ -622,6 +623,10 @@ static void viewerCallback(BMenu* m, BScreenMessage msg,
 // because the banks do: a .SBK loaded for the frontend is still the frontend's
 // when a screen comes back.
 static BsndDriver gSnd;
+
+// That bSound (0x00336900, gp-13696): the regions, the samples and the
+// voice records over gSnd (bsound.h).
+static BSound gSound;
 
 // Fred (0x002fc050), the frontend database (fred.h), which the card loads
 // over whole. The jukebox and the volumes read its audio options at +148.
@@ -4267,6 +4272,10 @@ int main(int argc, char** argv)
     // ndsp and the menu banks. Silence is a survivable failure -- a card with
     // no SOUND directory still runs the frontend -- so nothing below checks.
     bool soundUp = bsnd_hw_init(&gSnd);
+    // bSound::Initialize, the first thing InitializeSoundDriver (0x001ae608)
+    // does. Its client, sound's callback (0x001ae3c8), comes with the game's
+    // sound module; with no ndsp there is no driver, and the status stays 0.
+    bsound_init(&gSound, soundUp ? &gSnd : NULL, NULL, NULL);
     if (soundUp) {
         fesound_init(&gSnd);
         logPrintf("Sound: %u patches in %u voices\n",
@@ -4850,18 +4859,20 @@ int main(int argc, char** argv)
         hidScanInput();
         u32 kDown = hidKeysDown();
 
-        // bSound::updateCompletedVoices' slot in the frame. Without it the
-        // allocator hands out 24 channels and then never another.
+        // sound::Update (0x001af4c0). First the jukebox: its Update and a
+        // delayed start, then bSound::Update's -- the sample's callbacks.
+        // Its 8 ms gate passes at any frame rate up to 125. The delayed
+        // start counts down by the world's step (gp-19560), which is still
+        // the last frame's here: the clocks advance below.
         hangwatch_mark("sound");
-        bsnd_update(&gSnd);
-        // sound::Update's jukebox (0x001af4c0): its Update and a delayed
-        // start, then bSound::Update's -- the sample's callbacks. Its 8 ms
-        // gate passes at any frame rate up to 125. The delayed start counts
-        // down by the world's step (gp-19560), which is still the last
-        // frame's here: the clocks advance below.
         jb_music_update(&g_jukebox, Fred.AudioOptionsScreenData,
                         WorldTimeElapsed);
         if (soundUp) jbstream_poll(&g_jukebox.jukebox);
+        // bSound::Update, last in sound::Update: the driver's sweep of the
+        // voices that have ended (without it the allocator hands out every
+        // channel once and never again), the regions whose banks have come
+        // in, and the voice records' own Update.
+        bsound_update(&gSound);
         {
             // The log's note of each tune that starts, the race's too.
             static uint32_t lastTune = 0xffffffffu;

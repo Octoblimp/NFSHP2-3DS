@@ -2316,6 +2316,16 @@ phases.
           two-player cars) are where the second player would come in,
           driven by the other console's packets.
         - Not started. It comes after the single-player race is whole.
+38. [ ] **BUSTED! is flat and static.** The user's Azahar shot of
+        2026-10-09: in the bust NIS, BUSTED! sits squashed, its top cut
+        off, and never animates. Retail scales it from 5 down to ScaleX
+        and fades it in from alpha 0 to 128 over a quarter second
+        (NISOverlayManager::Start, 0x00182488; Update, 0x001825f0;
+        hudnis.c). Check that Update runs each frame of the NIS, that the
+        tracks step (WorldTimeElapsed may be 0 while the world is
+        frozen), and how ScaleY reaches the quad. The bottom screen was
+        blank during the NIS too; check that against retail. The user
+        agreed it comes after step 14, the full audio.
 
 ### The retail frontend
 

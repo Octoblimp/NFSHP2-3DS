@@ -576,16 +576,106 @@ uint32_t bsnd_get_voice_pitch(const BsndDriver* d, uint16_t voice)
     return voice < d->voices ? d->voice[voice].pitch : 0;    // 0x0024af78
 }
 
-void bsnd_lock_channels(BsndDriver* d, uint16_t first, uint16_t count)
+uint16_t bsnd_lock_channels(BsndDriver* d, uint16_t count)
 {
-    unsigned n;                                    // bSnd_LockChannels, 0x0024a278
-    for (n = 0; n < count && first + n < d->voices; n++) d->lock[first + n] = 1;
+    // bSnd_LockChannels, 0x002638a0: SOUND_FindFreeSPUChannels(47, 0, count,
+    // false, lockTable), from the top down, then a lock byte per channel.
+    int first = bsnd_find_free_channels(d, d->voices - 1, 0, count);
+    unsigned n;
+    if (first < 0) return BSND_BAD_VOICE;
+    for (n = 0; n < count; n++) d->lock[first + n] = 1;
+    return (uint16_t)first;
 }
 
 void bsnd_unlock_channels(BsndDriver* d, uint16_t first, uint16_t count)
 {
-    unsigned n;                                  // bSnd_UnlockChannels, 0x0024a378
+    unsigned n;                                  // bSnd_UnlockChannels, 0x002639a0
     for (n = 0; n < count && first + n < d->voices; n++) d->lock[first + n] = 0;
+}
+
+void bsnd_set_voice_azimuth(BsndDriver* d, uint16_t voice, uint16_t azimuth)
+{
+    // 0x00263f40 tests the first channel's StreamChannel, then hands each
+    // channel to 0x00263ce0: the pan of the azimuth, the volumes of that pan
+    // at the channel's own volume, each masked to 15 bits, and the pan, the
+    // azimuth and both volumes kept. GetVolumesFromAzimuth comes between in
+    // any mode but mono and returns at once unless the mode is Prologic.
+    unsigned w = voice_width(d, voice), n;
+    if (w == 0 || d->voice[voice].streamChannel != -1) return;
+    for (n = 0; n < w; n++) {
+        BsndVoice* v = &d->voice[voice + n];
+        int8_t pan = bsnd_pan_from_azimuth(azimuth);
+        uint16_t l, r;
+        bsnd_volumes_from_pan(d, &l, &r, v->volume, pan);
+        l &= 0x7fff;
+        r &= 0x7fff;
+        v->pan = pan;
+        v->azimuth = azimuth;
+        v->volL = l;
+        v->volR = r;
+        if (d->sink && d->sink->mix) d->sink->mix(d->sink->user, voice + n, l, r);
+    }
+}
+
+bool bsnd_stream_near_end(const BsndDriver* d, uint16_t voice)
+{
+    // 0x00263090 returns 0 at once for a StreamChannel below 0, and asks the
+    // IOP's stream otherwise. No voice here is a stream.
+    (void)d;
+    (void)voice;
+    return false;
+}
+
+uint16_t bsnd_bank_number(const BsndDriver* d, const char* name)
+{
+    int i = name ? slot_of(d, name) : -1;       // bSnd_BankNumber, 0x00260b38
+    return i < 0 ? 0xffffu : (uint16_t)i;
+}
+
+unsigned bsnd_bank_patch_count(const BsndDriver* d, uint16_t bank)
+{
+    // bSnd_GetNumberOfPatches, 0x00264cf8.
+    if (bank >= BSND_MAX_BANKS || !d->bankSlot[bank].used) return 0;
+    return d->bankSlot[bank].count;
+}
+
+const char* bsnd_bank_patch_name(const BsndDriver* d, uint16_t bank, unsigned k)
+{
+    // bSnd_PatchName, 0x00264e10: bStrNCpy's 32 bytes into one static buffer.
+    static char name[33];
+    SndPatch p;
+    if (bank >= BSND_MAX_BANKS || !d->bankSlot[bank].used) return NULL;
+    if (k >= d->bankSlot[bank].count) return NULL;
+    if (!sndbank_get(&d->bankSlot[bank].bank, k, &p)) return NULL;
+    memcpy(name, p.name, sizeof(name));
+    name[32] = 0;
+    return name;
+}
+
+uint32_t bsnd_get_patch_pitch(const BsndDriver* d, const char* bank,
+                              const char* patch)
+{
+    SndPatch p;                                 // bSnd_GetPatchPitch, 0x00264f58
+    uint16_t id = bsnd_patch_id(d, bank, patch);
+    if (id == BSND_PATCH_NONE || !bsnd_patch_get(d, id, &p)) return 0;
+    return p.rate;
+}
+
+uint16_t bsnd_get_patch_volume(const BsndDriver* d, const char* bank,
+                               const char* patch)
+{
+    SndPatch p;                                // bSnd_GetPatchVolume, 0x00265088
+    uint16_t id = bsnd_patch_id(d, bank, patch);
+    if (id == BSND_PATCH_NONE || !bsnd_patch_get(d, id, &p)) return 0;
+    return p.volume;
+}
+
+unsigned bsnd_get_patch_channels(const BsndDriver* d, const char* bank,
+                                 const char* patch)
+{
+    uint16_t id = bsnd_patch_id(d, bank, patch);  // 0x002652b0
+    if (id == BSND_PATCH_NONE) return 0;
+    return bsnd_patch_channels(d, id);
 }
 
 void bsnd_update(BsndDriver* d)

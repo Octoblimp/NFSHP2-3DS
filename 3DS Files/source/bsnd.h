@@ -215,10 +215,51 @@ uint16_t bsnd_get_voice_volume(const BsndDriver* d, uint16_t voice);
 int8_t   bsnd_get_voice_pan(const BsndDriver* d, uint16_t voice);
 uint32_t bsnd_get_voice_pitch(const BsndDriver* d, uint16_t voice);
 
-// bSnd_LockChannels / bSnd_UnlockChannels: a locked channel is invisible to
-// the allocator but keeps playing.
-void bsnd_lock_channels(BsndDriver* d, uint16_t first, uint16_t count);
+// bSnd_LockChannels (0x002638a0) allocates: the first run of `count`
+// channels nobody has locked or is sounding, found scanning down from the
+// top (SOUND_FindFreeSPUChannels from 47 to 0 on the PS2, from the last of
+// the port's voices here), is locked and returned by its lowest channel --
+// BSND_BAD_VOICE when there is no such run. bSample takes its voices this
+// way, so they come from the top while bsnd_voice_play's own allocation
+// comes from the bottom. bSnd_UnlockChannels (0x002639a0) takes the run
+// back. A locked channel is invisible to both allocators but keeps playing.
+uint16_t bsnd_lock_channels(BsndDriver* d, uint16_t count);
 void bsnd_unlock_channels(BsndDriver* d, uint16_t first, uint16_t count);
+
+// The per-channel half of 0x00263f40, retail's bSnd_SetVoiceAzimuth, which
+// the demo has by name (0x0024a680): each channel of the voice, a stereo
+// pair's two included, is panned to bsnd_pan_from_azimuth(azimuth) at its
+// own volume and remembers the azimuth. Nothing for a stream's voice.
+void bsnd_set_voice_azimuth(BsndDriver* d, uint16_t voice, uint16_t azimuth);
+
+// 0x00263090: whether a stream's voice is near its end, which bSample
+// polls to raise its near-end event. Always false here: no bsnd voice is a
+// stream (the EA TRAX stream has its own channel, jbstream.h), and retail
+// returns 0 for every voice whose StreamChannel is -1.
+bool bsnd_stream_near_end(const BsndDriver* d, uint16_t voice);
+
+// -- what bRegion and bSample ask of the banks ---------------------------------
+
+// bSnd_BankNumber (0x00260b38, FindBank): the bank's slot, or 0xffff.
+uint16_t bsnd_bank_number(const BsndDriver* d, const char* name);
+// bSnd_GetNumberOfPatches (0x00264cf8): 0 for a bank that is not loaded.
+// The disc counts the records whose channel number is 0, which is every
+// patch but a stereo pair's right half; .SBK has joined those already.
+unsigned bsnd_bank_patch_count(const BsndDriver* d, uint16_t bank);
+// bSnd_PatchName (0x00264e10): the bank's k'th patch's name, in one buffer
+// each call overwrites, as the disc's 0x00322490 is; NULL when not there.
+const char* bsnd_bank_patch_name(const BsndDriver* d, uint16_t bank,
+                                 unsigned k);
+
+// bSnd_GetPatchPitch (0x00264f58), bSnd_GetPatchVolume (0x00265088) and
+// bSnd_GetPatchChannels (0x002652b0): the patch's rate, volume and channel
+// count by name, each 0 when either name misses.
+uint32_t bsnd_get_patch_pitch(const BsndDriver* d, const char* bank,
+                              const char* patch);
+uint16_t bsnd_get_patch_volume(const BsndDriver* d, const char* bank,
+                               const char* patch);
+unsigned bsnd_get_patch_channels(const BsndDriver* d, const char* bank,
+                                 const char* patch);
 
 // Once a frame. Clears the key status of any voice the mixer has finished
 // with, so the allocator can hand it out again.

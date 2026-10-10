@@ -482,10 +482,20 @@ class Driver(object):
     def get_voice_pitch(self, voice):
         return self.voice[voice].pitch if voice < self.voices else 0
 
-    def lock_channels(self, first, count, locked):
+    def lock_channels(self, count):
+        # bSnd_LockChannels, 0x002638a0: a free run found from the top down,
+        # locked, and its lowest channel returned; 0xfffc when there is none.
+        first = self.find_free_channels(self.voices - 1, 0, count)
+        if first < 0:
+            return BAD_VOICE
+        for n in range(count):
+            self.lock[first + n] = 1
+        return first
+
+    def unlock_channels(self, first, count):
         n = 0
         while n < count and first + n < self.voices:
-            self.lock[first + n] = 1 if locked else 0
+            self.lock[first + n] = 0
             n += 1
 
     def update(self):
@@ -589,10 +599,14 @@ def transcript(common, frontend, table):
         out("   one pair 2 -> %d  reversed -> %d"
             % (d.find_free_channels(0, width - 1, 2),
                d.find_free_channels(width - 1, 0, 2)))
-        d.lock_channels(width // 2, 2, True)
-        out("   locked 2 -> %d" % d.find_free_channels(0, width - 1, 2))
-        d.lock_channels(width // 2, 2, False)
+        got = d.lock_channels(2)
+        out("   lock 2 -> %u  locked 2 -> %d"
+            % (got, d.find_free_channels(0, width - 1, 2)))
+        out("   lock 2 again -> %u  lock 1 -> %u"
+            % (d.lock_channels(2), d.lock_channels(1)))
+        d.unlock_channels(got, 2)
         out("   unlocked 2 -> %d" % d.find_free_channels(0, width - 1, 2))
+        d.unlock_channels(width - 1, 1)
         out("   bad first -> %d  bad last -> %d"
             % (d.find_free_channels(width, width - 1, 1),
                d.find_free_channels(0, width, 1)))

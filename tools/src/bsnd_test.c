@@ -267,10 +267,22 @@ int main(int argc, char** argv)
                bsnd_find_free_channels(&d, 0, width - 1, 2),
                bsnd_find_free_channels(&d, width - 1, 0, 2));
         // Locks are invisible to the allocator but do not stop the audio.
-        bsnd_lock_channels(&d, (uint16_t)(width / 2), 2);
-        printf("   locked 2 -> %d\n", bsnd_find_free_channels(&d, 0, width - 1, 2));
-        bsnd_unlock_channels(&d, (uint16_t)(width / 2), 2);
-        printf("   unlocked 2 -> %d\n", bsnd_find_free_channels(&d, 0, width - 1, 2));
+        // bSnd_LockChannels allocates from the top down and returns the run's
+        // lowest channel.
+        {
+            uint16_t got = bsnd_lock_channels(&d, 2);
+            uint16_t again, one;
+            printf("   lock 2 -> %u  locked 2 -> %d\n", (unsigned)got,
+                   bsnd_find_free_channels(&d, 0, width - 1, 2));
+            again = bsnd_lock_channels(&d, 2);
+            one = bsnd_lock_channels(&d, 1);
+            printf("   lock 2 again -> %u  lock 1 -> %u\n", (unsigned)again,
+                   (unsigned)one);
+            bsnd_unlock_channels(&d, got, 2);
+            printf("   unlocked 2 -> %d\n",
+                   bsnd_find_free_channels(&d, 0, width - 1, 2));
+            bsnd_unlock_channels(&d, (uint16_t)(width - 1), 1);
+        }
         // Out-of-range endpoints, which return their own error each.
         printf("   bad first -> %d  bad last -> %d\n",
                bsnd_find_free_channels(&d, width, width - 1, 1),

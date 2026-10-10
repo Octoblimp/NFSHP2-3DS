@@ -164,6 +164,32 @@ Locks are separate from keys: a locked voice is skipped by the allocator but
 keeps playing. That is how the engine reserves voices for the car it is
 following without stopping what is already in them.
 
+`bSnd_LockChannels(count)` (`0x002638a0`) is an allocator too: it finds the
+first run of `count` voices that are neither locked nor sounding, walking
+down from 47, locks it and returns its low end, or `0xfffc` when there is
+none. bSample takes every voice it plays on this way, so bSound's voices come
+from the top while `bSnd_VoicePlay`'s own allocation comes from the bottom.
+`bSnd_UnlockChannels(first, count)` (`0x002639a0`) gives the run back.
+
+## What bSound asks of the banks
+
+bRegion and bSample (docs/formats/bsound.md) read the banks by name:
+
+| | address | answers |
+|---|---|---|
+| `bSnd_BankNumber` | `0x00260b38` | the bank's slot, `0xffff` when not loaded |
+| `bSnd_GetNumberOfPatches` | `0x00264cf8` | 0 for a bank not loaded |
+| `bSnd_PatchName` | `0x00264e10` | the k'th patch's name, in one buffer each call overwrites |
+| `bSnd_GetPatchID` | | `0xfffa` when either name misses |
+| `bSnd_GetPatchPitch`, `GetPatchVolume`, `GetPatchChannels` | `0x00264f58`, `0x00265088`, `0x002652b0` | 0 when either name misses |
+
+The disc counts patches as the records whose channel number is 0, which is
+every patch but a stereo pair's right half; .SBK has joined those already.
+
+`bSnd_SetVoiceAzimuth` (`0x00263f40`) pans each channel of a voice, both of a
+stereo pair, to the azimuth's pan at its own volume. A voice's near end
+(`0x00263090`) is 0 for any voice that is not a stream.
+
 ## What the port does differently
 
 The 3DS has 24 ndsp channels against the PS2's 48 SPU voices, and ndsp's
@@ -188,4 +214,5 @@ drives both the port and an independent Python model of this document through
 twelve scenarios and diffs the transcripts line for line.
 
 The streaming and queueing paths are not ported. Nothing in the frontend
-reaches them, and the music they exist for is task 29's problem.
+reaches them, and the music they exist for is task 29's problem. So no voice
+is a stream, and the near end is always false.
