@@ -1,6 +1,15 @@
 # CONTINUE
 
-Where the next session picks up. Updated in Session 62 (2026-10-09):
+**Now (Session 70, 2026-10-10): the end of the race, RE-1 to RE-6,
+below in "First", is the user's ask: "I do need the end of races to be
+coded in".** 14-10c and 14-10d come after it. The user's device log of
+2026-10-10 (`3DS Files/nfshp2_debug.txt`, a Hot Pursuit quick race on
+track 43): no hitch and no abort; 15-30 fps in the race, median 24.5,
+17-20 with the pack and the cops in view; a spike strip was laid. At
+the finish the race went to POSTRACE (rc 7), braked the car to a stop
+and sat there: nothing after the finish is ported.
+
+Updated in Session 62 (2026-10-09):
 the cars' light flares now show -- the cop light bars, headlights and
 brake lights -- since the position-marker loader (slot 8) is ported
 (`epositionmarker.c`; `docs/formats/car-render-info.md`, "The position
@@ -152,7 +161,70 @@ of what is left.
 `HANDOFF.md` is the running narrative; this file is the short list of what
 to do next and what not to trust.
 
-## First: step 12, the cops and cop mode (Session 56)
+## First: the end of the race, RE-1 to RE-6 (Session 70)
+
+The user's ask of 2026-10-10. After the finish, retail's
+RaceCoordinator::TheRaceHasFinished builds EndGameScreens (72 bytes)
+and goes to POSTRACE; POSTRACE's ACTIVATE resumes the screens and starts
+the demo camera on the race's highlights. Both are NULL seams in the
+port (`rcstates.h`, `rcpost.h`), so the race stops at the line. The
+code is EndGameScreens.obj, 0x001dc850 .. 0x001e26f0, 24 KB.
+
+The screens, in BuildScreenList's order (0x001dcae0), each with its
+test; End Game Menu is always last:
+
+| Screen | Test | Class (ctor) |
+|---|---|---|
+| Points Rewards | gp-15392 not -1 and its car not unlocked | 0x001de568 |
+| Task Rewards | gp-15388 not -1 | 0x001de6a8 |
+| Events Unlocked | an event tree's event, done, with unlocks | 0x001df180 |
+| Reward menu | 0x001dc758 | 0x001def38 |
+| Be The Cop Results 1P / 2P | 0x001dc6e8 / 0x001dc720 | 0x001e0898 / 0x001e0a10 |
+| Race Results | not Be A Cop; GameType not 6; 8 or 9 only off the tourney | RaceResultsScreen 0x001dffe8 |
+| Tourney Standings | GameType 8 or 9 at the tourney | 0x001dd5d0 |
+| Best Lap Times | not Be A Cop, GameType not 6, a lapped race of 2+ laps | 0x001ddc10 |
+| Best Total Times | as Race Results | 0x001ddfd0 |
+| End Game Menu | always | EndGameMenu 0x001e12b8 |
+
+"Lap Times 1P"/"2P" (0xc4881cbd/0xc4881cde) are the End Game Menu's
+View Lap Times, callback 0x001e10f0. Every other screen's callback is
+EndGameMenusBase::Callback (0x001dd278): SCREEN_ACTIVATE builds the
+class by the screen's name, UNACTIVATE deletes it, the rest go to its
+vtable. EndGameMenusBase::HandleEvent (0x001dd0f0): SELECT goes to the
+next screen, BACK to the one before.
+
+The End Game Menu ("RACE OVER", "PURSUIT OVER", "EVENT OVER"): Next
+Race, Restart Race, Restart Event, View Replay, View Lap Times and Quit
+Race, each shown by its own test, each but two behind an OK/Cancel
+popup (MaybeRestart, 0x001e1858). OK posts the race coordinator's
+NEXT_RACE (9), RESTART_RACE (8) or QUIT_RACE (10), through the
+Autosave screen when ShouldAutoSave.
+
+A Hot Pursuit quick race sees Race Results, Best Lap Times, Best Total
+Times and the End Game Menu.
+
+The slices:
+- **RE-1:** EndGameScreens (the tests, BuildScreenList, the list's
+  navigation, Resume/Suspend, the autosave bridge), EndGameMenusBase
+  (its ctor, HandleEvent and Callback), EndGameMenu (its ctor, the
+  label table 0x001e15f0, MaybeRestart, HandleEvent and the popups'
+  answers), and the screens' rows in main.c's kScreens. Screens whose
+  class is not ported yet get the bare EndGameMenusBase, so SELECT
+  passes them.
+- **RE-2:** RaceResultsScreen (0x001dffe8, Scroll 0x001e0838) and
+  ShowPointsResults (0x001e0430).
+- **RE-3:** BestLapTimes, BestTotalTimes and the Lap Times screens
+  (0x001e0bd0, 0x001e10f0), with what records the times.
+- **RE-4:** the post-race camera: DemoCameraCoordinator (0x0019a440 ..
+  0x0019abd8), PostRaceCameraCoordinator (0x0019b280 .. 0x0019b4ac),
+  Player::BeginDemoCameras (0x00176868) and the demo-camera seams. With
+  no replay, it follows the live cars.
+- **RE-5:** 14-10c, the race's speech (RaceFinishedSpeech and the
+  rest, below under 14-10).
+- **RE-6:** the career's screens: Tourney Standings, the rewards and Be
+  The Cop Results, with step 16's event tree.
+
+## Step 12, the cops and cop mode (Session 56)
 
 The user, 2026-10-08: "When you're done doing whatever, move on to cops
 and cop mode." The texture memory work is done (2f0a300, HANDOFF's
@@ -782,8 +854,12 @@ pursuit.obj, on a 10 KB manager. Its slices:
     ops, 47809 lines, 0 differ; 281 mutations, all caught. Azahar, on
     AC: a frontend Hot Pursuit quick race, PASS, with two chases
     started. The cops speak with NFSHP2/SOUND/SPEECH on the SD card.
-  - **14-10b:** the filler speech: SayFillerSpeech (0x00231760) and
-    its filler classes (0x002317b0 ..), for gSayFillerSpeechFn.
+  - **14-10b, done (95ea945):** the filler speech: TryFillerSpeech,
+    SayFillerSpeech and the nine filler classes (0x002315d0 ..
+    0x00231d70) in `fillerspeech.c`, with IsCopNearChasedCar
+    (docs/formats/pursuit-speech.md, "The filler speech"). main.c binds
+    gSayFillerSpeechFn. `tools/fillerspeech_check.py`: 81169 ops, 23198
+    lines, 0 differ; 122 mutations, all caught.
   - **14-10c:** the race's speech (0x00206900 .. 0x002077e0):
     RaceFinishedSpeech (0x00206ab8, gRaceFinishedSpeechFn),
     LapFinishedSpeech (0x00207198, gLapFinishedSpeechFn), 0x002075d8
@@ -5242,9 +5318,9 @@ count. It is its own slice when it goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** step 14, the audio in full, at 14-10b (the filler speech).
-  14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5, 14-6, 14-7, 14-8a, 14-8b,
-  14-8c, 14-8d, 14-9 and 14-10a are done. Of step 12,
+- **Next:** the end of the race, RE-1 (see "First"), then step 14's
+  14-10c. 14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5, 14-6, 14-7, 14-8a,
+  14-8b, 14-8c, 14-8d, 14-9, 14-10a and 14-10b are done. Of step 12,
   12a to 12k-2, the light flares, 12k-3's planners, 12k-3a, 12k-3b,
   12k-4a, 12k-4b, 12k-7, 12l-1 and 12l-2 are done. See
   "First" at the top.
