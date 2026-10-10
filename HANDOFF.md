@@ -19294,3 +19294,194 @@ stopped car under the camcorder overlay for the NIS's time.
 
 Step 14, the audio in full: engines, sirens, cop speech and radio, and
 the world's sounds (the user, 2026-10-09). Then 12m (Be A Cop) and 12n.
+
+## Session 64 (2026-10-09 .. 10-10) -- step 14, the audio; 14-8c in progress
+
+The session stopped in the middle of 14-8c, at the user's word. **Nothing
+of 14-8c is committed or built yet.** The steps below finish it.
+
+### Done and committed
+
+Each slice is in CONTINUE.md's step-14 list, with its checker's numbers:
+
+- 14-4, the engines (816ae93);
+- 14-5, the tyres (4278190);
+- 14-6, the crashes and scrapes, collision_sound (39f7fd7);
+- 14-7, the track's ambience and the chopper's rotor, sound_scape and
+  ChopperSound (6084aa3);
+- 14-8a, the radio's squelch and static, SpeechNoise (ab3e2d3);
+- 14-8b, the SPCH library (a08d232);
+- and a379354, which plays every effect voice 6 dB up on the 3DS.
+
+### 14-8c in the working tree: bSampleStream, bSampleChain and the stream
+
+`git status` shows:
+
+- **Modified:** `bsnd.c`, `bsnd.h`, `bsound.c`, `bsound.h`,
+  `tools/bsound_check.py` and `tools/src/bsound_test.c`.
+- **New:** `bsndstream.c`, `bsndstream.h`, `tools/bsndstream_check.py`
+  and `tools/src/bsndstream_test.c`.
+- **Not part of the slice:** the five `3DS Files/nfshp2_cap_*` files are
+  captures left over from earlier sessions. Don't commit them.
+
+What the slice holds:
+
+- **`bsound.c`**, bSample's stream side:
+  - `bsample_play` takes `bsnd_voice_play_part` when the sample has an
+    offset or a size.
+  - `bsample_set_rate` is SetSampleRate (0x00280340).
+  - `bsample_chain_new` is the chain sample, which cSEDWedge::Initialize
+    builds inline at 0x00205cb4: bSample(1), the "_STREAM" bank and name,
+    then LockVoice. The wedge sets the rate (24000) after.
+  - `bsample_chain_add` is AddToChain (0x00206760).
+  - The stream-active query calls `bsnd_stream_active`.
+- **`bsnd.c` and `bsnd.h`**, the driver's streams:
+  - the "_STREAM" bank's mono path, `stream_play` (0x0026129c);
+  - the "_CHAIN" queue (0x00261e80): 8 parts, retail's at 0x003353b8 in
+    52-byte entries, with the count at gp-14344;
+  - PlayChain, `play_chain` (0x00262848);
+  - `bsnd_voice_play_part`;
+  - `bsnd_stream_active` (0x00263090);
+  - the BsndSink's new last member, `stream`;
+  - BsndDriver's `chain[]`, `chainCount` and `streamVoice`.
+- **Where the port departs from retail**, decided this session:
+  - **A full queue is guarded.** After a chain finds no voice, retail
+    leaves the count at 8; its next part goes past the queue, and
+    PlayChain copies nine entries into a frame of eight. The port's
+    "_CHAIN" branch drops the part. A "_STREAM" part takes the eighth
+    slot.
+  - **`streamVoice`:** there is one mono stream, so any voice with a
+    StreamChannel asks after the newest stream's channel, as retail's
+    GetStreamInfo(2) does. It is set in `stream_start`, starts at -1 in
+    `bsnd_init`, and goes back to -1 when `bsnd_voice_stop` or
+    `bsnd_update` frees that channel.
+  - **A chained part's offset of 0** means the file's own start, past its
+    48-byte VAG header, as it does for the first part.
+  - **A stream's file name** is the patch's first 32 bytes (0x00261304).
+- **`bsndstream.c` and `bsndstream.h`:**
+  - the decoder, `bss_decode`, which also builds on the host. A frame
+    flagged 7 is not decoded and ends the part; one flagged 1 is decoded,
+    then ends it. Predictors above 4 become 0.
+  - the 3DS worker (`bsndstream_init`, `exit`, `play`, `stop`,
+    `playing` and `owns`). It reads the parts off the card, decodes them
+    to PCM16 and queues them on the voice's own ndsp channel.
+
+  The 3DS half of `bsnd.c` wires it in: `hw_stream`, `hw_playing` through
+  `bsndstream_owns` and `bsndstream_playing`, and `bsndstream_init` and
+  `bsndstream_exit`. The Makefile's wildcard picks the file up.
+- **Nothing calls the chain yet.** cSEDWedge, in 14-8d, is its first
+  caller.
+
+### Checked so far
+
+- `python tools/bsound_check.py`: 8906 ops, 0 differ, and the 18 new
+  mutations are all caught. That was before the last `bsnd.c` edits, so
+  run it again.
+- `python tools/bsndstream_check.py`: 713 ops, 3277 lines, 0 differ. The
+  decoder: 112 inputs (48 windows of ENGLISHDAT.PCK and 64 made-up
+  ones), 0 differ.
+- `--mutate`, with 56 mutations: 50 caught, 5 survived, and 1 pattern no
+  longer found. Here is each of the six, with its fix:
+  - **start-key** (pattern not found): `stream_start` now has
+    `d->streamVoice = (int16_t)ch;` between the key line and the sink
+    call. Make the pattern the key line followed by the streamVoice
+    line, and drop the key line in the mutant.
+  - **chain-name** (survived): copying 33 bytes changes nothing, since
+    `name[32]` is set to '\0' straight after. Mutate it to 31 instead, as
+    stream-append-name does.
+  - **stream-effect** (survived): no op ever sets EffectVolume. Add an
+    `eff|voice|value` op to both sides: the model writes the u16 at
+    VOICES+80*v+24, the harness `gD.voice[v].effectVolume`. Use it before
+    a deterministic stream on that voice, and now and then in the random
+    runs.
+  - **stream-stereo** (survived): EQUIVALENT. Once "_STREAM" has matched,
+    `bank[6]` is always 'M'. The mutant therefore only lets "_STREAMS"
+    through as mono, and "_STREAMS" is not compared.
+  - **path-join** (survived): EQUIVALENT, because the case cannot happen.
+    The port's load path holds 159 bytes and a name 32: 191 < 254.
+  - **dec-pred** (survived): `pred > 5` reads `kFilter[5]`, past the
+    table. Whatever the host has there is zero, which is predictor 0's
+    pair, so the clamp looks the same. Mutate the other edge, `pred > 3`,
+    which the predictor-4 frames catch.
+- **Not run yet** since the `bsnd.c` edits:
+  - `tools/bsnd_check.py`. Its harness, `tools/src/bsnd_test.c` line 105,
+    also needs a trailing NULL for `stream` in kRecSink, to quiet the
+    warning.
+  - The CIA build, and Azahar.
+
+### Next, in order: finishing 14-8c
+
+1. Make the mutation fixes above. Rerun `python tools/bsndstream_check.py`
+   (0 differ), then `--mutate`, until every mutation is caught or noted
+   in EQUIVALENT.
+2. Add the NULL to `bsnd_test.c`'s kRecSink. Rerun `bsnd_check.py` and
+   `bsound_check.py`; both must stay at 0 differ.
+3. Write the docs:
+   - `docs/formats/sound-driver.md`. It is CRLF: use Edit or a Python
+     bytes script, never sed. Cover "_STREAM", "_CHAIN", PlayChain,
+     `bsnd_stream_active`, the sink's `stream`, and every departure:
+     - the queue guard;
+     - `streamVoice`;
+     - a chained offset of 0 meaning the header;
+     - the 32-byte name;
+     - "_MOVIE" and "_STREAMS", which are not ported here;
+     - HzToSPU in 64 bits.
+   - `bsound.md`: `play_part`, `set_rate`, `chain_new` and `chain_add`.
+   - The stream itself, in a new `docs/formats/bsndstream.md`:
+     ENGLISHDAT.PCK (VAG clips back to back, each with a 48-byte header,
+     24000 Hz mono SPU ADPCM, every frame flag 0), the worker, and the
+     decoder's rules.
+4. Build: `tools/build_cia.ps1` in PowerShell, with no redirection. Then
+   run `check_3dsx` and `check_shbin`.
+5. Azahar, on AC, reading Speed % first: a gas-only SkipFE race
+   (`-HoldKeys 65`). Nothing speaks yet, so this checks for no abort and
+   30 fps.
+6. Commit "14-8c: the speech's stream (bSampleStream, bSampleChain,
+   ENGLISHDAT.PCK)", ending with the Co-Authored-By line. Then update
+   CONTINUE.md: the 14-8c done entry, the step-14 table row (11 done:
+   "... 14-8a, 14-8b and 14-8c done"), and "Where the port stands" Next
+   to 14-8d. Commit it on its own, as the earlier slices did.
+
+After 14-8c, the order is:
+
+1. 14-8d: cSEDWedge (0x002056f0 .. 0x00206760) and sound's sed_* hooks;
+2. 14-9: speech::mgr_t;
+3. 14-10: the speech content;
+4. the BUSTED! text (task 38);
+5. 12m: Be A Cop, where the D-Pad triggers the cop options and the
+   Circle Pad drives;
+6. 12n.
+
+### Gotchas met this session
+
+- **Bash heredocs mangle backslash escapes**, even with a quoted
+  delimiter: `\\n` arrived as a newline, and `'\\0'` as a NUL byte in
+  `bsnd.c`. Write any script that has a backslash with the Write tool,
+  then run it with python.
+- **Line endings:**
+  - CRLF: `bsnd.c`, CONTINUE.md, HANDOFF.md and `sound-driver.md`.
+  - LF: `bsnd.h`, `bsound.c`, and the checkers and harnesses.
+- **The checker's random runs** free every voice every 15 ops (the
+  `clear` op). Without that, the streams' keys pile up and a chain finds
+  no voice: the full-queue case, which is not compared.
+
+## Session 65 (2026-10-10) -- 14-8c finished
+
+Picked up from Session 64's steps:
+
+- The six mutation leftovers: start-key's pattern now spans the key and
+  streamVoice lines; chain-name copies 31; dec-pred mutates the other
+  edge (`pred > 3`); the checker has an `eff` op that sets a voice's
+  EffectVolume, before deterministic streams and in the random runs;
+  stream-stereo and path-join are noted as equivalent.
+  `bsndstream_check.py`: 716 ops, 3627 lines, 0 differ; 56 mutations,
+  54 caught, 2 equivalent.
+- `bsnd_test.c`'s kRecSink has its trailing NULL. bsnd_check (5159
+  lines) and bsound_check (8906 ops) stay at 0 differ.
+- Docs: sound-driver.md's "Streams and the queue", bsound.md's "The
+  speech's samples", and the new bsndstream.md (ENGLISHDAT.PCK: a
+  256-byte head, 10,126 VAG clips at 256-byte boundaries, all 24000 Hz,
+  every frame flag 0).
+- Built; check_3dsx and check_shbin pass. Azahar on AC: a gas-only
+  SkipFE race at 30 fps, speed 100%.
+- Committed as c8a4ce9. Next: 14-8d, cSEDWedge.
