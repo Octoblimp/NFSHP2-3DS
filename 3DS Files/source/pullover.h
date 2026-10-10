@@ -114,6 +114,8 @@ void player_stop_busted_display(struct Player *p);
 //     and the arrest type), 0x002075d8 (SPCH event 206 outside the
 //     replays), 0x00207648 (Be A Cop's arrests: NumPlayerCars, 0, 1 and
 //     the count) and tPursuit::AITicketSpeech (0x0022b840), step 14.
+//     main.c binds speechmgr.h's raiseRacerCaught and pursuitspeech.h's
+//     AITicketSpeech (14-10a); the other two are 14-10c's.
 extern int32_t (*gPlayerPlayNextNisFn)(struct Player *pl, struct Car *car,
                                        struct Car *cop,
                                        void (*done)(int32_t), int32_t param);

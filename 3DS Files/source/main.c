@@ -92,6 +92,7 @@
 #include "pursuit.h"
 #include "pursuitchopper.h"
 #include "pullover.h"
+#include "pursuitspeech.h"
 #include "nisinfo.h"
 #include "nismanager.h"
 #include "playernis.h"
@@ -871,6 +872,75 @@ static void speechAllocateVoices(void)
 static int32_t speechPlaybackState(void)
 {
     return speechmgr_get_instance()->previousSedPlaybackState;
+}
+
+// The chases' raises that go straight to speech::mgr_t (14-10a), each with
+// its arguments in retail's order.
+static void speechRaiseCrashTow(uint32_t was, uint32_t now)
+{
+    speechmgr_raise_crash_tow(speechmgr_get_instance(), was, now);
+}
+static void speechRaiseCrash(uint32_t was, uint32_t now)
+{
+    speechmgr_raise_crash(speechmgr_get_instance(), was, now);
+}
+static void speechRaiseFlatTire(uint32_t was, uint32_t now)
+{
+    speechmgr_raise_flat_tire(speechmgr_get_instance(), was, now);
+}
+static void speechRaiseSuperRequest(uint32_t speaker)
+{
+    speechmgr_raise_super_request(speechmgr_get_instance(), speaker);
+}
+static void speechRaisePursuitCopHit(uint32_t speaker, int32_t where)
+{
+    speechmgr_raise_pursuit_cop_hit(speechmgr_get_instance(), speaker, where);
+}
+static void speechRaiseSuspectCrashTraffic(uint32_t speaker, int32_t b)
+{
+    speechmgr_raise_suspect_crash_traffic(speechmgr_get_instance(), speaker,
+                                          b);
+}
+static void speechRaiseSpikeStripTireBlow(uint32_t speaker, int32_t b)
+{
+    speechmgr_raise_spike_strip_tire_blow(speechmgr_get_instance(), speaker,
+                                          b);
+}
+static void speechRaiseRequestAnotherRoadblock(uint32_t speaker, int32_t b)
+{
+    speechmgr_raise_request_another_roadblock(speechmgr_get_instance(),
+                                              speaker, b);
+}
+static void speechRaiseSpikeStripRequest(uint32_t speaker, int32_t b)
+{
+    speechmgr_raise_spike_strip_request(speechmgr_get_instance(), speaker, b);
+}
+static void speechRaiseRoadblockRequest(uint32_t speaker, int32_t b)
+{
+    speechmgr_raise_roadblock_request(speechmgr_get_instance(), speaker, b);
+}
+static void speechRaiseDispatchRoadBlockNA(uint32_t speaker)
+{
+    speechmgr_raise_dispatch_road_block_na(speechmgr_get_instance(), speaker);
+}
+static void speechRaiseRotorRequest(uint32_t speaker, int32_t supervisor)
+{
+    speechmgr_raise_rotor_request(speechmgr_get_instance(), speaker,
+                                  supervisor);
+}
+static void speechRaiseRotorConfirm(void)
+{
+    speechmgr_raise_rotor_confirm(speechmgr_get_instance());
+}
+static void speechRaiseDispatchHelicopterNA(uint32_t speaker)
+{
+    speechmgr_raise_dispatch_helicopter_na(speechmgr_get_instance(), speaker);
+}
+static void speechRaiseRacerCaught(uint32_t speaker, uint32_t n,
+                                   int32_t arrestType)
+{
+    speechmgr_raise_racer_caught(speechmgr_get_instance(), speaker,
+                                 (int32_t)n, arrestType);
 }
 
 // The chopper's sound (14-7): Chopper::UpdateSound and Mute, which
@@ -5146,6 +5216,37 @@ int main(int argc, char** argv)
     gPlayerCreateRandomNisArrayFn  = player_create_random_nis_array;
     gPlayerPlayNextNisFn           = player_play_next_nis;
     gUpdatePlayersGameStateFn      = player_update_players_game_state;
+    // What the cops say on the radio (14-10a): each chase's own speeches
+    // (pursuitspeech.h) and the raises it, its helicopter, its roadblocks
+    // and its pullovers make straight to speech::mgr_t.
+    gPursuitStartSpeechFn              = tpursuit_start_pursuit_speech;
+    gPursuitJoinSpeechFn               = tpursuit_join_pursuit_speech;
+    gPursuitBackOffSpeechFn            = tpursuit_cop_back_off_speech;
+    gPursuitDeclareSpeechFn            = tpursuit_declare_pursuit_speech;
+    gPursuitRaiseBackupSpeechFn        = tpursuit_raise_backup_speech;
+    gPursuitBeginCollisionSpeechFn     =
+        tpursuit_begin_pursuit_collision_speech;
+    gPursuitRoadblockFailedSpeechFn    = tpursuit_roadblock_failed_speech;
+    gPursuitRoadBlockSetSpeechFn       = tpursuit_road_block_set_speech;
+    gPursuitAITicketSpeechFn           = tpursuit_ai_ticket_speech;
+    gPursuitCanSupervisorInitiateFn    = tpursuit_can_supervisor_initiate;
+    gPursuitSuperInitiatesFn           = tpursuit_super_initiates;
+    gSpeechRaiseCrashTowFn             = speechRaiseCrashTow;
+    gSpeechRaiseCrashFn                = speechRaiseCrash;
+    gSpeechRaiseFlatTireFn             = speechRaiseFlatTire;
+    gSpeechRaiseSuperRequestFn         = speechRaiseSuperRequest;
+    gSpeechRaisePursuitCopHitFn        = speechRaisePursuitCopHit;
+    gSpeechRaiseSuspectCrashTrafficFn  = speechRaiseSuspectCrashTraffic;
+    gSpeechRaiseSpikeStripTireBlowFn   = speechRaiseSpikeStripTireBlow;
+    gSpeechRaiseRequestAnotherRoadblockFn =
+        speechRaiseRequestAnotherRoadblock;
+    gSpeechRaiseSpikeStripRequestFn    = speechRaiseSpikeStripRequest;
+    gSpeechRaiseRoadblockRequestFn     = speechRaiseRoadblockRequest;
+    gSpeechRaiseDispatchRoadBlockNAFn  = speechRaiseDispatchRoadBlockNA;
+    gSpeechRaiseRotorRequestFn         = speechRaiseRotorRequest;
+    gSpeechRaiseRotorConfirmFn         = speechRaiseRotorConfirm;
+    gSpeechRaiseDispatchHelicopterNAFn = speechRaiseDispatchHelicopterNA;
+    gSpeechRaiseRacerCaughtFn          = speechRaiseRacerCaught;
     logPrintf("car loader: pool %s\n", LoadedCarSlotPool ? "up" : "missing");
 
     // The blurb moves to the bottom screen, so the top screen stops drawing

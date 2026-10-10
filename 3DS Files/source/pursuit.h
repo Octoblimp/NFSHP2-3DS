@@ -335,8 +335,9 @@ int32_t copmanager_find_cops_for_road_block(tCopManager *m, tCop **out,
 int32_t copmanager_lay_out_road_block(tCopManager *m, tRoadBlock *rb,
                                       tPursuit *p);
 
-// RoadBlockSetSpeech (0x0022b5d0), tPursuit's, the cop speech manager's
-// side: NULL says nothing. AddSpikeStrip (0x002276d0), the spike strips'
+// RoadBlockSetSpeech (0x0022b5d0), tPursuit's: main.c binds
+// tpursuit_road_block_set_speech (pursuitspeech.h); NULL says nothing.
+// AddSpikeStrip (0x002276d0), the spike strips'
 // (12j): NULL lays none.
 extern void (*gPursuitRoadBlockSetSpeechFn)(tPursuit *p);
 extern void (*gCopManagerAddSpikeStripFn)(tCopManager *m, const bVector2 *a,
@@ -346,12 +347,13 @@ extern void (*gCopManagerAddSpikeStripFn)(tCopManager *m, const bVector2 *a,
 
 // ---------------------------------------------------------- the seams
 
-// The cop speech manager's (gp-15624), not ported: NULL says nothing.
+// The cop speech manager's (gp-15624, speechmgr.h): NULL says nothing.
 //   - StartPursuitSpeech (0x0022afb8), JoinPursuitSpeech (0x0022b288) and
-//     CopBackOffSpeech (0x0022b788), tPursuit's own.
+//     CopBackOffSpeech (0x0022b788), tPursuit's own: main.c binds
+//     pursuitspeech.h's.
 //   - raiseCrashTow (0x0020aa90), raiseCrash (0x0020a9b0), raiseFlatTire
 //     (0x0020aa00), each with the old and new speakers, and
-//     raiseSuperRequest (0x0020b4b0).
+//     raiseSuperRequest (0x0020b4b0): main.c binds speechmgr.h's.
 extern void (*gPursuitStartSpeechFn)(tPursuit *p);
 extern void (*gPursuitJoinSpeechFn)(tPursuit *p);
 extern void (*gPursuitBackOffSpeechFn)(tPursuit *p);
@@ -364,7 +366,8 @@ extern void (*gSpeechRaiseSuperRequestFn)(uint32_t speaker);
 // RaiseBackupSpeech (0x0022acc0) and BeginPursuitCollisionSpeech
 // (0x0022aef8, with the car hit), tPursuit's own; raisePursuitCopHit
 // (0x0020a3e0, the speaker and the landmark) and raiseSuspectCrashTraffic
-// (0x0020b758, the speaker and 0).
+// (0x0020b758, the speaker and 0). main.c binds pursuitspeech.h's and
+// speechmgr.h's.
 extern void (*gPursuitDeclareSpeechFn)(tPursuit *p);
 extern void (*gPursuitRaiseBackupSpeechFn)(tPursuit *p);
 extern void (*gPursuitBeginCollisionSpeechFn)(tPursuit *p, struct Car *hit);
@@ -392,7 +395,7 @@ extern void (*gPursuitUpdateChopperFn)(tPursuit *p);
 // Roadblock (0x0020b190), raiseSpikeStripRequest (0x0020b2f0) and
 // raiseRoadblockRequest (0x0020b140), each with the speaker and the
 // supervisor's bool, and raiseDispatchRoadBlockNA (0x0020b7e8, Be A Cop's
-// id).
+// id). main.c binds pursuitspeech.h's and speechmgr.h's.
 extern void (*gSpeechRaiseSpikeStripTireBlowFn)(uint32_t speaker, int32_t b);
 extern void (*gPursuitRoadblockFailedSpeechFn)(tPursuit *p, int32_t b);
 extern void (*gSpeechRaiseRequestAnotherRoadblockFn)(uint32_t speaker,

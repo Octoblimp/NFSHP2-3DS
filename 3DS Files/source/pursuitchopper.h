@@ -21,7 +21,8 @@
 struct Car;
 struct Chopper;
 
-// The speech manager's (gp-15624), not ported: NULL says nothing.
+// The speech manager's (gp-15624): main.c binds speechmgr.h's; NULL says
+// nothing.
 //   - raiseRotorRequest (0x0020af50): the cop speaker, and whether the
 //     supervisor's timer is within 0.001 of 0;
 //   - raiseRotorConfirm (0x0020afa0);
