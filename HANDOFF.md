@@ -19558,3 +19558,39 @@ Picked up from Session 64's steps:
 - Committed as a7f8f4b. Next: 14-10, binding the raises: pursuit.h's,
   pullover.h's, pursuitchopper.h's, raceupdate.h's and playerhud.h's
   speech seams, the filler speech, and bcarsel's speakCar.
+
+## Session 68 (2026-10-10) -- 14-10a, tPursuit's speech
+
+- `pursuitspeech.{c,h}`: tPursuit's 13 speech methods ported from retail
+  (0x0022aa20 .. 0x0022b908):
+  - GetChasedCarColour and GetExactDescription (its jump table by type,
+    the cop cars' 0x10000000, the French and German -1s);
+  - the supervisor's test (0x0022aaf0);
+  - RaiseBackup, Declare, BeginPursuitCollision, StartPursuit,
+    JoinPursuit, RoadblockFailed, RoadBlockSet, CopBackOff, AITicket and
+    SuperInitiates.
+  Retail's quirks are kept: the collision speech's landmark test is the
+  wrong way round, and the helicopter's spike failure has its speaker
+  and bool swapped.
+- `speechconv.{c,h}`: Speech::ConvertCarType and its 67-entry table
+  (0x0031c1f0).
+- `tools/pursuitspeech_check.py` with `tools/src/pursuitspeech_test.c`:
+  258792 ops, 47809 lines, 0 differ. 281 mutations, all caught. The
+  table entries and the case labels are generated. The model's stubs
+  return signed ints: a masked -1 read as positive in a 64-bit blez.
+- docs/formats/pursuit-speech.md.
+- main.c binds:
+  - pursuit.h's eight speech seams, pullover.h's AI ticket and
+    copmgr.h's supervisor test and SuperInitiates;
+  - wrappers for the 15 raises that go straight to speech::mgr_t (crash
+    tow, crash, flat tire, the super request, the cop hit, the traffic
+    crash, the spike blowout, the roadblock and spike requests, the
+    dispatch's two N/As, the rotor request and confirm, and the racer
+    caught).
+- Built; check_3dsx and check_shbin pass. Azahar, on AC: a frontend Hot
+  Pursuit quick race (`-HoldKeys 65`), PASS at 29 fps, with two chases
+  started.
+- The cops speak only with NFSHP2/SOUND/SPEECH on the SD card (Azahar's
+  sdmc has it).
+- Committed as a96f7b6. Next: 14-10b, the filler speech; then 14-10c,
+  the race's speech; then 14-10d, the car selector's.

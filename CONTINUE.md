@@ -773,8 +773,25 @@ pursuit.obj, on a 10 KB manager. Its slices:
     mutations, 876 caught, 9 equivalent. Azahar, on AC: a frontend
     Hot Pursuit quick race at 30 fps. Nothing raises an event until
     14-10, so nothing speaks yet.
-  - **14-10:** the pursuit, race and filler speech, retiring the
-    gSpeech* seams.
+  - **14-10a, done (a96f7b6):** tPursuit's 13 speech methods
+    (0x0022aa20 .. 0x0022b908) in `pursuitspeech.c`, and
+    Speech::ConvertCarType (0x002232f8) in `speechconv.c`
+    (docs/formats/pursuit-speech.md). main.c binds them, and wraps the
+    raises that pursuit.h, pursuitchopper.h and pullover.h make
+    straight to speech::mgr_t. `tools/pursuitspeech_check.py`: 258792
+    ops, 47809 lines, 0 differ; 281 mutations, all caught. Azahar, on
+    AC: a frontend Hot Pursuit quick race, PASS, with two chases
+    started. The cops speak with NFSHP2/SOUND/SPEECH on the SD card.
+  - **14-10b:** the filler speech: SayFillerSpeech (0x00231760) and
+    its filler classes (0x002317b0 ..), for gSayFillerSpeechFn.
+  - **14-10c:** the race's speech (0x00206900 .. 0x002077e0):
+    RaceFinishedSpeech (0x00206ab8, gRaceFinishedSpeechFn),
+    LapFinishedSpeech (0x00207198, gLapFinishedSpeechFn), 0x002075d8
+    (gSpeechPulloverEventFn), 0x00207648 (gSpeechBeACopArrestFn),
+    PlayBustedSpeech, and Speech's conversions 0x00223328,
+    0x00223358 .. 0x002233b8 and 0x00223480 into speechconv.
+  - **14-10d:** bcarsel's speakCar (ConvertCarType; event 211 for a
+    cop, 146 otherwise) and ConvertTrackNumber (0x002233d8).
 
   After step 14:
   - **12m** Be A Cop. The user's controls (2026-10-08): in Be A Cop
@@ -5225,9 +5242,9 @@ count. It is its own slice when it goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** step 14, the audio in full, at 14-10 (the raises bound).
+- **Next:** step 14, the audio in full, at 14-10b (the filler speech).
   14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5, 14-6, 14-7, 14-8a, 14-8b,
-  14-8c, 14-8d and 14-9 are done. Of step 12,
+  14-8c, 14-8d, 14-9 and 14-10a are done. Of step 12,
   12a to 12k-2, the light flares, 12k-3's planners, 12k-3a, 12k-3b,
   12k-4a, 12k-4b, 12k-7, 12l-1 and 12l-2 are done. See
   "First" at the top.
