@@ -73,7 +73,7 @@ typedef struct SoundHooks {
                       float seconds);
     // pRaceCoordinator's state (gp-22216, +0), or -1 with no coordinator.
     int      (*race_state)(void* ctx);
-    // Player::NumPlayers (gp-20920), and pPlayersByNumber[i]'s
+    // Player::NumPlayers (gp-20920), and pPlayersByIndex[i]'s (gp-20928)
     // bZoneMuffleSound (+144), nZoneCurrent (+88) and fZoneMuffleVolume
     // (+148).
     int      (*num_players)(void* ctx);

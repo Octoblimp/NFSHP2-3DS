@@ -136,6 +136,7 @@
 #include "jukebox.h"
 #include "songmon.h"
 #include "sound.h"
+#include "sound3d.h"
 #include "selcam.h"
 #include "player.h"
 #include "playerfinish.h"
@@ -707,7 +708,8 @@ static int sndNumPlayers(void* c) { (void)c; return PlayerNumPlayers; }
 static void sndPlayerZone(void* c, int i, int* muffle, int* zone,
                           float* volume)
 {
-    const struct Player* p = PlayerPlayersByNumber[i];
+    // gp-20928: by index, the order they were made.
+    const struct Player* p = PlayerPlayersByIndex[i];
     (void)c;
     if (p == NULL) return;          // the port's; retail reads it untested
     *muffle = p->bZoneMuffleSound;
@@ -749,6 +751,17 @@ static void sndJoylogAdd(void* c, int32_t value, int bits, int channel)
     Joylog_AddData(value, bits, channel);
 }
 
+// sound3d_oneshot (14-2b), which sound::Initialize, Close, Update and
+// the mutes call.
+static void sndOneshotInit(void* c)   { (void)c; sound3d_oneshot_init(); }
+static void sndOneshotClose(void* c)  { (void)c; sound3d_oneshot_close(); }
+static void sndOneshotUpdate(void* c) { (void)c; sound3d_oneshot_update(); }
+static void sndOneshotMute(void* c, int on)
+{
+    (void)c;
+    sound3d_oneshot_mute(on);
+}
+
 static SoundHooks gSoundHooks = {
     .game_state       = sndGameState,
     .paused           = sndPaused,
@@ -765,6 +778,10 @@ static SoundHooks gSoundHooks = {
     .joylog_replaying = sndJoylogReplaying,
     .joylog_get       = sndJoylogGet,
     .joylog_add       = sndJoylogAdd,
+    .oneshot_init     = sndOneshotInit,
+    .oneshot_close    = sndOneshotClose,
+    .oneshot_update   = sndOneshotUpdate,
+    .oneshot_mute     = sndOneshotMute,
     .sound_path       = gSoundDir,
     .skip_missing     = 1,
 };
@@ -4178,6 +4195,7 @@ int main(int argc, char** argv)
     trafficcar_install_vtables();
     trafficdriver_install_vtables();
     cameracoord_install_vtables();
+    sound3d_install_vtables();
 
     // Car::SetControlMode reaches the controllers task 26 brings through
     // seams; a NULL one is a class not ported yet, and the arm aborts.
@@ -4789,6 +4807,7 @@ int main(int argc, char** argv)
     gJukeboxDelayedStartFn    = raceJukeboxDelayedStart;
     gJukeboxDelayedStartTimer = &g_jukebox.delayedStart;
     gJukeboxStopFn            = raceJukeboxStop;
+    gSound3dOneshotResetFn    = sound3d_oneshot_reset;
     // World's constructor makes its TrafficTeleporter, and its destructor
     // deletes it and any car left on CarList. AddTrafficCar places each
     // traffic car with it, and World's step moves them out of sight.

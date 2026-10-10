@@ -619,9 +619,16 @@ pursuit.obj, on a 10 KB manager. Its slices:
     and "sound regions: InGame Parkland NewENeo" (driver number 1 is
     none in a one-player race, so one car). The user heard the 3-2-1
     beeps; no engine or siren yet, which are 14-3 and 14-4.
-  - **14-2b:** Sound3d (0x00208ae8 .. 0x002091a0), sound3d_oneshot
+  - **14-2b, done:** Sound3d (0x00208ae8 .. 0x002091a0), sound3d_oneshot
     (0x002091d0 .. 0x002093d8) and Sound3dSample (0x002094b0 ..
-    0x00209e98), with GetActiveCameras (0x001cf268), the sound scape's.
+    0x00209e98), with GetActiveCameras (0x001cf268), the sound scape's
+    (`sound3d.c`, docs/formats/sound3d.md). The two vtables are
+    installed at boot; sound.c's one-shot hooks and RaceCoordinator's
+    Reset seam are set. `tools/sound3d_check.py` runs retail's
+    Sound3d.obj in mipsemu, with the EE's divide, product and root,
+    against the port: 1425 ops, 3323 lines, 0 differ; 193 mutations, 193
+    caught. Play's only callers are collision_sound's (14-6). Azahar, on
+    AC: a Hot Pursuit quick race, PASS at 30 fps.
   - **14-3:** car sounds, the horn and the siren.
   - **14-4:** the engines.
   - **14-5:** the tyres.
@@ -5055,7 +5062,7 @@ each class shows what it reaches.
 | 12 | The cops and the pursuit: CopManager, the cop drivers, roadblocks and spikes | 4-6 |
 | 13 | ~~The two-screen HUD, to the split decided below~~ done as 8m: 8m-1 to 8m-6c | 10 |
 | 13b | New 3DS mode in full and a steady 30 FPS race (task 28), right after step 13: the real clock and the pacing, a frame profiler, New 3DS mode checked part by part, then only the optimizations the New 3DS needs. Set by the user on 2026-10-03 | 4 |
-| 14 | The car and world sounds and the speech, and the ChopperSound (12k-5) | 10 (14-1 and 14-2a done) |
+| 14 | The car and world sounds and the speech, and the ChopperSound (12k-5) | 10 (14-1, 14-2a and 14-2b done) |
 | 14b | The smokeables: FindSmokeableInfo, the spawner (`0x0021ed28`) and delete (`0x0021ef88`), Smokeable's Break and DeleteFarAway, and their collision. The roadblock's barrels wait for it (12i-2), and the helicopter's munitions (12k-6) come after it | 1-2 |
 | 15 | **A whole race with the AI and the cops.** Steps 10-14 add about 15-23 slices | |
 | 16 | The full frontend from retail: the 44 screens still plain or unregistered (`screen_registry.py --check-port`), the event tree (the career), the tourneys and the car selector | 6-10 |
@@ -5081,7 +5088,8 @@ count. It is its own slice when it goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** step 14, the audio in full; 14-1 and 14-2a are done. Of step 12,
+- **Next:** step 14, the audio in full, at 14-3 (the car sounds, the horn
+  and the siren); 14-1, 14-2a and 14-2b are done. Of step 12,
   12a to 12k-2, the light flares, 12k-3's planners, 12k-3a, 12k-3b,
   12k-4a, 12k-4b, 12k-7, 12l-1 and 12l-2 are done. See
   "First" at the top.
