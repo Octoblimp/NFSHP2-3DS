@@ -30,6 +30,7 @@
 #include "nisinfo.h"
 #include "esolid.h"
 #include "racefinish.h"
+#include "soundscape.h"
 #include "sun.h"
 #include "texturepack.h"
 #include "weatherman.h"
@@ -812,7 +813,7 @@ static int unported_slot(int k)
 {
     return !(k == 0 || k == 1 || k == 2 || k == 4 || k == 5 || k == 6
              || k == 8 || k == 9 || k == 11 || k == 13 || k == 14 || k == 16
-             || k == 15 || k == 18 || k == 19 || k == 20
+             || k == 15 || k == 18 || k == 19 || k == 20 || k == 21
              || k == 22 || k == 23 || k == 25 || k == 28);
 }
 
@@ -1105,7 +1106,9 @@ static uint8_t *chunk_ptr(int32_t idx)
 // unloader, and the list after the call must hold just it (the loader)
 // or nothing (the unloader); 5 is a NIS table chunk of 479 bytes, loaded
 // first for the unloader, and the table after the call must be its two
-// records (the loader) or empty (the unloader).
+// records (the loader) or empty (the unloader); 6 is a sound-scape chunk
+// of one empty reverb area, loaded first for the unloader, and the areas
+// after the call must number one (the loader) or none (the unloader).
 static void matrix(int table, int slot, uint32_t type, int mode)
 {
     static uint8_t raw[512];
@@ -1133,6 +1136,12 @@ static void matrix(int table, int slot, uint32_t type, int mode)
         memcpy(c, w, sizeof w);
         if (table)
             (void)loader_nis_info(c);
+    } else if (mode == 6) {
+        uint32_t w[4] = { SOUNDSCAPE_CHUNK, 56, SOUNDSCAPE_CHUNK_REVERB, 48 };
+
+        memcpy(c, w, sizeof w);
+        if (table)
+            (void)loader_sound_scape(c);
     } else if (mode == 2) {
         uint32_t w[4] = { 0x80034000u, 60, 0x00034001u, 52 };
 
@@ -1167,6 +1176,11 @@ static void matrix(int table, int slot, uint32_t type, int mode)
             printf("  nis wrong\n");
         NisInfoTable = NULL;
         NumNisInfos = 0;
+    }
+    if (mode == 6) {
+        if (SoundScapeNumReverbAreas != (table ? 0 : 1))
+            printf("  soundscape wrong\n");
+        SoundScapeNumReverbAreas = 0;
     }
     if (unported_slot(slot) && r) {
         if (seam_rec.set != 1 || seam_rec.slot != slot

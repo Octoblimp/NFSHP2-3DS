@@ -20,13 +20,14 @@
 // HighLevelPlanning, CleverPursuitPlan and BombRunLogic. 12k-4a has the
 // flying under them, Think, and 12k-4b Fly, the moving and the dust.
 // 12k-7 has the chase's side, tPursuit's UpdateChopper and the manager's
-// requests, in pursuitchopper.c. The sound (12k-5, after step 14's
-// Sound3d) and the salvos (FireSalvo and the munitions it launches,
-// 12k-6, in chopperfire.c, after step 14b's Smokeable) come after.
+// requests, in pursuitchopper.c. The salvos (FireSalvo and the
+// munitions it launches, 12k-6, in chopperfire.c, after step 14b's
+// Smokeable) come after.
 //
-// The ChopperSound is task 29's. The port builds none unless
-// gCreateChopperSoundFn is set, and then every call through it is
-// skipped; retail calls through it unguarded except in the destructor.
+// The ChopperSound is 14-7's, in choppersound.c; main.c sets
+// gCreateChopperSoundFn to choppersound_create. Without it the port
+// builds none and skips every call through it; retail calls through it
+// unguarded except in the destructor.
 //
 // Cross-check: tools/chopper_check.py. Write-up: docs/formats/chopper.md.
 

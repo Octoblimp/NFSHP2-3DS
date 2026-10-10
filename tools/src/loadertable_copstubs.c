@@ -1,13 +1,16 @@
 // What copmgr.c calls besides LoaderCops, for tools/loadertable_check.py.
 // The table's slot 15 is copmgr.c's loader and unloader, and the file
 // links whole; nothing the check runs reaches past the cop container's
-// walk, so each of these exits if it is ever called.
+// walk, so each of these exits if it is ever called. The same for
+// soundscape.c, slot 21's: its loader reads records and calls nothing,
+// and its unloader deletes only samples an update made.
 
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 #include "airoute.h"
+#include "bsound.h"
 #include "car.h"
 #include "carinit.h"
 #include "collision.h"
@@ -19,6 +22,8 @@
 #include "raceparams.h"
 #include "racesplit.h"
 #include "realdriver.h"
+#include "sound.h"
+#include "sound3d.h"
 #include "trackgraph.h"
 #include "trackmap.h"
 #include "world.h"
@@ -234,4 +239,155 @@ int32_t collision_is_two_car_collision(Collision *c)
     (void)c;
     unreached("collision_is_two_car_collision");
     return 0;
+}
+
+// ---------------------------------------------------------- soundscape.c
+
+int32_t SoundEnabled = 1;
+
+BSound *bsound_get(void)
+{
+    unreached("bsound_get");
+    return NULL;
+}
+
+BRegion *bsound_region(const BSound *s, const char *name)
+{
+    (void)s, (void)name;
+    unreached("bsound_region");
+    return NULL;
+}
+
+BSample *bregion_sample(const BRegion *r, const char *name)
+{
+    (void)r, (void)name;
+    unreached("bregion_sample");
+    return NULL;
+}
+
+void bsample_construct(BSample *s, int8_t type)
+{
+    (void)s, (void)type;
+    unreached("bsample_construct");
+}
+
+BSample *bsample_new(int8_t type)
+{
+    (void)type;
+    unreached("bsample_new");
+    return NULL;
+}
+
+void bsample_delete(BSample *s)
+{
+    (void)s;
+    unreached("bsample_delete");
+}
+
+void bsample_initialize_copy(BSample *s, const BSample *other)
+{
+    (void)s, (void)other;
+    unreached("bsample_initialize_copy");
+}
+
+void bsample_set_category(BSample *s, uint32_t category)
+{
+    (void)s, (void)category;
+    unreached("bsample_set_category");
+}
+
+int32_t bsample_set_pitch(BSample *s, float pitch)
+{
+    (void)s, (void)pitch;
+    unreached("bsample_set_pitch");
+    return 0;
+}
+
+void bsample_set_volume(BSample *s, float volume)
+{
+    (void)s, (void)volume;
+    unreached("bsample_set_volume");
+}
+
+void bsample_set_azimuth(BSample *s, uint16_t azimuth)
+{
+    (void)s, (void)azimuth;
+    unreached("bsample_set_azimuth");
+}
+
+float bsample_get_volume(const BSample *s)
+{
+    (void)s;
+    unreached("bsample_get_volume");
+    return 0.0f;
+}
+
+BVoice *bsample_play(BSample *s, float volume, float pan, float pitch)
+{
+    (void)s, (void)volume, (void)pan, (void)pitch;
+    unreached("bsample_play");
+    return NULL;
+}
+
+bool bsample_is_playing(const BSample *s)
+{
+    (void)s;
+    unreached("bsample_is_playing");
+    return false;
+}
+
+void bsample_pause(BSample *s, bool pause)
+{
+    (void)s, (void)pause;
+    unreached("bsample_pause");
+}
+
+void bsample_stop(BSample *s)
+{
+    (void)s;
+    unreached("bsample_stop");
+}
+
+void bsample_mute(BSample *s, bool mute)
+{
+    (void)s, (void)mute;
+    unreached("bsample_mute");
+}
+
+void bsample_fade(BSample *s, float volume, uint32_t ms)
+{
+    (void)s, (void)volume, (void)ms;
+    unreached("bsample_fade");
+}
+
+SoundModule *sound_get(void)
+{
+    unreached("sound_get");
+    return NULL;
+}
+
+int32_t sound_random_int(SoundModule *m, int32_t range)
+{
+    (void)m, (void)range;
+    unreached("sound_random_int");
+    return 0;
+}
+
+float sound_random_float(SoundModule *m, float range)
+{
+    (void)m, (void)range;
+    unreached("sound_random_float");
+    return 0.0f;
+}
+
+struct Camera **get_active_cameras(void)
+{
+    unreached("get_active_cameras");
+    return NULL;
+}
+
+void basecarsound_scale_road_noise(BaseCarSound *s, float f)
+{
+    (void)s, (void)f;
+    unreached("basecarsound_scale_road_noise");
 }

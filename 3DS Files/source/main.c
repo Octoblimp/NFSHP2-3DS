@@ -96,6 +96,7 @@
 #include "nismanager.h"
 #include "playernis.h"
 #include "chopper.h"
+#include "choppersound.h"
 #include "barricade.h"
 #include "difficultyinfo.h"
 #include "drivingchoice.h"
@@ -140,6 +141,7 @@
 #include "songmon.h"
 #include "sound.h"
 #include "sound3d.h"
+#include "soundscape.h"
 #include "selcam.h"
 #include "player.h"
 #include "playerfinish.h"
@@ -778,6 +780,27 @@ static void sndCollisionMute(void* c, int on)
     collision_sound_mute(on);
 }
 
+// sound_scape (14-7), which sound::Update and the mutes call.
+static void sndScapeUpdate(void* c) { (void)c; sound_scape_update(); }
+static void sndScapeMute(void* c, int on)
+{
+    (void)c;
+    sound_scape_mute(on);
+}
+
+// The chopper's sound (14-7): Chopper::UpdateSound and Mute, which
+// sound.c calls only with a helicopter.
+static void sndChopperUpdate(void* c)
+{
+    (void)c;
+    chopper_update_sound(pCurrentWorld->Helicopter);
+}
+static void sndChopperMute(void* c, int on)
+{
+    (void)c;
+    chopper_mute(pCurrentWorld->Helicopter, on);
+}
+
 // The car sounds (14-3): UpdateCarSounds, and Mute's walk of
 // pCurrentWorld's CarList, each car's BaseCarSound muted through its table.
 static void sndCarSoundsUpdate(void* c)
@@ -852,6 +875,10 @@ static SoundHooks gSoundHooks = {
     .collision_unregister = sndCollisionUnregister,
     .collision_update     = sndCollisionUpdate,
     .collision_mute       = sndCollisionMute,
+    .scape_update     = sndScapeUpdate,
+    .scape_mute       = sndScapeMute,
+    .chopper_update   = sndChopperUpdate,
+    .chopper_mute     = sndChopperMute,
     .sound_path       = gSoundDir,
     .skip_missing     = 1,
 };
@@ -4270,6 +4297,8 @@ int main(int argc, char** argv)
     enginesound_install_vtables();
     tiresound_install_vtables();
     collisionsound_install_vtables();
+    choppersound_install_vtables();
+    soundscape_init();
 
     // The car sounds (14-3): Car's constructor and destructor, the splash
     // and the tyre pop, and the drivers' horn.
@@ -4297,6 +4326,8 @@ int main(int argc, char** argv)
     gCollisionSoundPlayScrapeFn = collision_sound_play_scrape;
     gCollisionSoundResetFn = collision_sound_reset;
     gCollisionSoundPlayBustRoadBlockFn = collision_sound_play_bust_road_block;
+    // The chopper's rotor (14-7), which Chopper's constructor makes.
+    gCreateChopperSoundFn = choppersound_create;
 
     // Car::SetControlMode reaches the controllers task 26 brings through
     // seams; a NULL one is a class not ported yet, and the arm aborts.

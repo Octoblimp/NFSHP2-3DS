@@ -83,7 +83,9 @@ record, the unloader's linked first, and the list must hold just that
 record after the loader and nothing after the unloader. NisInfo's two
 (slot 20) are called on a chunk of 479 bytes, the unloader's loaded
 first, and the table must be its two records after the loader and empty
-after the unloader. An unported slot
+after the unloader. SoundScape's two (slot 21) are called on a chunk of
+one empty reverb area, the unloader's loaded first, and there must be
+one area after the loader and none after the unloader. An unported slot
 must also hand the chunk it takes to gUnportedLoaderFn, once, with its
 slot and table.
 
@@ -148,7 +150,7 @@ SOURCES = [HARNESS, STUBS, BCL, ESC, EMC] + ["3DS Files/source/" + f for f in (
     "cartypeinfo.c", "langtab.c", "drivetrain.c", "engine.c", "wheel.c",
     "suspension.c", "steering.c", "rigidbody.c", "table.c", "elight.c",
     "helisheet.c", "copmgr.c", "cop.c", "copmanager.c", "timer.c",
-    "epositionmarker.c", "nisinfo.c")]
+    "epositionmarker.c", "nisinfo.c", "soundscape.c")]
 
 HARNESS_TIMEOUT = 600
 EXTRACTED = ROOT / "extracted"
@@ -266,8 +268,8 @@ CLAIMS = {
     30: [0x00039100, 0x00039101, 0x00039102],
 }
 TAKER = {t: k for k, ts in CLAIMS.items() for t in ts}
-PORTED = {0, 1, 2, 4, 5, 6, 8, 9, 11, 13, 14, 16, 18, 19, 21, 23, 24,
-          26, 29}
+PORTED = {0, 1, 2, 4, 5, 6, 8, 9, 11, 13, 14, 16, 18, 19, 21, 22, 23,
+          24, 26, 29}
 
 # Retail's: the demo's without PhysPredict, slot 20, and HeliSheet (23) a
 # container. The rest of the guards are the demo's.
@@ -616,6 +618,10 @@ def scenario_matrix(sc, files, tables):
                     # A size-0 NIS table loads as an empty one, so the
                     # slot gets two records and the table is checked.
                     mode = 5
+                elif t == 0x80038000:
+                    # A size-0 sound scape loads as an empty one, so the
+                    # slot gets an area and the count is checked.
+                    mode = 6
                 elif slot in tables.ported:
                     # Scenery's unloader unlinks what its loader linked,
                     # and TexturePack's destroys the pack its header names,
@@ -2208,13 +2214,24 @@ MUTATIONS = [
      "    unloader_heli_sheet,            // 23",
      "    loader_heli_sheet,              // 23"),
     ("nis-slot", BCL, "    loader_nis_info,                // 20",
-     "    LoaderSoundScape,               // 20"),
+     "    loader_sound_scape,             // 20"),
     ("nis-unloader-loads", BCL, "    unloader_nis_info,              // 20",
      "    loader_nis_info,                // 20"),
     ("nis-demo-type", "3DS Files/source/nisinfo.h",
      "#define NIS_INFO_CHUNK_ID 0x00037010u",
      "#define NIS_INFO_CHUNK_ID 0x00034700u"),
     ("nis-count", "3DS Files/source/nisinfo.c", "/ 160u);", "/ 128u);"),
+    ("soundscape-slot", BCL, "    loader_sound_scape,             // 21",
+     "    loader_nis_info,                // 21"),
+    ("soundscape-unloader-loads", BCL,
+     "    unloader_sound_scape,           // 21",
+     "    loader_sound_scape,             // 21"),
+    ("soundscape-type", "3DS Files/source/soundscape.h",
+     "#define SOUNDSCAPE_CHUNK           0x80038000u",
+     "#define SOUNDSCAPE_CHUNK           0x00038000u"),
+    ("soundscape-unload-take", "3DS Files/source/soundscape.c",
+     "    SoundScapeNumLoopingAmbient = 0;\n    return 1;",
+     "    SoundScapeNumLoopingAmbient = 0;\n    return 0;"),
     ("nis-unload-count", "3DS Files/source/nisinfo.c",
      "    NisInfoTable = NULL;\n    NumNisInfos = 0;",
      "    NisInfoTable = NULL;"),

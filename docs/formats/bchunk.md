@@ -85,7 +85,7 @@ python tools/chunk_loader_table.py "PS2 Files/NFSHP2.ELF"
 | `0x80035000` | `LoaderAcidFX`            | container -- particle/FX system; also takes `0x80035010` and `0x00035021` |
 | `0x80036000` | `LoaderEventManager`      | container |
 | `0x00037010` | `LoaderNisInfo`           | 160-byte records; cutscene table |
-| `0x80038000` | `LoaderSoundScape`        | container -- ambient sound zones |
+| `0x80038000` | `LoaderSoundScape`        | container -- ambient sound zones -- ported, see `soundscape.md` |
 | `0x00039000` | `LoaderLanguage`          | `LANGUAGES\FE_*.BIN` string tables |
 | `0x00039100` | `LoaderDemoModeReplay`    | `REPLAY\*` attract-mode recordings |
 | --           | `LoaderNull`              | slot 0, the no-op sentinel |

@@ -18,6 +18,7 @@
 #include "nisinfo.h"
 #include "polyhedra.h"
 #include "scenery.h"
+#include "soundscape.h"
 #include "sun.h"
 #include "texturepack.h"
 #include "track.h"
@@ -148,7 +149,6 @@ UNPORTED(LoaderEventManager, UnloaderEventManager, 7, 0x80036000u)
 UNPORTED(LoaderFlailerChunk, UnloaderFlailerChunk, 10, 0x80010200u)
 UNPORTED(LoaderAnimations, UnloaderAnimations, 12, 0x80034008u)
 UNPORTED(LoaderBodyDamage, UnloaderBodyDamage, 17, 0x00034030u)
-UNPORTED(LoaderSoundScape, UnloaderSoundScape, 21, 0x80038000u)
 UNPORTED(LoaderEventTree, UnloaderEventTree, 24, 0x80034a00u)
 UNPORTED(LoaderLanguage, UnloaderLanguage, 26, 0x00039000u)
 UNPORTED(LoaderSmokeables, UnloaderSmokeables, 27, 0x00034026u, 0x00034027u)
@@ -181,7 +181,7 @@ BChunkLoader LoaderTable[BCHUNK_NUM_LOADERS] = {
     LoaderTrackRoutes,              // 18
     loader_track_path,              // 19
     loader_nis_info,                // 20
-    LoaderSoundScape,               // 21
+    loader_sound_scape,             // 21
     LoaderCharacterInfo,            // 22
     loader_heli_sheet,              // 23
     LoaderEventTree,                // 24
@@ -214,7 +214,7 @@ BChunkLoader UnloaderTable[BCHUNK_NUM_LOADERS] = {
     UnloaderTrackRoutes,            // 18
     UnloaderTrackPath,              // 19
     unloader_nis_info,              // 20
-    UnloaderSoundScape,             // 21
+    unloader_sound_scape,           // 21
     UnloaderCharacterInfo,          // 22
     unloader_heli_sheet,            // 23
     UnloaderEventTree,              // 24

@@ -13,7 +13,7 @@ helicopter. The port has it in `chopper.{c,h}`, in slices:
 | 12k-3b | the plans: HighLevelPlanning, CleverPursuitPlan and BombRunLogic (this page) |
 | 12k-4a | flying: Think and its helpers (this page) |
 | 12k-4b | moving: Fly, MoveChopper, DrawChopper and the dust (this page) |
-| 12k-5 | the ChopperSound |
+| 12k-5 | the ChopperSound, done as 14-7 (`choppersound.md`) |
 | 12k-6 | the salvos: FireSalvo and its launch (`chopperfire.c`) |
 | 12k-7 | tPursuit's UpdateChopper and the manager's methods |
 
@@ -568,10 +568,11 @@ TriggerDustEmitter(dt)                  0x001ea5c0
 
 ## The port
 
-- **No sound unless it is set.** The ChopperSound is task 29's. The port
-  builds one only through `gCreateChopperSoundFn`, and skips every call
-  through it when there is none. Retail calls through it unguarded except
-  in the destructor.
+- **No sound unless it is set.** The ChopperSound is
+  [choppersound](choppersound.md)'s, and main.c sets
+  `gCreateChopperSoundFn` to it. The port builds one only through that
+  pointer, and skips every call through it when there is none. Retail
+  calls through it unguarded except in the destructor.
 - **The flags word starts at 0** in FindUnobstructedSpot (see above).
 - **HangoutNearHere stops** after a miss once both offsets are below the
   least normal float, or NaN. By then the EE has flushed them to zero,
