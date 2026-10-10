@@ -150,7 +150,7 @@ void copmanager_calculate_max_cop_car_dimensions(tCopManager *m);
 // nMaxCops above 0, CreateCop and then 0x002276a0.
 void copmgr_add_cop_car_to_race(struct DriverInfo *info, int32_t beACop);
 
-// The cop speech manager (gp-15624), not ported: AllocateVoices
+// The cop speech manager (gp-15624, speechmgr.h): AllocateVoices
 // (0x0020a288) and FlushQueue (0x0020a230). NULL seams do nothing.
 extern void (*gCopSpeechAllocateVoicesFn)(void);
 extern void (*gCopSpeechFlushQueueFn)(void);
@@ -243,7 +243,8 @@ void copmanager_spawn_speed_traps(tCopManager *m);
 //     (GetExactDescription is not -1) and the pursuit is at LEVEL2 or 3.
 //   - SuperInitiates (0x0022b908) and SayFillerSpeech (0x00231760), the
 //     speech manager's.
-//   - The speech manager's previousSedPlaybackState, its word at 1452.
+//   - The speech manager's previousSedPlaybackState, its word at 1452:
+//     main.c binds speechmgr.h's (14-9).
 //   - SpawnSpeedTraps (0x00224a20): main.c binds
 //     copmanager_spawn_speed_traps (12j-1).
 //   - MonitorSpikeBelts (0x00227758), 12j-2; EndPullover (0x00225878),

@@ -117,8 +117,8 @@ order:
 5. no cops, no player cop (-1);
 6. speakers 0 to 3 pushed at the head, so the queue reads 3, 2, 1, 0;
 7. the speech timers (0, -50 and 12), then the speech manager's
-   AllocateVoices and FlushQueue (seams, NULL until the speech is
-   ported);
+   AllocateVoices and FlushQueue (seams, bound to
+   [speechmgr](speechmgr.md));
 8. each pullover cleared, except `bShouldDisplayBustedText`, which
    retail leaves;
 9. each radar trap's spawn timer from GetBaseSpeedTrapSpawnTime: 15,
@@ -252,7 +252,7 @@ that does nothing (or returns 0) while NULL:
 | tPursuit::Update | `0x00229288` | `gPursuitUpdateFn` | 12h |
 | the supervisor's test | `0x0022aaf0` | `gPursuitCanSupervisorInitiateFn` | 12h |
 | SuperInitiates, SayFillerSpeech | `0x0022b908`, `0x00231760` | `gPursuitSuperInitiatesFn`, `gSayFillerSpeechFn` | speech |
-| the speech manager's previousSedPlaybackState | gp-15624 + 1452 | `gCopSpeechPlaybackStateFn` | speech |
+| the speech manager's previousSedPlaybackState | gp-15624 + 1452 | `gCopSpeechPlaybackStateFn` | 14-9, bound ([speechmgr](speechmgr.md)) |
 | SpawnSpeedTraps | `0x00224a20` | `gCopManagerSpawnSpeedTrapsFn` | 12j-1, bound (below) |
 | MonitorSpikeBelts | `0x00227758` | `gCopManagerMonitorSpikeBeltsFn` | 12j-2a, bound (below) |
 | EndPullover | `0x00225878` | `gCopManagerEndPulloverFn` | 12l, bound ([pullover](pullover.md)) |

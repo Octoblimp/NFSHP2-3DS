@@ -143,6 +143,7 @@
 #include "sound3d.h"
 #include "soundscape.h"
 #include "sedwedge.h"
+#include "speechmgr.h"
 #include "speechnoise.h"
 #include "selcam.h"
 #include "player.h"
@@ -835,6 +836,43 @@ static void speechClearEventQueue(void)
     if (w != NULL) sedwedge_clear_event_queue(w);
 }
 
+// speech::mgr_t (14-9): sound::Update runs its update and the mutes its
+// Mute; the race's ends and the cop manager flush its queue, the cop
+// manager shuffles its voices, and the jukebox and the cop manager's
+// filler speech wait on previousSedPlaybackState.
+static void sndSpeechUpdate(void* c)
+{
+    (void)c;
+    speechmgr_update(speechmgr_get_instance());
+}
+static void sndSpeechMute(void* c, int on)
+{
+    (void)c;
+    speechmgr_mute(speechmgr_get_instance(), on);
+}
+static void sndSpeechFlush(void* c)
+{
+    (void)c;
+    speechmgr_flush_queue(speechmgr_get_instance());
+}
+static int sndSpeechSedPlaying(void* c)
+{
+    (void)c;
+    return speechmgr_get_instance()->previousSedPlaybackState;
+}
+static void speechFlushQueue(void)
+{
+    speechmgr_flush_queue(speechmgr_get_instance());
+}
+static void speechAllocateVoices(void)
+{
+    speechmgr_allocate_voices(speechmgr_get_instance());
+}
+static int32_t speechPlaybackState(void)
+{
+    return speechmgr_get_instance()->previousSedPlaybackState;
+}
+
 // The chopper's sound (14-7): Chopper::UpdateSound and Mute, which
 // sound.c calls only with a helicopter.
 static void sndChopperUpdate(void* c)
@@ -930,6 +968,10 @@ static SoundHooks gSoundHooks = {
     .noise_mute       = sndNoiseMute,
     .sed_create       = sndSedCreate,
     .sed_update       = sndSedUpdate,
+    .speech_update    = sndSpeechUpdate,
+    .speech_mute      = sndSpeechMute,
+    .speech_flush     = sndSpeechFlush,
+    .speech_sed_playing = sndSpeechSedPlaying,
     .chopper_update   = sndChopperUpdate,
     .chopper_mute     = sndChopperMute,
     .sound_path       = gSoundDir,
@@ -3013,6 +3055,19 @@ static void hookCarSelSound(void* user, int32_t event)
     fesound_play((int)event, user);
 }
 
+// SoundEnabled (gp-23056), which the selector asks before it fades the
+// speech, speech::mgr_t::fade.
+static int hookCarSelSoundEnabled(void* user)
+{
+    (void)user;
+    return SoundEnabled;
+}
+static void hookCarSelSpeechFade(void* user, float level)
+{
+    (void)user;
+    speechmgr_fade(speechmgr_get_instance(), level);
+}
+
 // StopFrontendSound (0x0016e0e8), CarSelector's destructor's.
 static void hookCarSelStopSound(void* user, int32_t event)
 {
@@ -4481,6 +4536,10 @@ int main(int argc, char** argv)
     gSamplePlayFn             = sndSamplePlay;
     gTriggerFinishLineSoundFn = sndTriggerFinishLine;
     gSpeechClearEventQueueFn  = speechClearEventQueue;
+    gSpeechFlushQueueFn        = speechFlushQueue;
+    gCopSpeechFlushQueueFn     = speechFlushQueue;
+    gCopSpeechAllocateVoicesFn = speechAllocateVoices;
+    gCopSpeechPlaybackStateFn  = speechPlaybackState;
     gSelCamSound              = &kSelCamSound;
 
     // World::DoTimestep's Race::Update and SimulateRaceFinish's
@@ -5227,6 +5286,8 @@ int main(int argc, char** argv)
     carselHooks.loaderBeginLoading = hookCarSelLoaderBeginLoading;
     carselHooks.renderTextIntoRectangle = hookCarSelRenderText;
     carselHooks.formatUnlockBlurb  = hookCarSelFormatUnlockBlurb;
+    carselHooks.speechFade         = hookCarSelSpeechFade;
+    carselHooks.soundEnabled       = hookCarSelSoundEnabled;
     carselHooks.language           = hookCarSelLanguage;
     carselHooks.stopMovie          = hookCarSelStopMovie;
     carselHooks.trace              = hookTrace;

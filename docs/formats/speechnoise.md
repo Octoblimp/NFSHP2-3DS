@@ -84,8 +84,7 @@ never plays, though speech::mgr_t's helicopter action still asks for it.
 - speech::mgr_t (step 14-9) turns the radio on and off, and stops the
   helicopter's noise in its update and FlushQueue. Its actions
   (`0x0020be0c`, `0x0020be64`) begin the squelch and start the
-  helicopter's noise. Until 14-9, nothing turns the radio on, so the
-  static stays quiet.
+  helicopter's noise ([speechmgr](speechmgr.md)).
 
 ## What the port changes
 

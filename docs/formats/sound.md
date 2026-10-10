@@ -233,8 +233,8 @@ main.c owns a SoundModule and binds the SoundHooks:
 
 Each module's hooks stay NULL until its step binds them. The collision
 sounds, the scapes, the car sounds, the one-shots and the speech noise
-([speechnoise](speechnoise.md)) are bound. The speech manager and the SED
-wedge are not yet.
+([speechnoise](speechnoise.md)), the SED wedge ([sedwedge](sedwedge.md))
+and the speech manager ([speechmgr](speechmgr.md)) are bound.
 
 The frontend's InitFrontendSounds / UnInitFrontendSounds and the menu
 sounds (fesound.c) take their samples from these regions. The
