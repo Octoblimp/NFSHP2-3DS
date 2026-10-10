@@ -688,7 +688,22 @@ pursuit.obj, on a 10 KB manager. Its slices:
     `tools/collisionsound_check.py`: 633 ops, 1630 lines, 0 differ; 153
     mutations, 153 caught. Azahar, on AC: a gas-only SkipFE race, no
     abort, 30 fps (speed 99%), sound 0.1-0.7 ms a frame.
-  - **14-7:** sound_scape (slot 21) and the ChopperSound (12k-5).
+  - **14-7, done (6084aa3):** the track's ambience and the chopper's
+    rotor. SoundScape.obj (0x001cdde0 .. 0x001cff20): the 0x80038000
+    chunk's reverb areas, looping ambients (over an area, or a sound
+    sphere round a source inside it) and one-shot ambients, the reverb's
+    smoothing and its road-over-the-car test, Update, Mute and
+    SoundScapeIsInsideTunnel (`soundscape.c`,
+    docs/formats/soundscape.md), on bchunkload's slot 21 and sound's
+    scape hooks. The 3DS has no reverb unit, so the three effect calls
+    are NULL seams. ChopperSound.obj (0x00214d68 .. 0x002150d8): the
+    Sound3d over "ChopperEngine" with its tunnel fade
+    (`choppersound.c`, docs/formats/choppersound.md), set as
+    gCreateChopperSoundFn. `tools/soundscape_check.py`: 4854 ops, 21476
+    lines, 0 differ, every distinct retail track's chunk included; 342
+    mutations, 338 caught, 4 equivalent. loadertable_check covers slot
+    21 (0 differ). Azahar, on AC: a gas-only SkipFE race, no abort, 30
+    fps (speed 99%).
   - **14-8:** SPCH, cSEDWedge and SpeechNoise.
   - **14-9:** speech::mgr_t.
   - **14-10:** the pursuit, race and filler speech, retiring the
@@ -5117,7 +5132,7 @@ each class shows what it reaches.
 | 12 | The cops and the pursuit: CopManager, the cop drivers, roadblocks and spikes | 4-6 |
 | 13 | ~~The two-screen HUD, to the split decided below~~ done as 8m: 8m-1 to 8m-6c | 10 |
 | 13b | New 3DS mode in full and a steady 30 FPS race (task 28), right after step 13: the real clock and the pacing, a frame profiler, New 3DS mode checked part by part, then only the optimizations the New 3DS needs. Set by the user on 2026-10-03 | 4 |
-| 14 | The car and world sounds and the speech, and the ChopperSound (12k-5) | 10 (14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5 and 14-6 done) |
+| 14 | The car and world sounds and the speech, and the ChopperSound (12k-5) | 10 (14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5, 14-6 and 14-7 done) |
 | 14b | The smokeables: FindSmokeableInfo, the spawner (`0x0021ed28`) and delete (`0x0021ef88`), Smokeable's Break and DeleteFarAway, and their collision. The roadblock's barrels wait for it (12i-2), and the helicopter's munitions (12k-6) come after it | 1-2 |
 | 15 | **A whole race with the AI and the cops.** Steps 10-14 add about 15-23 slices | |
 | 16 | The full frontend from retail: the 44 screens still plain or unregistered (`screen_registry.py --check-port`), the event tree (the career), the tourneys and the car selector | 6-10 |
@@ -5143,9 +5158,9 @@ count. It is its own slice when it goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** step 14, the audio in full, at 14-7 (sound_scape and the
-  ChopperSound). 14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5 and 14-6 are
-  done. Of step 12,
+- **Next:** step 14, the audio in full, at 14-8 (SPCH, cSEDWedge and
+  SpeechNoise). 14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5, 14-6 and 14-7
+  are done. Of step 12,
   12a to 12k-2, the light flares, 12k-3's planners, 12k-3a, 12k-3b,
   12k-4a, 12k-4b, 12k-7, 12l-1 and 12l-2 are done. See
   "First" at the top.
