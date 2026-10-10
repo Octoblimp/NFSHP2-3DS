@@ -243,7 +243,8 @@ void copmanager_spawn_speed_traps(tCopManager *m);
 //     (GetExactDescription is not -1) and the pursuit is at LEVEL2 or 3.
 //     main.c binds tpursuit_can_supervisor_initiate (pursuitspeech.h).
 //   - SuperInitiates (0x0022b908): main.c binds tpursuit_super_initiates.
-//     SayFillerSpeech (0x00231760), the speech manager's, 14-10b.
+//   - SayFillerSpeech (0x00231760): main.c binds say_filler_speech
+//     (fillerspeech.h).
 //   - The speech manager's previousSedPlaybackState, its word at 1452:
 //     main.c binds speechmgr.h's (14-9).
 //   - SpawnSpeedTraps (0x00224a20): main.c binds

@@ -19594,3 +19594,23 @@ Picked up from Session 64's steps:
   sdmc has it).
 - Committed as a96f7b6. Next: 14-10b, the filler speech; then 14-10c,
   the race's speech; then 14-10d, the car selector's.
+
+## Session 69 (2026-10-10) -- 14-10b, the filler speech
+
+- `fillerspeech.{c,h}`: the chase's filler speech ported from retail
+  (0x002315d0 .. 0x00231d70): TryFillerSpeech, SayFillerSpeech, the nine
+  filler classes of FillerSpeechBanks (0x0031c658) as a table of bank,
+  weight, test and speech, tPursuit::IsCopNearChasedCar (0x0022bb28) and
+  the 80 mph reckless test (0x0022bbb0). CopDirection's Speak is
+  retail's reckless update, as CopReckless's is; kept.
+- `tools/fillerspeech_check.py` with `tools/src/fillerspeech_test.c`:
+  81169 ops, 23198 lines, 0 differ on the first run. 122 mutations, all
+  caught. The class table's mutations are generated.
+- docs/formats/pursuit-speech.md, "The filler speech" and its check.
+- main.c binds `say_filler_speech` into copmgr.h's gSayFillerSpeechFn,
+  so TimeBasedSpeech's gaps are filled.
+- Built. Azahar, on AC: a frontend Hot Pursuit quick race
+  (`-HoldKeys 65`), PASS at 30 fps with two chases started.
+- The session ran out mid-doc; the next one (Session 70) wrote the doc
+  and committed it. Next: the user's ask of 2026-10-10, the end of the
+  race (the finish, the post-race and the results), then 14-10c.

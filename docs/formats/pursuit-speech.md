@@ -163,6 +163,52 @@ Every roll is bRandom on bDefaultSeed. The rolls happen in retail's order
 and only where retail rolls: a test that fails first skips the roll after
 it.
 
+## The filler speech
+
+When the player's chase has been quiet a while, the cops and the
+helicopter fill the gap. tCopManager's TimeBasedSpeech
+([cop-manager](cop-manager.md)) counts the time since the last speech.
+Past its MaxSpeechGapTime it calls SayFillerSpeech (0x00231760) on the
+player's chase with the manager's SpeechFillerCookie. It does not call it
+while the supervisor's timer runs, while the chase is about to say
+something, or while it is not chasing.
+
+Retail has nine filler classes. FillerSpeechBanks (0x0031c658) points at
+them in this order, and _GLOBAL_$I$FillerSpeechBanks (0x002317b0) gives
+each its vtable: GetBank, IsAppropriate, GetWeight and Speak. Each bank
+is one bit of the cookie.
+
+| Bank | Class | Weight | Its test | What it raises |
+|---|---|---|---|---|
+| 1 | ChopperLocation | 4 | the helicopter near, a landmark | the rotor's location |
+| 2 | ChopperTraffic | 4 | the helicopter near, traffic over 0.9 | the rotor's traffic |
+| 4 | ChopperMisc | 4 | the helicopter near | the rotor's chatter, with the chased car past 30 forward |
+| 8 | CopLocation | 2 | a cop within 65, a landmark | the subject's location |
+| 32 | CopTacticMisc | 2 | a cop within 65, not Be A Cop | a divert or a cutoff, one roll in two |
+| 64 | CopSpeed | 2 | a cop within 65, over 100 | the current speed |
+| 128 | CopReckless | 2 | a cop within 65, 80 mph or more | the reckless update |
+| 256 | CopDirection | 2 | a cop within 65 | the reckless update |
+| 16 | TacticHit | 5 | flag 4, not Be A Cop, two different speakers, a cop within 40 | the tactic hit |
+
+"A cop within 65" is tPursuit::IsCopNearChasedCar (0x0022bb28): one of
+the chase's cars within 65 of the chased car, in three dimensions. Each
+cop class tests that a cop is on the chase first. 80 mph is 0x0022bbb0's
+35.762 m/s. "Over 100" is GetSpeedMPHOrKPH, in the player's units.
+
+CopDirection's Speak is retail's reckless update, the same as
+CopReckless's. The port keeps it.
+
+TryFillerSpeech (0x002315d0) gathers the classes whose bank is not in the
+cookie and whose test passes, rolls bRandom over their summed weights and
+says the one the roll falls in. It adds that bank to the cookie and
+returns 1. With no class to say it returns 0 and rolls nothing.
+SayFillerSpeech empties the cookie on a 0 and tries again, so the
+banks come round once each before any repeats.
+
+The port has them in `fillerspeech.{c,h}`, the classes as a table of the
+bank, the weight, the test and the speech. main.c binds
+`say_filler_speech` into copmgr.h's gSayFillerSpeechFn.
+
 ## The seams
 
 main.c binds pursuitspeech.h's methods into these seams:
@@ -170,7 +216,8 @@ main.c binds pursuitspeech.h's methods into these seams:
 - pursuit.h's start, join, back-off, declare, backup, collision,
   roadblock-failed and roadblock-set seams;
 - pullover.h's AI ticket seam;
-- copmgr.h's supervisor test and SuperInitiates.
+- copmgr.h's supervisor test and SuperInitiates;
+- copmgr.h's filler speech, fillerspeech.h's `say_filler_speech`.
 
 It also binds wrappers that call speechmgr.h's raise functions on
 `speechmgr_get_instance()`:
@@ -205,3 +252,23 @@ The mutation pass makes 281 mutations. Some are generated:
 
 The rest are hand-written. They cover every test, constant, argument,
 raise, return and call order. All 281 are caught.
+
+### The filler speech's check
+
+`python tools/fillerspeech_check.py` runs retail's TryFillerSpeech,
+SayFillerSpeech, the nine classes through their vtables,
+IsCopNearChasedCar and the reckless test on the MIPS model, against
+`fillerspeech.c` on the host (`tools/src/fillerspeech_test.c`). The
+helicopter's test, the speakers, the speed, bRandom and the nine raises
+are logged stubs. The race's traffic and Be A Cop, the cars and the cops
+are memory both sides read. The script covers IsCopNearChasedCar's
+distances, each class's test at its boundaries with every bank of the
+cookie, the roll at each weight's edges, SayFillerSpeech's second try on
+a full cookie, and random chases.
+
+Result: 81169 ops, 23198 lines, 0 differ.
+
+The mutation pass makes 122 mutations. Each row of the class table has
+its bank, its weight, its test and its speech changed or swapped with the
+next row's. The rest cover every test, constant, argument and the roll's
+sum. All 122 are caught.

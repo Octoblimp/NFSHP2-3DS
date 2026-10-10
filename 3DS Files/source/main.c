@@ -93,6 +93,7 @@
 #include "pursuitchopper.h"
 #include "pullover.h"
 #include "pursuitspeech.h"
+#include "fillerspeech.h"
 #include "nisinfo.h"
 #include "nismanager.h"
 #include "playernis.h"
@@ -5217,8 +5218,9 @@ int main(int argc, char** argv)
     gPlayerPlayNextNisFn           = player_play_next_nis;
     gUpdatePlayersGameStateFn      = player_update_players_game_state;
     // What the cops say on the radio (14-10a): each chase's own speeches
-    // (pursuitspeech.h) and the raises it, its helicopter, its roadblocks
-    // and its pullovers make straight to speech::mgr_t.
+    // (pursuitspeech.h), its filler (fillerspeech.h, 14-10b) and the
+    // raises it, its helicopter, its roadblocks and its pullovers make
+    // straight to speech::mgr_t.
     gPursuitStartSpeechFn              = tpursuit_start_pursuit_speech;
     gPursuitJoinSpeechFn               = tpursuit_join_pursuit_speech;
     gPursuitBackOffSpeechFn            = tpursuit_cop_back_off_speech;
@@ -5231,6 +5233,7 @@ int main(int argc, char** argv)
     gPursuitAITicketSpeechFn           = tpursuit_ai_ticket_speech;
     gPursuitCanSupervisorInitiateFn    = tpursuit_can_supervisor_initiate;
     gPursuitSuperInitiatesFn           = tpursuit_super_initiates;
+    gSayFillerSpeechFn                 = say_filler_speech;
     gSpeechRaiseCrashTowFn             = speechRaiseCrashTow;
     gSpeechRaiseCrashFn                = speechRaiseCrash;
     gSpeechRaiseFlatTireFn             = speechRaiseFlatTire;
