@@ -142,6 +142,7 @@
 #include "sound.h"
 #include "sound3d.h"
 #include "soundscape.h"
+#include "speechnoise.h"
 #include "selcam.h"
 #include "player.h"
 #include "playerfinish.h"
@@ -788,6 +789,30 @@ static void sndScapeMute(void* c, int on)
     sound_scape_mute(on);
 }
 
+// SpeechNoise (14-8a): the radio's squelch and static. Its samples are
+// asked for by LoadSoundRegionsInGame and unloaded by UnLoadSoundRegions;
+// sound::Update and the mutes call the rest.
+static void sndNoiseRequest(void* c)
+{
+    (void)c;
+    speechnoise_request_samples(speechnoise_get_instance());
+}
+static void sndNoiseUnload(void* c)
+{
+    (void)c;
+    speechnoise_unload_samples(speechnoise_get_instance());
+}
+static void sndNoiseUpdate(void* c)
+{
+    (void)c;
+    speechnoise_update(speechnoise_get_instance());
+}
+static void sndNoiseMute(void* c, int on)
+{
+    (void)c;
+    speechnoise_mute(speechnoise_get_instance(), on);
+}
+
 // The chopper's sound (14-7): Chopper::UpdateSound and Mute, which
 // sound.c calls only with a helicopter.
 static void sndChopperUpdate(void* c)
@@ -877,6 +902,10 @@ static SoundHooks gSoundHooks = {
     .collision_mute       = sndCollisionMute,
     .scape_update     = sndScapeUpdate,
     .scape_mute       = sndScapeMute,
+    .noise_request    = sndNoiseRequest,
+    .noise_unload     = sndNoiseUnload,
+    .noise_update     = sndNoiseUpdate,
+    .noise_mute       = sndNoiseMute,
     .chopper_update   = sndChopperUpdate,
     .chopper_mute     = sndChopperMute,
     .sound_path       = gSoundDir,

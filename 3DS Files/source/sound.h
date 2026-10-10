@@ -107,7 +107,8 @@ typedef struct SoundHooks {
     // for none after it. tools/sound_check.py runs with this 0.
     int skip_missing;
 
-    // -- the modules not ported yet
+    // -- the modules sound calls, each bound by main.c; the speech's
+    // (speech_* and sed_*) are not ported yet, so are NULL
     void (*speech_update)(void* ctx);           // speech::mgr_t::update
     void (*speech_mute)(void* ctx, int on);     // speech::mgr_t::Mute
     void (*speech_flush)(void* ctx);            // speech::mgr_t::FlushQueue

@@ -704,7 +704,29 @@ pursuit.obj, on a 10 KB manager. Its slices:
     mutations, 338 caught, 4 equivalent. loadertable_check covers slot
     21 (0 differ). Azahar, on AC: a gas-only SkipFE race, no abort, 30
     fps (speed 99%).
-  - **14-8:** SPCH, cSEDWedge and SpeechNoise.
+  - **14-8:** the speech's engine, in four parts (retail addresses;
+    out/retail_syms.txt's first column is retail's, its fifth the
+    demo's):
+    - **14-8a, done:** SpeechNoise.obj (0x002155d8 .. 0x00215a5c, and
+      getInstance 0x001b0188): the radio's two squelches and seven
+      bursts of static, category 6, a 3% chance a frame of one burst
+      while the radio is on (`speechnoise.c`,
+      docs/formats/speechnoise.md), on sound's four noise hooks. Retail
+      never sets the helicopter's sample. Nothing turns the radio on
+      until 14-9, so it is quiet for now. `tools/speechnoise_check.py`:
+      175 ops, 433 lines, 0 differ; 67 mutations, 67 caught. Azahar, on
+      AC: a gas-only SkipFE race, no abort, 31 fps (speed 99%).
+    - **14-8b:** the SPCH library (0x00290720 .. 0x00295afc, 130
+      functions, ~21 KB): the banks, the event queue, the sentence
+      choice, the rules, its random and the sample unpacking, run on
+      SOUND/SPEECH/EVENTS.EVT and ENGLISHBAN.PCK. The SPCHLOG/SPCHDBG
+      functions are the debug log.
+    - **14-8c:** bSampleStream and bSampleChain (bSampleChain's
+      AddToChain 0x00206760 and the rest) and the driver's streams, to
+      play ENGLISHDAT.PCK (303 MB) off the card.
+    - **14-8d:** cSEDWedge (0x002056f0 .. 0x00206760): Initialize,
+      Update, PlaySentence and the callbacks into SPCH, and sound's
+      sed_* hooks and localized speech files (0x001ae4d8, 0x001ae5e8).
   - **14-9:** speech::mgr_t.
   - **14-10:** the pursuit, race and filler speech, retiring the
     gSpeech* seams.
@@ -5158,9 +5180,9 @@ count. It is its own slice when it goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** step 14, the audio in full, at 14-8 (SPCH, cSEDWedge and
-  SpeechNoise). 14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5, 14-6 and 14-7
-  are done. Of step 12,
+- **Next:** step 14, the audio in full, at 14-8b (the SPCH library).
+  14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5, 14-6, 14-7 and 14-8a are
+  done. Of step 12,
   12a to 12k-2, the light flares, 12k-3's planners, 12k-3a, 12k-3b,
   12k-4a, 12k-4b, 12k-7, 12l-1 and 12l-2 are done. See
   "First" at the top.

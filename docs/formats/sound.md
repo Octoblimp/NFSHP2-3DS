@@ -232,9 +232,10 @@ main.c owns a SoundModule and binds the SoundHooks:
 - the chopper and the Joylog;
 - the card's `SOUND` directory as the path.
 
-The modules not ported yet stay NULL until their step binds them: the
-speech, the SED wedge, the speech noise, the collision sounds, the
-scapes, the car sounds and the one-shots.
+Each module's hooks stay NULL until its step binds them. The collision
+sounds, the scapes, the car sounds, the one-shots and the speech noise
+([speechnoise](speechnoise.md)) are bound. The speech manager and the SED
+wedge are not yet.
 
 The frontend's InitFrontendSounds / UnInitFrontendSounds and the menu
 sounds (fesound.c) take their samples from these regions. The
