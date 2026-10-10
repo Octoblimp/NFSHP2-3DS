@@ -2326,6 +2326,50 @@ phases.
         frozen), and how ScaleY reaches the quad. The bottom screen was
         blank during the NIS too; check that against retail. The user
         agreed it comes after step 14, the full audio.
+39. [ ] **The helicopter's missiles.** Asked for on 2026-10-10, with a
+        video of retail for reference: "NFS HP2 for PS2 dodging
+        missiles" (https://www.youtube.com/watch?v=VAsYHOw5pyc, 2:18).
+        This is 12k-6: FireSalvo (`0x001ea8c0`) is a placeholder in
+        `chopperfire.c`, so the bombing run counts its salvos and fires
+        nothing. The munitions are Smokeables -- Munition (`0x001be6c8`),
+        Rocket (`0x001bf340`), DroppedBomb (`0x001beae0`), SmokeBomb
+        (`0x001beb90`) and DroppedSpikes (`0x001bee88`) -- with the
+        MunitionEffectsHandler (`0x001bf980` .. `0x001bfad0`) behind the
+        seam `gMunitionEffectsDoTimestepFn`. They need the Smokeable base
+        (step 14b) first. Check the result against the video's frames:
+        the missiles' look, their trail and what a hit does to the car.
+        - The user's note, 2026-10-10: only one helicopter fires
+          missiles, the armed one, and only on certain tracks. It also
+          drops exploding barrels, some with a spike belt hidden
+          inside and some without. Reference:
+          https://nfs.fandom.com/wiki/Police_Helicopter_(Armed)_(2002)
+          (the page would not load here, in WebFetch or the browser).
+        - That matches retail's decode (CONTINUE.md, 12k-6): the
+          bombing runs' table (`0x0031a7c8`, five rows of 32 bytes,
+          by BombRunType) has the kind at +0 -- 0 a Rocket (the
+          missile), 1 a SmokeBomb (the plain barrel), anything else
+          DroppedSpikes (the barrel with the belt). Which run a
+          helicopter gets, and so which tracks have the missiles,
+          comes from the track's data: find where BombRunType is set
+          and check that only the armed helicopter's tracks pick row
+          kind 0.
+40. [ ] **The radar detection meter.** Asked for on 2026-10-10: the
+        bar of lights under the rear-view mirror. The user's
+        description: it fills as the car nears a cop, green first and
+        then red when close, and flashes yellow when a roadblock or a
+        spike strip is set up ahead. This is 12n. The meter itself is
+        ported (8m-4c-1, `hudcop.c`, Player::UpdateRadarDetector
+        `0x0017be70`; `docs/formats/hud-cop.md`): twelve lights, the
+        count lit from the intensity times 11, RadarColours' rows 2
+        and 3 (the yellow-green ones) for a flagged cop, the swells
+        and the beep. What is missing is
+        tCopManager::GetRadarDetectorIntensity (`0x002274a8`), the
+        intensity 0 to 1 for the nearest cop in range and the flag for
+        its kind. Its seam `gCopManagerGetRadarDetectorIntensityFn` is
+        NULL, so the radar reads 0 and nothing lights. Port it with a
+        checker against retail, bind it in `main.c`, and check in
+        Azahar that the lights climb near a cop and turn yellow for a
+        roadblock or spikes ahead.
 
 ### The retail frontend
 

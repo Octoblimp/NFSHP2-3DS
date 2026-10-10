@@ -8,6 +8,7 @@
 //   NFSPointsRewardsArray      0x0031d1f0  eighteen points totals, a car each
 //   GetTaskParametersForCar    0x0024ae58  and IsCarATaskReward 0x0024aeb0
 //   GetPointsRewardForCar      0x0024b0c0  and IsCarAPointsReward 0x0024b100
+//   GetCarTypeForPointsReward  0x0024b178
 //   the points' text           0x0024b468  no name in the image
 //   FormatUnlockBlurbForCar    0x0024b548
 //
@@ -60,6 +61,11 @@ int nfs_is_car_a_task_reward(int32_t carType, int32_t gameType);
 
 const NFSPointsRewards* nfs_get_points_reward_for_car(int32_t carType);
 int nfs_is_car_a_points_reward(int32_t carType);
+
+// GetCarTypeForPointsReward, 0x0024b178: the car of the reward whose
+// IndexIntoFred is `index` (TransientStats.PointsRewardEarned holds one),
+// -1 for none.
+int32_t nfs_get_car_type_for_points_reward(int32_t index);
 
 // 0x0024b468: a points total with its thousands split, by `language`'s
 // separator -- a space in French (1), a dot in German (2), a comma in the

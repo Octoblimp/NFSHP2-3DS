@@ -19614,3 +19614,35 @@ Picked up from Session 64's steps:
 - The session ran out mid-doc; the next one (Session 70) wrote the doc
   and committed it. Next: the user's ask of 2026-10-10, the end of the
   race (the finish, the post-race and the results), then 14-10c.
+
+## Session 70 (2026-10-10) -- RE-1, the end of the race's screens
+
+- `endgame.{c,h}`: EndGameScreens from retail: the tests, BuildScreenList,
+  the list's walk and edits, the resume, suspend and autosave, the
+  classes' base EndGameMenusBase, the callback (0x001dd278) and its class
+  table, and the End Game Menu with its labels, items, popup and BACK.
+  The classes that are not ported yet get the bare base, so SELECT
+  passes them.
+- `tools/endgame_check.py` with `tools/src/endgame_test.c`: 24325 ops,
+  78957 lines, 0 differ. 272 mutations, 270 caught; the two equivalent
+  ones are proven from retail's code in the script's EQUIVALENT.
+- The stubs that return ints must `return s32(x)`: mipsemu stores
+  `v & M64` with no sign extension, so a -1 masked to 32 bits is
+  positive to retail's `slt` (32 lines differed until that was fixed).
+- bdtor and mdtor print the vtable they left when FLAGS has no 1, so a
+  dtor that runs the wrong level is seen.
+- docs/formats/end-game.md; race-coordinator.md links it.
+- `screen_registry.py --check-port` flags Events Unlocked and Be The Cop
+  Results 1P/2P because it reads the demo's ELF; retail registers all
+  three (0x001e2018, 0x001e20c8, 0x001e20f4).
+- Azahar, on AC, with a test-only hook that finished the player after
+  600 frames (removed, rebuilt clean): Task Rewards, Race Results, Best
+  Lap Times, Best Total Times, then the End Game Menu ("Race Over":
+  Restart Race, View Replay, View Lap Times, Quit Race), and SELECT on
+  Restart Race opened its popup. Task Rewards showed EA's placeholder
+  text because TheRaceIsOver is not bound yet, so TaskRewardEarned is 0,
+  not -1; RE-2's CheckForTaskAndPointRewards (0x0024b7b0) sets both
+  words to -1 first. RE-2 must land before the user's next build.
+- TASKS.md: task 39 (the armed helicopter: missiles, and barrels with or
+  without spike belts, on its own maps) and task 40 (the radar detection
+  meter under the rear-view mirror, 12n). Next: RE-2.

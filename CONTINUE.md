@@ -2,7 +2,12 @@
 
 **Now (Session 70, 2026-10-10): the end of the race, RE-1 to RE-6,
 below in "First", is the user's ask: "I do need the end of races to be
-coded in".** 14-10c and 14-10d come after it. The user's device log of
+coded in".** RE-1 is done (the list of screens, the classes' base, the
+callback and the End Game Menu; `docs/formats/end-game.md`); RE-2 is
+next. 14-10c and 14-10d come after RE-6. Two asks were added to
+TASKS.md the same day, with no order given: task 39, the armed
+helicopter's missiles and barrels (12k-6), and task 40, the radar
+detection meter under the rear-view mirror (12n). The user's device log of
 2026-10-10 (`3DS Files/nfshp2_debug.txt`, a Hot Pursuit quick race on
 track 43): no hitch and no abort; 15-30 fps in the race, median 24.5,
 17-20 with the pack and the cops in view; a spike strip was laid. At
@@ -175,7 +180,7 @@ test; End Game Menu is always last:
 
 | Screen | Test | Class (ctor) |
 |---|---|---|
-| Points Rewards | gp-15392 not -1 and its car not unlocked | 0x001de568 |
+| Points Rewards | gp-15392 not -1, and IsCarUnlocked(its car, 3) as it answers | 0x001de568 |
 | Task Rewards | gp-15388 not -1 | 0x001de6a8 |
 | Events Unlocked | an event tree's event, done, with unlocks | 0x001df180 |
 | Reward menu | 0x001dc758 | 0x001def38 |
@@ -204,13 +209,20 @@ A Hot Pursuit quick race sees Race Results, Best Lap Times, Best Total
 Times and the End Game Menu.
 
 The slices:
-- **RE-1:** EndGameScreens (the tests, BuildScreenList, the list's
+- **RE-1, done (Session 70):** EndGameScreens (the tests, BuildScreenList, the list's
   navigation, Resume/Suspend, the autosave bridge), EndGameMenusBase
   (its ctor, HandleEvent and Callback), EndGameMenu (its ctor, the
   label table 0x001e15f0, MaybeRestart, HandleEvent and the popups'
   answers), and the screens' rows in main.c's kScreens. Screens whose
   class is not ported yet get the bare EndGameMenusBase, so SELECT
-  passes them.
+  passes them. `endgame.c`, `tools/endgame_check.py` (0 differ, 270
+  of 272 mutations caught, two equivalent), `docs/formats/end-game.md`.
+  The Autosave screen is not ported: main.c's
+  SetAutosaveCompletionCallback runs the callback at once. View Replay
+  is hidden while `pReplayManager` is NULL. `screen_registry.py
+  --check-port` flags Events Unlocked and Be The Cop Results 1P/2P
+  because it reads the demo's ELF; retail registers all three
+  (0x001e2018, 0x001e20c8, 0x001e20f4).
 - **RE-2:** RaceResultsScreen (0x001dffe8, Scroll 0x001e0838) and
   ShowPointsResults (0x001e0430).
 - **RE-3:** BestLapTimes, BestTotalTimes and the Lap Times screens
@@ -5318,8 +5330,8 @@ count. It is its own slice when it goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** the end of the race, RE-1 (see "First"), then step 14's
-  14-10c. 14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5, 14-6, 14-7, 14-8a,
+- **Next:** the end of the race, RE-2 (see "First"; RE-1 is done),
+  then the rest of RE-3 to RE-6, then step 14's 14-10c. 14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5, 14-6, 14-7, 14-8a,
   14-8b, 14-8c, 14-8d, 14-9, 14-10a and 14-10b are done. Of step 12,
   12a to 12k-2, the light flares, 12k-3's planners, 12k-3a, 12k-3b,
   12k-4a, 12k-4b, 12k-7, 12l-1 and 12l-2 are done. See

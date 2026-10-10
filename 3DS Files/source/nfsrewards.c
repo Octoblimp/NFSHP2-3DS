@@ -70,6 +70,15 @@ int nfs_is_car_a_points_reward(int32_t carType)
     return nfs_get_points_reward_for_car(carType) != NULL;
 }
 
+// GetCarTypeForPointsReward (0x0024b178).
+int32_t nfs_get_car_type_for_points_reward(int32_t index)
+{
+    for (int i = 0; i < NFS_NUM_POINTS_REWARDS; i++)
+        if (NFSPointsRewardsArray[i].IndexIntoFred == index)
+            return NFSPointsRewardsArray[i].Reward;
+    return -1;
+}
+
 // 0x0024b468. The separators are the strings at 0x00331e70 (","),
 // 0x00331e78 (" ") and 0x00331e80 ("."); the millions are what is left of
 // a thousand thousands, as the console's divides leave it.

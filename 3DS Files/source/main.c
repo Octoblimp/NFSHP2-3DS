@@ -155,6 +155,7 @@
 #include "mainloop.h"
 #include "mellowmover.h"
 #include "pausemenu.h"
+#include "endgame.h"
 #include "physcomp.h"
 #include "physicscar.h"
 #include "physicssystem.h"
@@ -347,6 +348,34 @@ static const BScreenConfig kScreens[] = {
     // controls and the debug menu it leads to are not ported yet.
     { "Pause Menu",              PAUSE_MENU_SCREEN,
       pause_menu_callback },
+    // The end of the race (endgame.c): EndGameScreens' list, each on the
+    // one callback that makes its class by name. The four reward screens
+    // share one Flailer screen. The classes not ported yet are the bare
+    // EndGameMenusBase, which SELECT passes and BACK walks back from. The
+    // Lap Times screens View Lap Times goes to, and the Autosave screen,
+    // are not ported.
+    { "Points Rewards",          END_GAME_REWARDS_SCREEN,
+      endgame_screen_callback },
+    { "Task Rewards",            END_GAME_REWARDS_SCREEN,
+      endgame_screen_callback },
+    { "Events Unlocked",         END_GAME_REWARDS_SCREEN,
+      endgame_screen_callback },
+    { "Reward menu",             END_GAME_REWARDS_SCREEN,
+      endgame_screen_callback },
+    { "Race Results",            END_GAME_RACE_RESULTS_SCREEN,
+      endgame_screen_callback },
+    { "Tourney Standings",       END_GAME_TOURNEY_SCREEN,
+      endgame_screen_callback },
+    { "Best Lap Times",          END_GAME_BEST_LAP_SCREEN,
+      endgame_screen_callback },
+    { "Best Total Times",        END_GAME_BEST_TOTAL_SCREEN,
+      endgame_screen_callback },
+    { "End Game Menu",           END_GAME_MENU_SCREEN,
+      endgame_screen_callback },
+    { "Be The Cop Results 1P",   END_GAME_BTC_1P_SCREEN,
+      endgame_screen_callback },
+    { "Be The Cop Results 2P",   END_GAME_BTC_2P_SCREEN,
+      endgame_screen_callback },
 };
 #define NUM_SCREENS ((int)(sizeof(kScreens) / sizeof(kScreens[0])))
 
@@ -4335,6 +4364,29 @@ static BAnim* pauseMenuAnim(void)
     return g_flow.anim;
 }
 
+// ------------------------------------------------------- the end of the race
+//
+// endgame.c's seams, and the FED's two that TheRaceHasFinished asks.
+
+// SetAutosaveCompletionCallback (0x00247d98). The Autosave screen is not
+// ported, and nothing is saved at the end of a race yet: what comes after
+// the autosave comes now.
+static void endGameAutosaveNow(void (*cb)(void))
+{
+    if (cb != NULL)
+        cb();
+}
+
+static int32_t fedIsThereAnotherRace(void)
+{
+    return fred_is_there_another_race(&Fred);
+}
+
+static int32_t fedIsMultiTrack(void)
+{
+    return fred_is_multi_track(&Fred);
+}
+
 // ChangeGameFlow (0x001680d8) for RCSTATE_NONE: Quit Race's unloading, and
 // NEXT_RACE's.
 static void raceChangeGameFlow(int32_t desired, int32_t pending)
@@ -4592,6 +4644,21 @@ int main(int argc, char** argv)
     gFlailerCurrentScreenFn = flowCurrentScreen;
     gPauseTranslateFn = startRaceTranslate;
     gPauseMenuAnimFn = pauseMenuAnim;
+    // The end of the race (endgame.c): TheRaceHasFinished makes the
+    // screens' list, POSTRACE puts them up and takes them down, and the
+    // End Game Menu's popups and bloom are the pause menu's. Its OK posts
+    // RESTART_RACE, NEXT_RACE or QUIT_RACE to POSTRACE, which goes on
+    // through RCSTATE_NONE. The event tree's calls stay NULL until the
+    // career is ported.
+    gEndGameScreensCtorFn = endgame_screens_construct;
+    gEndGameScreensDestroyFn = endgame_screens_destroy;
+    gEndGameScreensResumeFn = endgame_screens_resume;
+    gEndGameScreensSuspendFn = endgame_screens_suspend;
+    gEndGameTranslateFn = startRaceTranslate;
+    gEndGameMenuAnimFn = pauseMenuAnim;
+    gSetAutosaveCompletionCallbackFn = endGameAutosaveNow;
+    gFEDIsThereAnotherRaceFn = fedIsThereAnotherRace;
+    gFEDIsMultiTrackFn = fedIsMultiTrack;
     gChangeGameFlowFn = raceChangeGameFlow;
     gSoundMuteFn = raceSoundMute;
     gSoundMuteReplayFn = sndMuteReplay;

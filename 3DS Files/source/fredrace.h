@@ -21,6 +21,7 @@
 #ifndef FREDRACE_H
 #define FREDRACE_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "car.h"
@@ -47,6 +48,20 @@ static inline int32_t fred_is_multi_track(const FrontendDatabase *f)
     (void)f;
     return t < 6 && t >= 4;
 }
+
+// UseTreeEvent, 0x001841e8: GameTypes 8 and 9, an event tree's race. The
+// image has it twice over, IsEventGame being the other.
+static inline int32_t fred_use_tree_event(const FrontendDatabase *f)
+{
+    int32_t t = f->GameType;
+
+    return t == 8 || t == 9;
+}
+
+// IsThereAnotherRace, 0x00184210: a race event's, and another race of it
+// to come. fred_use_the_race_event is fredrace.c's, the second answer the
+// seam's (gRaceEventIsThereAnotherRaceFn, below).
+static inline int32_t fred_is_there_another_race(const FrontendDatabase *f);
 
 // FrontendPlayerInfo::GetSelectedRideInfo, 0x00187af8: the ride the
 // player picked for game type `gameType`, unchecked.
@@ -147,14 +162,18 @@ void fred_start_skip_fe_game(FrontendDatabase *f);
 
 // --------------------------------------------------------- the seams
 
-// The four words of TheRaceEvent (0x0031b600) StartRace touches: the
-// event's type (+106) and its track count (+112), which it reads, and the
-// player count (+118) and the event's word (+120), which it writes.
+// The words of TheRaceEvent (0x0031b600) the port touches. StartRace
+// reads the event's type (+106) and its track count (+112) and writes the
+// player count (+118) and the event's word (+120); the end of the race
+// (endgame.c) reads the event's number (+104), its reward count (+114) and
+// the word.
 typedef struct RaceEventFields {
     int16_t Type;                                // 106
     int16_t NumTracks;                           // 112
     int16_t NumPlayers;                          // 118
     int32_t EventWord;                           // 120
+    int16_t Number;                              // 104  nNumber
+    int16_t NumRewards;                          // 114  nRewards
 } RaceEventFields;
 
 extern RaceEventFields TheRaceEventFields;
@@ -189,6 +208,16 @@ extern int32_t (*gFredEventWordFn)(FrontendDatabase *f);
 extern int32_t (*gRaceEventDriverEliminatedFn)(int32_t number);
 extern int32_t (*gRaceEventEliminatedRankFn)(int32_t number);
 extern void (*gRaceEventStartingPositionsFn)(void);
+
+// RaceEvent::IsThereAnotherRace (0x00202420) on TheRaceEvent: another race
+// of the event to come.
+extern int32_t (*gRaceEventIsThereAnotherRaceFn)(void);
+
+static inline int32_t fred_is_there_another_race(const FrontendDatabase *f)
+{
+    return fred_use_the_race_event(f) && gRaceEventIsThereAnotherRaceFn != NULL
+           && gRaceEventIsThereAnotherRaceFn() != 0;
+}
 
 // An event game's opponent `i` (OpponentSelect 2): the record GetEventTree,
 // EventTree::GetEventNumber and the event's opponent table point at, four

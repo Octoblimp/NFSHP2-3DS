@@ -446,7 +446,7 @@ is set it is 0.
 6. What comes next: `NEXT_RACE` (1) if `IsThereAnotherRace`, else `NONE`
    (0) if `IsMultiTrack`, else `RESTART` (2).
 7. `new EndGameScreens(next)` on `bMalloc(72, "EndGameScreens", 0, 16)`,
-   kept in `pEndGameScreens`.
+   kept in `pEndGameScreens` ([end-game.md](end-game.md)).
 8. `ChangeState(POSTRACE)`.
 
 Retail's active demo disc ends the race between steps 6 and 7 instead

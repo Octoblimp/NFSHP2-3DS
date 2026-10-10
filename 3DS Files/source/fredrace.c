@@ -21,6 +21,7 @@ RaceEventFields TheRaceEventFields;
 
 void (*gSetupFakeRaceEventForChallengeKnockoutFn)(FrontendDatabase *f);
 int32_t (*gRaceEventGetStatusFn)(void);
+int32_t (*gRaceEventIsThereAnotherRaceFn)(void);
 void (*gRaceEventResetStateFn)(void);
 int32_t (*gRaceEventGetRaceIndexFn)(void);
 void (*gEventTrackSetRaceFn)(int32_t index, RaceParameters *rp);
