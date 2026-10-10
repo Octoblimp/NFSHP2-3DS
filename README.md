@@ -48,7 +48,10 @@ Copy `extracted-retail/` to the SD card as `sdmc:/NFSHP2` or
 `sdmc:/3ds/NFSHP2-3DS/data`, or point `nfshp2_config.txt` at wherever you
 put it. The movies play straight from the disc's `.AVI`: the title screen
 wants `MOVIES/INTRO/EALOGO_EN.AVI` and `NFSINTRO_EN.AVI` (73 MB between
-them), and skips any it cannot find.
+them), and skips any it cannot find. The race speech streams from
+`SOUND/SPEECH` (`EVENTS.EVT` and each language's `BAN.PCK` and
+`DAT.PCK`: 1.5 GB for all five, about 300 MB for one). Without it the
+game runs silent of speech.
 
 ## Status
 

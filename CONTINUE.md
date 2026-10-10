@@ -742,9 +742,23 @@ pursuit.obj, on a 10 KB manager. Its slices:
       caught, 2 equivalent. bsnd_check and bsound_check stay at 0
       differ. Azahar, on AC: a gas-only SkipFE race, no abort, 30 fps
       (speed 100%).
-    - **14-8d:** cSEDWedge (0x002056f0 .. 0x00206760): Initialize,
-      Update, PlaySentence and the callbacks into SPCH, and sound's
-      sed_* hooks and localized speech files (0x001ae4d8, 0x001ae5e8).
+    - **14-8d, done (c8b0d26):** cSEDWedge (0x002056f0 ..
+      0x00206760), bSegment (0x002761d0 .. 0x00276538) and Sound.obj's
+      wedge creation (0x001ae754), LoadLocalizedSpeechFiles and
+      UnLoadLocalizedSpeechFiles (0x001ae4d8, 0x001ae5e8) in
+      `sedwedge.c` (docs/formats/sedwedge.md). The wedge loads
+      EVENTS.EVT and the language's BAN into SPCH; each update plays
+      channel 0's best pending event as bSegments of the DAT, handed to
+      the chain. main.c binds sound's sed_create and sed_update, the
+      gameflow's speech load and unload, and the finish's
+      ClearEventQueue. The port returns 0 for a missing BAN (bGetFile
+      would stop the game) and a full pool. spch.md's BAN entries are
+      corrected. `tools/sedwedge_check.py`: 300 ops, 1329 lines, 0
+      differ; 195 mutations, 193 caught, 2 equivalent. sound_check and
+      spch_check stay at 0 differ. Azahar, on AC, with SOUND/SPEECH on
+      the card: a gas-only SkipFE race at 30 fps, and a frontend Hot
+      Pursuit quick race at 30 fps with "speech bank 0: loaded". No
+      event is queued until 14-9, so nothing speaks yet.
   - **14-9:** speech::mgr_t.
   - **14-10:** the pursuit, race and filler speech, retiring the
     gSpeech* seams.
@@ -5172,7 +5186,7 @@ each class shows what it reaches.
 | 12 | The cops and the pursuit: CopManager, the cop drivers, roadblocks and spikes | 4-6 |
 | 13 | ~~The two-screen HUD, to the split decided below~~ done as 8m: 8m-1 to 8m-6c | 10 |
 | 13b | New 3DS mode in full and a steady 30 FPS race (task 28), right after step 13: the real clock and the pacing, a frame profiler, New 3DS mode checked part by part, then only the optimizations the New 3DS needs. Set by the user on 2026-10-03 | 4 |
-| 14 | The car and world sounds and the speech, and the ChopperSound (12k-5) | 11 (14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5, 14-6, 14-7, 14-8a, 14-8b and 14-8c done) |
+| 14 | The car and world sounds and the speech, and the ChopperSound (12k-5) | 12 (14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5, 14-6, 14-7, 14-8a, 14-8b, 14-8c and 14-8d done) |
 | 14b | The smokeables: FindSmokeableInfo, the spawner (`0x0021ed28`) and delete (`0x0021ef88`), Smokeable's Break and DeleteFarAway, and their collision. The roadblock's barrels wait for it (12i-2), and the helicopter's munitions (12k-6) come after it | 1-2 |
 | 15 | **A whole race with the AI and the cops.** Steps 10-14 add about 15-23 slices | |
 | 16 | The full frontend from retail: the 44 screens still plain or unregistered (`screen_registry.py --check-port`), the event tree (the career), the tourneys and the car selector | 6-10 |
@@ -5198,9 +5212,9 @@ count. It is its own slice when it goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** step 14, the audio in full, at 14-8d (cSEDWedge and
-  sound's sed_* hooks). 14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5, 14-6,
-  14-7, 14-8a, 14-8b and 14-8c are done. Of step 12,
+- **Next:** step 14, the audio in full, at 14-9 (speech::mgr_t).
+  14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5, 14-6, 14-7, 14-8a, 14-8b,
+  14-8c and 14-8d are done. Of step 12,
   12a to 12k-2, the light flares, 12k-3's planners, 12k-3a, 12k-3b,
   12k-4a, 12k-4b, 12k-7, 12l-1 and 12l-2 are done. See
   "First" at the top.

@@ -19485,3 +19485,39 @@ Picked up from Session 64's steps:
 - Built; check_3dsx and check_shbin pass. Azahar on AC: a gas-only
   SkipFE race at 30 fps, speed 100%.
 - Committed as c8a4ce9. Next: 14-8d, cSEDWedge.
+
+## Session 66 (2026-10-10) -- 14-8d, cSEDWedge
+
+- `sedwedge.{c,h}`: cSEDWedge, bSegment and Sound.obj's three calls on
+  the wedge, ported from retail. The port departs from retail in a few
+  places, each noted in the code:
+  - Initialize returns 0 for a missing BAN (asked of bFileSizeName first,
+    since bGetFile stops the game) and for a full pool;
+  - AddSentencePart drops parts past ten;
+  - the DAT name ends at [31];
+  - PlaySentence puts back the card's sound path (`sound_get_path`, new
+    in sound.c).
+- `tools/sedwedge_check.py` with `tools/src/sedwedge_test.c`: 300 ops,
+  1329 lines, 0 differ; 195 mutations, 193 caught.
+  - The two equivalents are the tick's cast (the host converts a
+    negative float the same both ways) and create's size (the host's).
+  - The model writes the port's own two stops (the missing BAN and the
+    full pool, `PortStop`) by hand.
+  - The script's clock frames 15 and 489 tell retail's
+    `frames * (1/60) * 1000` from the other float orders.
+- main.c binds `sed_create`, `sed_update`, `hookLoadSpeech` and
+  `hookUnloadSpeech` (which logs "speech bank N: loaded"), and
+  `gSpeechClearEventQueueFn`.
+- sound.h's and sound.md's "not ported" notes and bsound.h's chain
+  comment are fixed. spch.md's BAN section now gives the 16-byte entries:
+  - word 0 is the count, then the handle;
+  - word 1 is the bank's offset;
+  - word 2 is unused (leftover bytes outside English);
+  - word 3 is the DAT base.
+- Azahar's sdmc now has NFSHP2/SOUND/SPEECH (1.5 GB, all five
+  languages). The user's card needs the same folder for speech.
+- Built; check_3dsx and check_shbin pass. Azahar, on AC:
+  - a gas-only SkipFE race at 30 fps (SkipFE loads no speech);
+  - a frontend Hot Pursuit quick race at 30 fps, logging "speech bank 0:
+    loaded".
+- Committed as c8b0d26. Next: 14-9, speech::mgr_t.
