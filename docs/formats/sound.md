@@ -32,12 +32,11 @@ code against it.
 
 The jukebox half of `sound::jukebox` lives in [jukebox](jukebox.md):
 Start, Stop, SetSelection, the saved volumes and DefaultCategoryVolumes.
-TriggerTimerWarningSound (`0x001afb80`) is hudrender.c's. Three things are
-not ported:
+TriggerTimerWarningSound (`0x001afb80`) is hudrender.c's. The localized
+speech files (`0x001ae4d8` / `0x001ae5e8`) and the wedge's creation are
+`sedwedge.c`'s ([sedwedge](sedwedge.md)). Two things are not ported:
 
 - GetFrontEndSample, which nothing calls;
-- the localized speech files (`0x001ae4d8` / `0x001ae5e8`), which are
-  cSEDWedge's, step 14-8;
 - `0x001afa18`, a 0.7 the FlailerSlider's constructor asks for.
 
 ## The statics

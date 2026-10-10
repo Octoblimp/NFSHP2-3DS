@@ -119,9 +119,18 @@ references up to parameter 8. There are no constant rules.
 
 ### ENGLISHBAN.PCK, the banks
 
-`SOUND/SPEECH/<language>BAN.PCK` starts with a u32 count, then 16-byte
-entries whose first word is the bank's offset in the file. The library
-only sees the banks themselves, through SPCH_AddBank.
+`SOUND/SPEECH/<language>BAN.PCK` starts with a 16-byte entry for each
+bank, then the banks. An entry's words:
+
+| at | what |
+|---|---|
+| 0 | the number of banks in the first entry, 0 in the rest; cSEDWedge writes each bank's handle over it |
+| 4 | the bank's offset in the BAN file (the first is just past the entries) |
+| 8 | unused: 0 in English, leftover bytes in the other languages |
+| 12 | the bank's base in `<language>DAT.PCK`, where its sample data starts (the first is 256) |
+
+The library only sees the banks themselves, through SPCH_AddBank;
+[sedwedge](sedwedge.md) reads the entries.
 
 A bank:
 

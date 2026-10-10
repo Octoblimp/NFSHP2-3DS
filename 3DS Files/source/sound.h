@@ -34,16 +34,17 @@
 //
 // sound::jukebox's half -- Start, Stop, SetSelection, the saved volumes,
 // the default volumes -- is jukebox.c's, and this module holds a JBSound
-// for it. TriggerTimerWarningSound is hudrender.c's. Not ported: IsNISPlaying
-// (0x001ae098) and GetFrontEndSample (0x001ae2d8), which nothing calls; the
-// localized speech files (0x001ae4d8/0x001ae5e8), cSEDWedge's (step 14-8);
-// 0x001afa18, the 0.7 FlailerSlider's constructor asks for.
+// for it. TriggerTimerWarningSound is hudrender.c's, and the localized
+// speech files (0x001ae4d8/0x001ae5e8) and the wedge's creation are
+// sedwedge.c's. Not ported: IsNISPlaying (0x001ae098) and GetFrontEndSample
+// (0x001ae2d8), which nothing calls; 0x001afa18, the 0.7 FlailerSlider's
+// constructor asks for.
 //
-// The modules sound::Update and Mute call that are not ported yet -- the
-// speech, the SED wedge, the speech noise, the collision sounds, the sound
-// scape, the car sounds, the chopper's, the one-shots -- are SoundHooks,
-// each NULL until its step binds it. So is what the module reads of the
-// game, so tools/sound_check.py can run sound.c next to retail's image.
+// The modules sound::Update and Mute call -- the speech, the SED wedge,
+// the speech noise, the collision sounds, the sound scape, the car sounds,
+// the chopper's, the one-shots -- are SoundHooks, which main.c binds; one
+// left NULL does nothing. So is what the module reads of the game, so
+// tools/sound_check.py can run sound.c next to retail's image.
 //
 // Written up in docs/formats/sound.md; checked by tools/sound_check.py.
 
@@ -107,8 +108,8 @@ typedef struct SoundHooks {
     // for none after it. tools/sound_check.py runs with this 0.
     int skip_missing;
 
-    // -- the modules sound calls, each bound by main.c; the speech's
-    // (speech_* and sed_*) are not ported yet, so are NULL
+    // -- the modules sound calls, each bound by main.c; speech::mgr_t's
+    // (speech_*) are not ported yet, so are NULL
     void (*speech_update)(void* ctx);           // speech::mgr_t::update
     void (*speech_mute)(void* ctx, int on);     // speech::mgr_t::Mute
     void (*speech_flush)(void* ctx);            // speech::mgr_t::FlushQueue
@@ -168,6 +169,9 @@ typedef struct SoundModule {
 void sound_init(SoundModule* m, BSound* bs, BsndDriver* driver, JBSound* jb,
                 const uint8_t* audioOptions, const SoundHooks* hooks);
 SoundModule* sound_get(void);
+// What SetPath is handed: the hooks' sound_path, or SOUND_DIR without one.
+// cSEDWedge::PlaySentence puts it back after its sentence.
+const char* sound_get_path(const SoundModule* m);
 
 // 0x001ae608. With SoundEnabled: bSound initialized with this module's
 // callback, stereo, the path set and "common" loaded -- waited for, frame

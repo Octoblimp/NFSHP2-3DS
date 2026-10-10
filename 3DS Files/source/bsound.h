@@ -259,7 +259,7 @@ void bsample_release_voice(BSample* s);
 // the type is not 0.
 void bsample_set_rate(BSample* s, uint32_t rate);
 
-// The bSampleChain cSEDWedge::LoadDataFile makes (0x00205cb4): a pool
+// The bSampleChain cSEDWedge::Initialize makes (0x00205cb4): a pool
 // sample of type 1 on the "_STREAM" bank and named so, its one voice locked
 // for good. The caller sets the rate. NULL when the pool is full.
 BSample* bsample_chain_new(void);

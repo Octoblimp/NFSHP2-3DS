@@ -90,6 +90,11 @@ SoundModule* sound_get(void)
     return s_instance;
 }
 
+const char* sound_get_path(const SoundModule* m)
+{
+    return sound_path(m);
+}
+
 // ------------------------------------------------------------ the regions
 
 static void load_region(SoundModule* m, const char* name);

@@ -142,6 +142,7 @@
 #include "sound.h"
 #include "sound3d.h"
 #include "soundscape.h"
+#include "sedwedge.h"
 #include "speechnoise.h"
 #include "selcam.h"
 #include "player.h"
@@ -813,6 +814,27 @@ static void sndNoiseMute(void* c, int on)
     speechnoise_mute(speechnoise_get_instance(), on);
 }
 
+// cSEDWedge (14-8d): made at the end of InitializeSoundDriver, updated by
+// sound::Update; the gameflow's language hooks load and unload its files.
+static void sndSedCreate(void* c)
+{
+    (void)c;
+    sedwedge_create();
+}
+static void sndSedUpdate(void* c)
+{
+    SedWedge* w = sedwedge_sound_instance();
+    (void)c;
+    if (w != NULL) sedwedge_update(w);
+}
+
+// The finish's ClearEventQueue, on the wedge when there is one.
+static void speechClearEventQueue(void)
+{
+    SedWedge* w = sedwedge_sound_instance();
+    if (w != NULL) sedwedge_clear_event_queue(w);
+}
+
 // The chopper's sound (14-7): Chopper::UpdateSound and Mute, which
 // sound.c calls only with a helicopter.
 static void sndChopperUpdate(void* c)
@@ -906,6 +928,8 @@ static SoundHooks gSoundHooks = {
     .noise_unload     = sndNoiseUnload,
     .noise_update     = sndNoiseUpdate,
     .noise_mute       = sndNoiseMute,
+    .sed_create       = sndSedCreate,
+    .sed_update       = sndSedUpdate,
     .chopper_update   = sndChopperUpdate,
     .chopper_mute     = sndChopperMute,
     .sound_path       = gSoundDir,
@@ -1381,15 +1405,24 @@ static void hookSetLanguage(void* user, int language)
     uirender_set_language(b->ui, path);
 }
 
-// The speech bank is the in-game commentary's, and there is no in-game yet;
-// the flow keeps the loaded flag, so these only say so.
+// LoadLocalizedSpeechFiles and UnLoadLocalizedSpeechFiles (sedwedge.c):
+// the language's BAN and DAT under SOUND/SPEECH into the wedge. A card
+// without them loads nothing.
 static void hookLoadSpeech(void* user, int language)
 {
     (void)user;
-    logLine("speech bank %d (not ported)", language);
+    sedwedge_load_localized_speech_files(language);
+    logLine("speech bank %d: %s", language,
+            sedwedge_sound_instance() != NULL
+                && sedwedge_sound_instance()->initialized
+                ? "loaded" : "not loaded");
 }
 
-static void hookUnloadSpeech(void* user) { (void)user; }
+static void hookUnloadSpeech(void* user)
+{
+    (void)user;
+    sedwedge_unload_localized_speech_files();
+}
 
 // The French LOADING art, LOADING_FR and NFS_LOGO_ALPHA_FR in place of the
 // English pair. Not in any bundle the port reads yet.
@@ -4447,6 +4480,7 @@ int main(int argc, char** argv)
     gSampleIsPlayingFn        = sndSampleIsPlaying;
     gSamplePlayFn             = sndSamplePlay;
     gTriggerFinishLineSoundFn = sndTriggerFinishLine;
+    gSpeechClearEventQueueFn  = speechClearEventQueue;
     gSelCamSound              = &kSelCamSound;
 
     // World::DoTimestep's Race::Update and SimulateRaceFinish's
