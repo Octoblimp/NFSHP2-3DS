@@ -673,7 +673,124 @@ pursuit.obj, on a 10 KB manager. Its slices:
     5042 ops, 13994 lines, 0 differ; 447 mutations, 445 caught, 2
     equivalent (the squall volume's scale and cap). Azahar: a gas-only
     SkipFE race, no abort, 29 fps, sound 0.3 ms a frame.
-  - **14-6:** collision_sound.
+  - **14-6, in progress:** collision_sound, CollisionSounds.obj
+    (0x001e4658 .. 0x001e5e58). Read in full on 2026-10-10; no code
+    written yet. `python tools/retaildis.py --addr 0x001e4658 --count
+    1880` gives the listing. What it holds:
+    - **Globals.** The pool gp-17288 ("CollisionSampleSounds",
+      bNewSlotPool(196, 40, name, 16)); FreeSampleList gp-17280, a
+      bTList<CollisionSample> whose node is at +188 of the sample (the
+      static ctor 0x001e5d98 points it at itself, the static dtor
+      0x001e5d88 deletes what is on it); the two hashes gp-17272
+      ("CS_PetrolPump") and gp-17268 ("CS_GasPump"); gp-17264, set to 1
+      by LoadSampleTable (1 in the image too); the loaded flag gp-17236;
+      the single samples MetalScraping gp-17240 ("CrashMetalScrape"),
+      WoodScraping gp-17244 ("CrashWoodScrape") and GlassBreaking
+      gp-17248 ("CrashGlass01"). Five SampleLibrary<3> records, 16 bytes
+      each (three bSample* and CurrSampleIndex at +12), in the bss:
+      0x0031a778 foliage ("CrashFoilage"), 0x0031a788 wood
+      ("CrashWood"), 0x0031a798 / a7a8 / a7b8 metal small, medium and
+      hard ("CrashMetalSmall", "CrashMetalMedium", "CrashMetalHard").
+      WorldTimer is gp-19576; TheRaceParameters.NumPlayerCars is
+      0x0031a8c8.
+    - **The constants** (gp): -28216 and -28208 1/30, -28212 1/6, -28204
+      0.65, -28200 and -28172 0.00025, -28196 and -28168 0.1, -28192,
+      -28180, -28156, -28148, -28140 and -28136 1.9, -28188 0.36, -28184
+      -0.18, -28176 0.05, -28164 0.2, -28160, -28152, -28144, -28132 and
+      -28124 0.6, -28128 1/300. -28120 on is CarCollisionPredict's.
+    - **CollisionSample** is 196 bytes: the bSample (188, its vptr slot at
+      184 holding CollisionSample's table, 0x002b9410), then the list
+      node at 188. The table is two 8-byte entries; slot 8 is the
+      destructor 0x001e5db0: vptr back, Stop, the node's dtor, bSample's
+      dtor, and with flags & 1 bFree on the pool (0x001e5e50).
+      Initialize (0x001e5da8) is bSample::Initialize(bSample*). Every
+      delete is through slot 8 with flags 3. On the 3DS the port's
+      bSample is 184 bytes, so a `uint32_t _vtable` after it lands at 184
+      as in retail; the pool's slot size is sizeof the struct.
+    - **GetCollisionSoundType** (0x001e4658): terrain (Collision's
+      GetTerrainType) 15 or 16 takes the wood library; otherwise
+      idx = cvt.w.s(TotalImpulseMagnitude * 1/30 * 3.0), 2 if idx >= 3,
+      0 if idx < 0, and metal library idx. Either way CurrSampleIndex =
+      (CurrSampleIndex + 1) % 3 and that sample.
+    - **Register** (0x001e4740): the loaded flag 0; the pool if there is
+      none; the two hashes if gp-17272 is 0. **LoadSampleTable**
+      (0x001e47a8): gp-17264 = 1; for the libraries in the order metal
+      small, medium, hard, wood, foliage: bStrCat(buf, name, "01"), the
+      last character replaced by '1'..'3', GetInGameSample, SetCategory
+      0, then CurrSampleIndex 0; then the three singles, each category 0.
+      **UnRegister** (0x001e4a78): the loaded flag 0; each node on the
+      free list unlinked and deleted; the pool deleted and gp-17288 0.
+    - **GetDistanceToCamera** (0x001e4b58): to eGetView(1)'s camera
+      (+56, position +64), VU0's (x*x + y*y) + z*z and sqrt.s; with
+      NumPlayerCars >= 2, the min with eGetView(2)'s.
+      **CalcCollisionVolume** (0x001e4c28): d to InitialContactPoint
+      (+16); d < 35: min(TotalImpulseMagnitude * 1/30 * 0.65, 1) *
+      min(35 / d, 1); else 0. **CalcCollisionScrapeVolume** (0x001e4b08):
+      min(CalcCollisionVolume * (CurrentScrapeSpeed * 1/6), 1).
+      CalcCollisionAzimuth (0x001e4cc0) returns 0.
+    - **StartScraping** (0x001e4cc8): back if (int)(WorldTimer -
+      CollisionTime) * 0.00025 < 0.1; terrain < 15 none, 15..16 wood
+      scraping, 17 metal scraping, above none; none returns. A pool
+      slot, bSample's ctor, the vptr, Initialize from the source,
+      c->Scrape (+92) = it, vol = ScrapeVolume; with SoundEnabled:
+      SetAzimuth(ComputeAzimuth(&CurrentContactPoint)), Play(vol * 1.9,
+      0, 0), SetPitch(random(0.36) - 0.18).
+    - **UpdateSample** (0x001e4e00): with a scrape: vol =
+      Sound3d::ComputeVolume(&CurrentContactPoint, 200) * ScrapeVolume *
+      1.9, az = ComputeAzimuth(same), SetVolume(vol), SetAzimuth(az).
+    - **Update** (0x001e4ea8): nothing without pCurrentWorld (gp-22120).
+      Not loaded and IsSoundRegionLoadingComplete: the flag 1 and
+      LoadSampleTable. Each sample on the free list not playing, or
+      playing at a volume <= 0.05, unlinked and deleted. Then each
+      collision on pCurrentWorld's CollisionList (+16): UpdateSample if
+      it has a scrape, and CreateSample if it has no Sample (+88).
+    - **Mute(on)** (0x001e5018): Pause the metal and wood scraping; each
+      collision's Sample and Scrape; every sample on the free list; and
+      each playing sample of the wood and foliage libraries (not the
+      metal ones). It reads pCurrentWorld without a test.
+    - **collision_sound**'s Register, UnRegister, Update and Mute
+      (0x001e51a8 .. 51c0) jump to CollisionSounds'. **Reset**
+      (0x001e51c8): every sample on the free list unlinked and deleted.
+      **CreateSample** (0x001e5278): NULL if (int)(WorldTimer -
+      CollisionTime) * 0.00025 < 0.1, if the type is NULL, or unless
+      CalcCollisionVolume > 0.2; else a pool sample from the type, and
+      with SoundEnabled Play(vol * 1.9, 0, random(0.6) + 0.5 - 1) and
+      SetAzimuth(ComputeAzimuth(&CurrentContactPoint)); it returns the
+      sample even with sound off. **ReleaseSample** (0x001e53b0): the
+      Sample playing goes on the free list's head, else it is deleted;
+      the Scrape playing fades to 0 over 50 ms and goes on the head; a
+      Scrape not playing is left alone, its slot never given back until
+      UnRegister deletes the pool.
+    - **The one-shots**: PlayFoilage (0x001e5470) and
+      PlayGenericSmokable (0x001e5508) take the next of the foliage or
+      wood library and sound3d_oneshot Play(sample, pos, 1.9 or 2.5,
+      random(0.6) + 0.5), with SoundEnabled. **PlaySmokeable**
+      (0x001e55a8, SoundEnabled): info NULL or its terrain (+192) not 28
+      GenericSmokable, else Foilage; then with info and its NameHash
+      (+112) either pump's, PlayExplosion and Play("PreviewZone", pos,
+      1.9, 1). **PlayGlass** (0x001e5660): GlassBreaking at 1.9, 1.
+      **PlayBustRoadBlock** (0x001e5688): GetCategoryVolume(bSound, 0)
+      read and dropped, Play("FinishLine", pos, 1, 0.5), and the one-shot's
+      bSample (+40) SetCategory(0xffffffff). **PlayExplosion**
+      (0x001e56f0, SoundEnabled): twice Play("Bomb", pos, 1,
+      random(0.6) + 0.5) with the envelope (+228) set to 6, 300, 1/300
+      (the second's random is -28124's 0.6); it does not test Play's
+      answer before writing the envelope. **PlayScrape** (0x001e57d0):
+      StartScraping when SoundEnabled and there is no Scrape yet.
+    - **Callers and seams**: Register/UnRegister from sound.c's
+      collision_register / collision_unregister hooks, Update and Mute
+      from collision_update / collision_mute (sound.h, unset in main.c's
+      gSoundHooks); Reset is racecoord.c's gCollisionSoundResetFn;
+      CreateSample, ReleaseSample and PlayScrape are collision.h's three
+      seams; PlayBustRoadBlock is pursuit.c's and playernis.c's
+      gCollisionSoundPlayBustRoadBlockFn. PlaySmokeable (Smokeable,
+      SmokeBomb), PlayGlass (car glass, 0x001b5a08) and PlayExplosion
+      (Munition) have no ported caller yet: export them.
+    - **To do**: collisionsound.c/.h, bind the seams and hooks in
+      main.c, tools/collisionsound_check.py with
+      tools/src/collisionsound_test.c and the mutation pass, then
+      docs/formats/collision-sound.md, the build, a gas-only Azahar race
+      and the commit.
   - **14-7:** sound_scape (slot 21) and the ChopperSound (12k-5).
   - **14-8:** SPCH, cSEDWedge and SpeechNoise.
   - **14-9:** speech::mgr_t.
@@ -5129,8 +5246,10 @@ count. It is its own slice when it goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** step 14, the audio in full, at 14-6 (collision_sound);
-  14-1, 14-2a, 14-2b, 14-3, 14-4 and 14-5 are done. Of step 12,
+- **Next:** step 14, the audio in full, at 14-6 (collision_sound),
+  whose retail code is read and decoded in its entry above; the port,
+  checker and doc are next. 14-1, 14-2a, 14-2b, 14-3, 14-4 and 14-5 are
+  done. Of step 12,
   12a to 12k-2, the light flares, 12k-3's planners, 12k-3a, 12k-3b,
   12k-4a, 12k-4b, 12k-7, 12l-1 and 12l-2 are done. See
   "First" at the top.
