@@ -712,6 +712,9 @@ static ndspWaveBuf gWave[BSND_MAX_VOICES];
 static ndspAdpcmData gAdpcm[BSND_MAX_VOICES];
 static bool gNdspReady;
 
+// hw_mix's gain on every voice, 6 dB.
+#define BSND_HW_GAIN 2.0f
+
 static void hw_start(void* user, unsigned ch, const uint8_t* data,
                      uint32_t bytes, uint32_t samples, const int16_t* coefs,
                      uint32_t rate, bool looping)
@@ -756,10 +759,16 @@ static void hw_mix(void* user, unsigned ch, uint16_t left, uint16_t right)
     // The table's full scale is 16383, and volume comes in at up to 0x7fff,
     // so a patch recorded near full can land above 1.0. Clamping here rather
     // than scaling keeps quiet sounds at the relative level the disc set.
+    // The port's gain on top: the disc's categories put the effects at
+    // 0.31 to 0.55 of full for a TV's amplifier, too quiet on the 3DS's
+    // speakers, so every voice plays 6 dB up. The music is its own channel
+    // (jbstream.c) and keeps its level.
     mix[0] = left / 16383.0f;
     mix[1] = right / 16383.0f;
     if (mix[0] > 1.0f) mix[0] = 1.0f;
     if (mix[1] > 1.0f) mix[1] = 1.0f;
+    mix[0] *= BSND_HW_GAIN;
+    mix[1] *= BSND_HW_GAIN;
     ndspChnSetMix(ch, mix);
 }
 

@@ -213,6 +213,15 @@ the record layout, the return codes -- is the ROM's. `tools/bsnd_check.py`
 drives both the port and an independent Python model of this document through
 twelve scenarios and diffs the transcripts line for line.
 
+The ndsp sink's `hw_mix` turns each side's volume into a channel mix of
+`volume / 16383`, clamped at 1.0 (a volume can come in at up to `0x7fff`), and
+then doubles it, 6 dB. That gain is the port's: bSound's categories put the
+effects at 0.31 to 0.55 of full (jukebox.c's `kDefaultVolume`), a level set
+for a TV's amplifier and too quiet on the 3DS's speakers. Every voice takes
+it, so the categories keep their balance among themselves; the music is its
+own ndsp channel in `jbstream.c` and keeps its level. The checker never sees
+the sink, so it is unchanged.
+
 The streaming and queueing paths are not ported. Nothing in the frontend
 reaches them, and the music they exist for is task 29's problem. So no voice
 is a stream, and the near end is always false.
