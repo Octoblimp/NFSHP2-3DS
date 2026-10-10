@@ -113,8 +113,8 @@ typedef struct SirenSound3d {
 // ------------------------------------------------------------ the globals
 
 // CarSounds.obj's switches, each 1 on the disc and nothing writes them.
-// RoadNoiseEnabled is CarSoundTires.obj's in retail and sits here until
-// step 14-5 brings that.
+// RoadNoiseEnabled is CarSoundTires.obj's in retail (tiresound.c), and
+// stays here with the others, which CarSounds.obj reads too.
 extern int32_t CarSoundEnabled;         // gp-20456
 extern int32_t CarDamageSoundEnabled;   // gp-20460
 extern int32_t RoadNoiseEnabled;        // gp-16248
@@ -127,10 +127,11 @@ extern BaseCarSound *ClosestCarSounds[CARSOUND_MAX_CLOSEST];
 extern int32_t       MaxActiveCarSounds;
 extern int32_t       NumClosestCarSounds;
 
-// What CarSounds.obj calls that is not ported yet, each NULL until its
-// step binds it: the engine_sound and tire_sound factories (14-4, 14-5),
-// and tire_sound's TriggerBlowOut and ScaleRoadNoise. A NULL factory makes
-// no engine or tyre, and every call on one is skipped.
+// What CarSounds.obj calls in the engine and tyre objects, bound at boot
+// (main.c): the engine_sound and tire_sound factories (enginesound.c,
+// tiresound.c), and tire_sound's TriggerBlowOut and ScaleRoadNoise. A NULL
+// factory makes no engine or tyre, and every call on one is skipped;
+// carsound_check.py leaves them so.
 typedef Sound3d *(*CarSoundCreateFn)(struct Car *c);
 typedef Sound3d *(*CarSoundCreateTireFn)(struct Car *c, int32_t side);
 extern CarSoundCreateFn     gCreatePlayerEngineFn;  // 0x00211d90

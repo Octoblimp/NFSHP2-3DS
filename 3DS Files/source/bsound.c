@@ -480,6 +480,12 @@ void bsound_set_mode(BSound* s, int32_t mode)
     }
 }
 
+void bsound_flush(BSound* s, int32_t wait)
+{
+    (void)s;
+    (void)wait;
+}
+
 BSlotPool* bsound_sample_pool(void)
 {
     return s_samplePool;

@@ -178,6 +178,7 @@
 #include "spikestrip.h"
 #include "startrace.h"
 #include "terraintype.h"
+#include "tiresound.h"
 #include "texturepack.h"
 #include "texturestream.h"
 #include "topology.h"
@@ -4251,6 +4252,7 @@ int main(int argc, char** argv)
     sound3d_install_vtables();
     carsound_install_vtables();
     enginesound_install_vtables();
+    tiresound_install_vtables();
 
     // The car sounds (14-3): Car's constructor and destructor, the splash
     // and the tyre pop, and the drivers' horn.
@@ -4266,6 +4268,11 @@ int main(int argc, char** argv)
     // Their engines (14-4), which BaseCarSound's constructors make.
     gCreatePlayerEngineFn = enginesound_create_player;
     gCreateAIEngineFn = enginesound_create_ai;
+    // And their tyres (14-5).
+    gCreatePlayerTireFn = tiresound_create_player;
+    gCreateAITireFn = tiresound_create_ai;
+    gTireSoundTriggerBlowOutFn = tiresound_trigger_blow_out;
+    gTireSoundScaleRoadNoiseFn = tiresound_scale_road_noise;
 
     // Car::SetControlMode reaches the controllers task 26 brings through
     // seams; a NULL one is a class not ported yet, and the arm aborts.

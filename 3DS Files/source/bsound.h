@@ -173,6 +173,10 @@ void bsound_set_path(BSound* s, const char* path);        // 0x00277e38
 int32_t bsound_get_status(const BSound* s);               // 0x00277ea0
 // 0x00278190: 0 mono, 1 stereo, 2 Prologic; anything else is ignored.
 void bsound_set_mode(BSound* s, int32_t mode);
+// 0x002783b0, Flush(bool). Retail sends the IOP the commands queued for it
+// now, unless the driver is in its own update; the 3DS driver queues
+// nothing, so here it does nothing.
+void bsound_flush(BSound* s, int32_t wait);
 
 int32_t bsound_region_count(const BSound* s);
 BRegion* bsound_region_at(const BSound* s, int32_t i);
