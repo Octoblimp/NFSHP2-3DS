@@ -178,6 +178,37 @@ uint16_t bsnd_voice_play_pan(BsndDriver* d, const char* bank,
     return r;
 }
 
+uint16_t bsnd_voice_play_part(BsndDriver* d, const char* bank,
+                              const char* patch, uint32_t rate,
+                              uint16_t volume, int8_t pan, uint32_t offset,
+                              uint32_t size, uint16_t voice)
+{
+    const FPatch* p;
+    uint16_t r = 0xfffe;
+    char vs[16];
+
+    (void)d;
+    if (voice == BSND_VOICE_ALLOC)
+        snprintf(vs, sizeof(vs), "alloc");
+    else
+        snprintf(vs, sizeof(vs), "%u", voice);
+    printf("  snd playpart %s %s %u %u %d %u %u %s\n", bank, patch, rate,
+           volume, pan, offset, size, vs);
+    if (strcmp(bank, "_CHAIN") == 0)
+        return voice;
+    p = fpatch(bank, patch);
+    if (p != NULL && voice < gN) {
+        unsigned c;
+
+        gWidth[voice] = (int)p->ch;
+        for (c = voice; c < voice + p->ch && c < gN; c++)
+            gBusy[c] = 1;
+        gVol[voice] = volume;
+        r = voice;
+    }
+    return r;
+}
+
 void bsnd_voice_stop(BsndDriver* d, uint16_t voice)
 {
     (void)d;
@@ -211,7 +242,7 @@ bool bsnd_channel_busy(const BsndDriver* d, uint16_t voice)
     return r != 0;
 }
 
-bool bsnd_stream_near_end(const BsndDriver* d, uint16_t voice)
+bool bsnd_stream_active(const BsndDriver* d, uint16_t voice)
 {
     int r = voice < gN ? gNear[voice] : 0;
 
@@ -700,6 +731,13 @@ static int run(char** a, int n)
     }
 
     // -- the ops on a handle
+    if (strcmp(o, "chainnew") == 0) {
+        gH[h] = bsample_chain_new();
+        gLocal[h] = 0;
+        gFrom[h][0] = '\0';
+        printf("chainnew %d -> %s\n", h, slabel(gH[h]));
+        return 1;
+    }
     if (strcmp(o, "new") == 0) {
         gH[h] = bsample_new((int8_t)atoi(a[2]));
         gLocal[h] = 0;
@@ -787,7 +825,12 @@ static int run(char** a, int n)
         return 1;
     }
     if (strcmp(o, "setrate") == 0) {
-        s->rate = (uint32_t)strtoul(a[2], NULL, 0);
+        bsample_set_rate(s, (uint32_t)strtoul(a[2], NULL, 0));
+        return 1;
+    }
+    if (strcmp(o, "chain") == 0) {
+        bsample_chain_add(s, a[2], (uint32_t)strtoul(a[3], NULL, 0),
+                          (uint32_t)strtoul(a[4], NULL, 0), atoi(a[5]) != 0);
         return 1;
     }
     if (strcmp(o, "lockvoice") == 0) {

@@ -103,7 +103,8 @@ static bool rec_playing(void* user, unsigned ch)
 }
 
 static const BsndSink kRecSink = {
-    rec_start, rec_stop, rec_mix, rec_rate, rec_pause, rec_playing, NULL
+    rec_start, rec_stop, rec_mix, rec_rate, rec_pause, rec_playing, NULL,
+    NULL
 };
 
 // One bsnd_update() tick: every sounding one-shot gets one closer to done.

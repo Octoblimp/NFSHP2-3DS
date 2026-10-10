@@ -105,6 +105,8 @@ F_CHANNELS = 0x00274960
 F_SUPDATE = 0x00274a98
 F_SETCB = 0x00275e88
 F_GETPITCH = 0x00275de0
+F_SETRATE = 0x00280340
+F_CHAIN_ADD = 0x00206760
 # bRegion
 F_REGION_SAMPLE = 0x002719b8
 F_SVEC_SIZE = 0x0025d608
@@ -289,11 +291,33 @@ class Model(object):
         def play(e):
             return play_at(e, 5)
 
+        def play_part(e, v):
+            # (bank, patch, rate, volume, pan, offset, size[, voice]): the
+            # overloads that pass a part of a file on. A voice of 48 is the
+            # driver's choice, the port's BSND_VOICE_ALLOC. "_CHAIN" only
+            # queues; the rest are played as the plain overload plays.
+            bank, patch = S(R(0)), S(R(1))
+            rate, vol, pn = R(2), R(3) & 0xffff, sc(R(4))
+            off, size = R(5), R(6)
+            self.emit("  snd playpart %s %s %u %u %d %u %u %s" % (
+                bank, patch, rate, vol, pn, off, size,
+                "alloc" if v == 48 else "%u" % v))
+            if bank == "_CHAIN":
+                return v
+            p = self.fpatch(bank, patch)
+            if p is not None and v < self.n:
+                self.width[v] = p[1]
+                for c in range(v, min(v + p[1], self.n)):
+                    self.busy[c] = 1
+                self.vol[v] = vol
+                return v
+            return 0xfffe
+
         def play_offset(e):
-            # (bank, patch, rate, volume, pan, offset, size, voice): the
-            # two words the master overload passes on, which the port's
-            # driver has no use for, so the line is the plain one's.
-            return play_at(e, 7)
+            return play_part(e, R(7) & 0xffff)
+
+        def play_chain(e):
+            return play_part(e, 48)
 
         def stop(e):
             v = R(0) & 0xffff
@@ -451,6 +475,7 @@ class Model(object):
                      (0x00263a38, pitch), (0x00264038, setvol),
                      (0x00264790, getvol), (0x00263f40, az),
                      (0x00260c40, play), (0x00260ce8, play_offset),
+                     (0x00260d98, play_chain),
                      (0x00263710, busy), (0x00263240, pause),
                      (0x00263330, resume), (0x00263438, stop),
                      (0x00263090, near), (0x00264f58, ppitch),
@@ -678,6 +703,20 @@ class Model(object):
 
         h = int(a[1])
         s = self.h.get(h, 0)
+        if o == "chainnew":
+            # cSEDWedge::Initialize's, inline (0x00205cb4): the pool's, the
+            # constructor's 1, the bank and name, LockVoice, words 4 and 8.
+            p = e.call(F_SAMPLE_NEW, SAMPLE_SIZE, 0, 0) & M32
+            if p:
+                e.call(F_SAMPLE_CTOR, p, 1)
+                e.call(F_SETBANK, p, *self.strs("_STREAM"))
+                e.call(F_SETNAME, p, *self.strs("_STREAM"))
+                e.call(F_LOCKVOICE, p)
+                e.put32(p + 4, 0)
+                e.put32(p + 8, 0)
+            self.h[h], self.local[h], self.frm[h] = p, False, ""
+            self.emit("chainnew %d -> %s" % (h, self.slabel(p)))
+            return True
         if o == "new":
             p = e.call(F_SAMPLE_NEW, SAMPLE_SIZE, 0, 0) & M32
             if p:
@@ -731,7 +770,12 @@ class Model(object):
                    *self.strs(a[2]))
             return True
         if o == "setrate":
-            e.put32(s, int(a[2], 0))
+            e.call(F_SETRATE, s, int(a[2], 0))
+            return True
+        if o == "chain":
+            (p,) = self.strs(a[2])
+            e.call(F_CHAIN_ADD, s, p, int(a[3], 0), int(a[4], 0),
+                   1 if int(a[5]) else 0)
             return True
         if o == "lockvoice":
             e.call(F_LOCKVOICE, s)
@@ -1040,6 +1084,46 @@ def basic_cases(sc):
     sc.op("new", 26, -1)
     sc.op("delete", 24)
 
+    # the speech's chain: the parts but the last queued on "_CHAIN", the
+    # last played on the sample, a part of a file or the whole of it
+    sc.op("chainnew", 40)
+    sc.op("setrate", 40, 24000)
+    sc.op("channels", 40)
+    sc.op("scaled", 40)
+    sc.op("chain", 40, "SPEECH.PCK", 4096, 1000, 0)
+    sc.op("chain", 40, "SPEECH.PCK", 8192, 2000, 0)
+    sc.op("chain", 40, "MUSIC", 12288, 3000, 1)
+    sc.op("isplaying", 40)
+    sc.op("update")
+    sc.op("setvol", 40, F(0.5))
+    sc.op("setpan", 40, F(-0.75))
+    sc.op("setpitch", 40, F(2.0))
+    sc.op("chain", 40, "SPEECH.PCK", 0, 0, 0)
+    sc.op("chain", 40, "MUSIC", 0, 0, 1)
+    sc.op("chain", 40, "MUSIC", 0, 77, 1)
+    sc.op("chain", 40, "MUSIC", 77, 0, 1)
+    sc.op("stop", 40)
+    sc.op("chain", 40, "NOPE", 16, 32, 1)
+    sc.op("isplaying", 40)
+    sc.op("setcb", 40, "A", "0x40")
+    sc.op("fade", 40, F(0.1), 100)
+    sc.op("chain", 40, "MUSIC", 48, 4800, 1)
+    sc.op("near", 7, 1)
+    sc.op("update")
+    sc.op("update")
+    sc.op("near", 7, 0)
+    for i in range(9):
+        sc.op("chain", 40, "P%d" % i, 48 * i, 100 + i, 0)
+    sc.op("chain", 40, "X" * 40, 1, 2, 0)
+    sc.op("chain", 40, "MUSIC", 96, 960, 1)
+    sc.op("stop", 40)
+    sc.op("chainnew", 41)
+    sc.op("chain", 41, "MUSIC", 48, 48, 1)
+    sc.op("chain", 2, "SKID", 48, 48, 1)
+    sc.op("chain", 2, "SKID", 48, 48, 0)
+    sc.op("delete", 41)
+    sc.op("delete", 40)
+
     # unloading what is playing
     sc.op("play", 2, F(1.0), F(0.0), F(0.0))
     sc.op("unload", "CARS")
@@ -1196,6 +1280,10 @@ def random_cases(sc, rng, runs=30, steps=120):
                 else:
                     sc.op("at", h, b, rng.randrange(6))
                 handles.add(h)
+            elif r < 0.345:
+                h = 12 + rng.randrange(6)
+                sc.op("chainnew", h)
+                handles.add(h)
             elif r < 0.36:
                 h = 12 + rng.randrange(6)
                 sc.op(rng.choice(("new", "local")), h, rng.choice((0, 1)))
@@ -1250,10 +1338,19 @@ def random_cases(sc, rng, runs=30, steps=120):
                 elif k < 0.93 and h >= 12:
                     sc.op("delete", h)
                     handles.discard(h)
-                elif k < 0.96:
+                elif k < 0.94:
                     sc.op("playn", h, rng.choice(["HORN", "ENG_HI", "MUSIC",
                                                   "NOPE"]),
                           rng.randrange(100), rng.randrange(1000))
+                elif k < 0.96:
+                    sc.op("chain", h, rng.choice(["MUSIC", "AMB", "HORN",
+                                                  "NOPE"]),
+                          rng.choice((0, 48, 4096, 0x123456)),
+                          rng.choice((0, 1, 960, 0x7654)),
+                          1 if rng.random() < 0.4 else 0)
+                elif k < 0.97:
+                    sc.op("setrate", h, rng.choice((0, 22050, 24000,
+                                                    0xffffffff)))
                 else:
                     sc.op("pause", h, 1)
         for b in loaded:
@@ -1567,6 +1664,18 @@ MUTATIONS = [
      "    return bsample_play(s, 1.0f, 0.0f, 0.0f);"),
     ("play named offset", P,
      "    s->offset = offset;\n", ""),
+    ("play part needs offset", P,
+     "    if (s->offset != 0 || s->size != 0)\n        bsnd_voice_play_part",
+     "    if (s->size != 0)\n        bsnd_voice_play_part"),
+    ("play part needs size", P,
+     "    if (s->offset != 0 || s->size != 0)\n        bsnd_voice_play_part",
+     "    if (s->offset != 0)\n        bsnd_voice_play_part"),
+    ("play part offset", P,
+     "                             s->offset, s->size, s->voice->id);",
+     "                             s->size, s->size, s->voice->id);"),
+    ("play part size", P,
+     "                             s->offset, s->size, s->voice->id);",
+     "                             s->offset, s->offset, s->voice->id);"),
     ("play stops busy", P,
      "        if (bsnd_channel_busy(d, s->voice->id))\n"
      "            bsample_stop(s);\n    }",
@@ -1650,7 +1759,48 @@ MUTATIONS = [
      "    if (s->voice != NULL && !s->nearEndNotified && s->callback != NULL\n",
      "    if (s->voice != NULL && !s->nearEndNotified\n"),
     ("near end tells client", P,
-     "        notify_client(BSOUND_SAMPLE_NEAR_END, s);\n", ""),
+     "        notify_client(BSOUND_SAMPLE_STREAM_ACTIVE, s);\n", ""),
+    ("set rate", P,
+     "    s->rate = rate;\n}\n\nBSample* bsample_chain_new",
+     "    s->rate = rate | 1;\n}\n\nBSample* bsample_chain_new"),
+    ("chain new type", P,
+     "    BSample* s = bsample_new(1);\n\n    if (s == NULL)\n"
+     "        return NULL;\n    bsample_set_bank_name(s, \"_STREAM\");",
+     "    BSample* s = bsample_new(0);\n\n    if (s == NULL)\n"
+     "        return NULL;\n    bsample_set_bank_name(s, \"_STREAM\");"),
+    ("chain new bank", P,
+     "    bsample_set_bank_name(s, \"_STREAM\");",
+     "    bsample_set_bank_name(s, \"_STREAMS\");"),
+    ("chain new name", P,
+     "    bsample_set_name(s, \"_STREAM\");",
+     "    bsample_set_name(s, \"_STREAX\");"),
+    ("chain new locks", P,
+     "    bsample_set_name(s, \"_STREAM\");\n    bsample_lock_voice(s);\n",
+     "    bsample_set_name(s, \"_STREAM\");\n"),
+    ("chain start", P,
+     "    if (start) {\n        bsample_play_named(s, path, offset, size);",
+     "    if (!start) {\n        bsample_play_named(s, path, offset, size);"),
+    ("chain start part", P,
+     "        bsample_play_named(s, path, offset, size);\n        return;",
+     "        bsample_play_named(s, path, size, offset);\n        return;"),
+    ("chain pitch", P,
+     "    rate = bsample_calc_pitch(s, s->currentPitch);",
+     "    rate = bsample_calc_pitch(s, 0.0f);"),
+    ("chain volume", P,
+     "    vol = bsample_calc_volume(s, s->currentVolume);",
+     "    vol = bsample_calc_volume(s, 1.0f);"),
+    ("chain pan", P,
+     "                         bsample_calc_pan(s, s->currentPan), offset, size,",
+     "                         bsample_calc_pan(s, 0.0f), offset, size,"),
+    ("chain part", P,
+     "                         bsample_calc_pan(s, s->currentPan), offset, size,",
+     "                         bsample_calc_pan(s, s->currentPan), size, offset,"),
+    ("chain bank", P,
+     "    bsnd_voice_play_part(drv(), \"_CHAIN\", path, rate, vol,",
+     "    bsnd_voice_play_part(drv(), \"_STREAM\", path, rate, vol,"),
+    ("chain voice", P,
+     "                         BSND_VOICE_ALLOC);",
+     "                         47);"),
     ("get pitch is volume", P,
      "    return s->currentVolume;\n}\n\nvoid bsample_set_callback",
      "    return s->currentPitch;\n}\n\nvoid bsample_set_callback"),

@@ -124,6 +124,7 @@ void bsnd_init(BsndDriver* d, const BsndSink* sink, unsigned voices)
     d->voices = (voices && voices <= BSND_PS2_VOICES) ? voices : BSND_MAX_VOICES;
     // bSnd_Initialize ends with bSnd_SetStereo (0x00246028).
     d->mode = BSND_MODE_STEREO;
+    d->streamVoice = -1;
     for (i = 0; i < BSND_PS2_VOICES; i++) {
         d->voice[i].streamChannel = -1;
         d->voice[i].patch = BSND_PATCH_NONE;
@@ -346,8 +347,184 @@ uint16_t bsnd_voice_play(BsndDriver* d, const char* bank, const char* patch,
                          uint32_t rate, uint16_t volume, uint16_t azimuth,
                          uint16_t voice)
 {
-    // bSnd_VoicePlay, 0x00247f00, non-streaming path. The streaming path above
-    // it (bank name "STREAMS") drove the IOP's CD reader and has no port.
+    return bsnd_voice_play_at(d, bank, patch, rate, volume, azimuth, 0, 0,
+                              voice);
+}
+
+uint16_t bsnd_voice_play_part(BsndDriver* d, const char* bank,
+                              const char* patch, uint32_t rate,
+                              uint16_t volume, int8_t pan, uint32_t offset,
+                              uint32_t size, uint16_t voice)
+{
+    return bsnd_voice_play_at(d, bank, patch, rate, volume,
+                              bsnd_azimuth_from_pan(pan), offset, size, voice);
+}
+
+// bStrNCpy (0x002535a0): up to n bytes, stopping after the terminator, and
+// none when n runs out first.
+static void b_strncpy(char* dst, const char* src, size_t n)
+{
+    size_t i;
+    for (i = 0; i < n; i++) {
+        dst[i] = src[i];
+        if (src[i] == '\0') break;
+    }
+}
+
+// The file a stream reads: the load path, then the name straight after it
+// (0x002618d8 and 0x00262af4 copy one and append the other, 255 bytes in
+// all). The port's buffer is always terminated.
+static void stream_path(const BsndDriver* d, char* out, const char* name)
+{
+    size_t n = strlen(d->path);
+    if (n > 255) n = 255;
+    memcpy(out, d->path, n);
+    b_strncpy(out + n, name, 255 - n);
+    out[255] = '\0';
+}
+
+// The voice record a stream leaves, which bSnd_VoiceStop's Type 3 and the
+// setters' StreamChannel test read. The ADSR is the default every voice
+// starts from (0x0026129c, 0x00262d18). Not the bank and patch names,
+// which the port does not keep.
+static void stream_voice(BsndDriver* d, unsigned ch, uint32_t rate,
+                         uint16_t volume, int8_t pan)
+{
+    BsndVoice* v = &d->voice[ch];
+    v->pitch = rate;                // the rate asked for, unconverted
+    v->volume = volume;
+    v->pan = pan;
+    v->adsr = 0x1a00000au;
+    v->type = BSND_TYPE_STREAM;
+    v->loopChannel = 0;
+    v->streamChannel = BSND_MONO_STREAM;
+    v->azimuth = bsnd_azimuth_from_pan(pan);
+    v->patch = BSND_PATCH_NONE;
+}
+
+static void stream_start(BsndDriver* d, unsigned ch,
+                         const BsndStreamPart* parts, unsigned count,
+                         uint32_t rate, uint16_t volume)
+{
+    // GetVolumesFromPan at pan 0, whatever the voice's pan (0x00261be8,
+    // 0x00262cfc); then SOUND_StopStream on the slot and SOUND_PlayStream,
+    // which keys the voice on (0x0026a920). The DSP gets the rate that
+    // survives the SPU pitch register, as a patch does.
+    uint16_t l, r;
+    bsnd_volumes_from_pan(d, &l, &r, volume, 0);
+    d->voice[ch].volL = l;
+    d->voice[ch].volR = r;
+    d->key[ch] = BSND_KEY_ON;
+    d->streamVoice = (int16_t)ch;
+    if (d->sink && d->sink->stream)
+        d->sink->stream(d->sink->user, ch, parts, count,
+                        bsnd_spu_to_hz(bsnd_hz_to_spu(rate)));
+    if (d->sink && d->sink->mix) d->sink->mix(d->sink->user, ch, l, r);
+}
+
+// PlayChain, 0x00262848: the queue, the part that ends it already in, played
+// on one voice as one stream. The first part's rate and volume are the
+// stream's. A voice that cannot be had leaves the queue as it was.
+static uint16_t play_chain(BsndDriver* d, uint16_t voice)
+{
+    BsndStreamPart parts[BSND_CHAIN_MAX];
+    uint16_t rate = d->chain[0].rate, volume = d->chain[0].volume;
+    unsigned i, n = d->chainCount;
+
+    if (voice == BSND_VOICE_ALLOC) {
+        int got = bsnd_find_free_channels(d, 0, d->voices - 1, 1);
+        if (got < 0) return BSND_NO_PATCH;               // 0x00262a5c
+        voice = (uint16_t)got;
+    }
+    // Retail writes whatever voice it is given; the port bounds it.
+    if (voice >= d->voices) return BSND_BAD_VOICE;
+
+    for (i = 0; i < n; i++) {
+        const BsndChainPart* c = &d->chain[i];
+        stream_path(d, parts[i].path, c->name);
+        // Each part is a file opened past its VAG header (0x00262b98). The
+        // first is moved to its part when it has an offset (0x00262d58);
+        // the rest go to SOUND_ChainStreams with theirs, and one of 0 is
+        // taken as the file's own start, as the first's is -- the IOP's
+        // side of it is not on the disc, and the speech never asks.
+        if (c->offset == 0) {
+            parts[i].offset = BSND_VAG_HEADER;
+            parts[i].size = 0;
+        } else {
+            parts[i].offset = c->offset;
+            parts[i].size = c->size;
+        }
+    }
+    stream_voice(d, voice, rate, volume, 0);
+    stream_start(d, voice, parts, n, rate, volume);
+    d->chainCount = 0;                                   // 0x00262f8c
+    return voice;
+}
+
+// The master's "_STREAM" path, 0x0026129c.
+static uint16_t stream_play(BsndDriver* d, const char* bank, const char* patch,
+                            uint32_t rate, uint16_t volume, int8_t pan,
+                            uint32_t offset, uint32_t size, uint16_t voice)
+{
+    BsndStreamPart part;
+    char name[33];
+
+    // 0x002612a8: with parts queued, this one is the last of them, and the
+    // whole chain plays. Its rate goes in as it came, a u16.
+    if (d->chainCount != 0) {
+        BsndChainPart* c;
+        // A full queue is one a chain left when it found no voice: retail
+        // writes a ninth part past the queue, and PlayChain a ninth entry
+        // past its frame. The port's last part takes the eighth's place.
+        if (d->chainCount >= BSND_CHAIN_MAX)
+            d->chainCount = BSND_CHAIN_MAX - 1;
+        c = &d->chain[d->chainCount];
+        b_strncpy(c->name, patch, 32);
+        c->name[32] = '\0';
+        c->offset = offset;
+        c->rate = (uint16_t)rate;
+        c->size = size;
+        c->volume = volume;
+        d->chainCount++;
+        return play_chain(d, voice);
+    }
+
+    if (rate == BSND_RATE_PATCH) rate = 22050;           // 0x002612c8
+    // bank[7] == 'S' is a stereo stream (0x0026131c), the jukebox's.
+    if (bank[7] == 'S') return BSND_NO_PATCH;
+
+    if (voice == BSND_VOICE_ALLOC) {
+        int got = bsnd_find_free_channels(d, 0, d->voices - 1, 1);
+        if (got < 0) return BSND_NO_PATCH;               // 0x002614dc
+        voice = (uint16_t)got;
+    }
+    if (voice >= d->voices) return BSND_BAD_VOICE;       // the port's bound
+
+    // The voice keeps its pan, and the azimuth back from it, though the
+    // stream plays centred; EffectVolume is cleared (0x00261708).
+    stream_voice(d, voice, rate, volume, pan);
+    d->voice[voice].effectVolume = 0;
+
+    // The file's name is the patch's first 32 bytes (0x00261304).
+    b_strncpy(name, patch, 32);
+    name[32] = '\0';
+    stream_path(d, part.path, name);
+    if (offset != 0) {                                   // 0x00261a28
+        part.offset = offset;
+        part.size = size;
+    } else {
+        part.offset = BSND_VAG_HEADER;
+        part.size = 0;
+    }
+    stream_start(d, voice, &part, 1, rate, volume);
+    return voice;
+}
+
+uint16_t bsnd_voice_play_at(BsndDriver* d, const char* bank, const char* patch,
+                            uint32_t rate, uint16_t volume, uint16_t azimuth,
+                            uint32_t offset, uint32_t size, uint16_t voice)
+{
+    // bSnd_VoicePlay, retail's 0x002611c0 and the demo's 0x00247f00.
     uint16_t id;
     SndPatch p;
     unsigned channels, n;
@@ -360,6 +537,27 @@ uint16_t bsnd_voice_play(BsndDriver* d, const char* bank, const char* patch,
     // sentinel further down (0x00248f20).
     pan = bsnd_pan_from_azimuth(azimuth);
 
+    if (bank && strncmp(bank, "_STREAM", 7) == 0)       // 0x0026128c
+        return stream_play(d, bank, patch, rate, volume, pan, offset, size,
+                           voice);
+    if (bank && strncmp(bank, "_CHAIN", 16) == 0) {      // 0x00261e80
+        // Queued, to play when a "_STREAM" part ends the chain. An eighth
+        // part empties the queue instead (0x00261f74). On a full queue --
+        // a chain that found no voice -- retail writes past it first.
+        if (d->chainCount < BSND_CHAIN_MAX) {
+            BsndChainPart* c = &d->chain[d->chainCount];
+            b_strncpy(c->name, patch, 32);
+            c->name[32] = '\0';
+            c->offset = offset;
+            c->size = size;
+            c->rate = (uint16_t)rate;
+            c->volume = volume;
+        }
+        if (++d->chainCount >= BSND_CHAIN_MAX) d->chainCount = 0;
+        return voice;
+    }
+
+    // Anything else is a patch, which has no use for the part.
     id = bsnd_patch_id(d, bank, patch);
     if (id == BSND_PATCH_NONE) return BSND_NO_PATCH;   // 0x00248d2c
     if (!bsnd_patch_get(d, id, &p)) return BSND_NO_PATCH;
@@ -450,6 +648,7 @@ void bsnd_voice_stop(BsndDriver* d, uint16_t voice)
     for (n = 0; n < w; n++) {
         unsigned ch = voice + n;
         if (d->sink && d->sink->stop) d->sink->stop(d->sink->user, ch);
+        if ((int)ch == d->streamVoice) d->streamVoice = -1;
         d->key[ch] = BSND_KEY_OFF;
         memset(&d->voice[ch], 0, sizeof(d->voice[ch]));
         d->voice[ch].streamChannel = -1;
@@ -617,13 +816,16 @@ void bsnd_set_voice_azimuth(BsndDriver* d, uint16_t voice, uint16_t azimuth)
     }
 }
 
-bool bsnd_stream_near_end(const BsndDriver* d, uint16_t voice)
+bool bsnd_stream_active(const BsndDriver* d, uint16_t voice)
 {
     // 0x00263090 returns 0 at once for a StreamChannel below 0, and asks the
-    // IOP's stream otherwise. No voice here is a stream.
-    (void)d;
-    (void)voice;
-    return false;
+    // IOP's stream otherwise: SOUND_STREAM_INFO::Active, byte 18. There is
+    // one mono stream, so a voice an older stream played on asks after the
+    // newest, wherever it went.
+    if (voice >= d->voices || d->voice[voice].streamChannel < 0) return false;
+    if (d->streamVoice < 0) return false;
+    return d->sink && d->sink->playing
+        && d->sink->playing(d->sink->user, (unsigned)d->streamVoice);
 }
 
 uint16_t bsnd_bank_number(const BsndDriver* d, const char* name)
@@ -690,6 +892,7 @@ void bsnd_update(BsndDriver* d)
         if (d->voice[i].paused) continue;
         if (d->sink->playing(d->sink->user, i)) continue;
         if (d->sink->stop) d->sink->stop(d->sink->user, i);
+        if ((int)i == d->streamVoice) d->streamVoice = -1;
         d->key[i] = BSND_KEY_OFF;
         memset(&d->voice[i], 0, sizeof(d->voice[i]));
         d->voice[i].streamChannel = -1;
@@ -702,6 +905,7 @@ void bsnd_update(BsndDriver* d)
 #ifdef __3DS__
 #include <3ds.h>
 
+#include "bsndstream.h"
 #include "gamedata.h"
 
 // One ndsp channel per voice, and one waveBuf per channel because every patch
@@ -723,6 +927,7 @@ static void hw_start(void* user, unsigned ch, const uint8_t* data,
     (void)user;
     if (ch >= BSND_MAX_VOICES) return;
 
+    bsndstream_stop(ch);         // a patch on the stream's channel ends it
     ndspChnReset(ch);
     ndspChnSetInterp(ch, NDSP_INTERP_LINEAR);
     ndspChnSetRate(ch, (float)rate);
@@ -745,6 +950,7 @@ static void hw_stop(void* user, unsigned ch)
 {
     (void)user;
     if (ch < BSND_MAX_VOICES) {
+        bsndstream_stop(ch);
         ndspChnWaveBufClear(ch);
         gWave[ch].status = NDSP_WBUF_DONE;
     }
@@ -787,11 +993,22 @@ static void hw_pause(void* user, unsigned ch, bool paused)
 static bool hw_playing(void* user, unsigned ch)
 {
     (void)user;
-    return ch < BSND_MAX_VOICES && ndspChnIsPlaying(ch);
+    if (ch >= BSND_MAX_VOICES) return false;
+    // A stream's waves come and go, and ndsp can run dry between two of
+    // them while the worker reads; the stream knows when it has ended.
+    if (bsndstream_owns(ch)) return bsndstream_playing(ch);
+    return ndspChnIsPlaying(ch);
+}
+
+static void hw_stream(void* user, unsigned ch, const BsndStreamPart* parts,
+                      unsigned count, uint32_t rate)
+{
+    (void)user;
+    if (ch < BSND_MAX_VOICES) bsndstream_play(ch, parts, count, rate);
 }
 
 static const BsndSink kNdspSink = {
-    hw_start, hw_stop, hw_mix, hw_rate, hw_pause, hw_playing, NULL
+    hw_start, hw_stop, hw_mix, hw_rate, hw_pause, hw_playing, NULL, hw_stream
 };
 
 static void* hw_alloc(size_t n) { return linearAlloc(n); }
@@ -811,6 +1028,8 @@ bool bsnd_hw_init(BsndDriver* d)
     }
     gNdspReady = true;
     ndspSetOutputMode(NDSP_OUTPUT_STEREO);
+    // The speech's stream; without it the speech is silent and no more.
+    bsndstream_init();
 
     if (gamedata_path("SOUND", path, sizeof(path)))
         bsnd_set_load_path(d, path);
@@ -820,6 +1039,7 @@ bool bsnd_hw_init(BsndDriver* d)
 void bsnd_hw_close(BsndDriver* d)
 {
     bsnd_close(d);
+    bsndstream_exit();
     if (gNdspReady) {
         ndspExit();
         gNdspReady = false;

@@ -189,7 +189,7 @@ and scales it by a ratio:
   slope comes from the octave above when rising and the octave below when
   falling.
 
-## Fades and the near end
+## Fades and the stream poll
 
 `Fade(volume, ms)` does nothing without a voice. Under 33 ms it sets the
 volume straight to `scaled·volume`. Otherwise:
@@ -202,9 +202,34 @@ The target is in scaled terms and the current volume is not, so a fade
 towards 1.0 of a quiet patch steps down to it.
 
 `Update` only does anything while a fade is in progress. It steps the
-volume and stops at the target. Then, still inside the fade, it polls a
-stream's near end, and raises event 4 once if the sample has a callback.
-So a stream that isn't fading never raises event 4.
+volume and stops at the target. Then, still inside the fade, it asks
+the driver whether the voice's stream is still going (`0x00263090`), and
+raises event 4 once if it is and the sample has a callback. So a stream
+that isn't fading never raises event 4.
+
+## The speech's samples
+
+The speech plays through two bSamples of its own, both of type 1, so
+CalcPitch scales the sample's own rate rather than a patch's.
+
+- **bSampleStream::SetSampleRate** (`0x00280340`) sets that rate.
+  `bsample_set_rate`.
+- **bSampleChain** is what cSEDWedge::Initialize builds inline at
+  `0x00205cb4`: a pool sample made with bSample(1), its bank and name
+  both "_STREAM", and LockVoice, so it keeps its voice for good. The
+  wedge sets the rate (24000) after. `bsample_chain_new`.
+- **AddToChain** (`0x00206760`) takes a file, an offset, a size and
+  whether this is the last part. A part that is not the last is queued:
+  CalcPitch, CalcVolume and CalcPan at the sample's current three, then
+  the driver's 7-word overload (`0x00260d98`) on the "_CHAIN" bank,
+  which lets the driver choose the voice. The last part is played by
+  name, offset and size, which ends the queue and plays it.
+  `bsample_chain_add`.
+- **Play with an offset or a size** goes through the overload that
+  takes a part of a file (`0x00260ce8`). `bsnd_voice_play_part`.
+
+The driver's side, "_STREAM", "_CHAIN" and PlayChain, is in
+docs/formats/sound-driver.md, "Streams and the queue".
 
 ## The port
 
@@ -223,10 +248,8 @@ The port is retail's code over bsnd.c. These things differ:
   on into a NULL voice. 48 locked runs cannot happen on 22 channels.
 - The debug output is left out: bSound::Printf, the voice manager's
   allocation log, and the asserts.
-- The offset/size overload of bSnd_VoicePlay plays the same way as the
-  plain one. Only the speech's streams set those values.
 
-Not ported, because nothing calls them: GetPan (which reads the near-end
-flag), GetSampleVolume (which reads the callback), GetFlags and IsLooping.
-The speech's subclasses bSampleStream and bSampleChain come with the
-speech.
+Not ported, because nothing calls them: GetPan (which reads the
+event-4 flag), GetSampleVolume (which reads the callback), GetFlags and
+IsLooping. Event 4 is `BSOUND_SAMPLE_STREAM_ACTIVE`: retail's poll asks
+whether the stream is still going, not whether it is near its end.

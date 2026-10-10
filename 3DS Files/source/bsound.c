@@ -876,11 +876,14 @@ BVoice* bsample_play(BSample* s, float volume, float pan, float pitch)
     rate = bsample_calc_pitch(s, pitch);
     vol = bsample_calc_volume(s, volume);
     p = bsample_calc_pan(s, pan);
-    // With an offset or a size, retail plays through the overload that
-    // starts a stream part-way (0x00260ce8). The port's driver has no
-    // streams, so both reach the same call; only the speech's streams ever
-    // set them.
-    bsnd_voice_play_pan(d, s->bankName, s->name, rate, vol, p, s->voice->id);
+    // With an offset or a size, through the overload that takes a part of
+    // a file (0x00260ce8), which only the streams' banks look at.
+    if (s->offset != 0 || s->size != 0)
+        bsnd_voice_play_part(d, s->bankName, s->name, rate, vol, p,
+                             s->offset, s->size, s->voice->id);
+    else
+        bsnd_voice_play_pan(d, s->bankName, s->name, rate, vol, p,
+                            s->voice->id);
     s->voiceLockPlaying = 1;
     s->paused = 0;
     return s->voice;
@@ -986,7 +989,7 @@ uint32_t bsample_get_channels(const BSample* s)
 void bsample_update(BSample* s)
 {
     // 0x00274a98. A fade's step, stopping at the target; then, still
-    // inside the fade, the near-end poll -- so a stream that is not fading
+    // inside the fade, the stream poll -- so a stream that is not fading
     // never raises event 4. Retail's, kept.
     float v;
 
@@ -1006,10 +1009,10 @@ void bsample_update(BSample* s)
     }
     bsample_set_volume(s, v);
     if (s->voice != NULL && !s->nearEndNotified && s->callback != NULL
-        && bsnd_stream_near_end(drv(), s->voice->id)) {
-        notify_client(BSOUND_SAMPLE_NEAR_END, s);
+        && bsnd_stream_active(drv(), s->voice->id)) {
+        notify_client(BSOUND_SAMPLE_STREAM_ACTIVE, s);
         if (s->callback != NULL)
-            s->callback(BSOUND_SAMPLE_NEAR_END, s, s->callbackData);
+            s->callback(BSOUND_SAMPLE_STREAM_ACTIVE, s, s->callbackData);
         s->nearEndNotified = 1;
     }
 }
@@ -1032,6 +1035,49 @@ int32_t bsample_is_voice_locked(const BSample* s)
 void bsample_release_voice(BSample* s)
 {
     s->voice = NULL;
+}
+
+void bsample_set_rate(BSample* s, uint32_t rate)
+{
+    s->rate = rate;
+}
+
+BSample* bsample_chain_new(void)
+{
+    // Inline in cSEDWedge::Initialize (0x00205cb4): bOMalloc of the sample
+    // pool, bSample(1), the bank and the name, LockVoice, then words 4 and
+    // 8 cleared -- which the constructor has already done. The wedge sets
+    // the rate after, each time.
+    BSample* s = bsample_new(1);
+
+    if (s == NULL)
+        return NULL;
+    bsample_set_bank_name(s, "_STREAM");
+    bsample_set_name(s, "_STREAM");
+    bsample_lock_voice(s);
+    s->nearEndNotified = 0;
+    s->field8 = 0;
+    return s;
+}
+
+void bsample_chain_add(BSample* s, const char* path, uint32_t offset,
+                       uint32_t size, bool start)
+{
+    uint32_t rate;
+    uint16_t vol;
+
+    if (start) {
+        bsample_play_named(s, path, offset, size);
+        return;
+    }
+    // CalcPitch, CalcVolume, CalcPan, in that order, at the sample's
+    // current three; then the driver's 7-word overload, which lets it
+    // choose the voice (0x00260d98).
+    rate = bsample_calc_pitch(s, s->currentPitch);
+    vol = bsample_calc_volume(s, s->currentVolume);
+    bsnd_voice_play_part(drv(), "_CHAIN", path, rate, vol,
+                         bsample_calc_pan(s, s->currentPan), offset, size,
+                         BSND_VOICE_ALLOC);
 }
 
 uint32_t bsample_get_category(const BSample* s)

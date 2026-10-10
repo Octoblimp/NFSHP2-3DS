@@ -187,8 +187,9 @@ The disc counts patches as the records whose channel number is 0, which is
 every patch but a stereo pair's right half; .SBK has joined those already.
 
 `bSnd_SetVoiceAzimuth` (`0x00263f40`) pans each channel of a voice, both of a
-stereo pair, to the azimuth's pan at its own volume. A voice's near end
-(`0x00263090`) is 0 for any voice that is not a stream.
+stereo pair, to the azimuth's pan at its own volume. Whether a voice's stream is
+still going (`0x00263090`) is 0 for any voice that is not a stream; see
+"Streams and the queue" below.
 
 ## What the port does differently
 
@@ -222,6 +223,107 @@ it, so the categories keep their balance among themselves; the music is its
 own ndsp channel in `jbstream.c` and keeps its level. The checker never sees
 the sink, so it is unchanged.
 
-The streaming and queueing paths are not ported. Nothing in the frontend
-reaches them, and the music they exist for is task 29's problem. So no voice
-is a stream, and the near end is always false.
+## Streams and the queue
+
+Retail's bSnd_VoicePlay (`0x002611c0`, the demo's `0x00247f00` above)
+sends two banks down their own paths before it looks for a patch. Both
+are the speech's. bSampleChain (docs/formats/bsound.md) plays a sentence
+as one "_CHAIN" call for each clip but the last, and a "_STREAM" call
+for the last.
+
+| address | what |
+|---|---|
+| `0x0026128c` | the bank test: 7 characters of "_STREAM" |
+| `0x0026129c` | the "_STREAM" path |
+| `0x00261e80` | the "_CHAIN" path: 16 characters of "_CHAIN", so the name alone |
+| `0x00262848` | PlayChain |
+| `0x00263090` | whether a voice's stream is still going |
+| `0x00268200` | SOUND_FindFreeMonoStream, which always answers stream 2 |
+| `0x003353b8` | the queue: 8 entries of 52 bytes, the count at gp-14344 |
+
+bSound::Initialize asks bSnd_Initialize for one stereo stream and one
+mono. The stereo pair is streams 0 and 1, the jukebox's. The mono one,
+stream 2, is the speech's.
+
+**"_STREAM"** takes any bank whose first 7 characters match, so
+"_STREAMS" and "_STREAMX" too.
+
+1. With parts queued, this call becomes the queue's last part (its
+   name, offset, rate as a u16, size and volume), and PlayChain plays
+   them all.
+2. Otherwise a rate of `0xffffffff` becomes 22050. An 8th character of
+   'S' is the stereo stream, the jukebox's.
+3. Voice 48 takes the lowest voice that is neither keyed nor locked;
+   when there is none the call returns `0xfffe`.
+4. The voice record:
+   - Pitch: the rate as asked, unconverted;
+   - Volume: the call's;
+   - Pan: the call's, with Azimuth worked back from it;
+   - ADSR: `0x1a00000a`;
+   - Type: 3, which bSnd_VoiceStop sends to SOUND_StopStream;
+   - LoopChannel: 0;
+   - StreamChannel: 2;
+   - EffectVolume: 0.
+5. The file is the load path with the patch's first 32 bytes straight
+   after it, 255 bytes in all. An offset of 0 plays the whole file past
+   its 48-byte VAG header. Any other offset plays `size` bytes from
+   there.
+6. The volumes come from GetVolumesFromPan at pan 0, whatever the
+   voice's pan, so a stream plays centred. SOUND_PlayStream keys the
+   voice on at the SPU pitch of the rate.
+
+**"_CHAIN"** stores the part at the count: the name (32 bytes and a
+terminator), offset, size, rate and volume. It returns the voice it was
+given. The count goes up, and at 8 goes back to 0, so an eighth part
+empties the queue unplayed.
+
+**PlayChain**:
+
+1. Takes the first part's rate and volume as the stream's.
+2. Finds a voice as "_STREAM" does. When there is none it returns
+   `0xfffe` and leaves the queue as it was.
+3. Fills the record as above, at pan 0.
+4. Opens each part's file past its header. It moves the first to its
+   offset when it has one, and hands the rest to SOUND_ChainStreams.
+5. Sets the count back to 0.
+
+**`0x00263090`** answers 0 for a voice whose StreamChannel is below 0.
+Otherwise it asks the IOP's stream: SOUND_STREAM_INFO's Active, byte 18.
+bSample::Update raises its event 4 on it (docs/formats/bsound.md).
+
+### What the port does differently
+
+- **The stream plays on the 3DS** on the voice's own ndsp channel
+  (`bsndstream.c`, docs/formats/bsndstream.md). The sink's new last
+  member, `stream`, is handed the parts: each a path, an offset and a
+  size, where a size of 0 is the rest of the file. Its `playing` answers
+  for the stream's channel until the last part has been heard.
+- **`streamVoice`.** There is one mono stream, so every voice with a
+  StreamChannel asks after the newest stream's channel, as retail's
+  GetStreamInfo(2) does. The driver keeps that channel in `streamVoice`.
+  It is -1 after bsnd_init, set when a stream starts, and -1 again when
+  bsnd_voice_stop or bsnd_update frees that channel.
+- **The full queue is guarded.** A chain that finds no voice leaves the
+  count at 8. Retail's next "_CHAIN" part then goes past the queue, and
+  a "_STREAM" part makes PlayChain copy nine entries into a frame of
+  eight. The port drops such a "_CHAIN" part, and lets a "_STREAM" part
+  take the eighth's place.
+- **A chained part's offset of 0** means the file past its header, as it
+  does for the first part. The first's is the EE's to decide; the rest
+  go to the IOP, whose side of it is not on the disc. The speech never
+  sends one.
+- **The file name** is the patch's first 32 bytes, as `0x00261304`
+  copies them, and the port's path is always terminated.
+- **HzToSPU in 64 bits.** Retail shifts the rate left by 12 in 32 bits,
+  which overflows at 2^20 Hz. The port's does not. No stream asks for
+  such a rate.
+- **Not ported here:** "_STREAMS", the stereo stream, which the jukebox
+  plays itself (`jbstream.c`), so it finds no patch; and "_MOVIE" as a
+  "_STREAM" patch, which the movie player does.
+- **A voice past the driver's** returns `0xfffc`, where retail writes
+  past its table.
+
+`tools/bsndstream_check.py` runs retail's code for all of this in the
+MIPS emulator, with the IOP's calls faked, against bsnd.c's: 716 ops,
+0 differ. Its 56 mutations are all caught but two, which are noted as
+equivalent.

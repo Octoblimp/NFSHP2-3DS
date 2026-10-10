@@ -67,7 +67,8 @@ typedef void (*BSoundCallback)(uint32_t event, void* what, void* data);
 // The events, as bSound::notifyClient and the bSample callbacks raise them.
 enum {
     BSOUND_REGION_LOADED = 2,   // updatePendingRegions: `what` is the bRegion
-    BSOUND_SAMPLE_NEAR_END = 4, // bSample::Update, a stream nearing its end
+    BSOUND_SAMPLE_STREAM_ACTIVE = 4, // bSample::Update, while fading: its
+                                     // stream's voice is playing
     BSOUND_SAMPLE_STOPPED = 8,  // bSample::Stop
 };
 
@@ -253,6 +254,22 @@ int8_t bsample_get_type(const BSample* s);
 int32_t bsample_is_voice_locked_playing(const BSample* s);
 int32_t bsample_is_voice_locked(const BSample* s);
 void bsample_release_voice(BSample* s);
+
+// bSampleStream::SetSampleRate, 0x00280340: the rate CalcPitch scales when
+// the type is not 0.
+void bsample_set_rate(BSample* s, uint32_t rate);
+
+// The bSampleChain cSEDWedge::LoadDataFile makes (0x00205cb4): a pool
+// sample of type 1 on the "_STREAM" bank and named so, its one voice locked
+// for good. The caller sets the rate. NULL when the pool is full.
+BSample* bsample_chain_new(void);
+// bSampleChain::AddToChain, 0x00206760: `size` bytes of `path` (a file
+// under bSound's path) from `offset`, queued at the sample's current
+// pitch, volume and pan; or, with `start`, added as the last part and the
+// queue played -- bsample_play_named.
+void bsample_chain_add(BSample* s, const char* path, uint32_t offset,
+                       uint32_t size, bool start);
+
 uint32_t bsample_get_category(const BSample* s);
 int32_t bsample_is_paused(const BSample* s);
 // GetPitch, 0x00275de0, which reads m_fCurrentVolume and not the pitch.
