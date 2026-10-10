@@ -84,6 +84,7 @@
 #include "characterinfo.h"
 #include "collision.h"
 #include "collisionbody.h"
+#include "collisionsound.h"
 #include "configitems.h"
 #include "cop.h"
 #include "copdriver.h"
@@ -766,6 +767,17 @@ static void sndOneshotMute(void* c, int on)
     sound3d_oneshot_mute(on);
 }
 
+// collision_sound (14-6), which LoadSoundRegionsInGame registers,
+// UnLoadSoundRegions unregisters, and sound::Update and the mutes call.
+static void sndCollisionRegister(void* c)   { (void)c; collision_sound_register(); }
+static void sndCollisionUnregister(void* c) { (void)c; collision_sound_unregister(); }
+static void sndCollisionUpdate(void* c)     { (void)c; collision_sound_update(); }
+static void sndCollisionMute(void* c, int on)
+{
+    (void)c;
+    collision_sound_mute(on);
+}
+
 // The car sounds (14-3): UpdateCarSounds, and Mute's walk of
 // pCurrentWorld's CarList, each car's BaseCarSound muted through its table.
 static void sndCarSoundsUpdate(void* c)
@@ -836,6 +848,10 @@ static SoundHooks gSoundHooks = {
     .oneshot_close    = sndOneshotClose,
     .oneshot_update   = sndOneshotUpdate,
     .oneshot_mute     = sndOneshotMute,
+    .collision_register   = sndCollisionRegister,
+    .collision_unregister = sndCollisionUnregister,
+    .collision_update     = sndCollisionUpdate,
+    .collision_mute       = sndCollisionMute,
     .sound_path       = gSoundDir,
     .skip_missing     = 1,
 };
@@ -4253,6 +4269,7 @@ int main(int argc, char** argv)
     carsound_install_vtables();
     enginesound_install_vtables();
     tiresound_install_vtables();
+    collisionsound_install_vtables();
 
     // The car sounds (14-3): Car's constructor and destructor, the splash
     // and the tyre pop, and the drivers' horn.
@@ -4273,6 +4290,13 @@ int main(int argc, char** argv)
     gCreateAITireFn = tiresound_create_ai;
     gTireSoundTriggerBlowOutFn = tiresound_trigger_blow_out;
     gTireSoundScaleRoadNoiseFn = tiresound_scale_road_noise;
+    // The crashes and scrapes (14-6): a collision's sample, its release
+    // and its scrape, the race's reset, and the busted roadblock.
+    gCollisionSoundCreateSampleFn = collision_sound_create_sample;
+    gCollisionSoundReleaseSampleFn = collision_sound_release_sample;
+    gCollisionSoundPlayScrapeFn = collision_sound_play_scrape;
+    gCollisionSoundResetFn = collision_sound_reset;
+    gCollisionSoundPlayBustRoadBlockFn = collision_sound_play_bust_road_block;
 
     // Car::SetControlMode reaches the controllers task 26 brings through
     // seams; a NULL one is a class not ported yet, and the arm aborts.
