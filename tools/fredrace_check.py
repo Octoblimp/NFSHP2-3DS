@@ -22,9 +22,11 @@ The model is the image. These run as shipped:
     GetLocationIndex;
   * the Mode Selects' StartQuickRace (0x00216c18), with the express
     game's track pick (0x00216aa8), IsTrackUnlocked (0x0024b760),
-    IsTrackAnEventReward (0x001ffaa8), EventTreeIsTrackUnlocked
-    (0x001ffb18), MakeChallengeCarsAvailable, SetCarAvailability,
-    AssignCarOfType and GetCarStatus (0x00187958);
+    MakeChallengeCarsAvailable, SetCarAvailability, AssignCarOfType and
+    GetCarStatus (0x00187958); retail's IsTrackAnEventReward (0x001ffaa8)
+    and EventTreeIsTrackUnlocked (0x001ffb18) run under them, which the
+    port has in eventtree.c (eventtree_check.py) and the harness stands
+    in for;
   * and under them bRandom, bSetRandomSeed, GetSkinInfo, GetNumSkins,
     GetSkinNumber, GetTrackInfo, GetCharacterInfo and its hash lookup,
     bStrICmp, bStrCmp and bStringHash; InitFred, RaceParameters'
@@ -2175,32 +2177,20 @@ MUTATIONS = [
       "*out = list[n - 1 - bRandomI(n, &bDefaultSeed)];", QRC),
     M("pk_random_n", "*out = list[bRandomI(n, &bDefaultSeed)];",
       "*out = list[bRandomI(n > 1 ? n - 1 : n, &bDefaultSeed)];", QRC),
-    # The locks.
-    M("lk_reward_ret", "            return 1;\n    return 0;\n}",
-      "            return 2;\n    return 0;\n}", QRC),
-    M("lk_reward_first", "    for (tree = 0; tree < gNumEventTrees; tree++)\n"
-      "        if (tree_track_is_a_reward",
-      "    for (tree = 1; tree < gNumEventTrees; tree++)\n"
-      "        if (tree_track_is_a_reward", QRC),
-    M("lk_unlocked_tree", "    for (tree = 0; tree < gNumEventTrees; tree++) {",
-      "    for (tree = 1; tree < gNumEventTrees; tree++) {", QRC),
-    M("lk_skip", "        if (!tree_track_is_a_reward(tree, track, "
-      "direction))\n            continue;",
-      "        if (0)\n            continue;", QRC),
-    M("lk_bool", "gEventTreeIsTrackUnlockedFn(tree, track, direction) != 0;",
-      "gEventTreeIsTrackUnlockedFn(tree, track, direction);", QRC),
-    M("lk_tree_arg", "gEventTreeIsTrackUnlockedFn(tree, track, direction) "
-      "!= 0;", "gEventTreeIsTrackUnlockedFn(0, track, direction) != 0;", QRC),
-    M("lk_none", "        return gEventTreeIsTrackUnlockedFn(tree, track, "
-      "direction) != 0;\n    }\n    return 1;",
-      "        return gEventTreeIsTrackUnlockedFn(tree, track, "
-      "direction) != 0;\n    }\n    return 0;", QRC),
-    M("lk_unlocked", "        return event_tree_is_track_unlocked(track, "
+    # The locks: IsTrackUnlocked over eventtree.c's two, which the harness
+    # stands in for.
+    M("lk_reward", "    if (is_track_an_event_reward(track, direction))\n"
+      "        return event_tree", "    if (0)\n        return event_tree", QRC),
+    M("lk_dir", "is_track_an_event_reward(track, direction)",
+      "is_track_an_event_reward(track, 0)", QRC),
+    M("lk_unlocked_dir", "event_tree_is_track_unlocked_any(track, direction);",
+      "event_tree_is_track_unlocked_any(track, 0);", QRC),
+    M("lk_unlocked", "        return event_tree_is_track_unlocked_any(track, "
       "direction);\n    return 1;",
       "        return 1;\n    return 1;", QRC),
-    M("lk_unlocked_else", "        return event_tree_is_track_unlocked(track, "
-      "direction);\n    return 1;",
-      "        return event_tree_is_track_unlocked(track, "
+    M("lk_unlocked_else", "        return event_tree_is_track_unlocked_any("
+      "track, direction);\n    return 1;",
+      "        return event_tree_is_track_unlocked_any(track, "
       "direction);\n    return 0;", QRC),
     M("cs_index", "(const uint8_t *)p + type * (int32_t)sizeof(CarStatus)",
       "(const uint8_t *)p + (type + 1) * (int32_t)sizeof(CarStatus)", FRC),

@@ -3,7 +3,9 @@
 // links whole; nothing the check runs reaches past the cop container's
 // walk, so each of these exits if it is ever called. The same for
 // soundscape.c, slot 21's: its loader reads records and calls nothing,
-// and its unloader deletes only samples an update made.
+// and its unloader deletes only samples an update made. eventtree.c,
+// slot 24's, deals its trees' state out of Fred and reads the rest only
+// for the questions the check never asks.
 
 #include <stdint.h>
 #include <stdio.h>
@@ -19,6 +21,8 @@
 #include "coputil.h"
 #include "drivetarget.h"
 #include "drivetargetrenderer.h"
+#include "fred.h"
+#include "raceinit.h"
 #include "raceparams.h"
 #include "racesplit.h"
 #include "realdriver.h"
@@ -33,6 +37,10 @@ tTrackGraph        *TheTrackGraph;
 DriveTargetRenderer TheDriveTargetRenderer;
 float               SkipFETimeUntilCopsAppear = 1.0f;
 int32_t             CameraFollowThisCarInstead = -1;
+FrontendDatabase    Fred;
+const char       *(*gFredTranslateFn)(int32_t id);
+EggIsOnFn           gEggIsOnFn;
+int32_t             bVersionE3;
 
 static void unreached(const char *f)
 {

@@ -14,8 +14,9 @@ Best Lap Times, Best Total Times and the Lap Times screens;
 `docs/formats/camera-coordinator.md`, "The demo camera"), and RE-5
 (the race's speech, 14-10c; `docs/formats/race-speech.md`). RE-6, the
 career's screens, is under way, split into RE-6a to RE-6d: RE-6a (the
-event trees) is written but not yet checked or committed; HANDOFF's
-last entry has its files and next steps. 14-10d comes after RE-6. Two asks were added to
+event trees, `docs/formats/event-tree.md`) is done in Session 71, and
+RE-6b (RaceEvent) is next; HANDOFF's last entry has the split. 14-10d
+comes after RE-6. Two asks were added to
 TASKS.md the same day, with no order given: task 39, the armed
 helicopter's missiles and barrels (12k-6), and task 40, the radar
 detection meter under the rear-view mirror (12n). The user's device log of
@@ -37,8 +38,10 @@ had been left out of the port, so after a race FRONTB's solids kept
 the default texture their load-time fixup gave them. The flow's new
 `fixUpTables` hook runs the two lines (`docs/formats/boot-flow.md`,
 "End"). Checked on Azahar: a quit quick race, then Be A Cop's Select
-Car, shows the lit brushed-metal turntable. Then RE-6a goes on from
-HANDOFF's Session 70 entry.
+Car, shows the lit brushed-metal turntable. Then RE-6a, the event
+trees: FRONTB's two trees load through slot 24, and on a new save
+they lock their 19 reward cars and 23 reward tracks, as retail's do,
+until RE-6b to RE-6d make the events playable.
 
 Updated in Session 62 (2026-10-09):
 the cars' light flares now show -- the cop light bars, headlights and
@@ -318,8 +321,8 @@ The slices:
   (seven AI) said event 160 after each lap and 165 for seventh place.
   `docs/formats/race-speech.md`.
 - **RE-6, under way (Session 70):** split into RE-6a (the event
-  trees, in progress: `eventtree.{c,h}`, its harness and checker are
-  written, untracked; see HANDOFF's last entry), RE-6b (RaceEvent),
+  trees, done in Session 71: `eventtree.{c,h}`,
+  `docs/formats/event-tree.md`), RE-6b (RaceEvent),
   RE-6c (the races an event sets) and RE-6d (the screens). In all,
   the career's screens: Tourney Standings (with
   `tournament_race_speech`), Events Unlocked, the event's results
@@ -5423,8 +5426,8 @@ count. It is its own slice when it goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** the end of the race, RE-6 (see "First"; RE-1 to RE-5
-  are done), then step 14's 14-10d. 14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5, 14-6, 14-7, 14-8a,
+- **Next:** the end of the race, RE-6b (see "First"; RE-1 to RE-5
+  and RE-6a are done), then step 14's 14-10d. 14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5, 14-6, 14-7, 14-8a,
   14-8b, 14-8c, 14-8d, 14-9, 14-10a, 14-10b and 14-10c are done. Of step 12,
   12a to 12k-2, the light flares, 12k-3's planners, 12k-3a, 12k-3b,
   12k-4a, 12k-4b, 12k-7, 12l-1 and 12l-2 are done. See

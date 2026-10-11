@@ -9,6 +9,7 @@
 #include "bmath.h"
 #include "cartypeinfo.h"
 #include "configitems.h"
+#include "eventtree.h"
 #include "fred.h"
 #include "fredrace.h"
 #include "playersettings.h"
@@ -16,11 +17,6 @@
 #include "raceparams.h"
 #include "track.h"
 
-int32_t gNumEventTrees;
-int32_t (*gEventTreeTrackIsARewardFn)(int32_t tree, int32_t track,
-                                      int32_t direction);
-int32_t (*gEventTreeIsTrackUnlockedFn)(int32_t tree, int32_t track,
-                                       int32_t direction);
 void (*gQuickRaceStopMovieFn)(void);
 
 // Fred.GameType's express game, which StartQuickRace sets.
@@ -28,41 +24,10 @@ void (*gQuickRaceStopMovieFn)(void);
 
 // --------------------------------------------------------- the track locks
 
-static int32_t tree_track_is_a_reward(int32_t tree, int32_t track,
-                                      int32_t direction)
-{
-    return gEventTreeTrackIsARewardFn != NULL
-           ? gEventTreeTrackIsARewardFn(tree, track, direction) : 0;
-}
-
-int32_t is_track_an_event_reward(int32_t track, int32_t direction)
-{
-    int32_t tree;
-
-    for (tree = 0; tree < gNumEventTrees; tree++)
-        if (tree_track_is_a_reward(tree, track, direction))
-            return 1;
-    return 0;
-}
-
-int32_t event_tree_is_track_unlocked(int32_t track, int32_t direction)
-{
-    int32_t tree;
-
-    for (tree = 0; tree < gNumEventTrees; tree++) {
-        if (!tree_track_is_a_reward(tree, track, direction))
-            continue;
-        if (gEventTreeIsTrackUnlockedFn == NULL)
-            return 0;
-        return gEventTreeIsTrackUnlockedFn(tree, track, direction) != 0;
-    }
-    return 1;
-}
-
 int32_t is_track_unlocked(int32_t track, int32_t direction)
 {
     if (is_track_an_event_reward(track, direction))
-        return event_tree_is_track_unlocked(track, direction);
+        return event_tree_is_track_unlocked_any(track, direction);
     return 1;
 }
 

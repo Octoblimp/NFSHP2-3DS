@@ -134,11 +134,10 @@ which case it is `EventTreeIsTrackUnlocked`. Both walk the event trees'
   (`0x001ff5c8`) is not 0 and 0 if it is; 1 when no tree has it.
 
 The trees are loaded from FRONTB's chunk `0x80034a00` by
-`LoaderEventTree` (`0x001ffc40`). EventTree is not ported yet: the port's
-`gNumEventTrees` is 0, so every track is unlocked and Quick Race can pick
-a track the retail game would still have locked. `quickrace.h`'s seams
-(`gEventTreeTrackIsARewardFn`, `gEventTreeIsTrackUnlockedFn`) are where
-EventTree goes in.
+`LoaderEventTree` (`0x001ffc40`). The port's are eventtree.c's
+([event-tree](event-tree.md)), so a track the trees still have locked is
+locked for Quick Race too; `is_track_unlocked` calls eventtree.c's
+`is_track_an_event_reward` and `event_tree_is_track_unlocked_any`.
 
 ## Leaving the frontend (0x00168830)
 

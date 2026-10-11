@@ -132,7 +132,7 @@ and "R-TB12" retail's, whose 279 top-level chunks all have a taker.
 | 21 | 22 | SoundScape | `80038000` | 1 | 1 | 1 | -- |
 | 22 | 23 | CharacterInfo | `34300`, `34301` | 1, 1 | 0 | 0 | `characterinfo.c` |
 | 23 | 24 | HeliSheet | retail `80034800`; the demo's `34800` | 1 | 1 | 1 | `helisheet.c` ([helisheet](helisheet.md)) |
-| 24 | 25 | EventTree | `80034a00` | 4 | 0 | 0 | -- |
+| 24 | 25 | EventTree | `80034a00` | 4 | 0 | 0 | `eventtree.c` ([event-tree](event-tree.md)) |
 | 25 | 26 | DifficultyInfo | `34b00` | 1 | 0 | 0 | `difficultyinfo.c` |
 | 26 | 27 | Language | `39000` | 8 | 0 | 0 | -- |
 | 27 | 28 | Smokeables | `34026`, `34027` | 16, 1 | 2 | 2 | -- |
@@ -141,7 +141,7 @@ and "R-TB12" retail's, whose 279 top-level chunks all have a taker.
 
 The demo's TRACKB12 has 497 top-level chunks and retail's 279, and every one has a taker.
 
-Slots 15 (Cops) and 23 (HeliSheet) link whole objects. The harness
+Slots 15 (Cops), 23 (HeliSheet) and 24 (EventTree) link whole objects. The harness
 gets `tools/src/loadertable_copstubs.c`, which stands in for what the
 rest of `copmgr.c` calls and exits if any of it is reached; the check
 only walks the cop container. The checker had not linked since 12a wired

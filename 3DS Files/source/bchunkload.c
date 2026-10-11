@@ -14,6 +14,7 @@
 #include "elight.h"
 #include "epositionmarker.h"
 #include "esolid.h"
+#include "eventtree.h"
 #include "helisheet.h"
 #include "nisinfo.h"
 #include "polyhedra.h"
@@ -149,7 +150,6 @@ UNPORTED(LoaderEventManager, UnloaderEventManager, 7, 0x80036000u)
 UNPORTED(LoaderFlailerChunk, UnloaderFlailerChunk, 10, 0x80010200u)
 UNPORTED(LoaderAnimations, UnloaderAnimations, 12, 0x80034008u)
 UNPORTED(LoaderBodyDamage, UnloaderBodyDamage, 17, 0x00034030u)
-UNPORTED(LoaderEventTree, UnloaderEventTree, 24, 0x80034a00u)
 UNPORTED(LoaderLanguage, UnloaderLanguage, 26, 0x00039000u)
 UNPORTED(LoaderSmokeables, UnloaderSmokeables, 27, 0x00034026u, 0x00034027u)
 UNPORTED(LoaderDemoModeReplay, UnloaderDemoModeReplay, 29,
@@ -184,7 +184,7 @@ BChunkLoader LoaderTable[BCHUNK_NUM_LOADERS] = {
     loader_sound_scape,             // 21
     LoaderCharacterInfo,            // 22
     loader_heli_sheet,              // 23
-    LoaderEventTree,                // 24
+    loader_event_tree,              // 24
     loader_difficulty_info,         // 25
     LoaderLanguage,                 // 26
     LoaderSmokeables,               // 27
@@ -217,7 +217,7 @@ BChunkLoader UnloaderTable[BCHUNK_NUM_LOADERS] = {
     unloader_sound_scape,           // 21
     UnloaderCharacterInfo,          // 22
     unloader_heli_sheet,            // 23
-    UnloaderEventTree,              // 24
+    unloader_event_tree,            // 24
     UnloaderDifficultyInfo,         // 25
     UnloaderLanguage,               // 26
     UnloaderSmokeables,             // 27

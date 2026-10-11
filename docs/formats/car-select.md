@@ -139,8 +139,9 @@ In order:
    language's separator.
 5. Else "This car should be unlocked".
 
-The event trees are not ported, so `findEventForCar` is NULL in
-`main.c` and step 3 never answers on the device.
+`main.c`'s `findEventForCar` asks the event trees (`eventtree.c`,
+[event-tree](event-tree.md)) for the event a car is a reward for: its
+tree's type and its number.
 
 ## The selector
 
@@ -697,7 +698,7 @@ FRONTB's top-level chunks:
 | `0xb0300001` | the texture pack, 12.5 MB | `loader_texture_pack`, in place |
 | `0xb0300100` | the anim pack | in place |
 | `0x80010200` | the Flailer chunk | a slot not ported: the UI has it |
-| `0x80034a00`, twice | the event trees | not ported |
+| `0x80034a00`, twice | the event trees | `loader_event_tree`, in place ([event-tree](event-tree.md)) |
 | `0x15010`, four times | the fonts | not ported: the UI has them |
 
 `loader_solid_list` fixes its tables up in place, and can't do it twice.

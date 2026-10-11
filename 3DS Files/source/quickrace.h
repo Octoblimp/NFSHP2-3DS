@@ -25,30 +25,10 @@
 
 // --------------------------------------------------------- the track locks
 
-// The event trees, retail's bList at gp-16712, which LoaderEventTree
-// (0x001ffc40) fills from FRONTB.BUN's chunk 0x80034a00, one tree a chunk.
-// EventTree (0x001fd130 on) is not ported, so the list is the host's:
-// gNumEventTrees trees, each asked by its place in the list through
-// EventTree::TrackIsAReward (0x001ff6c8) and EventTree::IsTrackUnlocked
-// (0x001ff5c8). NULL answers 0. The game has no trees until they are
-// ported, so every track is unlocked; retail's FRONTB holds some back as
-// the event trees' rewards.
-extern int32_t gNumEventTrees;
-extern int32_t (*gEventTreeTrackIsARewardFn)(int32_t tree, int32_t track,
-                                             int32_t direction);
-extern int32_t (*gEventTreeIsTrackUnlockedFn)(int32_t tree, int32_t track,
-                                              int32_t direction);
-
-// IsTrackAnEventReward, 0x001ffaa8: whether any tree has the track, run
-// that way (eTrackDirection, 0 forwards and 1 backwards), as a reward.
-int32_t is_track_an_event_reward(int32_t track, int32_t direction);
-
-// EventTreeIsTrackUnlocked, 0x001ffb18: the first tree that has it as a
-// reward answers whether it is unlocked there, 1 or 0; with none, 1.
-int32_t event_tree_is_track_unlocked(int32_t track, int32_t direction);
-
 // IsTrackUnlocked, 0x0024b760: an event reward is unlocked when its tree
-// says so, and every other track is.
+// says so, and every other track is. The trees are eventtree.c's, loaded
+// from FRONTB.BUN's chunks 0x80034a00: IsTrackAnEventReward (0x001ffaa8)
+// and EventTreeIsTrackUnlocked (0x001ffb18) over their list.
 int32_t is_track_unlocked(int32_t track, int32_t direction);
 
 // --------------------------------------------------------- the race

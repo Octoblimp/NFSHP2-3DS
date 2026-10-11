@@ -19943,7 +19943,7 @@ Picked up from Session 64's steps:
   and race-results.md now name the bound seams. Next: RE-6, the
   career's screens.
 
-## Session 70, continued -- RE-6a, the event trees (in progress)
+## Session 70, continued -- RE-6a, the event trees (done in Session 71)
 
 Stopped at the user's word ("Wrap up ... let me start a fresh session").
 Nothing of RE-6a is committed. Its four files are untracked in the
@@ -20065,3 +20065,44 @@ and green, where the first visit had shown the brushed-metal turntable.
   eventtree.c for RE-6a, and step 3 of RE-6a's list must take
   quickrace.c's two stubs out, or make quickrace.c call the trees.
 - **Next.** RE-6a from the Session 70 entry above: its checker first.
+
+## Session 71, continued -- RE-6a, the event trees
+
+- **Done.** EventTree.obj's data side (0x001fd130 .. 0x001fffb0), the
+  state classes and EventInfo (0x00200000 .. 0x002014e8) and the two
+  Ultimates' test (0x002026f8) are `3DS Files/source/eventtree.{c,h}`.
+  `docs/formats/event-tree.md` has the decode, the disc's two trees and
+  the port's differences.
+- **The checker.** `tools/eventtree_check.py` runs FRONTB's two trees
+  and made-up trees A to J: 22401 ops, 28129 lines, 0 differ. Of 264
+  mutations, 255 are caught and 9 are equivalent (ic-26, eit-8, tp-8,
+  tri-0, fp-null, gs-egg, gs-egg0, rst-ko, ct-memset), each with its
+  reason. Two fixes on the way: the loose trees' state words are zeroed
+  in the data file, since the port's offset and retail's address differ;
+  and P()'s WINDOW is 0x24000 on both sides, for int16 indexes past an
+  array.
+- **Wired.**
+  - bchunkload.c slot 24 is loader_event_tree and unloader_event_tree.
+    loadertable_check has 0 differ on both images and catches 3 of 3
+    mutations (eventtree-slot, eventtree-unloader-loads, and
+    helisheet-slot on its new anchor). loadertable_copstubs.c gives
+    eventtree.c Fred, gFredTranslateFn, gEggIsOnFn and bVersionE3.
+  - quickrace.c's stand-ins are gone: gNumEventTrees, the two
+    gEventTree*Fn seams, and its own is_track_an_event_reward and
+    event_tree_is_track_unlocked. is_track_unlocked calls eventtree.c.
+    fredrace_test.c stands in for the two. fredrace_check: 10
+    scenarios, 3958 ops, 71235 lines, 0 differ; --only caught 7 of 7.
+  - main.c binds fredend's gIsCarAnEventRewardFn and
+    gEventTreeIsCarUnlockedFn, fredrace's gEventRewardCarsUnlockedFn
+    (New784), and the car select blurb's findEventForCar
+    (hookFindEventForCar: the tree's type and the event's number). It
+    logs the trees after FRONTB's load.
+- **On Azahar.** "frontres: FRONTB loaded; 2 event trees, 0 reward cars
+  earned". Be A Cop's Select Car walked (PASS). A Hot Pursuit quick race,
+  gas held, picked track 24 forwards and ran at 30 fps.
+- **What the player sees.** On a new save the trees' 19 reward cars (8
+  Championship, 11 Hot Pursuit) and 23 reward tracks (13 and 10) are
+  locked, as in retail, and Quick Race no longer picks a locked track.
+  They open through the events, which need RE-6b to RE-6d.
+- **Next.** RE-6b, RaceEvent (the Session 70 entry's split), then RE-6c,
+  RE-6d, 14-10d (bcarsel's speakCar), and TASKS 39 (12k-6) and 40 (12n).

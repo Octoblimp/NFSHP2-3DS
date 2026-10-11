@@ -113,6 +113,7 @@
 #include "emath.h"
 #include "emodel.h"
 #include "esolid.h"
+#include "eventtree.h"
 #include "eview.h"
 #include "gamedata.h"
 #include "fesound.h"
@@ -1495,7 +1496,12 @@ static void hookLoadResource(void* user, const char* path, BGameFlowDone done)
     // LoaderTable here, as the ResourceFile's would, before the callback.
     if (strcmp(path, "FRONTEND\\FRONTB.LZC") == 0 && g_frontBundle) {
         bool ok = frontres_load(g_frontBundle->data, g_frontBundle->len);
-        logLine("frontres: FRONTB %s", ok ? "loaded" : "not loaded, no room");
+        int trees = 0;
+        for (bNode* n = gEventTrees.next; n != &gEventTrees; n = n->next)
+            trees++;
+        logLine("frontres: FRONTB %s; %d event trees, %d reward cars earned",
+                ok ? "loaded" : "not loaded, no room", trees,
+                (int)event_trees_num_cars_unlocked());
     }
     bootQueue((Boot*)user, path, done);
 }
@@ -3381,8 +3387,22 @@ static int32_t hookCarSelLanguage(void* user)
     return g_flow.currLanguage;
 }
 
-// FormatUnlockBlurbForCar, nfsrewards.c's. The event trees are not ported,
-// so no car is an event's reward yet.
+// IsCarAnEventReward and FindEventThatCarIsARewardFor (eventtree.c), as
+// FormatUnlockBlurbForCar asks them: the event's tree type and number.
+static int hookFindEventForCar(void* user, int32_t carType, int32_t* treeType,
+                               int32_t* eventNumber)
+{
+    EventInfo* e;
+    (void)user;
+    if (!is_car_an_event_reward(carType))
+        return 0;
+    e = find_event_that_car_is_a_reward_for(carType);
+    *treeType    = event_info_tree(e)->nType;
+    *eventNumber = e->nNumber;
+    return 1;
+}
+
+// FormatUnlockBlurbForCar, nfsrewards.c's.
 static void hookCarSelFormatUnlockBlurb(void* user, char* buf, int len,
                                         int32_t carType, int32_t gameType,
                                         int flag)
@@ -3392,6 +3412,7 @@ static void hookCarSelFormatUnlockBlurb(void* user, char* buf, int len,
     h.user      = user;
     h.translate = hookCarSelTranslate;
     h.language  = hookCarSelLanguage;
+    h.findEventForCar = hookFindEventForCar;
     nfs_format_unlock_blurb_for_car(&h, buf, len, carType, gameType, flag);
 }
 
@@ -4841,8 +4862,8 @@ int main(int argc, char** argv)
     gFEDSetRecordTimesToBeatFn = fedSetRecordTimesToBeat;
     // Fred's end of the race (fredend.c): TransientStats, the points, the
     // task and points rewards the End Game screens read, and which cars
-    // they unlock. The high scores are bound above; the race events stay
-    // NULL until step 16.
+    // they unlock, the event trees' cars among them (eventtree.c). The high
+    // scores are bound above; the race events stay NULL until RE-6b.
     gFEDCheckForAbortionFn = fedCheckForAbortion;
     gFEDTheRaceIsOverFn = fedTheRaceIsOver;
     gFEDTheRaceWasQuitFn = fedTheRaceWasQuit;
@@ -4851,6 +4872,11 @@ int main(int argc, char** argv)
     gTransientStatsGetDriverFn = fedTransientStatsGetDriver;
     gSetAudioDataFromSoundFn = fedAudioFromSound;
     gIsCarUnlockedFn = nfs_is_car_unlocked;
+    gIsCarAnEventRewardFn = is_car_an_event_reward;
+    gEventTreeIsCarUnlockedFn = event_tree_is_car_unlocked_any;
+    // StartRace's RaceParameters New784 (fredrace.c): the trees' reward
+    // cars earned, 0x001ff978.
+    gEventRewardCarsUnlockedFn = event_trees_num_cars_unlocked;
     gChangeGameFlowFn = raceChangeGameFlow;
     gSoundMuteFn = raceSoundMute;
     gSoundMuteReplayFn = sndMuteReplay;

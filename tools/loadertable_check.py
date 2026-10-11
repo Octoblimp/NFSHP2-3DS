@@ -150,7 +150,7 @@ SOURCES = [HARNESS, STUBS, BCL, ESC, EMC] + ["3DS Files/source/" + f for f in (
     "cartypeinfo.c", "langtab.c", "drivetrain.c", "engine.c", "wheel.c",
     "suspension.c", "steering.c", "rigidbody.c", "table.c", "elight.c",
     "helisheet.c", "copmgr.c", "cop.c", "copmanager.c", "timer.c",
-    "epositionmarker.c", "nisinfo.c", "soundscape.c")]
+    "epositionmarker.c", "nisinfo.c", "soundscape.c", "eventtree.c")]
 
 HARNESS_TIMEOUT = 600
 EXTRACTED = ROOT / "extracted"
@@ -269,7 +269,7 @@ CLAIMS = {
 }
 TAKER = {t: k for k, ts in CLAIMS.items() for t in ts}
 PORTED = {0, 1, 2, 4, 5, 6, 8, 9, 11, 13, 14, 16, 18, 19, 21, 22, 23,
-          24, 26, 29}
+          24, 25, 26, 29}
 
 # Retail's: the demo's without PhysPredict, slot 20, and HeliSheet (23) a
 # container. The rest of the guards are the demo's.
@@ -2209,7 +2209,12 @@ MUTATIONS = [
      "#define HELISHEET_CHUNK_ID   0x80034800u",
      "#define HELISHEET_CHUNK_ID   0x00034800u"),
     ("helisheet-slot", BCL, "    unloader_heli_sheet,            // 23",
-     "    UnloaderEventTree,              // 23"),
+     "    unloader_event_tree,            // 23"),
+    ("eventtree-slot", BCL, "    loader_event_tree,              // 24",
+     "    loader_difficulty_info,         // 24"),
+    ("eventtree-unloader-loads", BCL,
+     "    unloader_event_tree,            // 24",
+     "    loader_event_tree,              // 24"),
     ("helisheet-unloader-loads", BCL,
      "    unloader_heli_sheet,            // 23",
      "    loader_heli_sheet,              // 23"),

@@ -133,6 +133,31 @@ static int32_t treeIsTrackUnlocked(int32_t tree, int32_t track, int32_t dir)
     return v;
 }
 
+// eventtree.c's IsTrackAnEventReward and EventTreeIsTrackUnlocked, as
+// retail runs them over its list, here over the script's trees by place;
+// eventtree_check has the port's own against retail's.
+static int32_t numTrees;
+
+int32_t is_track_an_event_reward(int32_t track, int32_t direction)
+{
+    int32_t tree;
+
+    for (tree = 0; tree < numTrees; tree++)
+        if (trackIsAReward(tree, track, direction))
+            return 1;
+    return 0;
+}
+
+int32_t event_tree_is_track_unlocked_any(int32_t track, int32_t direction)
+{
+    int32_t tree;
+
+    for (tree = 0; tree < numTrees; tree++)
+        if (trackIsAReward(tree, track, direction))
+            return treeIsTrackUnlocked(tree, track, direction) != 0;
+    return 1;
+}
+
 static void stopMovie(void) { emit("sm"); }
 
 static int32_t status(void)
@@ -539,8 +564,6 @@ int main(int argc, char **argv)
     gEventRewardCarsUnlockedFn = rewardCars;
     gFredGameFlowStateFn = gameFlowState;
     gFredChangeGameFlowFn = changeGameFlow;
-    gEventTreeTrackIsARewardFn = trackIsAReward;
-    gEventTreeIsTrackUnlockedFn = treeIsTrackUnlocked;
     gQuickRaceStopMovieFn = stopMovie;
 
     while (fgets(line, sizeof line, f)) {
@@ -785,7 +808,7 @@ int main(int argc, char **argv)
             ride_info_init(&scrRide, p, q, r, s);
         } else if (!strcmp(op, "tn")) {
             sscanf(rest, "%d", &p);
-            gNumEventTrees = p;
+            numTrees = p;
             continue;
         } else if (!strcmp(op, "ta") || !strcmp(op, "tu")) {
             sscanf(rest, "%d %d %d %lld", &p, &q, &r, &v);
@@ -807,7 +830,7 @@ int main(int argc, char **argv)
             sscanf(rest, "%d %d", &p, &q);
             r = (int)is_track_unlocked(p, q);
             s = (int)is_track_an_event_reward(p, q);
-            t = (int)event_tree_is_track_unlocked(p, q);
+            t = (int)event_tree_is_track_unlocked_any(p, q);
             emit("IU -> %d %d %d", r, s, t);
         } else if (!strcmp(op, "CS")) {
             sscanf(rest, "%d", &p);
