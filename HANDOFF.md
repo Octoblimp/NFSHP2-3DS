@@ -20297,3 +20297,34 @@ and green, where the first visit had shown the brushed-metal turntable.
   `race_event_reward_speech`), the Reward menu, and FormatStatus
   (0x001f60e8). Then Be A Cop and TASKS 41, then 14-10d and TASKS 39
   and 40.
+
+## Session 76 -- RE-6d, the career's end screens (done)
+
+- **Done.** `3DS Files/source/endevent.{c,h}`: TourneyStandingsScreen
+  (0x001dd5d0, with its order 0x001dd5c0), EventRewardScreen
+  (0x001def38) with the blurb's id (0x001de788), the player's place
+  (0x001dea88) and the blurb (0x001dead8), EventsUnlockedScreen
+  (0x001df180), BeTheCopResults1P and 2P (0x001e0898, 0x001e0a10), and
+  the five destructors. `docs/formats/end-event.md` has the decode, the
+  wiring and where the port differs.
+- **Two retail details found by the checker.** bList::Sort (0x00250550)
+  is a bubble sort that swaps any pair its test does not call in order,
+  and the tourney's test is a strict `<`, so a tie loops for ever. The
+  port's is `<=` (RacerRank breaks ties by index, so only bad data
+  ties). 0x001dea88 takes the driver in a1, which every caller sets to
+  0; `event_reward_user_rank` takes it too.
+- **The checker.** `tools/endevent_check.py` with
+  `tools/src/endevent_test.c`: 12340 ops, 57024 lines, 0 differ. Of 266
+  mutations, 265 are caught and 1 is equivalent (`<` for `<=`, which
+  only a tie tells apart). The script keeps to what retail can run: no
+  ties, racer indexes within the eight, a player's driver always in a
+  world car with a player.
+- **Wired.** main.c puts the five constructors in
+  gEndGameScreenCtorFns. Be A Cop's results come up after its races;
+  the event screens wait for step 16's event tree (GameType 4, 8, 9).
+- **Checked.** build_cia.ps1 built clean (relocations OK, shaders OK).
+  On Azahar (on AC), a gas-only Hot Pursuit quick race from the
+  frontend (`run_azahar_quickrace.ps1 -HoldKeys 65`): PASS, 30.0 fps.
+- **Next.** RE is done. Be A Cop "100% working" (the user's ask of
+  2026-10-11), and TASKS 41 (the Starting Grid only once the race has
+  loaded). Then 14-10d, and TASKS 39 and 40.

@@ -161,6 +161,7 @@
 #include "mainloop.h"
 #include "mellowmover.h"
 #include "pausemenu.h"
+#include "endevent.h"
 #include "endgame.h"
 #include "endresults.h"
 #include "endtimes.h"
@@ -5037,6 +5038,19 @@ int main(int argc, char** argv)
         best_lap_times_construct;
     gEndGameScreenCtorFns[END_GAME_CLASS_BEST_TOTAL_TIMES] =
         best_total_times_construct;
+    // The career's screens (endevent.c, RE-6d): Tourney Standings, the
+    // event's Reward menu, Events Unlocked and the two You're The Cop
+    // results.
+    gEndGameScreenCtorFns[END_GAME_CLASS_TOURNEY_STANDINGS] =
+        tourney_standings_construct;
+    gEndGameScreenCtorFns[END_GAME_CLASS_REWARD_MENU] =
+        event_reward_construct;
+    gEndGameScreenCtorFns[END_GAME_CLASS_EVENTS_UNLOCKED] =
+        events_unlocked_construct;
+    gEndGameScreenCtorFns[END_GAME_CLASS_BTC_RESULTS_1P] =
+        btc_results_1p_construct;
+    gEndGameScreenCtorFns[END_GAME_CLASS_BTC_RESULTS_2P] =
+        btc_results_2p_construct;
     gHighScoreMaybeRecordFn = fedMaybeRecordHighScore;
     gFEDSetRecordTimesToBeatFn = fedSetRecordTimesToBeat;
     // Fred's end of the race (fredend.c): TransientStats, the points, the
