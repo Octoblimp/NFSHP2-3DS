@@ -65,6 +65,11 @@ DriverInfo *race_parameters_find_driver(RaceParameters *rp, int32_t number);
 // to 0. SetupCarsForRace runs it first, before it clears the table.
 void race_parameters_restore_eliminated(RaceParameters *rp);
 
+// 0x001edd18, RaceEvent::Restart's (raceevent.h). The players start
+// behind the AI, at NumAICars + 1 and + 2, and each driver's starting
+// position is its player's, or 0 for the rest.
+void race_parameters_reset_start_positions(RaceParameters *rp);
+
 // 0x001edcd0: how many drivers a knockout has put out, the ranks above 0.
 // UpdateHud's two-player scoring counts it.
 int32_t race_parameters_num_eliminated(const RaceParameters *rp);

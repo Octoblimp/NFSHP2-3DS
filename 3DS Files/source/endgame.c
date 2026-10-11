@@ -180,19 +180,19 @@ int32_t endgame_should_see_btc_results_2p(void)
 // each pass, as retail does.
 int32_t endgame_should_see_reward_menu(void)
 {
-    const RaceEventFields *ev = &TheRaceEventFields;
+    const RaceEvent *ev = &TheRaceEvent;
     int32_t i;
 
     if (!fred_use_tree_event(&Fred))
         return 0;
-    if (ev->Number == 32)
+    if (ev->nNumber == 32)
         return 1;
-    if (ev->Number == 31 && ev->EventWord == 0)
+    if (ev->nNumber == 31 && ev->bIsLastOpen == 0)
         return 1;
-    for (i = 0; i < ev->NumRewards; i++)
+    for (i = 0; i < ev->nRewards; i++)
         if (race_event_status() >= 3 && race_event_reward_test(i) == 0)
             return 1;
-    if (ev->NumRewards != 0)
+    if (ev->nRewards != 0)
         return 0;
     if (race_event_status() < 3)
         return 0;
@@ -233,7 +233,7 @@ int32_t endgame_should_see_race_results(void)
     if (TheRaceParameters.BeACop || t == 6)
         return 0;
     if (t == 8 || t == 9)
-        return TheRaceEventFields.Type != 1;
+        return TheRaceEvent.nType != 1;
     return 1;
 }
 
@@ -244,7 +244,7 @@ int32_t endgame_should_see_tourney(void)
     if (TheRaceParameters.BeACop)
         return 0;
     if (t == 8 || t == 9)
-        return TheRaceEventFields.Type == 4;
+        return TheRaceEvent.nType == 4;
     return 0;
 }
 
@@ -264,7 +264,7 @@ int32_t endgame_should_see_best_total_times(void)
     if (TheRaceParameters.BeACop || t == 6)
         return 0;
     if (t == 8 || t == 9)
-        return TheRaceEventFields.Type != 1;
+        return TheRaceEvent.nType != 1;
     return 1;
 }
 

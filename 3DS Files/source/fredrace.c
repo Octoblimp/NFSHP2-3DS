@@ -17,8 +17,6 @@
 #include "raceparams.h"
 #include "track.h"
 
-RaceEventFields TheRaceEventFields;
-
 void (*gSetupFakeRaceEventForChallengeKnockoutFn)(FrontendDatabase *f);
 int32_t (*gRaceEventGetStatusFn)(void);
 int32_t (*gRaceEventIsThereAnotherRaceFn)(void);
@@ -711,7 +709,7 @@ void fred_start_race(FrontendDatabase *f)
     int32_t p;
 
     if (f->GameType == 4) {
-        TheRaceEventFields.NumPlayers = (int16_t)f->NumPlayerCars;
+        TheRaceEvent.nInitialPlayers = (int16_t)f->NumPlayerCars;
         if (gSetupFakeRaceEventForChallengeKnockoutFn != NULL)
             gSetupFakeRaceEventForChallengeKnockoutFn(f);
     }
@@ -722,18 +720,18 @@ void fred_start_race(FrontendDatabase *f)
         if (status != 2 && gRaceEventResetStateFn != NULL)
             gRaceEventResetStateFn();
     } else {
-        TheRaceEventFields.NumPlayers = (int16_t)f->NumPlayerCars;
+        TheRaceEvent.nInitialPlayers = (int16_t)f->NumPlayerCars;
     }
 
     if (fred_use_the_race_event(f)) {
         int32_t index = gRaceEventGetRaceIndexFn != NULL
                       ? gRaceEventGetRaceIndexFn() : 0;
-        int32_t tracks = TheRaceEventFields.NumTracks;
+        int32_t tracks = TheRaceEvent.nTracks;
 
         // The image's divide traps on an event with no tracks.
         if (gEventTrackSetRaceFn != NULL && tracks != 0)
             gEventTrackSetRaceFn(index % tracks, rp);
-        if (TheRaceEventFields.Type == 3
+        if (TheRaceEvent.nType == 3
             && (gRaceEventGetRaceIndexFn != NULL
                 ? gRaceEventGetRaceIndexFn() : 0) != 0) {
             int32_t s0 = gRaceEventKoStartPositionFn != NULL
@@ -745,7 +743,7 @@ void fred_start_race(FrontendDatabase *f)
                ? gRaceEventKoStartPositionFn(1) : 0;
             rp->PlayerStartPosition[1] = (int8_t)s1;
         }
-        if (TheRaceEventFields.Type == 4
+        if (TheRaceEvent.nType == 4
             && (gRaceEventGetStatusFn != NULL ? gRaceEventGetStatusFn() : 0)
                == 2)
             rp->PlayerStartPosition[0] = (int8_t)(
@@ -753,9 +751,9 @@ void fred_start_race(FrontendDatabase *f)
                 ? gRaceEventTournamentUserRankFn() : 0);
     }
 
-    TheRaceEventFields.EventWord = 0;
+    TheRaceEvent.bIsLastOpen = 0;
     if (fred_use_the_race_event(f) && gFredEventWordFn != NULL)
-        TheRaceEventFields.EventWord = gFredEventWordFn(f);
+        TheRaceEvent.bIsLastOpen = gFredEventWordFn(f);
 
     if (fred_is_challenge_game(f) || f->GameType == 2) {
         for (p = 0; p < rp->NumPlayerCars; p++) {

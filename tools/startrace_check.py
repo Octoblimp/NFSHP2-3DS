@@ -773,9 +773,9 @@ MUTATIONS = [
       "gRaceEventGetRaceIndexFn() + 1 : 0;"),
     M("rifdn-lt", "if (n < 100)" + NL + "        return n;",
       "if (n <= 100)" + NL + "        return n;"),
-    M("rifdn-off", "return TheRaceEventFields.NumPlayers + n - 100;",
-      "return TheRaceEventFields.NumPlayers + n - 101;"),
-    M("rifdn-np", "return TheRaceEventFields.NumPlayers + n - 100;",
+    M("rifdn-off", "return TheRaceEvent.nInitialPlayers + n - 100;",
+      "return TheRaceEvent.nInitialPlayers + n - 101;"),
+    M("rifdn-np", "return TheRaceEvent.nInitialPlayers + n - 100;",
       "return n - 100;"),
 
     # The NeedToSee tests.
@@ -892,28 +892,28 @@ MUTATIONS = [
       "if (t == FRED_CHALLENGE_GAME_KNOCKOUT + 1)"),
     M("ko-ult", "    if (t != FRED_ULTIMATE_GAME && t != FRED_HOTPURSUIT_GAME)"
       + NL + "        return 0;" + NL
-      + "    return TheRaceEventFields.Type == RACE_EVENT_KNOCKOUT;",
+      + "    return TheRaceEvent.nType == RACE_EVENT_KNOCKOUT;",
       "    if (t != FRED_HOTPURSUIT_GAME)" + NL + "        return 0;" + NL
-      + "    return TheRaceEventFields.Type == RACE_EVENT_KNOCKOUT;"),
+      + "    return TheRaceEvent.nType == RACE_EVENT_KNOCKOUT;"),
     M("ko-hp", "    if (t != FRED_ULTIMATE_GAME && t != FRED_HOTPURSUIT_GAME)"
       + NL + "        return 0;" + NL
-      + "    return TheRaceEventFields.Type == RACE_EVENT_KNOCKOUT;",
+      + "    return TheRaceEvent.nType == RACE_EVENT_KNOCKOUT;",
       "    if (t != FRED_ULTIMATE_GAME)" + NL + "        return 0;" + NL
-      + "    return TheRaceEventFields.Type == RACE_EVENT_KNOCKOUT;"),
-    M("ko-ev", "return TheRaceEventFields.Type == RACE_EVENT_KNOCKOUT;",
-      "return TheRaceEventFields.Type >= RACE_EVENT_KNOCKOUT;"),
+      + "    return TheRaceEvent.nType == RACE_EVENT_KNOCKOUT;"),
+    M("ko-ev", "return TheRaceEvent.nType == RACE_EVENT_KNOCKOUT;",
+      "return TheRaceEvent.nType >= RACE_EVENT_KNOCKOUT;"),
     M("tour-ult", "    if (t != FRED_ULTIMATE_GAME && t != FRED_HOTPURSUIT_GAME)"
       + NL + "        return 0;" + NL
-      + "    return TheRaceEventFields.Type == RACE_EVENT_TOURNAMENT;",
+      + "    return TheRaceEvent.nType == RACE_EVENT_TOURNAMENT;",
       "    if (t != FRED_HOTPURSUIT_GAME)" + NL + "        return 0;" + NL
-      + "    return TheRaceEventFields.Type == RACE_EVENT_TOURNAMENT;"),
+      + "    return TheRaceEvent.nType == RACE_EVENT_TOURNAMENT;"),
     M("tour-hp", "    if (t != FRED_ULTIMATE_GAME && t != FRED_HOTPURSUIT_GAME)"
       + NL + "        return 0;" + NL
-      + "    return TheRaceEventFields.Type == RACE_EVENT_TOURNAMENT;",
+      + "    return TheRaceEvent.nType == RACE_EVENT_TOURNAMENT;",
       "    if (t != FRED_ULTIMATE_GAME)" + NL + "        return 0;" + NL
-      + "    return TheRaceEventFields.Type == RACE_EVENT_TOURNAMENT;"),
-    M("tour-ev", "return TheRaceEventFields.Type == RACE_EVENT_TOURNAMENT;",
-      "return TheRaceEventFields.Type >= RACE_EVENT_TOURNAMENT;"),
+      + "    return TheRaceEvent.nType == RACE_EVENT_TOURNAMENT;"),
+    M("tour-ev", "return TheRaceEvent.nType == RACE_EVENT_TOURNAMENT;",
+      "return TheRaceEvent.nType >= RACE_EVENT_TOURNAMENT;"),
     M("tour-ko", "#define FRED_CHALLENGE_GAME_KNOCKOUT  4",
       "#define FRED_CHALLENGE_GAME_KNOCKOUT  5"),
 

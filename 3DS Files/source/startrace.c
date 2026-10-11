@@ -119,7 +119,7 @@ static int32_t race_event_racer_index_from_driver_number(int32_t n)
 {
     if (n < 100)
         return n;
-    return TheRaceEventFields.NumPlayers + n - 100;
+    return TheRaceEvent.nInitialPlayers + n - 100;
 }
 
 // ------------------------------------------------------------ the manager
@@ -239,7 +239,7 @@ int32_t race_knockout_info_should_be_displayed(void)
         return 1;
     if (t != FRED_ULTIMATE_GAME && t != FRED_HOTPURSUIT_GAME)
         return 0;
-    return TheRaceEventFields.Type == RACE_EVENT_KNOCKOUT;
+    return TheRaceEvent.nType == RACE_EVENT_KNOCKOUT;
 }
 
 int32_t tournament_standings_should_be_displayed(void)
@@ -248,7 +248,7 @@ int32_t tournament_standings_should_be_displayed(void)
 
     if (t != FRED_ULTIMATE_GAME && t != FRED_HOTPURSUIT_GAME)
         return 0;
-    return TheRaceEventFields.Type == RACE_EVENT_TOURNAMENT;
+    return TheRaceEvent.nType == RACE_EVENT_TOURNAMENT;
 }
 
 // A line for each racing car, at most eight, in the race's order. A

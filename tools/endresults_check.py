@@ -1198,8 +1198,8 @@ MUTATIONS = [
       "        flailer_printf(",
       "    if (fred_use_the_race_event(&Fred))\n"
       "        flailer_printf("),
-    M("rr-number", "(int)TheRaceEventFields.Number);",
-      "(int)TheRaceEventFields.NumRewards);"),
+    M("rr-number", "(int)TheRaceEvent.nNumber);",
+      "(int)TheRaceEvent.nRewards);"),
     M("rr-row-k", "        show_row(s, &ts->Stats[i], i + 1);",
       "        show_row(s, &ts->Stats[i], i);"),
     M("rr-hide-from", "for (k = n + 1; k <= RACE_RESULTS_ROWS; k++)",

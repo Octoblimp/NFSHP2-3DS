@@ -32,6 +32,7 @@
 #include "track.h"
 
 const int *gPlayerCamSkipFE;
+RaceEvent TheRaceEvent;          // raceevent.c's, not linked
 
 #define SPAN      0x40000
 #define NSLOTS    4
@@ -384,9 +385,9 @@ static void print_state(void)
              (int)scrList[4], (int)scrList[5], (int)scrList[6],
              (int)scrList[7]);
     line_once(3, s);
-    snprintf(s, sizeof s, "e %d %d %d %d", TheRaceEventFields.Type,
-             TheRaceEventFields.NumTracks, TheRaceEventFields.NumPlayers,
-             (int)TheRaceEventFields.EventWord);
+    snprintf(s, sizeof s, "e %d %d %d %d", TheRaceEvent.nType,
+             TheRaceEvent.nTracks, TheRaceEvent.nInitialPlayers,
+             (int)TheRaceEvent.bIsLastOpen);
     line_once(4, s);
     snprintf(s, sizeof s, "g seed=%08x", (unsigned)bDefaultSeed);
     line_once(5, s);
@@ -483,7 +484,7 @@ static void op_fill(int b)
     memset(&scrRide, b, sizeof scrRide);
     memset(&scrDriver, b, sizeof scrDriver);
     memset(scrList, b, sizeof scrList);
-    memset(&TheRaceEventFields, b, sizeof TheRaceEventFields);
+    memset(&TheRaceEvent, b, sizeof TheRaceEvent);
     quiet = 1;
     print_state();
     quiet = 0;
@@ -720,8 +721,8 @@ int main(int argc, char **argv)
             continue;
         } else if (!strcmp(op, "ev")) {
             sscanf(rest, "%d %d", &p, &q);
-            TheRaceEventFields.Type = (int16_t)p;
-            TheRaceEventFields.NumTracks = (int16_t)q;
+            TheRaceEvent.nType = (int16_t)p;
+            TheRaceEvent.nTracks = (int16_t)q;
         } else if (!strcmp(op, "SF")) {
             fred_static_init();
         } else if (!strcmp(op, "I")) {

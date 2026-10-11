@@ -20106,3 +20106,100 @@ and green, where the first visit had shown the brushed-metal turntable.
   They open through the events, which need RE-6b to RE-6d.
 - **Next.** RE-6b, RaceEvent (the Session 70 entry's split), then RE-6c,
   RE-6d, 14-10d (bcarsel's speakCar), and TASKS 39 (12k-6) and 40 (12n).
+
+## Session 72 -- RE-6b, RaceEvent (in progress; the user stopped the session)
+
+- **Written, not committed.** `3DS Files/source/raceevent.{c,h}`: TheRaceEvent
+  (retail's 432-byte layout, native pTree/pState, a 32-bit layout check) and
+  all of RE-6b's functions, prefixed `raceevent_` because endgame.c,
+  endresults.c, startrace.c and racespeech.c already have static
+  `race_event_*` wrappers. EventTrack::SetRace is the new seam
+  `gEventTrackSetRaceOnFn` (RE-6c binds it). The port's guards (the result
+  index, the % nTracks divide, rewards past 8, writes through a NULL state)
+  are commented in raceevent.c. raceparams.{c,h} gained
+  `race_parameters_reset_start_positions` (0x001edd18).
+- **Refactor done.** TheRaceEventFields is gone. Its fields are now
+  TheRaceEvent's nType, nTracks, nInitialPlayers, bIsLastOpen, nNumber and
+  nRewards, across the 6 sources, 6 harnesses and 6 checkers. fredrace.h
+  includes raceevent.h, and fredrace_test.c defines its own TheRaceEvent.
+  0 differ on startrace, racespeech, raceover, endresults, endgame,
+  fredrace and carsel. All 26 renamed mutations are caught.
+- **Still to do, in order.**
+  1. `tools/src/raceevent_test.c` and `tools/raceevent_check.py`. The model
+     runs retail on TheRaceEvent (0x0031b600), TRP (0x0031a898) and Fred
+     (0x002fc050), with retail's DriverInfo layout: elim +0, number +1,
+     start +4, type +8.
+     - Stubs on both sides: CalculateStartingPositions (0x00185fe8),
+       EventTrack::SetRace (0x001fec20), GetBestLapTime (0x00147588) and
+       Timer::SetTime (0x00136dd0), logged.
+     - The model re-zeroes memory 0..64 after each op, because the port
+       skips writes through a NULL state.
+     - The harness links raceevent.c, eventtree.c and raceparams.c. It also
+       needs stubs for Fred, TheRaceParameters, pCopManager,
+       fred_race_was_aborted, bMalloc, bFree, bRandomI, bDefaultSeed,
+       bVersionE3, cartypeinfo_get, config_skip_fe,
+       player_settings_reset_to_defaults, timer_print_to_string,
+       gCurrLanguageFn, gEggIsOnFn, gFredTranslateFn, gGetTextureInfoFn and
+       the four SkipFE ints.
+     - The script avoids retail's traps and out-of-range reads: for type 4,
+       nOpponents 0..7; `next` only with nTracks 1..8; a recorded racer
+       index of 0..7; rewards 0..8 with reward indexes of 0 or more; a
+       tournament's places 0..8.
+  2. Bind the seams in main.c on &TheRaceEvent:
+     - fredrace.h: GetStatus, ResetState, GetRaceIndex, KoStartPosition,
+       TournamentUserRank, DriverEliminated, EliminatedRank,
+       StartingPositions, IsThereAnotherRace.
+     - fredend.h: PostResults, MaybeDiscardResults (raceevent_save_state),
+       CycleResults.
+     - endgame.h: RewardTest (raceevent_reward_earned(ev, i, aOldState)),
+       StatusAdvanced, StatusFell, KeepState, Restart.
+     - endresults.h: RewardType, RewardEarned.
+     - racespeech.h: UserWon. racefinish.h: RecordResults.
+     - startrace.h: GetRaceCount, GetTournamentState.
+     - rcstates.h: gFEDSetupNextRaceFn, which is UseTheRaceEvent, then
+       raceevent_setup_next_race.
+  3. Write `docs/formats/race-event.md`, build with build_cia.ps1, run a
+     gas-only Azahar race, update CONTINUE, and commit.
+  Then RE-6c, RE-6d, 14-10d, and TASKS 39 and 40.
+
+## Session 73 -- RE-6b, RaceEvent (done)
+
+- **Done.** RaceEvent.obj is `3DS Files/source/raceevent.{c,h}`:
+  TheRaceEvent (0x0031b600, 432 bytes) and every function of RE-6b's
+  list. `docs/formats/race-event.md` has the decode, where the port is
+  wired and where it differs (no writes through a NULL state, results
+  past the eight dropped, no track for an event without tracks, rewards
+  stop at the array's end, Be A Cop's time 0 with no cop manager).
+- **The checker.** `tools/raceevent_check.py` with
+  `tools/src/raceevent_test.c`: 84260 ops, 59927 lines, 0 differ. Of 170
+  mutations, 158 are caught and 12 are equivalent, each with its reason.
+  Two fixes on the way: negative arguments go into the emulator's 64-bit
+  registers signed, and er-tour-sign's mutant was rewritten so that it
+  changes the compare.
+- **Wired.** main.c binds all 24 of RE-6b's seams to wrappers on
+  TheRaceEvent (the list is Session 72's step 2). Retail's details:
+  EliminatedRank reads GetRank on `pState` itself, not GetKoState
+  (0x00185864); KoStartPosition and TournamentUserRank go through
+  GetKoState and GetTournamentState, and answer 0 for a NULL state;
+  RewardType is the reward's first byte (TheRaceEvent+244, as
+  NumAvailableCars reads it at 0x001de420); FrontendDatabase::SetupNextRace
+  (0x00184270) is UseTheRaceEvent, then RaceEvent::SetupNextRace.
+  RecordResults is the one call made for every race; the rest sit behind
+  UseTheRaceEvent or an event type. raceevent.h's comment on
+  RacerEliminated now says race knockout (RaceType 4).
+- **Still NULL.** gEventTrackSetRaceFn and gEventTrackSetRaceOnFn
+  (EventTrack::SetRace), gSetupFakeRaceEventForChallengeKnockoutFn,
+  gFredEventWordFn (0x00200f98 on GetEventTree's event) and
+  gRaceEventNumOpenedFn (0x001f7458): RE-6c's. Until then TheRaceEvent
+  stays zeroed with a NULL state.
+- **Checked.** endgame, endresults, fredrace, raceover, racespeech and
+  startrace checkers: 0 differ. build_cia.ps1 built clean (relocations
+  OK, shaders OK). On Azahar (on AC), a gas-only Hot Pursuit quick race
+  from the frontend (`run_azahar_quickrace.ps1 -HoldKeys 65`): PASS,
+  29.6 fps.
+- **Next.** RE-6c: EventTrack::SetRace (0x001fec20), SetFromRace
+  (0x001fed30), EventTree::SetRace (0x001fee20) and FrontendDatabase's
+  event functions (SetupFakeRaceEventForChallengeKnockout 0x001849f0,
+  GetEventTree 0x00185568, the event word, 0x001f7458); bind
+  gEventTrackSetRaceOnFn and gEventTrackSetRaceFn. Then RE-6d, 14-10d,
+  and TASKS 39 and 40.

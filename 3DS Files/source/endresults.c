@@ -269,7 +269,7 @@ int32_t end_reward_num_available_cars(void)
     int32_t i;
 
     if (fred_use_the_race_event(&Fred))
-        for (i = 0; i < TheRaceEventFields.NumRewards; i++)
+        for (i = 0; i < TheRaceEvent.nRewards; i++)
             if (race_event_reward_type(i) == 0
                 && endgame_should_see_reward_menu()
                 && race_event_reward_earned(i))
@@ -957,7 +957,7 @@ EndGameMenusBase *race_results_construct(void *mem, uint32_t hash,
     if (fred_use_tree_event(&Fred))
         flailer_printf(s->Base.ScreenHash, RACE_RESULTS_OBJ_TITLE,
                        get_translated_string(RR_LANG_EVENT_RESULTS),
-                       (int)TheRaceEventFields.Number);
+                       (int)TheRaceEvent.nNumber);
     else
         flailer_set_language_id(s->Base.ScreenHash, RACE_RESULTS_OBJ_TITLE,
                                 RR_LANG_RACE_RESULTS);

@@ -180,6 +180,7 @@
 #include "quickrace.h"
 #include "race.h"
 #include "racecoord.h"
+#include "raceevent.h"
 #include "raceinit.h"
 #include "raceovermsg.h"
 #include "racerun.h"
@@ -4484,6 +4485,156 @@ static int32_t fedIsMultiTrack(void)
     return fred_is_multi_track(&Fred);
 }
 
+// ------------------------------------------------------- the race event
+//
+// RaceEvent.obj (raceevent.c) on TheRaceEvent, for the files that call it
+// through seams. Until EventTree::SetRace (RE-6c) copies an event in,
+// TheRaceEvent is zeroed and its state NULL, which reads as zeros.
+
+static int32_t raceEventGetStatus(void)
+{
+    return raceevent_get_status(&TheRaceEvent);
+}
+
+static void raceEventResetState(void)
+{
+    raceevent_reset_state(&TheRaceEvent);
+}
+
+static int32_t raceEventGetRaceIndex(void)
+{
+    return raceevent_get_race_index(&TheRaceEvent);
+}
+
+static int32_t raceEventGetRaceCount(void)
+{
+    return raceevent_get_race_count(&TheRaceEvent);
+}
+
+static int32_t raceEventIsThereAnotherRace(void)
+{
+    return raceevent_is_there_another_race(&TheRaceEvent);
+}
+
+// StartRace's 0x00200598 on GetKoState: player `player`'s place on the
+// grid. Retail reads a NULL state's bottom of memory; here it is 0.
+static int32_t raceEventKoStartPosition(int32_t player)
+{
+    const uint8_t* s = raceevent_get_ko_state(&TheRaceEvent);
+
+    return s != NULL ? ko_state_get_start_position(s, player) : 0;
+}
+
+// StartRace's UserRank (0x00200768) on GetTournamentState.
+static int32_t raceEventTournamentUserRank(void)
+{
+    const uint8_t* s = raceevent_get_tournament_state(&TheRaceEvent);
+
+    return s != NULL ? tournament_state_user_rank(s) : 0;
+}
+
+static int32_t raceEventDriverEliminated(int32_t number)
+{
+    return raceevent_driver_eliminated(&TheRaceEvent, number);
+}
+
+// SetupCarsForRace's GetRank (0x00200220) on the state itself, not
+// GetKoState, by RacerIndexFromDriverNumber.
+static int32_t raceEventEliminatedRank(int32_t number)
+{
+    const uint8_t* s = TheRaceEvent.pState;
+
+    if (s == NULL)
+        return 0;
+    return ko_state_get_rank(
+        s, raceevent_racer_index_from_driver_number(&TheRaceEvent, number));
+}
+
+// CalculateStartingPositions' 0x002022c0; its answer is dropped.
+static void raceEventStartingPositions(void)
+{
+    raceevent_calc_starting_positions(&TheRaceEvent);
+}
+
+static void raceEventPostResults(void)
+{
+    raceevent_post_results(&TheRaceEvent);
+}
+
+// MaybeDiscardResults (0x00201a80) is the state saved into aSavedState.
+static void raceEventSaveState(void)
+{
+    raceevent_save_state(&TheRaceEvent);
+}
+
+static void raceEventCycleResults(void)
+{
+    raceevent_cycle_results(&TheRaceEvent);
+}
+
+// The End Game Menu's 0x00200b30(ev, i, ev+8): reward `i` against the
+// state before the race.
+static int32_t raceEventRewardTest(int32_t i)
+{
+    return raceevent_reward_earned(&TheRaceEvent, i, TheRaceEvent.aOldState);
+}
+
+static int32_t raceEventStatusAdvanced(void)
+{
+    return raceevent_status_advanced(&TheRaceEvent);
+}
+
+static int32_t raceEventStatusFell(void)
+{
+    return raceevent_status_fell(&TheRaceEvent);
+}
+
+static void raceEventKeepState(void)
+{
+    raceevent_keep_state(&TheRaceEvent);
+}
+
+static void raceEventRestart(void)
+{
+    raceevent_restart(&TheRaceEvent);
+}
+
+// NumAvailableCars' first byte of reward `i` (TheRaceEvent+244), and
+// 0x00200b30 on it with no state: the event's own.
+static int32_t raceEventRewardType(int32_t i)
+{
+    return (uint32_t)i < 8u ? TheRaceEvent.aRewards[i].nType : 0;
+}
+
+static int32_t raceEventRewardEarned(int32_t i)
+{
+    return raceevent_reward_earned(&TheRaceEvent, i, NULL);
+}
+
+static int32_t raceEventUserWon(void)
+{
+    return raceevent_user_won(&TheRaceEvent);
+}
+
+static void raceEventRecordResults(Race* r, struct RacingCar* rc,
+                                   int32_t position)
+{
+    raceevent_record_results(&TheRaceEvent, r, rc, position);
+}
+
+static const uint8_t* raceEventGetTournamentState(void)
+{
+    return raceevent_get_tournament_state(&TheRaceEvent);
+}
+
+// FrontendDatabase::SetupNextRace (0x00184270): RaceEvent::SetupNextRace
+// when the game uses the race event.
+static void fedSetupNextRace(void)
+{
+    if (fred_use_the_race_event(&Fred))
+        raceevent_setup_next_race(&TheRaceEvent);
+}
+
 // RenderTextIntoGroup on the flow's screens: the reward screens' blurbs
 // and car counts (endresults.c).
 static void endRenderTextIntoGroup(uint32_t screen, uint32_t group,
@@ -4829,8 +4980,8 @@ int main(int argc, char** argv)
     // screens' list, POSTRACE puts them up and takes them down, and the
     // End Game Menu's popups and bloom are the pause menu's. Its OK posts
     // RESTART_RACE, NEXT_RACE or QUIT_RACE to POSTRACE, which goes on
-    // through RCSTATE_NONE. The event tree's calls stay NULL until the
-    // career is ported.
+    // through RCSTATE_NONE. The race event's calls are bound below; the
+    // events the race opened (0x001f7458) stay NULL until RE-6c.
     gEndGameScreensCtorFn = endgame_screens_construct;
     gEndGameScreensDestroyFn = endgame_screens_destroy;
     gEndGameScreensResumeFn = endgame_screens_resume;
@@ -4842,8 +4993,7 @@ int main(int argc, char** argv)
     gFEDIsThereAnotherRaceFn = fedIsThereAnotherRace;
     gFEDIsMultiTrackFn = fedIsMultiTrack;
     // The results (endresults.c): Race Results, Points Rewards and Task
-    // Rewards. The race event's rewards stay NULL until step 16, the
-    // reward speeches until 14-10c.
+    // Rewards. The race event's rewards are bound below.
     gEndGameScreenCtorFns[END_GAME_CLASS_RACE_RESULTS] =
         race_results_construct;
     gEndGameScreenCtorFns[END_GAME_CLASS_POINTS_REWARDS] =
@@ -4863,7 +5013,7 @@ int main(int argc, char** argv)
     // Fred's end of the race (fredend.c): TransientStats, the points, the
     // task and points rewards the End Game screens read, and which cars
     // they unlock, the event trees' cars among them (eventtree.c). The high
-    // scores are bound above; the race events stay NULL until RE-6b.
+    // scores are bound above.
     gFEDCheckForAbortionFn = fedCheckForAbortion;
     gFEDTheRaceIsOverFn = fedTheRaceIsOver;
     gFEDTheRaceWasQuitFn = fedTheRaceWasQuit;
@@ -4874,6 +5024,36 @@ int main(int argc, char** argv)
     gIsCarUnlockedFn = nfs_is_car_unlocked;
     gIsCarAnEventRewardFn = is_car_an_event_reward;
     gEventTreeIsCarUnlockedFn = event_tree_is_car_unlocked_any;
+    // The race event (raceevent.c, RE-6b) on TheRaceEvent: StartRace's and
+    // SetupCarsForRace's reads, each finish recorded, the results posted,
+    // saved and cycled, the End Game Menu's tests, the rewards, the grid's
+    // race count and points, and NEXT_RACE's SetupNextRace. EventTrack's
+    // SetRace, the fake challenge knockout and the tree's event word are
+    // RE-6c's.
+    gRaceEventGetStatusFn = raceEventGetStatus;
+    gRaceEventResetStateFn = raceEventResetState;
+    gRaceEventGetRaceIndexFn = raceEventGetRaceIndex;
+    gRaceEventGetRaceCountFn = raceEventGetRaceCount;
+    gRaceEventIsThereAnotherRaceFn = raceEventIsThereAnotherRace;
+    gRaceEventKoStartPositionFn = raceEventKoStartPosition;
+    gRaceEventTournamentUserRankFn = raceEventTournamentUserRank;
+    gRaceEventDriverEliminatedFn = raceEventDriverEliminated;
+    gRaceEventEliminatedRankFn = raceEventEliminatedRank;
+    gRaceEventStartingPositionsFn = raceEventStartingPositions;
+    gRaceEventRecordResultsFn = raceEventRecordResults;
+    gRaceEventPostResultsFn = raceEventPostResults;
+    gRaceEventMaybeDiscardResultsFn = raceEventSaveState;
+    gRaceEventCycleResultsFn = raceEventCycleResults;
+    gRaceEventRewardTestFn = raceEventRewardTest;
+    gRaceEventStatusAdvancedFn = raceEventStatusAdvanced;
+    gRaceEventStatusFellFn = raceEventStatusFell;
+    gRaceEventKeepStateFn = raceEventKeepState;
+    gRaceEventRestartFn = raceEventRestart;
+    gRaceEventRewardTypeFn = raceEventRewardType;
+    gRaceEventRewardEarnedFn = raceEventRewardEarned;
+    gRaceEventUserWonFn = raceEventUserWon;
+    gRaceEventGetTournamentStateFn = raceEventGetTournamentState;
+    gFEDSetupNextRaceFn = fedSetupNextRace;
     // StartRace's RaceParameters New784 (fredrace.c): the trees' reward
     // cars earned, 0x001ff978.
     gEventRewardCarsUnlockedFn = event_trees_num_cars_unlocked;

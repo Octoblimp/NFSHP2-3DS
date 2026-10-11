@@ -65,7 +65,7 @@
 // fredrace_check checks it.
 FrontendDatabase Fred;
 RaceParameters TheRaceParameters;
-RaceEventFields TheRaceEventFields;
+RaceEvent TheRaceEvent;
 int32_t (*gIsCarUnlockedFn)(int32_t carType, int32_t gameType);
 int32_t (*gRaceEventGetStatusFn)(void);
 int32_t (*gRaceEventIsThereAnotherRaceFn)(void);
@@ -600,10 +600,10 @@ int main(int argc, char **argv)
             TheRaceParameters.EventTreeRace = (int32_t)num(arg[5]);
             TheRaceParameters.BeACop = (int32_t)num(arg[6]);
         } else if (!strcmp(op, "ev")) {
-            TheRaceEventFields.Number = (int16_t)num(arg[1]);
-            TheRaceEventFields.Type = (int16_t)num(arg[2]);
-            TheRaceEventFields.NumRewards = (int16_t)num(arg[3]);
-            TheRaceEventFields.EventWord = (int32_t)num(arg[4]);
+            TheRaceEvent.nNumber = (int16_t)num(arg[1]);
+            TheRaceEvent.nType = (int16_t)num(arg[2]);
+            TheRaceEvent.nRewards = (int16_t)num(arg[3]);
+            TheRaceEvent.bIsLastOpen = (int32_t)num(arg[4]);
         } else if (!strcmp(op, "evf")) {
             evStatus = (int32_t)num(arg[1]);
             evAdvanced = (int32_t)num(arg[2]);

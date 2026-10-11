@@ -66,7 +66,7 @@ RaceCoordinator *pRaceCoordinator;
 RaceParameters TheRaceParameters;
 FrontendDatabase Fred;
 TrackInfo *CurrentTrackInfo;
-RaceEventFields TheRaceEventFields;
+RaceEvent TheRaceEvent;
 int32_t (*gRaceEventGetRaceIndexFn)(void);
 void (*gChangeToScreenFn)(const char *name, int32_t push);
 
@@ -360,8 +360,8 @@ int main(int argc, char **argv)
         } else if (!strcmp(op, "game")) {
             Fred.GameType = (int32_t)num(arg[1]);
         } else if (!strcmp(op, "event")) {
-            TheRaceEventFields.Type = (int16_t)num(arg[1]);
-            TheRaceEventFields.NumPlayers = (int16_t)num(arg[2]);
+            TheRaceEvent.nType = (int16_t)num(arg[1]);
+            TheRaceEvent.nInitialPlayers = (int16_t)num(arg[2]);
         } else if (!strcmp(op, "track")) {
             track.TrackLanguageID = (int32_t)num(arg[1]);
             track.ReverseTrackLanguageID = (int32_t)num(arg[2]);

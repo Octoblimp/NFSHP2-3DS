@@ -9,12 +9,11 @@
 // the starting grid), copies the players' settings into TheRaceParameters
 // and asks the game flow for the track.
 //
-// The race events are not ported, so what StartRace and SetupCarsForRace do
-// with TheRaceEvent (0x0031b600) and the event trees goes through the seams
-// at the bottom. Only GameTypes 4, 8 and 9 use the race event
-// (UseTheRaceEvent), and only an event game's opponents (OpponentSelect 2)
-// read a tree; the other game types touch none of it but four words of
-// TheRaceEvent, which RaceEventFields holds.
+// What StartRace and SetupCarsForRace do with TheRaceEvent (0x0031b600,
+// raceevent.h) and the event trees goes through the seams at the bottom.
+// Only GameTypes 4, 8 and 9 use the race event (UseTheRaceEvent), and only
+// an event game's opponents (OpponentSelect 2) read a tree; the other game
+// types touch none of it but four fields of TheRaceEvent.
 //
 // docs/formats/race-start.md has the decode.
 
@@ -27,6 +26,7 @@
 #include "car.h"
 #include "fred.h"
 #include "race.h"
+#include "raceevent.h"
 
 // --------------------------------------------------------- the game types
 
@@ -162,21 +162,10 @@ void fred_start_skip_fe_game(FrontendDatabase *f);
 
 // --------------------------------------------------------- the seams
 
-// The words of TheRaceEvent (0x0031b600) the port touches. StartRace
-// reads the event's type (+106) and its track count (+112) and writes the
-// player count (+118) and the event's word (+120); the end of the race
-// (endgame.c) reads the event's number (+104), its reward count (+114) and
-// the word.
-typedef struct RaceEventFields {
-    int16_t Type;                                // 106
-    int16_t NumTracks;                           // 112
-    int16_t NumPlayers;                          // 118
-    int32_t EventWord;                           // 120
-    int16_t Number;                              // 104  nNumber
-    int16_t NumRewards;                          // 114  nRewards
-} RaceEventFields;
-
-extern RaceEventFields TheRaceEventFields;
+// StartRace reads TheRaceEvent's type (nType) and its track count
+// (nTracks) and writes the player count (nInitialPlayers) and bIsLastOpen;
+// the end of the race (endgame.c) reads the event's number, its reward
+// count and bIsLastOpen.
 
 // The race event's calls, on TheRaceEvent. NULL answers 0 and does
 // nothing.

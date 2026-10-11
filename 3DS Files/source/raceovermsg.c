@@ -195,7 +195,7 @@ void player_fill_in_race_over_messages(struct Player *p)
         if (TheRaceParameters.BeACop != 0) {
             id = be_a_cop_message(rc, reason);
         } else if (fred_use_the_race_event(&Fred)
-                   && TheRaceEventFields.Type == RACE_EVENT_POINT2POINT) {
+                   && TheRaceEvent.nType == RACE_EVENT_POINT2POINT) {
             if (reason == RACING_CAR_ARRESTED)
                 id = MSG_ARRESTED_NO_END;
             else if (reason == RACING_CAR_NORMAL_COMPLETION)

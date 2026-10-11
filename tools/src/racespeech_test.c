@@ -37,7 +37,7 @@
 // ---------------------------------------------------- what the port reads
 
 RaceParameters   TheRaceParameters;
-RaceEventFields  TheRaceEventFields;
+RaceEvent        TheRaceEvent;
 FrontendDatabase Fred;
 Race            *pCurrentRace;
 RaceCoordinator *pRaceCoordinator;
@@ -274,8 +274,8 @@ static void run(void)
     } else if (!strcmp(o, "gametype")) {
         Fred.GameType = I(1);
     } else if (!strcmp(o, "event")) {
-        TheRaceEventFields.Number = (int16_t)I(1);
-        TheRaceEventFields.EventWord = I(2);
+        TheRaceEvent.nNumber = (int16_t)I(1);
+        TheRaceEvent.bIsLastOpen = I(2);
     } else if (!strcmp(o, "row")) {
         rows[I(1)].FinishReason = I(2);
     } else if (!strcmp(o, "reward")) {

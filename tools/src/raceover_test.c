@@ -3,7 +3,7 @@
 //
 //   lang|L             the language
 //   rp|TYPE|NP|COP     TheRaceParameters' RaceType, NumPlayerCars, BeACop
-//   ev|USE|TYPE        UseTheRaceEvent's answer, TheRaceEventFields.Type
+//   ev|USE|TYPE        UseTheRaceEvent's answer, TheRaceEvent.nType
 //   race|N|FINISH      pCurrentRace's NumRacingCars and
 //                      FinishLineBoundaryNumber
 //   rc|I|PLACE|REASON|TIME|B0|B1|B2|B3|B4  RacingCar I's FinishingOrder,
@@ -52,7 +52,7 @@
 // What raceovermsg.c reads.
 FrontendDatabase Fred;
 RaceParameters TheRaceParameters;
-RaceEventFields TheRaceEventFields;
+RaceEvent TheRaceEvent;
 Race *pCurrentRace;
 struct Player *PlayerPlayersByNumber[2];
 int32_t (*gCurrLanguageFn)(void);
@@ -248,7 +248,7 @@ int main(int argc, char **argv)
             TheRaceParameters.BeACop = (int32_t)num(arg[3]);
         } else if (!strcmp(op, "ev")) {
             useEvent = (int32_t)num(arg[1]);
-            TheRaceEventFields.Type = (int16_t)num(arg[2]);
+            TheRaceEvent.nType = (int16_t)num(arg[2]);
         } else if (!strcmp(op, "race")) {
             race.NumRacingCars = (int32_t)num(arg[1]);
             race.FinishLineBoundaryNumber = (int8_t)num(arg[2]);

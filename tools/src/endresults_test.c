@@ -8,7 +8,7 @@
 //   np|N               Fred.NumPlayerCars
 //   rp|TYPE|P2P|LAPS|COPS|NEW784  TheRaceParameters' RaceType,
 //                      Point2Point, NumLapsInRace, nMaxCops and New784
-//   ev|NUMBER|REWARDS  TheRaceEventFields' Number and NumRewards
+//   ev|NUMBER|REWARDS  TheRaceEvent's nNumber and nRewards
 //   rew|I|TYPE|EARNED  reward I's first byte, and what 0x00200b30 answers
 //   ts|NUM|POINTS|TASK TransientStats' NumStats, PointsRewardEarned and
 //                      TaskRewardEarned
@@ -78,7 +78,7 @@
 // What endresults.c reads.
 FrontendDatabase Fred;
 RaceParameters TheRaceParameters;
-RaceEventFields TheRaceEventFields;
+RaceEvent TheRaceEvent;
 World *pCurrentWorld;
 int32_t RealTimer;
 const CarTypeInfo *CarTypeInfoArray;
@@ -582,8 +582,8 @@ int main(int argc, char **argv)
             TheRaceParameters.nMaxCops = (int32_t)num(arg[4]);
             TheRaceParameters.New784 = (int32_t)num(arg[5]);
         } else if (!strcmp(op, "ev")) {
-            TheRaceEventFields.Number = (int16_t)num(arg[1]);
-            TheRaceEventFields.NumRewards = (int16_t)num(arg[2]);
+            TheRaceEvent.nNumber = (int16_t)num(arg[1]);
+            TheRaceEvent.nRewards = (int16_t)num(arg[2]);
         } else if (!strcmp(op, "rew")) {
             i = (int)num(arg[1]);
             rewardType[i] = (uint8_t)num(arg[2]);

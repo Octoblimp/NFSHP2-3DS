@@ -589,12 +589,12 @@ MUTATIONS = [
       "    default:\n        id = MSG_FINISHED;\n        break;\n    }"),
     M("cop-test", "        if (TheRaceParameters.BeACop != 0) {",
       "        if (TheRaceParameters.BeACop > 1) {"),
-    M("event-type", "&& TheRaceEventFields.Type == RACE_EVENT_POINT2POINT) {",
-      "&& TheRaceEventFields.Type >= RACE_EVENT_POINT2POINT) {"),
+    M("event-type", "&& TheRaceEvent.nType == RACE_EVENT_POINT2POINT) {",
+      "&& TheRaceEvent.nType >= RACE_EVENT_POINT2POINT) {"),
     M("event-order", "        } else if (fred_use_the_race_event(&Fred)\n"
-      "                   && TheRaceEventFields.Type == RACE_EVENT_POINT2POINT)"
+      "                   && TheRaceEvent.nType == RACE_EVENT_POINT2POINT)"
       " {",
-      "        } else if (TheRaceEventFields.Type == RACE_EVENT_POINT2POINT\n"
+      "        } else if (TheRaceEvent.nType == RACE_EVENT_POINT2POINT\n"
       "                   && fred_use_the_race_event(&Fred)) {"),
     M("event-arrest", "                id = MSG_ARRESTED_NO_END;",
       "                id = MSG_ARRESTED;"),

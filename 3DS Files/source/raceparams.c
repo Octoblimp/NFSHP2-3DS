@@ -132,6 +132,21 @@ int32_t race_parameters_num_eliminated(const RaceParameters *rp)
     return n;
 }
 
+void race_parameters_reset_start_positions(RaceParameters *rp)
+{
+    int32_t i;
+
+    rp->PlayerStartPosition[0] = (int8_t)(rp->NumAICars + 1);
+    rp->PlayerStartPosition[1] = (int8_t)(rp->NumAICars + 2);
+    for (i = 0; i < rp->NumDriverInfo; i++) {
+        DriverInfo *d = &rp->pDriverInfoTable[i];
+        int32_t n = d->UniqueDriverNumber;
+
+        d->StartingPosition = n >= 0 && n < 2 ? rp->PlayerStartPosition[n]
+                                              : 0;
+    }
+}
+
 DriverInfo *race_parameters_eliminate_driver(RaceParameters *rp,
                                              int32_t number, int32_t rank)
 {

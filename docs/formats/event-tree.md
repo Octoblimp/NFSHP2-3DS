@@ -153,8 +153,8 @@ The loader is slot 24 of the retail chunk loader table
 - main.c logs the trees after FRONTB's load: "frontres: FRONTB loaded; 2
   event trees, 0 reward cars earned" on a new save.
 
-RaceEvent, the races an event sets and the tree's screens come after
-(RE-6b .. RE-6d).
+The event being raced is [race-event](race-event.md) (RE-6b). The races
+an event sets and the tree's screens come after (RE-6c, RE-6d).
 
 ## Where the port differs
 

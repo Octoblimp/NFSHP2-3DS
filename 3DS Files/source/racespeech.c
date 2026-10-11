@@ -250,7 +250,7 @@ void race_event_speech(struct Player *p, TransientStatsElement *row)
     first = p->New2696 == 0;
     if (first)
         p->New2696 = 1;
-    n = TheRaceEventFields.Number;
+    n = TheRaceEvent.nNumber;
     hp = Fred.GameType == 9;
     if ((uint32_t)(n - 1) < 20u)
         a = hp ? speech_convert_hp_event_a(n)
@@ -262,7 +262,7 @@ void race_event_speech(struct Player *p, TransientStatsElement *row)
         spch_add_event_v(168, 1, 1024);
         return;
     }
-    word = TheRaceEventFields.EventWord != 0;
+    word = TheRaceEvent.bIsLastOpen != 0;
     if (b == 2048)
         spch_add_event_v(216, 4, first, a, 2048, word);
     else

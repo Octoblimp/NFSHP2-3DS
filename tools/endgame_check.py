@@ -1237,12 +1237,12 @@ MUTATIONS = [
     M("btc1-cop", "return TheRaceParameters.BeACop && Fred.NumPlayerCars == 1",
       "return Fred.NumPlayerCars == 1"),
     M("reward-tree", "    if (!fred_use_tree_event(&Fred))" + NL
-      + "        return 0;" + NL + "    if (ev->Number == 32)",
-      "    if (ev->Number == 32)"),
-    M("reward-32", "ev->Number == 32)", "ev->Number == 30)"),
-    M("reward-31", "ev->Number == 31 && ev->EventWord == 0)",
-      "ev->Number == 31)"),
-    M("reward-31-word", "ev->EventWord == 0)", "ev->EventWord >= 0)"),
+      + "        return 0;" + NL + "    if (ev->nNumber == 32)",
+      "    if (ev->nNumber == 32)"),
+    M("reward-32", "ev->nNumber == 32)", "ev->nNumber == 30)"),
+    M("reward-31", "ev->nNumber == 31 && ev->bIsLastOpen == 0)",
+      "ev->nNumber == 31)"),
+    M("reward-31-word", "ev->bIsLastOpen == 0)", "ev->bIsLastOpen >= 0)"),
     M("reward-status-3", "race_event_status() >= 3 && race_event_reward_test",
       "race_event_status() > 3 && race_event_reward_test"),
     M("reward-test-order",
@@ -1252,7 +1252,7 @@ MUTATIONS = [
       "race_event_reward_test(i) != 0)"),
     M("reward-test-i", "race_event_reward_test(i) == 0)",
       "race_event_reward_test(0) == 0)"),
-    M("reward-nrew", "if (ev->NumRewards != 0)", "if (ev->NumRewards > 0)"),
+    M("reward-nrew", "if (ev->nRewards != 0)", "if (ev->nRewards > 0)"),
     M("reward-status-lt3", "if (race_event_status() < 3)",
       "if (race_event_status() < 4)"),
     M("reward-adv", "    return race_event_status_advanced();" + NL + "}",
@@ -1289,20 +1289,20 @@ MUTATIONS = [
       "Type != 2;" + NL + "    return 1;" + NL + "}" + NL + NL
       + "int32_t endgame_should_see_tourney"),
     M("results-9", "    if (t == 8 || t == 9)" + NL
-      + "        return TheRaceEventFields.Type != 1;" + NL + "    return 1;"
+      + "        return TheRaceEvent.nType != 1;" + NL + "    return 1;"
       + NL + "}" + NL + NL + "int32_t endgame_should_see_tourney",
       "    if (t == 8)" + NL
-      + "        return TheRaceEventFields.Type != 1;" + NL + "    return 1;"
+      + "        return TheRaceEvent.nType != 1;" + NL + "    return 1;"
       + NL + "}" + NL + NL + "int32_t endgame_should_see_tourney"),
     M("tourney-cop", "    if (TheRaceParameters.BeACop)" + NL
       + "        return 0;" + NL + "    if (t == 8 || t == 9)" + NL
-      + "        return TheRaceEventFields.Type == 4;",
+      + "        return TheRaceEvent.nType == 4;",
       "    if (t == 8 || t == 9)" + NL
-      + "        return TheRaceEventFields.Type == 4;"),
+      + "        return TheRaceEvent.nType == 4;"),
     M("tourney-4", "Type == 4;", "Type == 2;"),
     M("tourney-9", "    if (t == 8 || t == 9)" + NL
-      + "        return TheRaceEventFields.Type == 4;",
-      "    if (t == 8)" + NL + "        return TheRaceEventFields.Type == 4;"),
+      + "        return TheRaceEvent.nType == 4;",
+      "    if (t == 8)" + NL + "        return TheRaceEvent.nType == 4;"),
     M("tourney-else", "Type == 4;" + NL + "    return 0;",
       "Type == 4;" + NL + "    return 1;"),
     M("lap-cop", "if (rp->BeACop || Fred.GameType == 6",
@@ -1321,10 +1321,10 @@ MUTATIONS = [
       "Type > 1;" + NL + "    return 1;" + NL + "}" + NL + NL
       + "int32_t endgame_should_auto_save"),
     M("total-9", "    if (t == 8 || t == 9)" + NL
-      + "        return TheRaceEventFields.Type != 1;" + NL + "    return 1;"
+      + "        return TheRaceEvent.nType != 1;" + NL + "    return 1;"
       + NL + "}" + NL + NL + "int32_t endgame_should_auto_save",
       "    if (t == 9)" + NL
-      + "        return TheRaceEventFields.Type != 1;" + NL + "    return 1;"
+      + "        return TheRaceEvent.nType != 1;" + NL + "    return 1;"
       + NL + "}" + NL + NL + "int32_t endgame_should_auto_save"),
     M("autosave", "Fred.Autosave != 0;", "Fred.Autosave > 0;"),
     M("end-game", "endgame_should_see_end_game(void)" + NL + "{" + NL
