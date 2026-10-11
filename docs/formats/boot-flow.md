@@ -255,6 +255,20 @@ LaunchFrontendMenus();
 ("LOADING...") on it. It is *hidden* here, which means something made it
 visible earlier -- `BeginGameFlowLoadingTrackCommon` and friends do.
 
+The first two lines matter after a race, and retail's End
+(`0x001687a8`) has them too. `BeginGameFlowUnloadingTrackSpecific` sets
+`eDisableFixUpTables`, and nothing clears it until this End, so FRONTB
+loads under it. FRONTB's solid list comes before its texture packs, and
+each solid's loader resolves its table there and then with the default
+allowed. No pack has BRUSHEDMETAL yet, so the car select's PLATFORM gets
+GLOBALB's `DEFAULTTEXTURE`, a 32x32 blue and magenta checker with yellow
+edges and a green arrow. Only this `eFixUpTables`, once the packs are in,
+puts the right textures in. The port left the two lines out because the
+fixup at boot had already run, and the user's device showed the
+turntable as that checker after a quick race (2026-10-11). The port's
+End now starts with the `fixUpTables` hook (gameflow.h), which main.c
+binds to the two lines.
+
 ### Retail's `LOADING_FRONTEND` (SLES_507.31)
 
 Everything above is the demo's. The PAL retail disc moved the language out

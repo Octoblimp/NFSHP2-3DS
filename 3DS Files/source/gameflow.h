@@ -270,6 +270,11 @@ typedef struct {
     // carloader.h). Neither is traced: the boot transcript predates them.
     void (*initSelectCar)(void* user);
     void (*closeSelectCar)(void* user);
+    // EndGameFlowLoadingFrontEnd's first two steps: eDisableFixUpTables
+    // cleared (`sw zero,-24944(gp)`) and eFixUpTables (0x00103e68) over
+    // the tables FRONTB and the cars dirtied (esolid.h). Leaving a race
+    // set the flag, so FRONTB's own fixup did nothing. Not traced.
+    void (*fixUpTables)(void* user);
     // InitFrontendSounds (0x0016df60), just before InitSelectCarScreen;
     // and UnInitFrontendSounds (0x0016dff8) and UnLoadSoundRegions
     // (0x001af420), after CloseSelectCarScreen (fesound.h, sound.h). Not

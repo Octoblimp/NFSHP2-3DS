@@ -723,9 +723,11 @@ void bgf_end_loading_frontend(BGameFlow* gf)
     // eFixUpTables, InitCarEffects, InitFrontendSounds, InitSelectCarScreen
     // and InitMoviePlayer run here in the original. On the 3DS the renderer
     // and the bundles are already up by the time the flow starts, so what
-    // is left is the frontend's sounds, the car selector, the visibility
-    // and the launch. (The demo disc hid its slideshow's last panel
-    // instead.)
+    // is left is the fixup, the frontend's sounds, the car selector, the
+    // visibility and the launch. (The demo disc hid its slideshow's last
+    // panel instead.) The fixup matters after a race: the Begin of
+    // unloading set eDisableFixUpTables, and FRONTB loaded under it.
+    HOOK_VOID0(gf, fixUpTables);
     HOOK_VOID0(gf, initFrontendSounds);
     HOOK_VOID0(gf, initSelectCar);
     screenVisible(gf, BGF_SCREEN_LOADING_TRACK, 0);

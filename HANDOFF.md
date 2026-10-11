@@ -19942,3 +19942,126 @@ Picked up from Session 64's steps:
 - Docs: docs/formats/race-speech.md; best-times.md, race-over-overlay.md
   and race-results.md now name the bound seams. Next: RE-6, the
   career's screens.
+
+## Session 70, continued -- RE-6a, the event trees (in progress)
+
+Stopped at the user's word ("Wrap up ... let me start a fresh session").
+Nothing of RE-6a is committed. Its four files are untracked in the
+working tree; do not lose them, and never git checkout over them.
+
+- RE-6 is split in four:
+  - **RE-6a, the event trees.** EventTree.obj 0x001fd130 .. 0x001fffb0,
+    the state classes and EventInfo 0x00200000 .. 0x002014e8, and the
+    two Ultimates' test 0x002026f8. In progress.
+  - **RE-6b, RaceEvent.** 0x00200e30, 0x002014e8 .. 0x002026f0, and
+    0x00200ac8, 0x00200b30, 0x00200c38 and 0x00201478.
+  - **RE-6c, the races an event sets.** EventTrack::SetRace 0x001fec20,
+    SetFromRace 0x001fed30, EventTree::SetRace 0x001fee20, and
+    FrontendDatabase's event functions.
+  - **RE-6d, the screens.** Tourney Standings 0x001dd5d0, Events
+    Unlocked 0x001df180, the Reward menu 0x001def38, and the speeches
+    tournament_race_speech, race_event_speech and
+    race_event_reward_speech.
+- Written:
+  - `3DS Files/source/eventtree.{c,h}`: the whole RE-6a port.
+    get_event_tree compares a nameless tree as "". (Retail compares
+    with the bottom of memory, a 0 in the image.)
+  - `tools/src/eventtree_test.c`: the harness. It compiles with
+    eventtree.c under hostbuild. Its ops and print formats are the
+    checker's contract; read its file comment and ev(), tr(), gl() and
+    state().
+  - `tools/eventtree_check.py`: the model, the data file (FRONTB.BUN's
+    two EventTree chunks [0xd97100, 0xd9aa50), then made-up trees A to I
+    and a chunk of another type) and the script. It has been written but
+    **never run**. Its constants block lists every retail address,
+    stub and global.
+- Next, in order:
+  1. Run `python tools/eventtree_check.py --dump out/et`. Fix the model,
+     harness and script until 0 differ.
+     - Watch loose_cases first. It runs ev|unlock, ev|status,
+       tr|unlock|-1 and tr|cur|-1 on the loose tree, whose pGoals and
+       pRewards are NULL. If unlock or status reads a goal, the harness
+       segfaults while retail reads low memory. Drop those ops, or keep
+       the loose tree to the constructor, SetName, SetEvents,
+       CalcStatePointers and reset.
+     - Tree.event's cars loop has a dead `if k >= 20` branch.
+     - The model's timer stub does not see the language. The harness
+       prints " ?lang" when it is not 3, so a stray language shows as a
+       difference.
+  2. Write MUTATIONS and EQUIVALENT; both are empty now. Run --mutate
+     until no survivor is unexplained.
+     - Equivalents to expect: the record's memset (blocks come zeroed),
+       and the port's own bounds. These are the handle bound, the
+       finish table's 16, the tournament's divide by zero, the points
+       past the table, and the KO rank and position bounds if retail
+       has none.
+  3. Wire the port in:
+     - bchunkload.c slot 24: replace `UNPORTED(LoaderEventTree,
+       UnloaderEventTree, 24, 0x80034a00u)` with wrappers around
+       loader_event_tree and unloader_event_tree, as LoaderCharacterInfo
+       does.
+     - `tools/loadertable_check.py`: PORTED gains slot 24, its sources
+       gain eventtree.c, and the harness gets what it needs. Rerun it.
+     - main.c binds quickrace's gEventTreeTrackIsARewardFn and
+       gEventTreeIsTrackUnlockedFn, fredend's gIsCarAnEventRewardFn and
+       gEventTreeIsCarUnlockedFn, and nfsrewards' findEventForCar.
+     - The 3DS Makefile builds every source/*.c, so eventtree.c is in
+       the next build already. Check it for duplicate symbols against
+       the UNPORTED stub and anything else that defines the trees'
+       globals.
+  4. Write `docs/formats/event-tree.md` with the port's deviations:
+     - the handle and offset scheme (Fred.pUltimateState is an offset
+       from &Fred);
+     - vCenter.w is 0, and the record is cleared before construction;
+     - the loader stops filling a tree whose name failed;
+     - the finish table's bound of 16, and a 64-byte finish buffer;
+     - the tournament's divide by zero answers 0, and points past the
+       table are 0;
+     - GetEventNumber on a NULL tree is NULL;
+     - a nameless tree is "" to GetEventTree.
+  5. Build with tools/build_cia.ps1, look in Azahar (gas only), update
+     CONTINUE and HANDOFF, and commit RE-6a's files alone.
+- Then RE-6b to RE-6d, then 14-10d (bcarsel's speakCar), then TASKS 39
+  (the chopper's missiles, 12k-6) and 40 (the radar meter, 12n).
+
+## Session 71 (2026-10-11) -- the Select Car turntable after a race
+
+The user's second device log of 2026-10-10 (`3DS Files/nfshp2_debug.txt`):
+a Hot Pursuit quick race on track 62, finished, the End Game Menu's
+Quit, then New Main Menu, Hot Pursuit, Be A Cop and Select Car, to see
+the points carry over (they did: NFS Points 22360). With it, a photo:
+the Crown Victoria on a floor of blue and magenta checks with yellow
+and green, where the first visit had shown the brushed-metal turntable.
+
+- **The race.** A median of 22 fps, 13 at the lowest; the user called
+  the slowdowns minor. The one long frame, 4846 ms, is the first
+  frame's texture prep before Pre Race Stats. The user also confirmed
+  on the device that the spike strips work.
+- **The cause.** Retail's EndGameFlowLoadingFrontEnd (0x001687a8)
+  starts with `sw zero,-24944(gp)` (eDisableFixUpTables = 0) and
+  `jal eFixUpTables`. The port's bgf_end_loading_frontend had left both
+  out, since at boot the flag is 0 and frontres_load's PostLoadFixup
+  had already fixed the tables. BeginGameFlowUnloadingTrackSpecific
+  sets the flag, so after a race FRONTB loads with it still set.
+  FRONTB's solid list (0x128) comes before its texture packs
+  (0x175534), and the solid loader resolves each table as it loads,
+  with the default allowed. PLATFORM's BRUSHEDMETAL and
+  BRUSHEDMETAL_OUTER are in no pack yet, so both get GLOBALB's
+  DEFAULTTEXTURE (0x19006835): 32x32 blue and magenta checks, yellow
+  edges, a green arrow. That is the photo.
+- **The fix.** gameflow.h's new `fixUpTables` hook, untraced, runs first
+  in bgf_end_loading_frontend; main.c's hookFixUpTables clears the flag
+  and calls efix_up_tables. bootflow_check (61 scenarios, 46779 lines)
+  and bscreens_check (17 scenarios, 1269 lines) still have 0 differ.
+  `docs/formats/boot-flow.md`, "End", has the story.
+- **On Azahar.** A Hot Pursuit quick race on track 14, paused, Quit
+  Race, OK; then Hot Pursuit, Be A Cop (Cops On Mode Select item 2,
+  ChallengeBeACop item 3), Be The Cop Setup and Select Car. The
+  turntable is lit brushed metal with the car's reflection on it.
+- **The build.** RE-6a's eventtree.c does not link yet: it defines
+  is_track_an_event_reward and event_tree_is_track_unlocked, which
+  quickrace.c has too. For this fix's build it was renamed
+  `eventtree.c.wip` (and copied to the scratchpad). It goes back to
+  eventtree.c for RE-6a, and step 3 of RE-6a's list must take
+  quickrace.c's two stubs out, or make quickrace.c call the trees.
+- **Next.** RE-6a from the Session 70 entry above: its checker first.

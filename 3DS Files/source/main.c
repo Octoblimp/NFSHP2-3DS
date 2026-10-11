@@ -1534,6 +1534,16 @@ static void hookUnloadSoundRegions(void* user)
     soundUnloadRegions();
 }
 
+// EndGameFlowLoadingFrontEnd's start. With the flag left set by the race's
+// unloading, the platform's texture table kept the pointers it was loaded
+// with, and the turntable drew with whatever texture was bound last.
+static void hookFixUpTables(void* user)
+{
+    (void)user;
+    eDisableFixUpTables = 0;
+    efix_up_tables();
+}
+
 static void hookInitFrontendSounds(void* user)
 {
     (void)user;
@@ -5245,6 +5255,7 @@ int main(int argc, char** argv)
     hooks.easterEggs       = hookEasterEggs;
     hooks.initSelectCar    = hookCarSelInit;
     hooks.closeSelectCar   = hookCarSelClose;
+    hooks.fixUpTables      = hookFixUpTables;
     hooks.initFrontendSounds   = hookInitFrontendSounds;
     hooks.unInitFrontendSounds = hookUnInitFrontendSounds;
     hooks.unloadSoundRegions   = hookUnloadSoundRegions;

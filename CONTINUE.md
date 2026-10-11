@@ -13,7 +13,9 @@ Best Lap Times, Best Total Times and the Lap Times screens;
 `docs/formats/best-times.md`), and RE-4 (the post-race camera;
 `docs/formats/camera-coordinator.md`, "The demo camera"), and RE-5
 (the race's speech, 14-10c; `docs/formats/race-speech.md`). RE-6, the
-career's screens, is next. 14-10d comes after RE-6. Two asks were added to
+career's screens, is under way, split into RE-6a to RE-6d: RE-6a (the
+event trees) is written but not yet checked or committed; HANDOFF's
+last entry has its files and next steps. 14-10d comes after RE-6. Two asks were added to
 TASKS.md the same day, with no order given: task 39, the armed
 helicopter's missiles and barrels (12k-6), and task 40, the radar
 detection meter under the rear-view mirror (12n). The user's device log of
@@ -22,6 +24,21 @@ track 43): no hitch and no abort; 15-30 fps in the race, median 24.5,
 17-20 with the pack and the cops in view; a spike strip was laid. At
 the finish the race went to POSTRACE (rc 7), braked the car to a stop
 and sat there: nothing after the finish is ported.
+
+Session 71 (2026-10-11): the user's second device log of 2026-10-10
+(a Hot Pursuit quick race on track 62, finished, the End Game Menu's
+Quit, then Be A Cop's Select Car to see the points carry over, which
+they did). The race ran at a median of 22 fps, 13 at the lowest; the
+user called the slowdowns minor. The user also confirmed on the device
+that the spike strips work. Select Car after the race showed the
+turntable as GLOBALB's DEFAULTTEXTURE checker. The cause:
+EndGameFlowLoadingFrontEnd's `eDisableFixUpTables = 0; eFixUpTables()`
+had been left out of the port, so after a race FRONTB's solids kept
+the default texture their load-time fixup gave them. The flow's new
+`fixUpTables` hook runs the two lines (`docs/formats/boot-flow.md`,
+"End"). Checked on Azahar: a quit quick race, then Be A Cop's Select
+Car, shows the lit brushed-metal turntable. Then RE-6a goes on from
+HANDOFF's Session 70 entry.
 
 Updated in Session 62 (2026-10-09):
 the cars' light flares now show -- the cop light bars, headlights and
@@ -300,7 +317,11 @@ The slices:
   PlayBustedSpeech waits for BeACopThink (12m). Azahar's Quick Race
   (seven AI) said event 160 after each lap and 165 for seventh place.
   `docs/formats/race-speech.md`.
-- **RE-6, next:** the career's screens: Tourney Standings (with
+- **RE-6, under way (Session 70):** split into RE-6a (the event
+  trees, in progress: `eventtree.{c,h}`, its harness and checker are
+  written, untracked; see HANDOFF's last entry), RE-6b (RaceEvent),
+  RE-6c (the races an event sets) and RE-6d (the screens). In all,
+  the career's screens: Tourney Standings (with
   `tournament_race_speech`), Events Unlocked, the event's results
   (0x001def38, with `race_event_speech` and
   `race_event_reward_speech`), the Reward menu and Be The Cop Results,
