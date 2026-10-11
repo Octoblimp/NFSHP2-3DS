@@ -250,7 +250,8 @@ void copmanager_spawn_speed_traps(tCopManager *m);
 //   - SpawnSpeedTraps (0x00224a20): main.c binds
 //     copmanager_spawn_speed_traps (12j-1).
 //   - MonitorSpikeBelts (0x00227758), 12j-2; EndPullover (0x00225878),
-//     12l; BeACopThink (0x00227f30), 12m.
+//     12l; BeACopThink (0x00227f30): main.c binds playercop.h's
+//     copmanager_be_a_cop_think (12m-2).
 extern int32_t (*gPursuitUpdateFn)(tPursuit *p);
 extern int32_t (*gPursuitCanSupervisorInitiateFn)(tPursuit *p);
 extern void    (*gPursuitSuperInitiatesFn)(tPursuit *p);

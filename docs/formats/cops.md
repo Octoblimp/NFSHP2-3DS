@@ -15,7 +15,8 @@ a cop on its spot and the tests for whom it chases, and two more of
 `coputil.obj`. The hot pursuit and caught speeder logics, DoSnapshot and
 the pursuits are the later slices. Slice 12m-1 adds tPlayerCop's Think,
 ChangeChaseTarget and SelectCarToChase, Be A Cop's player cop, in
-`playercop.c` ("Be A Cop's player cop").
+`playercop.c` ("Be A Cop's player cop"). Slice 12m-2 adds the manager's
+BeACopThink there ("BeACopThink").
 
 | function | address | port |
 |----------|---------|------|
@@ -55,6 +56,7 @@ ChangeChaseTarget and SelectCarToChase, Be A Cop's player cop, in
 | tPlayerCop::ChangeChaseTarget | `0x0022d700` | `tplayercop_change_chase_target` |
 | tPlayerCop::SelectCarToChase | `0x0022d898` | `tplayercop_select_car_to_chase` |
 | tCopManager::BeACopToggleSirenAndLights | `0x002289b8` | `copmanager_be_a_cop_toggle_siren_and_lights` |
+| tCopManager::BeACopThink | `0x00227f30` | `copmanager_be_a_cop_think`, through the seam `gCopManagerBeACopThinkFn` |
 | ResetAllDamage | `0x00228750` | `copmanager_reset_all_damage` |
 | Car::GetNumWheelsOnGround | `0x001cad80` | `num_wheels_on_ground`, static in `cop.c` |
 | tAICop::Teleport | `0x0022de70` | `taicop_teleport` |
@@ -639,9 +641,9 @@ get ahead 1, or 2; block 0; the rest 6.
 ## Be A Cop's player cop
 
 In Be A Cop the player's own car is a cop, a tPlayerCop
-(`nPlayerCopIndex`). Its three methods and the manager's horn handler
-are in `playercop.{c,h}`, apart from `cop.c` because they reach the
-speech and the samples, which `cop_test.c` does not link.
+(`nPlayerCopIndex`). Its three methods, the manager's horn handler and
+BeACopThink are in `playercop.{c,h}`, apart from `cop.c` because they
+reach the speech and the samples, which `cop_test.c` does not link.
 
 **The horn.** RealDriver calls tCopManager::BeACopToggleSirenAndLights
 (`0x002289b8`, `gCopManagerBeACopToggleSirenAndLightsFn`) when the horn
@@ -720,8 +722,80 @@ are caught and 2 are equivalent:
 **In Azahar.** A SkipFE Be A Cop race on track 12 with the player in car
 33 (CORVETTECOP, `DefaultPlayer1CarType 33` in the config) runs at 30
 fps. The first horn press (3DS X) opens a pursuit on a racer, and the
-chase marker shows over it. The clock stays at its start until 12m-2
-ports BeACopThink.
+chase marker shows over it. Since 12m-2 the clock counts down.
+
+### BeACopThink
+
+tCopManager::BeACopThink (`0x00227f30`) is the manager Think's last step
+in Be A Cop (`cop-manager.md`); main.c binds `gCopManagerBeACopThinkFn`
+to `copmanager_be_a_cop_think`. The cop is Cops[nPlayerCopIndex]. Retail
+reads Cops[-1] without one; the port returns.
+
+1. **The fly-by.** In a race of two players, once (New10488 at 10488),
+   PlayBustedSpeech (`0x002077b8`).
+2. **The pre-race.** Once (bBeACopAlreadySaidLookOutForSpeeders), the
+   dispatch's Be On Lookout (`0x0020b7a8`) names the landmark the cop's
+   car is in (FindLandmark, `0x00228a58`; 0 for none). With two players
+   the clock is set here: the track's TotalTimeAroundTrack, times 1 for
+   a point to point or the laps, times 1.5. With one, fBeACopTime keeps
+   the race parameters' time that the manager's init set
+   (`copmgr.c`).
+3. Nothing more until the race clock (RaceTime) is above 0, signed.
+4. **The clock.** While the cop's car races (a RacingCar, not finished)
+   with its player, and no pullover is active but the one in its own
+   car's slot, fBeACopTime counts down by WorldTimeElapsed. At 0 or
+   under the time is out: the clock is 0, the cop's car finishes
+   RACING_CAR_BE_THE_COP_LOST (5), the speech is the time-out's
+   (`0x00207648`: the players, 1, 2, the arrests), and the cop's pursuit
+   is deleted (`0x00224560`) and let go. With two players the speeder
+   (CarTable[1]), if not finished, finishes the same way.
+5. **The wrecks.** Each car before CopCarPos whose fCarDamage (by its
+   CarIndex) is 1 or more: its CarDamage is wrecked (`0x001b5bc8`,
+   `gCarDamageWreckFn`, which aborts while NULL; no car has a CarDamage
+   yet). An AI racer then ForceBoosts (the controller's slot 96) by
+   0x002bd238's 0.3, 0.4 or 0.5 for nDifficultyLevel. Another player's
+   car, not the cop's, gets a damage boost override of 0.75 and a
+   traction boost override of 1 - damage x 0.0125 (gp-27084).
+6. **Two players.** The speeder (CarTable[1]) finished and the cop
+   (CarTable[0]) not: the cop finishes BE_THE_COP_LOST, and the speech is
+   (2, 0, 2, the arrests).
+
+The HUD's Time Left, the results (`fredend.c`) and the race event read
+fBeACopTime (10480) straight; GetBeACopTime (`0x00228e10`) and
+GetBeACopSpeaker (`0x00228d78`) are one-load getters with no caller.
+
+**The check.** `playercop_check.py` runs BeACopThink too. Its stubs log
+PlayBustedSpeech, FindLandmark (with a landmark or none), Be On Lookout,
+Race::FinishCar by car, the Be A Cop speech, the pursuit's delete, the
+wreck and ForceBoost (through a vtable). Timer::SetTime and
+tCop::SetPursuit run as they are. After each call it prints the clock,
+the two once-flags, the cops' pursuits and each car's two boost
+overrides. The script covers:
+
+- each stage with 0 to 3 players and the flags set or not, the landmark
+  or none;
+- the clock's start for point to point and laps (0, 1, 3, 8, -1,
+  0x7fffffff) on odd lap times;
+- the race clock either side of 0, signed;
+- the countdown with and without a RacingCar, finished or not, the
+  player, each pullover against the car's index, and the clock at, near
+  and across 0, NaN and a negative step;
+- the time-out with and without a pursuit, one or two players, the
+  speeder finished or not, and the car table reordered;
+- the wrecks at the floats about 1, NaN and infinities, for each driver
+  type, with and without a player and a CarDamage, each difficulty, the
+  cop's own car, a CarIndex apart from the table's place, and CopCarPos
+  from 0 to 8;
+- the two-player end for each pair of finishes;
+- random runs through the stages.
+
+Result: 38434 lines, 0 differ. The mutation pass makes 128 mutations;
+the 68 for BeACopThink are all caught, and the 2 equivalent ones are
+12m-1's.
+
+**In Azahar.** The SkipFE race of 12m-1 (on AC, gas only, the horn every
+4 s) runs at 30 fps, Speed 100%, with Time Left counting down (282, then
+262 later in the chase).
 
 ## Seams
 

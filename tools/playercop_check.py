@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Cross-check 3DS Files/source/playercop.c, Be A Cop's player cop (12m-1),
-against the retail image, SLES_507.31, run in mipsemu.
+"""Cross-check 3DS Files/source/playercop.c, Be A Cop's player cop (12m-1)
+and the manager's BeACopThink (12m-2), against the retail image,
+SLES_507.31, run in mipsemu.
 
 **The model** is retail's own code: tPlayerCop's Think (0x0022d5c8),
-ChangeChaseTarget (0x0022d700) and SelectCarToChase (0x0022d898), and
-tCopManager::BeACopToggleSirenAndLights (0x002289b8). The harness
+ChangeChaseTarget (0x0022d700) and SelectCarToChase (0x0022d898),
+tCopManager::BeACopToggleSirenAndLights (0x002289b8) and
+tCopManager::BeACopThink (0x00227f30). The harness
 (tools/src/playercop_test.c) runs the port and prints the same lines.
 
 **The stubs**, logged and answered from the script on both sides:
@@ -12,14 +14,23 @@ Player::IsNisPlaying (each car's player's flag), Car::IsBlinking and
 Car::IsCarInFront (each car's flags), tCopManager::RequestPursuit,
 tPursuit's change of target (0x0022cb30, pursuitspeech_check.py's),
 GetInGameSample (a sample or none), bSample::Play and the helicopter's
-release (0x0022a310, pursuit_check.py's). The World's CopCarPos and car
-table, the cars' places, racing cars, lights and siren, the manager's
-pullovers and player cop, the pursuits and the helicopter's salvos are
-memory both sides read.
+release (0x0022a310, pursuit_check.py's). For BeACopThink:
+PlayBustedSpeech, FindLandmark (a landmark or none), the dispatch's Be On
+Lookout, Race::FinishCar by car, the Be A Cop finish speech (0x00207648),
+the manager's pursuit delete (0x00224560), CarDamage's wreck (0x001b5bc8)
+and the controllers' ForceBoost, through a table. Timer::SetTime and
+tCop::SetPursuit run as they are (the port's harness stores the pursuit).
+The World's CopCarPos and car table, the cars' places, indexes, drivers'
+types, racing cars, lights, siren and boost overrides, the manager's
+pullovers, player cop, car damage, difficulty and Be A Cop fields, the
+race's stage, clock and lap time, the race parameters' players, point to
+point and laps, the pursuits and the helicopter's salvos are memory both
+sides read.
 
 **Compared** are the stubs' logs, the pick SelectCarToChase answers and,
 after each call, the cop's two picks and their timers, and its car's
-lights word and siren.
+lights word and siren; after BeACopThink, the clock, the two said-once
+flags, the cops' pursuits and every car's two boost overrides.
 
     python tools/playercop_check.py
     python tools/playercop_check.py --mutate [--only a,b]
@@ -45,7 +56,8 @@ NL = chr(10)
 
 HARNESS = "tools/src/playercop_test.c"
 PC = "3DS Files/source/playercop.c"
-SOURCES = [HARNESS, PC]
+SOURCES = [HARNESS, PC, "3DS Files/source/vtable.c",
+           "3DS Files/source/timer.c"]
 HARNESS_TIMEOUT = 60
 
 GP = retail_model.RETAIL_GP
@@ -53,9 +65,11 @@ G_WORLD = GP - 22120                    # pCurrentWorld
 G_COPMGR = GP - 15620                   # pCopManager
 G_ELAPSED = GP - 19560                  # WorldTimeElapsed
 G_RACE = GP - 22272                     # pCurrentRace
+G_SPEECH = GP - 15624                   # the cop speech manager
+RP = 0x0031a898                         # TheRaceParameters
 
 F = {"think": 0x0022d5c8, "change": 0x0022d700, "select": 0x0022d898,
-     "toggle": 0x002289b8}
+     "toggle": 0x002289b8, "beacop": 0x00227f30}
 
 S_NIS = 0x00176520
 S_BLINK = 0x00133130
@@ -65,6 +79,13 @@ S_RETARGET = 0x0022cb30
 S_SAMPLE = 0x001ae280
 S_PLAY = 0x00274080
 S_RELEASE = 0x0022a310
+S_BUSTED = 0x002077b8
+S_LANDMARK = 0x00228a58
+S_LOOKOUT = 0x0020b7a8
+S_FINISH = 0x00149250
+S_COPSPEECH = 0x00207648
+S_DELETE = 0x00224560
+S_WRECK = 0x001b5bc8
 
 NCARS, NCOPS, NP = 8, 3, 3
 MGR_SIZE, CAR_SIZE, RC_SIZE, PURSUIT_SIZE, CHOPPER_SIZE = \
@@ -73,6 +94,15 @@ W_COPCARPOS, W_TABLE = 36, 44
 C_PLAYER, C_RC, C_POS, C_LIGHTS, C_SIREN = 24, 28, 96, 2056, 2104
 RC_FINISH = 18
 M_PCI, M_COPS, M_PULL = 12, 16, 88
+C_INDEX, C_DRIVER, C_CTL, C_DAMAGE = 8, 20, 40, 2120
+C_TRACTION, C_DBOOST = 1116, 1120
+D_TYPE = 8
+M_DAMAGE, M_DIFF, M_TIME, M_SAID, M_BUSTED, M_ARRESTS = \
+    10420, 10476, 10480, 10484, 10488, 10496
+R_TIME, R_TATT = 16, 1712
+RP_P2P, RP_LAPS, RP_PLAYERS = 40, 44, 48
+L_TYPE = 52
+VT_BOOST, BOOST_DELTA = 96, 16
 U_CHASED, U_CHOPPER = 16, 24
 H_SALVOS = 828
 
@@ -104,8 +134,19 @@ class Model(object):
         e.put32(self.m + M_PCI, M32)
         self.world = block(128, "W")
         e.put32(G_WORLD, self.world)
-        self.race = block(16, "R")
+        self.race = block(1728, "R")
         e.put32(G_RACE, self.race)
+        self.tatt = block(16, "T")
+        e.put32(self.race + R_TATT, self.tatt)
+        self.speech = block(16, "SM")
+        e.put32(G_SPEECH, self.speech)
+        self.landmark = block(64, "L")
+        self.land_on = 0
+        self.boost_fn = e.alloc(16, align=16)
+        self.vt = block(128, None)
+        struct.pack_into("<hhI", e.mem, self.vt + VT_BOOST, BOOST_DELTA, 0,
+                         self.boost_fn)
+        e.stub(self.boost_fn, self.s_boost)
         self.cars = [block(CAR_SIZE, "A%d" % k) for k in range(NCARS)]
         self.rcs = [block(RC_SIZE, None) for k in range(NCARS)]
         self.players = [block(16, "P%d" % k) for k in range(NCARS)]
@@ -115,6 +156,15 @@ class Model(object):
         self.sample = block(16, "S")
         for c, r in zip(self.cars, self.rcs):
             e.put32(c + C_RC, r)
+        self.drivers = [block(32, None) for k in range(NCARS)]
+        self.ctls = [block(64, "K%d" % k) for k in range(NCARS)]
+        self.damages = [block(16, "D%d" % k) for k in range(NCARS)]
+        for k in range(NCARS):
+            e.put32(self.cars[k] + C_DRIVER, self.drivers[k])
+            e.put32(self.cars[k] + C_CTL, self.ctls[k])
+            e.put32(self.ctls[k] + 8, self.vt)
+            self.names[self.ctls[k] + BOOST_DELTA] = "K%d+%d" % (k,
+                                                                 BOOST_DELTA)
         self.nis = [0] * NCARS
         self.blink = [0] * NCARS
         self.front = [0] * NCARS
@@ -125,7 +175,14 @@ class Model(object):
                          (S_REQUEST, self.s_request),
                          (S_RETARGET, self.s_retarget),
                          (S_SAMPLE, self.s_sample), (S_PLAY, self.s_play),
-                         (S_RELEASE, self.s_release)):
+                         (S_RELEASE, self.s_release),
+                         (S_BUSTED, self.s_busted),
+                         (S_LANDMARK, self.s_landmark),
+                         (S_LOOKOUT, self.s_lookout),
+                         (S_FINISH, self.s_finish),
+                         (S_COPSPEECH, self.s_copspeech),
+                         (S_DELETE, self.s_delete),
+                         (S_WRECK, self.s_wreck)):
             e.stub(addr, fn)
 
     def emit(self, line):
@@ -192,6 +249,39 @@ class Model(object):
     def s_release(self, em):
         self.emit("  release %s" % self.sym(em.reg[4]))
 
+    def s_busted(self, em):
+        self.emit("  busted")
+
+    def s_copspeech(self, em):
+        self.emit("  copspeech %d %d %d %d" % tuple(
+            s32(em.reg[r]) for r in (4, 5, 6, 7)))
+
+    def s_landmark(self, em):
+        a = em.reg[4] & M32
+        r = self.landmark if self.land_on else 0
+        self.emit("  landmark %08x %08x -> %s" % (
+            self.e.u32(a), self.e.u32(a + 4), self.sym(r)))
+        return r
+
+    def s_lookout(self, em):
+        self.emit("  lookout %s %d" % (self.sym(em.reg[4]), s32(em.reg[5])))
+
+    def s_finish(self, em):
+        self.emit("  finish %s %s %d %d %d" % (
+            self.sym(em.reg[4]), self.sym(em.reg[5]), s32(em.reg[6]),
+            s32(em.reg[7]), s32(em.reg[8])))
+
+    def s_delete(self, em):
+        self.emit("  delete %s %s" % (self.sym(em.reg[4]),
+                                      self.sym(em.reg[5])))
+
+    def s_wreck(self, em):
+        self.emit("  wreck %s" % self.sym(em.reg[4]))
+
+    def s_boost(self, em):
+        self.emit("  boost %s %08x" % (self.sym(em.reg[4]),
+                                       em.fpr[12] & M32))
+
     # ---- dumps
 
     def cdump(self, j):
@@ -203,6 +293,17 @@ class Model(object):
                      e.u32(c + 40), e.u32(c + 44),
                      e.u32(car + C_LIGHTS) if car else 0,
                      s32(e.u32(car + C_SIREN)) if car else 0))
+
+    def bdump(self):
+        e = self.e
+        m = self.m
+        self.emit("beacop time %08x said %d busted %d pursuits %s %s %s" % (
+            e.u32(m + M_TIME), s32(e.u32(m + M_SAID)),
+            s32(e.u32(m + M_BUSTED)),
+            *[self.sym(e.u32(c)) for c in self.cops]))
+        for k, c in enumerate(self.cars):
+            self.emit("A%d traction %08x damage %08x" % (
+                k, e.u32(c + C_TRACTION), e.u32(c + C_DBOOST)))
 
     # ---- ops
 
@@ -227,7 +328,8 @@ class Model(object):
             n = int(a[1])
             e.put32(self.world + W_COPCARPOS, n & M32)
             for j, s in enumerate(a[2:]):
-                e.put32(self.world + W_TABLE + 4 * j, self.cars[int(s)])
+                e.put32(self.world + W_TABLE + 4 * j,
+                        self.cars[int(s)] if int(s) >= 0 else 0)
         elif o == "time":
             e.put32(G_ELAPSED, v(1))
         elif o == "pull":
@@ -256,11 +358,43 @@ class Model(object):
             e.put32(self.m + M_COPS + 16, self.cops[j] if j >= 0 else 0)
         elif o == "race":
             e.put32(self.race, v(1))
+        elif o == "cidx":
+            # cidx|k|index|drivertype|damage|racingcar
+            k = int(a[1])
+            c = self.cars[k]
+            e.write(c + C_INDEX, struct.pack("<H", v(2) & 0xffff))
+            e.put32(self.drivers[k] + D_TYPE, v(3))
+            e.put32(c + C_DAMAGE, self.damages[k] if v(4) else 0)
+            e.put32(c + C_RC, self.rcs[k] if v(5) else 0)
+        elif o == "boosts":
+            c = self.cars[int(a[1])]
+            e.put32(c + C_TRACTION, v(2))
+            e.put32(c + C_DBOOST, v(3))
+        elif o == "dmg":
+            e.put32(self.m + M_DAMAGE + 4 * int(a[1]), v(2))
+        elif o == "bac":
+            for j, off in enumerate((M_DIFF, M_TIME, M_SAID, M_BUSTED,
+                                     M_ARRESTS)):
+                e.put32(self.m + off, v(1 + j))
+        elif o == "rp":
+            e.put32(RP + RP_PLAYERS, v(1))
+            e.put32(RP + RP_P2P, v(2))
+            e.put32(RP + RP_LAPS, v(3))
+        elif o == "rtime":
+            e.put32(self.race + R_TIME, v(1))
+            e.put32(self.tatt, v(2))
+        elif o == "land":
+            self.land_on = v(1)
+            e.put32(self.landmark + L_TYPE, v(2))
         elif o == "sample":
             self.sample_on = v(1)
         elif o == "request":
             self.request = v(1)
         elif o in F:
+            if o == "beacop":
+                e.call(F[o], self.m, limit=400000)
+                self.bdump()
+                return
             if o == "toggle":
                 e.call(F[o], self.m, limit=200000)
                 self.emit("toggle")
@@ -311,12 +445,31 @@ def world(n, table=None):
     return "world|%d|%s" % (n, "|".join(str(t) for t in table))
 
 
+def cidx(k, index=None, dtype=None, damage=0, rc=1):
+    index = k if index is None else index
+    dtype = (1 if k == 0 else 2) if dtype is None else dtype
+    return "cidx|%d|%d|%d|%d|%d" % (k, index, dtype, damage, rc)
+
+
+def bac(difficulty=0, t=100.0, said=0, busted=0, arrests=0):
+    return "bac|%d|%s|%d|%d|%d" % (difficulty, Fx(t), said, busted, arrests)
+
+
+def rtime(packed=4000, lap=0.0):
+    return "rtime|%d|%s" % (packed, Fx(lap))
+
+
 def base():
     out = [world(NCARS), "time|%s" % Fx(1.0 / 30), "race|4", "mgr|0",
-           "sample|1", "request|1"]
+           "sample|1", "request|1", "rp|1|0|3", bac(), rtime(0),
+           "land|0|0"]
     for k in range(NCARS):
         out.append(car(k, player=int(k == 0), x=10.0 * k, y=3.0 * k))
         out.append("pull|%d|0" % k)
+        out.append(cidx(k))
+        out.append("boosts|%d|0|0" % k)
+    for i in range(14):
+        out.append("dmg|%d|0" % i)
     for j in range(NP):
         out.append("pur|%d|1|0|0" % j)
     out.append(cop(0))
@@ -431,6 +584,158 @@ def toggle_cases():
     return out
 
 
+NAN = float("nan")
+
+
+def beacop_cases():
+    out = []
+    # The fly-by and the pre-race: the stage, the players, the two flags,
+    # the landmark, the clock from the lap; the race clock still at 0.
+    for players in (1, 2, 0, 3):
+        for stage in (0, 1, 2, 3, 4, 5):
+            for said, busted in ((0, 0), (1, 0), (0, 1), (1, 1)):
+                out += base() + ["rp|%d|0|3" % players, "race|%d" % stage,
+                                 bac(t=42.0, said=said, busted=busted),
+                                 rtime(0, 61.25),
+                                 car(0, x=-229.6, y=732.5, z=-58.1),
+                                 "land|1|7", "beacop"]
+    for on, kind in ((0, 0), (0, 9), (1, 0), (1, 3), (1, -1)):
+        out += base() + ["race|2", "land|%d|%d" % (on, kind),
+                         car(0, x=12.5, y=-7.25), "beacop"]
+    for p2p in (0, 1, 2, -1):
+        for laps in (0, 1, 3, 8, -1, 0x7fffffff):
+            for lap in (0.0, 61.25, 133.33333, -5.0, 3.0e38):
+                out += base() + ["race|2", "rp|2|%d|%d" % (p2p, laps),
+                                 rtime(0, lap), "beacop"]
+    # The race clock: above 0 signed, or not.
+    for packed in (0, 1, 2, 3, 4, 4000, 0x7fffffff, 0x80000000,
+                   0xffffffff, 0xfffff000):
+        for stage in (2, 4):
+            out += base() + ["race|%d" % stage, bac(t=10.0), rtime(packed),
+                             "beacop"]
+    # The clock: the cop's racing car, finished or not, its player, the
+    # pullovers (its own slot does not stop it), the time left.
+    for rc in (0, 1):
+        for finish in (0, 1, 2, 0xffff):
+            for player in (0, 1):
+                out += base() + [rtime(), cidx(0, rc=rc),
+                                 car(0, player=player, finish=finish),
+                                 bac(t=10.0), "beacop"]
+    for index in (0, 5, 7, 9, 13):
+        for pulls in ((), (0,), (5,), (7,), (0, 5), (3, 7), (index,)):
+            out += base() + [rtime(), cidx(0, index=index), bac(t=10.0)]
+            out += ["pull|%d|1" % k for k in pulls if k < NCARS]
+            out.append("beacop")
+    for t, dt in ((10.0, 1.0 / 30), (1.0 / 30, 1.0 / 30), (0.0, 0.0),
+                  (0.0333, 1.0 / 30), (1e-7, 1.0 / 30), (-1.0, 0.0),
+                  (5.0, 5.0), (5.0, 5.0000005), (5.0, 4.9999995),
+                  (NAN, 1.0 / 30), (1.0, -1.0), (0.5, 0.25)):
+        out += base() + [rtime(), bac(t=t, arrests=2),
+                         "time|%s" % Fx(dt), "beacop", "beacop"]
+    # The time-out: the chase deleted and let go, one or two players, the
+    # speeder (CarTable[1]) finished or not, the arrests.
+    for pursuit in (-1, 0):
+        for players in (1, 2):
+            for finish1 in (0, 1, 5, 0xffff):
+                for arrests in (0, 3):
+                    out += base() + [rtime(), "rp|%d|0|3" % players,
+                                     cop(0, pursuit=pursuit),
+                                     car(1, player=0, x=10.0, y=3.0,
+                                         finish=finish1),
+                                     bac(t=0.01, arrests=arrests), "beacop"]
+    for table in ([3, 0, 1, 2, 4, 5, 6, 7], [0, 6, 1, 2, 3, 4, 5, 7]):
+        out += base() + [rtime(), "rp|2|0|3", world(NCARS, table),
+                         bac(t=0.01), "beacop"]
+    # The wrecks: the damage at and about 1, each driver type, a player,
+    # a CarDamage, the difficulty, the cop's own car.
+    for dmg in (0.0, 0.99999994, 1.0, 1.0000001, 1.5, 80.0, 100.0, NAN,
+                -5.0, float("inf")):
+        for dtype in (0, 1, 2, 3, 4, 5):
+            for player in (0, 1):
+                out += base() + [rtime(), cidx(3, dtype=dtype),
+                                 car(3, player=player, x=30.0, y=9.0),
+                                 "dmg|3|%s" % Fx(dmg), "beacop"]
+    for diff in (0, 1, 2):
+        for damage in (0, 1):
+            out += base() + [rtime(), bac(difficulty=diff),
+                             cidx(2, damage=damage), cidx(5, dtype=1),
+                             car(5, player=1, x=50.0, y=15.0),
+                             cidx(6, dtype=4, damage=damage),
+                             "dmg|2|%s" % Fx(2.0), "dmg|5|%s" % Fx(1.0),
+                             "dmg|6|%s" % Fx(3.0), "beacop"]
+    for dtype in (1, 2, 4):
+        out += base() + [rtime(), cidx(0, dtype=dtype),
+                         "dmg|0|%s" % Fx(2.0), "beacop"]
+    # CarIndex apart from the table's place; CopCarPos short of a car.
+    for n in (0, 1, 3, 4, 8):
+        out += base() + [rtime(), cidx(3, index=11), cidx(4, index=3),
+                         "dmg|3|%s" % Fx(4.0), "dmg|11|%s" % Fx(1.25),
+                         world(n), "beacop"]
+    # Two players: the cop (CarTable[0]) and the speeder (CarTable[1]),
+    # each finished or not.
+    for f0 in (0, 1, 5, 0xffff):
+        for f1 in (0, 1, 5, 0xffff):
+            for players in (1, 2):
+                out += base() + [rtime(), "rp|%d|0|3" % players,
+                                 car(0, finish=f0),
+                                 car(1, player=1, x=10.0, y=3.0, finish=f1),
+                                 bac(arrests=4), "beacop"]
+    out += base() + [rtime(), "rp|2|0|3", world(NCARS, [2, 3, 0, 1, 4, 5,
+                                                        6, 7]),
+                     car(3, player=1, x=30.0, y=9.0, finish=1), "beacop"]
+    return out
+
+
+def beacop_runs(rng):
+    """A Be A Cop race over time: the stages go by, the clock runs down,
+    cars are wrecked and finish."""
+    out = base() + [rtime(0, 70.0), "race|1", bac(t=0.0)]
+    stage = 1
+    packed = 0
+    for _ in range(3000):
+        r = rng.random()
+        if r < 0.04 and stage < 4:
+            stage += 1
+            out.append("race|%d" % stage)
+        elif r < 0.10:
+            packed += rng.choice((0, 133, 4000))
+            out.append(rtime(packed, rng.choice((70.0, 70.0, 45.5))))
+        elif r < 0.14:
+            out.append("rp|%d|%d|%d" % (rng.choice((1, 1, 2)),
+                                        rng.randrange(2), rng.randrange(5)))
+        elif r < 0.20:
+            out.append("dmg|%d|%s" % (rng.randrange(14), Fx(rng.choice((
+                0.0, 0.5, 1.0, 2.5, rng.uniform(0.0, 90.0))))))
+        elif r < 0.24:
+            k = rng.randrange(NCARS)
+            out.append(cidx(k, index=rng.randrange(14),
+                            dtype=rng.randrange(6),
+                            damage=int(rng.random() < 0.3)))
+        elif r < 0.30:
+            k = rng.randrange(NCARS)
+            out.append(car(k, player=int(rng.random() < 0.3),
+                           x=rng.uniform(-200, 200), y=rng.uniform(-200, 200),
+                           finish=rng.choice((0, 0, 0, 1, 5))))
+        elif r < 0.33:
+            out.append("pull|%d|%d" % (rng.randrange(NCARS),
+                                       int(rng.random() < 0.3)))
+        elif r < 0.36:
+            out.append("time|%s" % Fx(rng.choice((1.0 / 30, 1.0 / 30, 0.0,
+                                                  0.5, 2.0))))
+        elif r < 0.39:
+            out.append(bac(difficulty=rng.randrange(3),
+                           t=rng.choice((0.5, 3.0, 30.0)),
+                           said=rng.randrange(2), busted=rng.randrange(2),
+                           arrests=rng.randrange(5)))
+        elif r < 0.41:
+            out.append("cpur|0|%d" % rng.choice((-1, 0)))
+        elif r < 0.43:
+            out.append("land|%d|%d" % (rng.randrange(2), rng.randrange(12)))
+        else:
+            out.append("beacop")
+    return out
+
+
 def random_runs(rng):
     """A race over time: the cars move, the horn picks and the cop thinks,
     with the picks and timers carried on."""
@@ -486,7 +791,8 @@ def random_runs(rng):
 
 def script():
     return (select_cases() + think_cases() + change_cases()
-            + toggle_cases() + random_runs(random.Random(0x12a1)))
+            + toggle_cases() + random_runs(random.Random(0x12a1))
+            + beacop_cases() + beacop_runs(random.Random(0x12a2)))
 
 
 # ================================================================= running
@@ -659,6 +965,159 @@ MUTATIONS = [
      "    if (pCurrentRace->RaceStage < RACE_STAGE_COUNTDOWN)"),
     ("tg-off", P, "        tplayercop_change_chase_target((tPlayerCop *)c);",
      "        tplayercop_think((tPlayerCop *)c);"),
+    # ---- BeACopThink
+    ("bt-flyby", P, "    if (pCurrentRace->RaceStage == RACE_STAGE_FLYBY\n",
+     "    if (pCurrentRace->RaceStage == RACE_STAGE_NONE\n"),
+    ("bt-flyby-players", P, "        && TheRaceParameters.NumPlayerCars == 2 "
+     "&& m->New10488 == 0) {", "        && TheRaceParameters.NumPlayerCars "
+     "!= 1 && m->New10488 == 0) {"),
+    ("bt-busted-flag", P, "&& m->New10488 == 0) {", "&& 1) {"),
+    ("bt-busted-once", P, "        m->New10488 = 1;\n", ""),
+    ("bt-busted-call", P, "        play_busted_speech();\n", ""),
+    ("bt-prerace", P, "    if (pCurrentRace->RaceStage == RACE_STAGE_PRERACE\n",
+     "    if (pCurrentRace->RaceStage == RACE_STAGE_COUNTDOWN\n"),
+    ("bt-said-test", P, "        && m->bBeACopAlreadySaidLookOutForSpeeders "
+     "== 0) {", "        ) {"),
+    ("bt-said", P, "        m->bBeACopAlreadySaidLookOutForSpeeders = 1;\n",
+     ""),
+    ("bt-land-pos", P, "copmgr_find_landmark((const bVector2 *)"
+     "&car->State.Position);", "copmgr_find_landmark((const bVector2 *)"
+     "&car->State.Position.y);"),
+    ("bt-land-none", P, "lm != NULL ? lm->LandmarkType : 0);",
+     "lm != NULL ? lm->LandmarkType : -1);"),
+    ("bt-land-type", P, "lm != NULL ? lm->LandmarkType : 0);",
+     "lm != NULL ? 0 : 0);"),
+    ("bt-time-players", P, "        if (TheRaceParameters.NumPlayerCars == 2) "
+     "{\n            float laps", "        if (TheRaceParameters.NumPlayerCars "
+     "!= 1) {\n            float laps"),
+    ("bt-p2p", P, "            float laps = TheRaceParameters.Point2Point != 0",
+     "            float laps = TheRaceParameters.Point2Point == 1"),
+    ("bt-p2p-one", P, "                         ? 1.0f : (float)"
+     "TheRaceParameters.NumLapsInRace;", "                         ? 2.0f : "
+     "(float)TheRaceParameters.NumLapsInRace;"),
+    ("bt-laps", P, "                         ? 1.0f : (float)"
+     "TheRaceParameters.NumLapsInRace;", "                         ? 1.0f : "
+     "(float)TheRaceParameters.NumPlayerCars;"),
+    ("bt-scale", P, "#define BEACOP_TIME_SCALE   1.5f",
+     "#define BEACOP_TIME_SCALE   1.25f"),
+    ("bt-lap", P, "->TotalTimeAroundTrack * laps * BEACOP_TIME_SCALE;",
+     "->TotalTimeAroundTrack * BEACOP_TIME_SCALE;"),
+    ("bt-zero", P, "    timer_set_time(&zero, 0.0f);",
+     "    timer_set_time(&zero, 0.001f);"),
+    ("bt-clock-le", P, "    if (!((int32_t)zero.PackedTime\n          < "
+     "(int32_t)pCurrentRace", "    if (!((int32_t)zero.PackedTime\n          "
+     "<= (int32_t)pCurrentRace"),
+    ("bt-clock-unsigned", P, "    if (!((int32_t)zero.PackedTime\n          < "
+     "(int32_t)pCurrentRace->RaceTime.PackedTime))", "    if (!(zero.PackedTime"
+     "\n          < pCurrentRace->RaceTime.PackedTime))"),
+    ("bt-rc-null", P, "    if (rc != NULL && rc->FinishReason == 0) {",
+     "    if (rc->FinishReason == 0) {"),
+    ("bt-rc-finish", P, "    if (rc != NULL && rc->FinishReason == 0) {",
+     "    if (rc != NULL && rc->FinishReason <= 0) {"),
+    ("bt-pull-own", P, "            if (m->CarPullovers[i].bActive != 0 && i "
+     "!= car->CarIndex)", "            if (m->CarPullovers[i].bActive != 0)"),
+    ("bt-pull-n", P, "        for (i = 0; i < COPMANAGER_NUM_PULLOVERS; i++)",
+     "        for (i = 0; i < 7; i++)"),
+    ("bt-pull-field", P, "            if (m->CarPullovers[i].bActive != 0 && i "
+     "!= car->CarIndex)", "            if (m->CarPullovers[i].bPlayNIS != 0 "
+     "&& i != car->CarIndex)"),
+    ("bt-player", P, "        if (pl != NULL && pulled == 0) {",
+     "        if (pulled == 0) {"),
+    ("bt-pulled", P, "        if (pl != NULL && pulled == 0) {",
+     "        if (pl != NULL) {"),
+    ("bt-dt", P, "            m->fBeACopTime -= WorldTimeElapsed;",
+     "            m->fBeACopTime -= WorldTimeElapsedFrame;"),
+    ("bt-le", P, "            if (m->fBeACopTime <= 0.0f)",
+     "            if (m->fBeACopTime < 0.0f)"),
+    ("to-zero", P, "    m->fBeACopTime = 0.0f;\n    race_finish", "    "
+     "race_finish"),
+    ("to-pos", P, "    race_finish_car_by_car(pCurrentRace, car, -1, 0,",
+     "    race_finish_car_by_car(pCurrentRace, car, 0, 0,"),
+    ("to-reason", P, "car, -1, 0,\n                           "
+     "RACING_CAR_BE_THE_COP_LOST);\n    be_a_cop", "car, -1, 0,\n"
+     "                           RACING_CAR_BE_THE_COP_WON);\n    be_a_cop"),
+    ("to-missed", P, "    be_a_cop_arrest_speech(TheRaceParameters."
+     "NumPlayerCars, 1, 2,", "    be_a_cop_arrest_speech(TheRaceParameters."
+     "NumPlayerCars, 0, 2,"),
+    ("to-winner", P, "    be_a_cop_arrest_speech(TheRaceParameters."
+     "NumPlayerCars, 1, 2,", "    be_a_cop_arrest_speech(TheRaceParameters."
+     "NumPlayerCars, 1, 1,"),
+    ("to-arrests", P, "    be_a_cop_arrest_speech(TheRaceParameters."
+     "NumPlayerCars, 1, 2,\n                           m->"
+     "nBeACopNumArrestsMade);", "    be_a_cop_arrest_speech(TheRaceParameters."
+     "NumPlayerCars, 1, 2,\n                           m->"
+     "nBeACopNumChopperAttacks);"),
+    ("to-pursuit", P, "    if (cop->pMyPursuit != NULL) {", "    if (1) {"),
+    ("to-delete", P, "        copmanager_delete_pursuit(m, cop->pMyPursuit);"
+     "\n", ""),
+    ("to-letgo", P, "        tcop_set_pursuit(cop, NULL);\n", ""),
+    ("to-two", P, "    if (TheRaceParameters.NumPlayerCars == 2) {\n"
+     "        Car *other", "    if (0) {\n        Car *other"),
+    ("to-other", P, "        Car *other = pCurrentWorld->CarTable[1];",
+     "        Car *other = pCurrentWorld->CarTable[2];"),
+    ("to-other-done", P, "        if (other != NULL && other->pRacingCar->"
+     "FinishReason == 0)", "        if (other != NULL)"),
+    ("to-other-reason", P, "            race_finish_car_by_car(pCurrentRace, "
+     "other, -1, 0,\n                                   "
+     "RACING_CAR_BE_THE_COP_LOST);", "            race_finish_car_by_car("
+     "pCurrentRace, other, -1, 0,\n                                   "
+     "RACING_CAR_BE_THE_COP_WON);"),
+    ("wr-threshold", P, "#define WRECKED             1.0f",
+     "#define WRECKED             1.0000001f"),
+    ("wr-lt", P, "        if (!(WRECKED <= *dmg))",
+     "        if (!(WRECKED < *dmg))"),
+    ("wr-nan", P, "        if (!(WRECKED <= *dmg))",
+     "        if (*dmg < WRECKED)"),
+    ("wr-index", P, "        float *dmg = &m->fCarDamage[c->CarIndex];",
+     "        float *dmg = &m->fCarDamage[i];"),
+    ("wr-n", P, "    for (i = 0; i < pCurrentWorld->CopCarPos; i++) {\n"
+     "        Car   *c", "    for (i = 0; i <= pCurrentWorld->CopCarPos "
+     "&& i < 8; i++) {\n        Car   *c"),
+    ("wr-damage", P, "        if (c->pCarDamage != NULL) {", "        if (0) {"),
+    ("wr-damage-arg", P, "            gCarDamageWreckFn(c->pCarDamage);",
+     "            gCarDamageWreckFn(c);"),
+    ("wr-type", P, "        if (c->MyDriver->TheDriverType == "
+     "DRIVER_TYPE_AI_RACER) {\n            force_boost", "        if "
+     "(c->MyDriver->TheDriverType == DRIVER_TYPE_COP) {\n            force_boost"),
+    ("wr-boost0", P, "BeACopWreckBoost[3] = { 0.3f, 0.4f, 0.5f };",
+     "BeACopWreckBoost[3] = { 0.25f, 0.4f, 0.5f };"),
+    ("wr-boost1", P, "BeACopWreckBoost[3] = { 0.3f, 0.4f, 0.5f };",
+     "BeACopWreckBoost[3] = { 0.3f, 0.45f, 0.5f };"),
+    ("wr-boost2", P, "BeACopWreckBoost[3] = { 0.3f, 0.4f, 0.5f };",
+     "BeACopWreckBoost[3] = { 0.3f, 0.4f, 0.6f };"),
+    ("wr-difficulty", P, "                        BeACopWreckBoost[m->"
+     "nDifficultyLevel]);", "                        BeACopWreckBoost[0]);"),
+    ("wr-this", P, "    ((ForceBoostFn)e->fn)(vt_this(ctl, e), f);",
+     "    ((ForceBoostFn)e->fn)(ctl, f);"),
+    ("wr-player", P, "        } else if (c->pPlayer != NULL && c != car) {",
+     "        } else if (c != car) {"),
+    ("wr-mine", P, "        } else if (c->pPlayer != NULL && c != car) {",
+     "        } else if (c->pPlayer != NULL) {"),
+    ("wr-dboost", P, "#define WRECK_DAMAGE_BOOST  0.75f",
+     "#define WRECK_DAMAGE_BOOST  0.8f"),
+    ("wr-dboost-off", P, "            c->fDamageBoostOverride = "
+     "WRECK_DAMAGE_BOOST;\n", ""),
+    ("wr-traction", P, "#define WRECK_TRACTION      0.0125f",
+     "#define WRECK_TRACTION      0.0126f"),
+    ("wr-traction-1", P, "            c->fTractionBoostOverride = 1.0f - *dmg "
+     "* WRECK_TRACTION;", "            c->fTractionBoostOverride = 0.9f - "
+     "*dmg * WRECK_TRACTION;"),
+    ("wr-traction-off", P, "            c->fTractionBoostOverride = 1.0f - "
+     "*dmg * WRECK_TRACTION;\n", ""),
+    ("end-two", P, "    if (TheRaceParameters.NumPlayerCars == 2) {\n"
+     "        Car *first", "    if (1) {\n        Car *first"),
+    ("end-first", P, "        if (first->pRacingCar->FinishReason == 0\n",
+     "        if (1\n"),
+    ("end-second", P, "            && second->pRacingCar->FinishReason != 0) {",
+     "            && second->pRacingCar->FinishReason > 0) {"),
+    ("end-first-index", P, "        Car *first = pCurrentWorld->CarTable[0];",
+     "        Car *first = pCurrentWorld->CarTable[2];"),
+    ("end-finish", P, "            race_finish_car_by_car(pCurrentRace, first, "
+     "-1, 0,", "            race_finish_car_by_car(pCurrentRace, second, "
+     "-1, 0,"),
+    ("end-speech", P, "            be_a_cop_arrest_speech(TheRaceParameters."
+     "NumPlayerCars, 0, 2,", "            be_a_cop_arrest_speech("
+     "TheRaceParameters.NumPlayerCars, 1, 2,"),
 ]
 
 EQUIVALENT = {

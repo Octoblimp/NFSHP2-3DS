@@ -5,17 +5,27 @@
 #include <math.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "car.h"
+#include "carcontroller.h"
 #include "chopper.h"
+#include "copmgr.h"
 #include "playerhud.h"
 #include "playerinit.h"
 #include "pursuit.h"
 #include "pursuitspeech.h"
 #include "race.h"
+#include "racecore.h"
+#include "racespeech.h"
+#include "raceupdate.h"
 #include "rcstates.h"
 #include "realtime.h"
+#include "speechmgr.h"
+#include "timer.h"
+#include "vtable.h"
 #include "world.h"
 
 #define PICKS               2
@@ -25,6 +35,18 @@
 #define CHASE_SCORE         185.0f      // 43390000
 #define CHASE_AHEAD         10000       // IsCarInFront's BAM
 #define CHOPPER_SPENT       4           // salvos before it is let go
+
+#define BEACOP_TIME_SCALE   1.5f        // 3fc00000, a lap's time to the clock
+#define WRECKED             1.0f        // fCarDamage from which a car is wrecked
+#define WRECK_TRACTION      0.0125f     // gp-27084, 3c4ccccd
+#define WRECK_DAMAGE_BOOST  0.75f       // 3f400000
+
+// 0x002bd238, by nDifficultyLevel: the ForceBoost of a wrecked AI racer.
+// It is MonitorSpikeBelts' table too (spikestrip.c's BeACopSpikeBoost).
+// The image copies all three to the stack and indexes the copy, unchecked.
+static const float BeACopWreckBoost[3] = { 0.3f, 0.4f, 0.5f };
+
+typedef void (*ForceBoostFn)(void *self, float f);
 
 // Car+2056 as retail stores it and reads it, a word: CopLights and the
 // three bytes after.
@@ -162,6 +184,131 @@ struct Car *tplayercop_select_car_to_chase(tPlayerCop *c)
     c->fPrevSelectionTimer[1] = c->fPrevSelectionTimer[0];
     c->fPrevSelectionTimer[0] = PICK_HOLD;
     return pCurrentWorld->CarTable[best];
+}
+
+static void force_boost(CarController *ctl, float f)
+{
+    const VtEntry *e = vt_slot(ctl->_vtable, CARCONTROLLER_VT_FORCE_BOOST);
+
+    ((ForceBoostFn)e->fn)(vt_this(ctl, e), f);
+}
+
+// The clock ran out: the cop's car (and in a race of two players the
+// speeder's) loses, the chase is over.
+static void time_out(tCopManager *m, tCop *cop, Car *car)
+{
+    m->fBeACopTime = 0.0f;
+    race_finish_car_by_car(pCurrentRace, car, -1, 0,
+                           RACING_CAR_BE_THE_COP_LOST);
+    be_a_cop_arrest_speech(TheRaceParameters.NumPlayerCars, 1, 2,
+                           m->nBeACopNumArrestsMade);
+    if (cop->pMyPursuit != NULL) {
+        copmanager_delete_pursuit(m, cop->pMyPursuit);
+        tcop_set_pursuit(cop, NULL);
+    }
+    if (TheRaceParameters.NumPlayerCars == 2) {
+        Car *other = pCurrentWorld->CarTable[1];
+
+        if (other != NULL && other->pRacingCar->FinishReason == 0)
+            race_finish_car_by_car(pCurrentRace, other, -1, 0,
+                                   RACING_CAR_BE_THE_COP_LOST);
+    }
+}
+
+void copmanager_be_a_cop_think(tCopManager *m)
+{
+    tCop      *cop;
+    Car       *car;
+    RacingCar *rc;
+    Player    *pl;
+    Timer      zero;
+    int32_t    i;
+
+    // Retail reads Cops[-1] with no player cop, and nothing makes a Be A
+    // Cop race without one.
+    if (m->nPlayerCopIndex < 0)
+        return;
+    cop = m->Cops[m->nPlayerCopIndex];
+    car = cop->pMyCar;
+    rc = car->pRacingCar;
+    pl = car->pPlayer;
+    if (pCurrentRace->RaceStage == RACE_STAGE_FLYBY
+        && TheRaceParameters.NumPlayerCars == 2 && m->New10488 == 0) {
+        m->New10488 = 1;
+        play_busted_speech();
+    }
+    if (pCurrentRace->RaceStage == RACE_STAGE_PRERACE
+        && m->bBeACopAlreadySaidLookOutForSpeeders == 0) {
+        const Landmark *lm;
+
+        m->bBeACopAlreadySaidLookOutForSpeeders = 1;
+        lm = copmgr_find_landmark((const bVector2 *)&car->State.Position);
+        speechmgr_raise_dispatch_be_on_lookout(
+            speechmgr_get_instance(), lm != NULL ? lm->LandmarkType : 0);
+        if (TheRaceParameters.NumPlayerCars == 2) {
+            float laps = TheRaceParameters.Point2Point != 0
+                         ? 1.0f : (float)TheRaceParameters.NumLapsInRace;
+
+            m->fBeACopTime = pCurrentRace->pTimeAroundTrackTable
+                             ->TotalTimeAroundTrack * laps * BEACOP_TIME_SCALE;
+        }
+    }
+    timer_set_time(&zero, 0.0f);
+    if (!((int32_t)zero.PackedTime
+          < (int32_t)pCurrentRace->RaceTime.PackedTime))
+        return;
+
+    // The clock runs while the cop races and no other car is pulled over.
+    if (rc != NULL && rc->FinishReason == 0) {
+        int32_t pulled = 0;
+
+        for (i = 0; i < COPMANAGER_NUM_PULLOVERS; i++)
+            if (m->CarPullovers[i].bActive != 0 && i != car->CarIndex)
+                pulled = 1;
+        if (pl != NULL && pulled == 0) {
+            m->fBeACopTime -= WorldTimeElapsed;
+            if (m->fBeACopTime <= 0.0f)
+                time_out(m, cop, car);
+        }
+    }
+
+    // Each wrecked car: an AI racer slows, another player's car grips less.
+    for (i = 0; i < pCurrentWorld->CopCarPos; i++) {
+        Car   *c = pCurrentWorld->CarTable[i];
+        float *dmg = &m->fCarDamage[c->CarIndex];
+
+        if (!(WRECKED <= *dmg))
+            continue;
+        if (c->pCarDamage != NULL) {
+            if (gCarDamageWreckFn == NULL) {
+                fprintf(stderr, "playercop: CarDamage's wreck (0x001b5bc8) "
+                        "is not ported\n");
+                abort();
+            }
+            gCarDamageWreckFn(c->pCarDamage);
+        }
+        if (c->MyDriver->TheDriverType == DRIVER_TYPE_AI_RACER) {
+            force_boost(c->pCarController,
+                        BeACopWreckBoost[m->nDifficultyLevel]);
+        } else if (c->pPlayer != NULL && c != car) {
+            c->fDamageBoostOverride = WRECK_DAMAGE_BOOST;
+            c->fTractionBoostOverride = 1.0f - *dmg * WRECK_TRACTION;
+        }
+    }
+
+    // Two players: the speeder done and the cop not, the cop has lost.
+    if (TheRaceParameters.NumPlayerCars == 2) {
+        Car *first = pCurrentWorld->CarTable[0];
+        Car *second = pCurrentWorld->CarTable[1];
+
+        if (first->pRacingCar->FinishReason == 0
+            && second->pRacingCar->FinishReason != 0) {
+            race_finish_car_by_car(pCurrentRace, first, -1, 0,
+                                   RACING_CAR_BE_THE_COP_LOST);
+            be_a_cop_arrest_speech(TheRaceParameters.NumPlayerCars, 0, 2,
+                                   m->nBeACopNumArrestsMade);
+        }
+    }
 }
 
 void copmanager_be_a_cop_toggle_siren_and_lights(tCopManager *m)

@@ -5726,6 +5726,9 @@ int main(int argc, char** argv)
     gPlayerCopThinkFn = tplayercop_think;
     gCopManagerBeACopToggleSirenAndLightsFn =
         copmanager_be_a_cop_toggle_siren_and_lights;
+    // And the manager's side (12m-2): the clock and its end, the
+    // dispatch's call and the wrecked cars.
+    gCopManagerBeACopThinkFn = copmanager_be_a_cop_think;
     gPursuitUpdateFn            = tpursuit_update;
     gPursuitCreateRoadBlockFn   = tpursuit_create_road_block;
     gRealDriverForceEBrakeStopFn = realdriver_force_ebrake_stop;

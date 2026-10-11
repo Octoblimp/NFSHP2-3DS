@@ -3,8 +3,9 @@
 // Runs playercop.c over the checker's script. Everything it calls is a
 // stub here that logs its arguments and answers from the script, as the
 // model's stubs do. Pointers print as names: M the manager, A0.. cars,
-// P0.. their players, C0.. cops, U0.. pursuits, H the helicopter and S the
-// sample; anything else is "?".
+// P0.. their players, C0.. cops, U0.. pursuits, H the helicopter, S the
+// sample, R the race, SM the speech manager, D0.. the cars' CarDamage and
+// K0..+16 their controllers as ForceBoost gets them; anything else is "?".
 //
 //     playercop_test script.txt > out.txt
 
@@ -14,22 +15,32 @@
 #include <string.h>
 
 #include "car.h"
+#include "carcontroller.h"
 #include "chopper.h"
 #include "cop.h"
 #include "copmanager.h"
+#include "copmgr.h"
 #include "playerhud.h"
 #include "playerinit.h"
 #include "playercop.h"
 #include "pursuit.h"
 #include "pursuitspeech.h"
 #include "race.h"
+#include "racecore.h"
+#include "racespeech.h"
+#include "raceupdate.h"
 #include "rcstates.h"
 #include "realtime.h"
+#include "speechmgr.h"
+#include "vtable.h"
 #include "world.h"
 
 #define NCARS  8
 #define NCOPS  3
 #define NP     3
+
+#define FAKE_VT     0x00500000u
+#define BOOST_DELTA 16
 
 static uint32_t fb(float f)
 {
@@ -54,8 +65,10 @@ World       *pCurrentWorld;
 Race        *pCurrentRace;
 float        WorldTimeElapsed;
 float        WorldTimeElapsedFrame;
+RaceParameters TheRaceParameters;
 struct bSample *(*gGetInGameSampleFn)(const char *name);
 void (*gSamplePlayFn)(struct bSample *s, float volume, float a, float b);
+void (*gCarDamageWreckFn)(void *damage);
 
 static tCopManager    mgr;
 static World          world;
@@ -67,6 +80,17 @@ static tPlayerCop     cops[NCOPS];
 static tPursuit       ps[NP];
 static struct Chopper chopper;
 static char           sample[16];
+static TimeAroundTrackTable tatt;
+static Landmark       landmark;
+static char           speechmgr[16];
+static DriverInfo     drivers[NCARS];
+static char           damages[NCARS][16];
+static union {
+    CarController c;
+    uint8_t       b[64];
+} ctls[NCARS];
+static VtEntry boost_vt[VT_SLOT(CARCONTROLLER_VT_FORCE_BOOST) + 1];
+static int     landmark_on;
 
 static int     nis[NCARS], blink[NCARS], front[NCARS];
 static int     sample_on = 1;
@@ -87,6 +111,10 @@ static const char *sym(const void *p)
         return "H";
     if (p == (const void *)sample)
         return "S";
+    if (p == &race)
+        return "R";
+    if (p == (const void *)speechmgr)
+        return "SM";
     for (i = 0; i < NCARS; i++) {
         if (p == &cars[i]) {
             snprintf(b, 16, "A%d", i);
@@ -94,6 +122,14 @@ static const char *sym(const void *p)
         }
         if (p == (const void *)players[i]) {
             snprintf(b, 16, "P%d", i);
+            return b;
+        }
+        if (p == (const void *)damages[i]) {
+            snprintf(b, 16, "D%d", i);
+            return b;
+        }
+        if (p == (const void *)(ctls[i].b + BOOST_DELTA)) {
+            snprintf(b, 16, "K%d+%d", i, BOOST_DELTA);
             return b;
         }
     }
@@ -183,6 +219,65 @@ static void play(struct bSample *s, float volume, float a, float b)
            (unsigned)fb(a), (unsigned)fb(b));
 }
 
+void play_busted_speech(void)
+{
+    printf("  busted\n");
+}
+
+void be_a_cop_arrest_speech(int32_t players, int32_t missed, int32_t winner,
+                            int32_t arrests)
+{
+    printf("  copspeech %d %d %d %d\n", (int)players, (int)missed,
+           (int)winner, (int)arrests);
+}
+
+Landmark *copmgr_find_landmark(const bVector2 *pos)
+{
+    Landmark *r = landmark_on ? &landmark : NULL;
+
+    printf("  landmark %08x %08x -> %s\n", (unsigned)fb(pos->x),
+           (unsigned)fb(pos->y), r != NULL ? "L" : "0");
+    return r;
+}
+
+SpeechMgr *speechmgr_get_instance(void)
+{
+    return (SpeechMgr *)(void *)speechmgr;
+}
+
+void speechmgr_raise_dispatch_be_on_lookout(SpeechMgr *m, int32_t location)
+{
+    printf("  lookout %s %d\n", sym(m), (int)location);
+}
+
+void race_finish_car_by_car(Race *r, struct Car *car, int32_t position,
+                            int32_t blink, eRaceFinishReason reason)
+{
+    printf("  finish %s %s %d %d %d\n", sym(r), sym(car), (int)position,
+           (int)blink, (int)reason);
+}
+
+void copmanager_delete_pursuit(tCopManager *m, tPursuit *p)
+{
+    printf("  delete %s %s\n", sym(m), sym(p));
+}
+
+// Retail's runs as it is, a store.
+void tcop_set_pursuit(tCop *c, tPursuit *p)
+{
+    c->pMyPursuit = p;
+}
+
+static void wreck(void *damage)
+{
+    printf("  wreck %s\n", sym(damage));
+}
+
+static void boost(void *self, float f)
+{
+    printf("  boost %s %08x\n", sym(self), (unsigned)fb(f));
+}
+
 // ---------------------------------------------------------------- dumps
 
 static uint32_t lights_word(const Car *c)
@@ -204,6 +299,21 @@ static void cdump(int j)
            (unsigned)fb(c->fPrevSelectionTimer[1]),
            car != NULL ? (unsigned)lights_word(car) : 0u,
            car != NULL ? (int)car->TheSirenMode : 0);
+}
+
+static void bdump(void)
+{
+    int k;
+
+    printf("beacop time %08x said %d busted %d pursuits %s %s %s\n",
+           (unsigned)fb(mgr.fBeACopTime),
+           (int)mgr.bBeACopAlreadySaidLookOutForSpeeders, (int)mgr.New10488,
+           sym(cops[0].Base.pMyPursuit), sym(cops[1].Base.pMyPursuit),
+           sym(cops[2].Base.pMyPursuit));
+    for (k = 0; k < NCARS; k++)
+        printf("A%d traction %08x damage %08x\n", k,
+               (unsigned)fb(cars[k].fTractionBoostOverride),
+               (unsigned)fb(cars[k].fDamageBoostOverride));
 }
 
 // ------------------------------------------------------------- the script
@@ -262,7 +372,7 @@ static void run(char **t, int n)
 
         world.CopCarPos = ix(t[1]);
         for (i = 2; i < n; i++)
-            world.CarTable[i - 2] = &cars[ix(t[i])];
+            world.CarTable[i - 2] = ix(t[i]) >= 0 ? &cars[ix(t[i])] : NULL;
     } else if (strcmp(o, "time") == 0) {
         WorldTimeElapsed = bf(hx(t[1]));
     } else if (strcmp(o, "pull") == 0) {
@@ -295,6 +405,42 @@ static void run(char **t, int n)
         mgr.Cops[4] = j >= 0 ? &cops[j].Base : NULL;
     } else if (strcmp(o, "race") == 0) {
         race.RaceStage = (eRaceStage)hx(t[1]);
+    } else if (strcmp(o, "cidx") == 0) {
+        // cidx|k|index|drivertype|damage|racingcar
+        int k = ix(t[1]);
+
+        cars[k].CarIndex = (int16_t)ix(t[2]);
+        drivers[k].TheDriverType = (DriverType)hx(t[3]);
+        cars[k].pCarDamage = hx(t[4]) ? (CarDamage *)(void *)damages[k]
+                                      : NULL;
+        cars[k].pRacingCar = hx(t[5]) ? &rcs[k] : NULL;
+    } else if (strcmp(o, "boosts") == 0) {
+        int k = ix(t[1]);
+
+        cars[k].fTractionBoostOverride = bf(hx(t[2]));
+        cars[k].fDamageBoostOverride = bf(hx(t[3]));
+    } else if (strcmp(o, "dmg") == 0) {
+        mgr.fCarDamage[ix(t[1])] = bf(hx(t[2]));
+    } else if (strcmp(o, "bac") == 0) {
+        // bac|difficulty|time|said|busted|arrests
+        mgr.nDifficultyLevel = (int32_t)hx(t[1]);
+        mgr.fBeACopTime = bf(hx(t[2]));
+        mgr.bBeACopAlreadySaidLookOutForSpeeders = (int32_t)hx(t[3]);
+        mgr.New10488 = (int32_t)hx(t[4]);
+        mgr.nBeACopNumArrestsMade = (int32_t)hx(t[5]);
+    } else if (strcmp(o, "rp") == 0) {
+        TheRaceParameters.NumPlayerCars = (int32_t)hx(t[1]);
+        TheRaceParameters.Point2Point = (int32_t)hx(t[2]);
+        TheRaceParameters.NumLapsInRace = (int32_t)hx(t[3]);
+    } else if (strcmp(o, "rtime") == 0) {
+        race.RaceTime.PackedTime = hx(t[1]);
+        tatt.TotalTimeAroundTrack = bf(hx(t[2]));
+    } else if (strcmp(o, "land") == 0) {
+        landmark_on = (int)hx(t[1]);
+        landmark.LandmarkType = (int32_t)hx(t[2]);
+    } else if (strcmp(o, "beacop") == 0) {
+        copmanager_be_a_cop_think(&mgr);
+        bdump();
     } else if (strcmp(o, "sample") == 0) {
         sample_on = (int)hx(t[1]);
     } else if (strcmp(o, "request") == 0) {
@@ -348,8 +494,18 @@ int main(int argc, char **argv)
     mgr.nPlayerCopIndex = -1;
     gGetInGameSampleFn = get_sample;
     gSamplePlayFn = play;
-    for (k = 0; k < NCARS; k++)
+    gCarDamageWreckFn = wreck;
+    race.pTimeAroundTrackTable = &tatt;
+    for (k = 0; k < NCARS; k++) {
         cars[k].pRacingCar = &rcs[k];
+        cars[k].MyDriver = &drivers[k];
+        cars[k].pCarController = &ctls[k].c;
+        ctls[k].c._vtable = FAKE_VT;
+    }
+    boost_vt[VT_SLOT(CARCONTROLLER_VT_FORCE_BOOST)].delta = BOOST_DELTA;
+    boost_vt[VT_SLOT(CARCONTROLLER_VT_FORCE_BOOST)].fn = (VtFn)boost;
+    vt_install(FAKE_VT, boost_vt,
+               (int)(sizeof boost_vt / sizeof boost_vt[0]));
     while (fgets(line, sizeof line, f) != NULL) {
         char *e = line + strlen(line);
         int n;

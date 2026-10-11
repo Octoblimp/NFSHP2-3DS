@@ -20389,3 +20389,31 @@ and green, where the first visit had shown the brushed-metal turntable.
   `pursuit-speech.md`, "The change of target".
 - **Next.** 12m-2, BeACopThink: the clock, the time-out, the Busted and
   Be On Lookout speech and the wrecked speeders.
+
+## Session 76, continued -- 12m-2, the manager's BeACopThink (done)
+
+- **Ported.** `playercop.c`'s `copmanager_be_a_cop_think`,
+  tCopManager::BeACopThink (`0x00227f30`), bound by main.c to
+  `gCopManagerBeACopThinkFn`. It does the fly-by's Busted speech (two
+  players) and the pre-race's Be On Lookout at the cop's landmark. With
+  two players it sets the clock (the lap time x laps x 1.5). Once the
+  race clock runs it counts Time Left down while the cop races and
+  nothing else is pulled over. At 0 the cop finishes BE_THE_COP_LOST,
+  the speech plays, and the chase is deleted. Wrecked cars (fCarDamage
+  1 or more) are slowed: an AI racer ForceBoosts by difficulty, and
+  another player's car loses grip. With two players the cop loses once
+  the speeder finishes. GetBeACopTime and GetBeACopSpeaker are one-load
+  getters with no caller, so nothing to port.
+- **The checker.** `tools/playercop_check.py` runs BeACopThink:
+  38434 lines, 0 differ. Of 128 mutations, 126 are caught; the 68 new
+  ones are all caught, and the 2 equivalent ones are 12m-1's.
+- **Checked.** build_cia.ps1 built clean (relocations OK, shaders OK).
+  On Azahar (on AC), the SkipFE Be A Cop race in car 33, gas only with
+  the horn every 4 s: 30 fps, Speed 100%, Time Left counting down (282,
+  then 262). The big faded number over the speedo is retail's speed pop
+  (pFlailerSpeedString2 as the speed passes each 50 from 100), not a
+  fault.
+- **Docs.** `docs/formats/cops.md`, "BeACopThink"; `cop-manager.md`'s
+  seam table.
+- **Next.** 12m-3, the controls: in Be A Cop the D-Pad calls the cop's
+  options, and the Circle Pad steers.

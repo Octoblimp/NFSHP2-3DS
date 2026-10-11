@@ -256,7 +256,7 @@ that does nothing (or returns 0) while NULL:
 | SpawnSpeedTraps | `0x00224a20` | `gCopManagerSpawnSpeedTrapsFn` | 12j-1, bound (below) |
 | MonitorSpikeBelts | `0x00227758` | `gCopManagerMonitorSpikeBeltsFn` | 12j-2a, bound (below) |
 | EndPullover | `0x00225878` | `gCopManagerEndPulloverFn` | 12l, bound ([pullover](pullover.md)) |
-| BeACopThink | `0x00227f30` | `gCopManagerBeACopThinkFn` | 12m |
+| BeACopThink | `0x00227f30` | `gCopManagerBeACopThinkFn` | 12m-2, bound ([cops](cops.md), "BeACopThink") |
 
 tPursuit's fields from 1104 on are 380 bytes further on in retail than
 in the demo; the chopper's state is 384 further on. `copmanager.h` has

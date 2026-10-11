@@ -6,7 +6,7 @@ A SkipFE Be A Cop race (`SkipFEBeACop 1` and `DefaultPlayer1CarType
 33`, the CORVETTECOP, parked on the SD card as
 `nfshp2_config.txt.beacop`; copy it to `nfshp2_config.txt` for a run and
 delete that after) runs at 30 fps. Since 12m-1 the horn (3DS X, Azahar
-key 90) opens a chase, but Time Left stays at 300. Ported already: tPursuit's Be A Cop branches
+key 90) opens a chase, and since 12m-2 Time Left counts down. Ported already: tPursuit's Be A Cop branches
 (the catch speeds, the roadblock count, the arrests' speech), the
 requests for a roadblock and the chopper (pursuitchopper.c), the
 cop's HUD (hudcop.c, hudrender.c, hudscore.c), the setup screens
@@ -17,11 +17,11 @@ cop's HUD (hudcop.c, hudrender.c, hudscore.c), the setup screens
   and the horn's BeACopToggleSirenAndLights (`0x002289b8`), in
   `playercop.c` (`docs/formats/cops.md`, "Be A Cop's player cop").
   DoSnapshot (`0x0022d7e8`) is the replay's and waits for it.
-- **12m-2** tCopManager::BeACopThink (`0x00227f30`,
-  `gCopManagerBeACopThinkFn`): the clock (fBeACopTime from the race's
-  limit, x1.5), the time-out finish, the Busted and Be On Lookout
-  speech, and each wrecked speeder. With it the small ones:
-  GetBeACopSpeaker (`0x00228d78`) and GetBeACopTime (`0x00228e10`).
+- **12m-2 (done)** tCopManager::BeACopThink (`0x00227f30`,
+  `gCopManagerBeACopThinkFn`) in `playercop.c`: the clock, the
+  time-out finish, the Busted and Be On Lookout speech, and each
+  wrecked speeder (`docs/formats/cops.md`, "BeACopThink").
+  GetBeACopSpeaker and GetBeACopTime are getters with no caller.
 - **12m-3** The controls, the user's plan of 2026-10-08: in Be A Cop
   the D-Pad calls the cop's options (the helicopter, the roadblock)
   and only the Circle Pad steers. Retail's are TRIANGLE + L2 and

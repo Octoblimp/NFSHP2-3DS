@@ -2,6 +2,8 @@
 // (0x0022d5c8), ChangeChaseTarget (0x0022d700) and SelectCarToChase
 // (0x0022d898), from retail's cop.obj, and the horn's
 // tCopManager::BeACopToggleSirenAndLights (0x002289b8), copmgr.obj's.
+// With them the manager's BeACopThink (0x00227f30, 12m-2): Be A Cop's
+// clock and its end, the dispatch's call, and the wrecked cars.
 //
 // The player's car is the cop's. The horn picks the speeder to chase: the
 // nearest car ahead within 175 m (or any within 20 m), the last two picks
@@ -13,7 +15,8 @@
 // four salvos.
 //
 // They sit apart from cop.c, whose harness does not link the speech and
-// the samples. main.c binds them to cop.c's and realdriver.c's seams.
+// the samples. main.c binds them to cop.c's, copmgr.c's and realdriver.c's
+// seams.
 //
 // Cross-check: tools/playercop_check.py. Write-up: docs/formats/cops.md,
 // "Be A Cop's player cop".
@@ -58,5 +61,32 @@ struct Car *tplayercop_select_car_to_chase(tPlayerCop *c);
 // ChangeChaseTarget while pCurrentRace is RACE_STAGE_RACING. Retail
 // passes NULL when there is no player cop, and the port does nothing.
 void copmanager_be_a_cop_toggle_siren_and_lights(tCopManager *m);
+
+// tCopManager::BeACopThink, 0x00227f30, the manager Think's last step in
+// Be A Cop (copmgr.h's gCopManagerBeACopThinkFn). The player cop is
+// Cops[nPlayerCopIndex]; the port returns without one.
+//
+// 1. In the fly-by of a race of two players, once (New10488),
+//    PlayBustedSpeech.
+// 2. In the pre-race, once (bBeACopAlreadySaidLookOutForSpeeders), the
+//    dispatch's Be On Lookout at the landmark the cop's car is in (0 for
+//    none). With two players the clock is set: the track's
+//    TotalTimeAroundTrack, by 1 for a point to point or the laps, by 1.5.
+// 3. Nothing more until the race clock (RaceTime) is above 0.
+// 4. While the cop's car races (a racing car, not finished), with its
+//    player, and no pullover active but its own car's slot: the clock
+//    counts down by WorldTimeElapsed. At 0 or under it is 0, the car
+//    finishes BE_THE_COP_LOST, the speech is the time-out's (players, 1,
+//    2, arrests), the cop's chase is deleted and let go, and with two
+//    players the speeder (CarTable[1]), unfinished, finishes the same.
+// 5. Each car before CopCarPos whose fCarDamage is 1 or more: its
+//    CarDamage wrecked (aborts while that is not ported); an AI racer
+//    ForceBoosts 0.3, 0.4 or 0.5 by nDifficultyLevel; another player's car
+//    (not the cop's) gets a damage boost of 0.75 and a traction boost of
+//    1 - damage / 80.
+// 6. With two players, the speeder (CarTable[1]) finished and the cop
+//    (CarTable[0]) not: the cop finishes BE_THE_COP_LOST, the speech
+//    (2, 0, 2, arrests).
+void copmanager_be_a_cop_think(tCopManager *m);
 
 #endif
