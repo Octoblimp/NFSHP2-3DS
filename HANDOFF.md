@@ -19850,3 +19850,53 @@ Picked up from Session 64's steps:
 - Built clean. Not yet seen in Azahar; the RE-4 runs, which finish the
   race, will show the menu as Restart Race, View Lap Times and Quit
   Race.
+
+## Session 70, continued -- RE-4, the post-race camera
+
+- `democam.{c,h}`: DemoCameraCoordinator (0x0019a440 .. 0x0019abd8), the
+  near-plane test it asks (0x001044c8, no symbol) and
+  Player::BeginDemoCameras (0x00176868).
+  - The coordinator puts the track's highlight cameras on one car: the
+    first in the bundle's order whose area holds the car and which faces
+    the car's way. It keeps one at least 56 world frames.
+  - A camera within 2 m of a car (5 m for one just built), or whose near
+    plane cuts the car's box, is dropped. With no highlight, the car gets
+    a drive camera: a random POV of its own, looking back every other
+    time.
+  - Highlight types 0, 1 and 2 build TrackCar, Bumper and TrackFly
+    movers. Retail reads through NULL on any other type; the disc has
+    none, and the port falls back to the drive camera.
+- PostRaceCameraCoordinator (0x0019b280 .. 0x0019b4ac) is dead in
+  retail: no call and no pointer reaches its constructor. Not ported.
+- `tools/democam_check.py` with `tools/src/democam_test.c`: 29860 ops,
+  124255 lines, 0 differ.
+  - The model must run eMath's static initialiser (0x0011bf70) first:
+    retail's eMulVector adds the input into the constant at 0x002dc400,
+    (0,0,0,1), which is zero until then. Without it the near-plane test
+    saw boxes in front as cut.
+  - 152 mutations: 149 caught and 3 equivalent (the destructor's table
+    store, twice, and clearing the mover after the delete).
+  - Two survivors needed new cases. A corner exactly on the plane makes
+    the corners' order matter, since a sign change across a 0 is missed.
+    And `Backwards` of 7 and -1, on areas no earlier highlight holds.
+- main.c binds `gDemoCameraCoordinatorCtorFn`,
+  `gPlayerBeginDemoCamerasFn`, and wrappers for
+  `gTrackCarCameraMoverFn` and `gDriveCameraMoverFn`. A static check
+  holds the two movers within retail's 1136 and 1008 bytes.
+- Azahar, on AC, with a test-only hook that finished the player early
+  and logged each demo mover (removed, rebuilt clean):
+  - Finished at the wall at x -180, where no highlight holds the car:
+    the drive camera, POV 1, looking back.
+  - Finished early, the car braked to a stop at x -87 inside highlight 0:
+    a trackside TrackCar shot 17 m off behind Race Results, whose best
+    lap reads 1:00.00.
+  - Finished on the start line: highlight 38, from in front by the
+    bridge.
+  - The End Game Menu lists Restart Race, View Lap Times and Quit Race,
+    so View Replay is hidden as the last entry meant.
+  - Azahar's speed read 53-58% behind the end screens on some runs and
+    102-107% on others. The port's own log held 30 fps throughout, so
+    the drop was the host.
+- Docs: "The demo camera" in docs/formats/camera-coordinator.md, and
+  cameracoord.h's header now points at democam.h. Next: RE-5, 14-10c,
+  the race's speech.

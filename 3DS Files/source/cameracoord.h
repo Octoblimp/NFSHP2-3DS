@@ -19,8 +19,9 @@
 //
 // FlyByCameraCoordinator is here too, building its movers through
 // gTrackFlyCameraMoverFn, and PreRaceCameraCoordinator, building its
-// through gBumperCameraMoverFn. Not ported here: the Demo, PostRace and
-// NIS coordinators (0x0019a440 .. 0x0019b6a4). Written up in
+// through gBumperCameraMoverFn. DemoCameraCoordinator is in democam.h;
+// the NIS coordinator is not ported, and nothing builds the PostRace one.
+// Written up in
 // docs/formats/camera-coordinator.md and checked on retail's image by
 // tools/cameracoord_check.py.
 #ifndef CAMERACOORD_H

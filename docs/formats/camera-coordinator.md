@@ -16,12 +16,14 @@ Step 11g-2c-1 ported part of it, in `3DS Files/source/cameracoord.c`:
 - `CountdownCameraCoordinator`.
 
 11g-2c-2a added `FlyByCameraCoordinator`, and 11g-2c-2c-1
-`PreRaceCameraCoordinator`.
+`PreRaceCameraCoordinator`. 11g-2c-2c-2 ported `BumperCameraMover`
+(`0x00158800`). RE-4 ported `DemoCameraCoordinator`, in
+`3DS Files/source/democam.c` (see "The demo camera").
 
-These are not ported yet:
+These are not ported:
 
-- the Demo, PostRace and NIS coordinators;
-- `BumperCameraMover` (`0x00158800`), which four of them build.
+- the NIS coordinator;
+- `PostRaceCameraCoordinator`, which nothing in the image builds.
 
 `tools/cameracoord_check.py` runs the port beside retail's own code (see
 "The check").
@@ -498,6 +500,133 @@ The eye has 3 points at 0.05333, so it takes 45 frames. The look ends
 no later, so the four take about 6 seconds in all. The race is not racing
 in the pre-race, so the wall routine never runs there.
 
+## The demo camera
+
+The demo camera is what the race shows after the finish. It puts the
+track's highlight cameras on one car, and a drive camera between them.
+Three things build one, each with a `bMalloc` of 52:
+
+- the race coordinator's `RCSTATE_POSTRACE`, on view 1, for the car of
+  the player who finished best ([race-over.md](race-over.md)); its TICK
+  and SKIP_REPLAY delete it and make the next with each replay
+  highlight;
+- `ResumeDemoCameras`, from the debug camera key in the AI demo;
+- `Player::BeginDemoCameras` (`0x00176868`): with two players, one who
+  has finished watches the other's car until that one finishes too.
+
+### `DemoCameraCoordinator`, 52 bytes
+
+| Offset | Field |
+|---:|---|
+| 0 | the base, 28 bytes |
+| 28 | `pCar`, the car it shows |
+| 32 | `DefaultCameraLookback`, the last drive camera's |
+| 36 | `DefaultCameraPOV`, the last drive camera's |
+| 40 | `CurrentCameraStartTime`, in `WorldTimeFrames` |
+| 44 | `CurrentlyActiveCameraData`: the highlight shown, or -1 |
+| 48 | `CurrVortexCount` |
+
+The table is `_vt$21DemoCameraCoordinator` (`0x002b52e0`): the destructor
+`0x0019a4a0` in slot 8 and `Update` `0x0019a4b8` in slot 16.
+
+- **Constructor** (`0x0019a440`): the base's, then the table, the car,
+  `CurrVortexCount` from the loader's `VortexCount`, no highlight (-1),
+  and POV and look-back 0. The start time is left unset; the first
+  `Update` always sets it.
+- **Destructor** (`0x0019a4a0`): stores its table and jumps to the base's.
+
+### Which highlight
+
+`WillLookGood` (`0x0019a9d0`) asks whether the car's x and y are in one
+of the highlight's area faces, by `eIsPointInPoly`. A face is three vertex
+indexes and a pad, 16 bytes; the indexes are not bounded. The car's z is
+not looked at. `WillLookGood(char*)` (`0x0019a988`) parses the block
+first.
+
+`FindGoodLookingHighlightCamera` (`0x0019aad8`) parses the highlights in
+the bundle's order and answers the first that holds the car and faces the
+car's way, or -1. The car goes backwards when:
+
+- the race runs reversed (`TheRaceParameters` +12 is 1) and the car is
+  not facing the wrong way; or
+- the race runs forwards and the car is facing the wrong way.
+
+A reversed race with the car facing the wrong way is forwards. The
+highlight's `Backwards` counts as set when it is nonzero.
+
+### `Update`, `0x0019a4b8`
+
+The reload mark is read and cleared. Then:
+
+1. **Look for a highlight.** With no mover, or the reload mark set, find
+   one. Otherwise, once 56 frames have passed since the camera changed:
+   if no highlight is shown, or the one shown no longer holds the car,
+   find one. Finding none while no highlight is shown is not a change.
+2. **Check the one shown.** With a highlight shown and a mover, once 56
+   frames have passed, the camera is bad if its eye is within 2 m of any
+   car in the World's list, or if its near plane cuts the car's box.
+3. With nothing to change and nothing bad, return.
+4. Delete the mover (its own deleting destructor) and clear it.
+5. **A highlight, unless bad.** Build its mover by type:
+   - 0: draw a shake from its bank, which only moves the seed, then a
+     `TrackCarCameraMover` (1136 bytes) with a cleared shake of 2 CVs and
+     focus effects on;
+   - 1: a `BumperCameraMover` (1116);
+   - 2: a `TrackFlyCameraMover` (412).
+
+   `CurrVortexCount` goes up by one. The new mover is disabled and
+   updated once. It is kept if its eye is not within 5 m of any car and
+   its near plane does not cut the car: the coordinator then enables it,
+   notes the highlight and the frame, and returns. Otherwise the mover is
+   deleted.
+6. **The drive camera.** Pick a POV of the car's: split-screen's count in
+   view mode 3, else full-screen's; `bRandomI` of the count from
+   `bDefaultSeed`, one on (wrapping) if it is the last one's. Flip the
+   look-back and build a `DriveCameraMover` (1008 bytes) with the POV,
+   look-back speed 300, lag off, the look-back, and perfect focus off.
+   No highlight is shown, and the frame is noted.
+
+Retail builds no mover for a highlight of another type and then reads
+through NULL. The disc has none. The port gives the car the drive camera
+there.
+
+### The near-plane test, `0x001044c8`
+
+It has no symbol. It answers whether the camera's near plane passes
+through the car's box:
+
+1. The car's world matrix (its body matrix, with its position as the last
+   row) times the camera's matrix.
+2. The car-space box's eight corners: x from bit 2 of the index, y from
+   bit 1, z from bit 0, each the maximum when set.
+3. The plane is `NearZ * tan(baseline / 2) / tan(fov / 2)`. The baseline
+   is `aBaselineFovZ` (gp-13424) and the FOV the camera's, both bams, the
+   tangents as `bSin / bCos`.
+4. Each corner through the matrix, in order: if the corner's z less the
+   plane has the opposite sign of the one before, the plane cuts the box.
+
+A corner exactly on the plane is 0, so a sign change across it is not
+seen. That makes the corners' order matter.
+
+### `PostRaceCameraCoordinator`
+
+`0x0019b280` .. `0x0019b4ac`, 176 bytes, table `0x002b5280`. No call and
+no pointer in the image reaches its constructor, so it is not ported.
+
+### In Azahar
+
+National Forest (`TRACKB12`) has 137 highlights. With the player finished
+early by a test hook, the car brakes to a stop:
+
+- at x -87, inside highlight 0 (type 0), the race results show it from a
+  trackside `TrackCarCameraMover`, 17 m off;
+- on the start line, inside highlight 38, from in front, by the bridge;
+- at x -180, against the wall, no highlight holds it, and the drive
+  camera at POV 1 looks back at it.
+
+Retail plays the race's replay under the camera. The port has no replay
+yet, so the camera shows the live race.
+
 ## The port
 
 - **Loader table.** `bchunkload.c` puts `loader_cameras` and
@@ -527,6 +656,12 @@ in the pre-race, so the wall routine never runs there.
   `bumpercam.c`. The coordinator flies the four close-ups round the cars
   it picked. No car has an `AnimatedDriver` yet, so
   `gAnimatedDriverBeginAPreRaceAnimationFn` is NULL.
+- **The demo camera.** `main.c` installs its table and points
+  `gDemoCameraCoordinatorCtorFn` (`rcpost.c`, `rcstates.c`) and
+  `gPlayerBeginDemoCamerasFn` (`rcstates.c`) at `democam.c`. Its two
+  mover seams, `gTrackCarCameraMoverFn` and `gDriveCameraMoverFn`, wrap
+  `trackcarcam.c` and `drivecam.c`. A check in `main.c` holds the two
+  movers within retail's 1136 and 1008 bytes.
 
 ## The check
 
@@ -610,6 +745,38 @@ its 145 mutations it catches 143, and 2 are equivalent:
 - the wall routine's eye pad: the inverse's fourth row ends in exactly 1;
 - the midpoint's order: halving is exact, so `a/2 + b/2` and `(a + b)/2`
   round alike.
+
+`tools/democam_check.py` runs `democam.c` beside retail's demo camera,
+with the parser, `bRandom`, the shake draw, `eIsPointInPoly`, the eMath
+matrix code and the near-plane test run as shipped. It runs eMath's static
+initialiser first: `eMulVector` adds into the constant it sets. These are
+stood in on both sides, and each call prints a line:
+
+- the four movers' constructors, which print the record and shake they
+  are given and point the mover at the next queued camera;
+- a test mover table: destructor, `Update`, `Enable` and `Disable`;
+- `IsFacingWrongWay`, `GetCarSpaceBoundingBox`, `eGetCurrentViewMode`,
+  `ChangeCameraMover`, `bMalloc` and the frees.
+
+The checker covers:
+
+- the near-plane test by hand, then 400 random boxes, half aimed across
+  the plane, and corners exactly on it;
+- `WillLookGood` and `Find` on built highlights over every direction,
+  wrong way and `Backwards`, and at the face centres of `TRACKB11`, 43
+  and 63;
+- `Update` over the areas, the reload mark, cameras near cars, the drive
+  camera's POVs and the World's cars, and 60 random steps on `TRACKB11`
+  and `TRACKB43` each way;
+- `BeginDemoCameras` and `UpdateCameraCoordinators`.
+
+It gives 29860 ops and 124255 lines, with 0 differences. Of its 152
+mutations it catches 149, and 3 are equivalent:
+
+- the destructor's table store, which the base's overwrites first (and
+  the same in the table's slot);
+- clearing the mover after the delete: every path after it stores a new
+  one, as `main.c` always binds the drive camera.
 
 `tools/loadertable_check.py` holds slot 13 as ported. Its two
 `slot-13-*` mutations are caught.

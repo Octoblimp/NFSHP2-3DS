@@ -10,7 +10,9 @@ slideshow and points tally, and the Points and Task Rewards screens;
 `docs/formats/race-results.md`), and RE-2c (the race-over overlay's
 message, `docs/formats/race-over-overlay.md`), and RE-3 (the records,
 Best Lap Times, Best Total Times and the Lap Times screens;
-`docs/formats/best-times.md`). RE-4, the post-race camera, is next.
+`docs/formats/best-times.md`), and RE-4 (the post-race camera;
+`docs/formats/camera-coordinator.md`, "The demo camera"). RE-5, the
+race's speech (14-10c), is next.
 14-10c and 14-10d come after RE-6. Two asks were added to
 TASKS.md the same day, with no order given: task 39, the armed
 helicopter's missiles and barrels (12k-6), and task 40, the radar
@@ -275,11 +277,18 @@ The slices:
   constructors, the Lap Times rows, MaybeRecordHighScore and
   SetRecordTimesToBeat. The two record speeches stay NULL until 14-10c
   (RE-5).
-- **RE-4, next:** the post-race camera: DemoCameraCoordinator (0x0019a440 ..
-  0x0019abd8), PostRaceCameraCoordinator (0x0019b280 .. 0x0019b4ac),
-  Player::BeginDemoCameras (0x00176868) and the demo-camera seams. With
-  no replay, it follows the live cars.
-- **RE-5:** 14-10c, the race's speech (RaceFinishedSpeech and the
+- **RE-4, done (Session 70):** the post-race camera.
+  DemoCameraCoordinator (0x0019a440 .. 0x0019abd8), the near-plane test
+  (0x001044c8) and Player::BeginDemoCameras (0x00176868) are in
+  `democam.c`. `tools/democam_check.py` gives 0 differ; of 152
+  mutations it catches 149, and 3 are equivalent. main.c binds the
+  coordinator's constructor, BeginDemoCameras and the TrackCar and
+  Drive mover seams. PostRaceCameraCoordinator (0x0019b280) is dead in
+  retail: nothing builds it. With no replay, the camera shows the live
+  race. Seen in Azahar on TRACKB12: highlight shots behind the end
+  screens, and the drive camera where no highlight holds the car. The
+  End Game Menu shows Restart Race, View Lap Times and Quit Race.
+- **RE-5, next:** 14-10c, the race's speech (RaceFinishedSpeech and the
   rest, below under 14-10).
 - **RE-6:** the career's screens: Tourney Standings, Events Unlocked,
   the Reward menu and Be The Cop Results, with step 16's event tree.
@@ -5378,8 +5387,8 @@ count. It is its own slice when it goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** the end of the race, RE-4 (see "First"; RE-1 to RE-3
-  are done), then RE-5 and RE-6, then step 14's 14-10c. 14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5, 14-6, 14-7, 14-8a,
+- **Next:** the end of the race, RE-5 (see "First"; RE-1 to RE-4
+  are done), then RE-6, then step 14's 14-10d. 14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5, 14-6, 14-7, 14-8a,
   14-8b, 14-8c, 14-8d, 14-9, 14-10a and 14-10b are done. Of step 12,
   12a to 12k-2, the light flares, 12k-3's planners, 12k-3a, 12k-3b,
   12k-4a, 12k-4b, 12k-7, 12l-1 and 12l-2 are done. See

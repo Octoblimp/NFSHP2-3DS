@@ -66,6 +66,8 @@
 #include "rvmcam.h"
 #include "camera.h"
 #include "cameracoord.h"
+#include "democam.h"
+#include "drivecam.h"
 #include "cammover.h"
 #include "bscreens.h"
 #include "bcarsel.h"
@@ -198,6 +200,7 @@
 #include "texturestream.h"
 #include "topology.h"
 #include "track.h"
+#include "trackcarcam.h"
 #include "trackflycam.h"
 #include "sky.h"
 #include "sun.h"
@@ -4319,6 +4322,32 @@ static int32_t track_fly_mover_is_finished(CameraMover* m)
     return track_fly_camera_mover_is_finished((const TrackFlyCameraMover*)m);
 }
 
+// DemoCameraCoordinator::Update's `new TrackCarCameraMover` and `new
+// DriveCameraMover`, in retail's 1136 and 1008 bytes.
+typedef char demo_camera_mover_size_check[
+    (sizeof(TrackCarCameraMover) <= 1136
+     && sizeof(DriveCameraMover) <= 1008) ? 1 : -1];
+
+static CameraMover* track_car_mover_new(void* mem, int32_t viewID,
+                                        struct Car* car,
+                                        const CameraDataItems* cd,
+                                        const CameraShake* shake,
+                                        int32_t focusEffects)
+{
+    return &track_car_camera_mover_init((TrackCarCameraMover*)mem, viewID,
+                                        car, cd, shake, focusEffects)->base;
+}
+
+static CameraMover* drive_mover_new(void* mem, int32_t viewID,
+                                    struct Car* car, int32_t pov,
+                                    float lookbackSpeed, int32_t disableLag,
+                                    int32_t lookBack, int32_t perfectFocus)
+{
+    drive_cam_init((DriveCameraMover*)mem, viewID, car, pov, lookbackSpeed,
+                   disableLag, lookBack, perfectFocus);
+    return &((DriveCameraMover*)mem)->base;
+}
+
 // ChangeToScreen (0x0014cc78) for the race's code: the flow's, which hides
 // and unactivates the screen up, pushes it when asked, and activates the
 // new one with its menu, which then has the pad.
@@ -4636,6 +4665,7 @@ int main(int argc, char** argv)
     trafficcar_install_vtables();
     trafficdriver_install_vtables();
     cameracoord_install_vtables();
+    democam_install_vtables();
     sound3d_install_vtables();
     carsound_install_vtables();
     enginesound_install_vtables();
@@ -4719,6 +4749,14 @@ int main(int argc, char** argv)
     gPreRaceCameraIsFinishedFn = prerace_camera_coordinator_is_finished;
     gBumperCameraMoverFn = bumper_camera_mover_construct;
     gBumperCameraMoverIsFinishedFn = bumper_camera_mover_is_finished_fn;
+    // The demo coordinator (RE-4): the race-over states and a finished
+    // player's camera show the car through the track's highlight cameras
+    // where one holds it, on TrackCar, Bumper or TrackFly movers, and on
+    // a DriveCameraMover at a random POV between them.
+    gDemoCameraCoordinatorCtorFn = demo_camera_coordinator_construct;
+    gPlayerBeginDemoCamerasFn = player_begin_demo_cameras;
+    gTrackCarCameraMoverFn = track_car_mover_new;
+    gDriveCameraMoverFn = drive_mover_new;
     // The rear-view mirror: SetHudFeatures puts its mover on view 3
     // while the HUD has HUD_REAR_VIEW_MIRROR, which turns target 7 on;
     // trackview_draw_mirror draws the view into it.
