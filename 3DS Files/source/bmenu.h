@@ -187,6 +187,12 @@ bool bmenu_joy(BMenu* m, int port, BJoyEvent ev, bool pressed);
 // move the selection -- navigation simply skips it next time.
 bool bmenu_set_item_enabled(BMenu* m, int itemID, bool enabled);
 
+// SetActiveMenuItem (0x0016a3a8): the item whose hash this is becomes the
+// current one, unhighlighting the old and highlighting it -- unless there
+// is no such item, it is current already or it is not ENABLED. True if the
+// selection moved.
+bool bmenu_set_active_item(BMenu* m, uint32_t itemHash);
+
 // The current item, or NULL.
 const BMenuItem* bmenu_current(const BMenu* m);
 

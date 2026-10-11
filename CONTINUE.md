@@ -1,5 +1,13 @@
 # CONTINUE
 
+## The device crashes (Session 77, open)
+
+Two random race crashes on the user's New 3DS XL were Process9 (the SD
+driver) reading ENGLISHDAT.PCK at 0x094B2400. The debug log is off now
+unless `DebugLog 1` is in nfshp2_config.txt. The user was copying all
+the NFSHP2 files to the card again; ask whether the crashes went on.
+HANDOFF.md, "Session 77 -- the device crashes and the debug log".
+
 ## Be A Cop, step 12m (the audit of Session 76)
 
 A SkipFE Be A Cop race (`SkipFEBeACop 1` and `DefaultPlayer1CarType
@@ -33,15 +41,19 @@ cop's HUD (hudcop.c, hudrender.c, hudscore.c), the setup screens
   and three choppers, the objective), bound to main.c's hook
   (`docs/formats/race-start.md`).
 - **12m-3c (in progress)** Select Track (`TrackSelectScreenCallback`,
-  `0x001a0920`; its StartRace is `0x001a0790`). It is still a plain
-  screen, so a frontend Be A Cop race cannot start: car select goes on
-  to it for every game type but the event games. Read HANDOFF.md's
-  "Session 76, continued -- 12m-3c" first. The still camera
+  `0x001a0920`; its StartRace is `0x001a0790`). Car select goes on to
+  it for every game type but the event games. Read HANDOFF.md's
+  "Session 77, continued -- 12m-3c-1" first. The still camera
   (`stillcam.c`) is ported and checked, and the whole screen is decoded
-  in `docs/formats/track-select.md`, whose "The plan" lays out the port:
-  - **12m-3c-1** `btracksel.c`: the logic, the 2D and StartRace, with
-    ACTIVATE's reply, `bmenu_set_active_item` and `tracksel_check.py`.
-  - **12m-3c-2** The TSELECT.BIN slideshow and the spinning model.
+  in `docs/formats/track-select.md`:
+  - **12m-3c-1 (done)** `btracksel.c`: the logic, the 2D, the model and
+    StartRace, with ACTIVATE's reply, `bmenu_set_active_item` and
+    `tracksel_check.py` (0 differ; 171 mutations, 155 caught, 16
+    equivalent). On Azahar it works from car select. Y (SQUARE, the
+    track's speech) did not reach the screen in that run; check the run
+    script's key first.
+  - **12m-3c-2** The TSELECT.BIN slideshow: main.c's five pack hooks
+    are still NULL.
 - **12m-4** The Pre Race Blurb (`0x001e3270` on, startrace.c): the
   objective screen before a Be A Cop race.
 - **12m-5** A Be A Cop race from the frontend in Azahar: the chase,
@@ -2032,7 +2044,7 @@ checkers to it as they are touched; selcam_check is the pattern.
 - The event trees are not ported, so findEventForCar is NULL in main.c
   and the device shows no tree blurbs.
 - The nebula is done (SC-3d).
-- Select Track is still a plain screen.
+- Select Track is `btracksel.c` since 12m-3c-1 (Session 77).
 - Joy event 34 does nothing in retail either.
 
 **SC-3, the nebula, is done.** It is the frontend's effects,

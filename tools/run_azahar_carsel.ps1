@@ -263,6 +263,17 @@ if ($atCarSel) {
         Write-Host ("  on to Select Track: {0}" -f $onTrack)
         Start-Sleep -Milliseconds 1200
         Shot "selecttrack"
+        # btracksel.c: the next track along the strip, its other time of
+        # day, and SQUARE's spoken name.
+        [Hp2Cap]::PressKey($hwnd, $VK_H)      # right, the next track
+        Start-Sleep -Milliseconds 1500
+        Shot "selecttrack-right"
+        [Hp2Cap]::PressKey($hwnd, $VK_G)      # down, the other time of day
+        Start-Sleep -Milliseconds 1200
+        Shot "selecttrack-tod"
+        [Hp2Cap]::PressKey($hwnd, $VK_X)      # SQUARE (Y), the track's name
+        Start-Sleep -Milliseconds 1500
+        Shot "selecttrack-square"
         [Hp2Cap]::PressKey($hwnd, $VK_S)      # B, back to car select
         Start-Sleep -Milliseconds 2500
         Shot "carsel-again"

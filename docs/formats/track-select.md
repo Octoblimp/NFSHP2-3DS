@@ -7,11 +7,22 @@ is `TrackSelectScreenCallback` (`0x001a0920`), and its StartRace is
 from `0x0019dd20` to `0x001a0c80`, plus the static init at `0x001a09e8`.
 
 **Status (step 12m-3c).** Everything below is decoded from retail's
-image. The port has only the still camera so far (`stillcam.c`,
-`docs/formats/camera.md`, "The still camera"); the rest is not ported.
-In the port, "Select Track" is still `bgf_plain_screen_callback` in
-main.c's screen table (around line 345). Until it is ported, a frontend
-race cannot start from car select, Be A Cop's included.
+image. The still camera is `stillcam.c` (`docs/formats/camera.md`, "The
+still camera"). 12m-3c-1 is done: `btracksel.c/.h` is the screen's
+logic, its 2D, the `TRACK%d_MINI` model and StartRace, bound to "Select
+Track" (`0x15417b53`) in main.c's screen table. `tools/tracksel_check.py`
+with `tools/src/tracksel_test.c` runs it beside retail's: 3132 ops,
+30026 lines, 0 differ; 171 mutations, 155 caught, 16 equivalent (the
+`EQUIVALENT` table in the checker says why for each). On Azahar car
+select goes on to it, with Coastal Parklands, its stats, the times of
+day and the model; RIGHT shows National Forest locked with its blurb,
+DOWN moves the time of day, and BACK returns to car select.
+
+Not done yet (12m-3c-2): the TSELECT.BIN slideshow. main.c leaves the
+`packNew`, `packDelete`, `packUnloadAll`, `packHasTexture` and `packLoad`
+hooks NULL, so the slideshow shows nothing, and `eggActive` is NULL. In
+the 12m-3c-1 Azahar run Y (SQUARE, the track's speech) did not reach the
+screen: no `SQUARE` line in the log. Check the run script's key first.
 
 The addresses are retail's (SLES_507.31). `gp` is `0x003358f0`.
 
@@ -76,9 +87,9 @@ The addresses are retail's (SLES_507.31). `gp` is `0x003358f0`.
   `tools/src/tracksel_test.c` runs retail's code in mipsemu. It uses
   FRONTB's screen `0x15417b53` and GLOBALB's track table, and logs the
   stubs. `carsel_check.py` is the pattern.
-- **A possible split.** 12m-3c-1 would be the logic, the 2D and
-  StartRace, with the checker. 12m-3c-2 would be the TSELECT.BIN
-  slideshow and the model on the device.
+- **The split.** 12m-3c-1, done, is the logic, the 2D, the model and
+  StartRace, with the checker. 12m-3c-2 is the TSELECT.BIN slideshow on
+  the device.
 
 Be A Cop with one player cannot select laps, so SELECT goes straight to
 StartRace. That is the path 12m-5 needs.
@@ -399,17 +410,20 @@ at +12. `AddTrack` bMallocs 48 bytes and appends at the tail.
 The screen is at +0 and the track at +4, which starts as 0.
 
 `SetCurrentTrack(t)` returns -1 if t is +4 already. Otherwise it sets
-+4 = t and r = -1, then for tod = 0..4:
++4 = t, r = -1 and n = 1, then for tod = 0..4:
 
-- item = `SprintfAndHash("MENUITEM_%d", tod+1)`, and back =
-  `SprintfAndHash("TOD_BACKING_%d", tod+1)`.
+- item = `SprintfAndHash("MENUITEM_%d", n)`, and back =
+  `SprintfAndHash("TOD_BACKING_%d", n)`. The number n counts the times of
+  day the track has, not tod.
 - If `HasTimeOfDay(t, tod)`:
   - `SetVisibility(icon[tod], 1)`, `SetVisibility(back, 1)` and
     `SetVisibility(item, 1)`;
   - `SetLanguageID(item, lang[tod])`;
   - if it is the current time of day, `SetActiveMenuItem(item)` and
-    r = tod+1.
-- Otherwise it hides the icon, the item and the backing.
+    r = n;
+  - n += 1.
+- Otherwise it hides icon[tod] and item n and backing n. A later time of
+  day the track has shows them again.
 
 It returns r.
 

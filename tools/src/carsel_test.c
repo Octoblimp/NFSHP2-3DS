@@ -353,7 +353,7 @@ static int r_find_event(void *u, int32_t type, int32_t *tree, int32_t *num)
 }
 
 static const NFSRewardHooks rewardHooks = {
-    NULL, r_translate, r_language, r_find_event,
+    NULL, r_translate, r_language, r_find_event, NULL,
 };
 
 static void h_blurb(void *u, char *buf, int len, int32_t type, int32_t gt,

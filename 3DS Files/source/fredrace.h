@@ -67,6 +67,12 @@ static inline int32_t fred_is_there_another_race(const FrontendDatabase *f);
 // player picked for game type `gameType`, unchecked.
 RideInfo *fpi_get_selected_ride_info(FrontendPlayerInfo *p, int32_t gameType);
 
+// FrontendPlayerInfo::GetSelectedCarClass, 0x00187970: the class of the
+// ride the player picked for the current game type (5 for a ride with no
+// car, where the image reads before the table). Select Track's records
+// ask it.
+int32_t fpi_get_selected_car_class(FrontendPlayerInfo *p);
+
 // --------------------------------------------------------- the drivers
 
 // RideInfo::Init, 0x00187dd0.

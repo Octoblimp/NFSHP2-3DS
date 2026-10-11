@@ -284,7 +284,13 @@ int bgf_change_to_screen(BGameFlow* gf, const char* name, int pushCurrent)
             HOOK_VOID(gf, openScreen, n);
             memset(&data, 0, sizeof(data));
             data.itemHash = n->hash;
+            // The reply: a Param other than -1 puts the menu on item
+            // Param - 1 (Select Track answers its time of day's item).
+            // The noise is played after the callback, as BACK's is.
+            data.param = -1;
             bgf_send(gf, BMSG_SCREEN_ACTIVATE, &data);
+            gf->activateItem = data.param != -1 ? data.param - 1 : 0;
+            makeSound(gf, data.noise);
             HOOK_VOID(gf, enterScreen, n);
         }
     }

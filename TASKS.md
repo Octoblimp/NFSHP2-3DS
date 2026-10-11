@@ -2564,5 +2564,13 @@ ahead of step 6's second slice, which waits on `wip/carrenderinfo`.
     - [x] SC-3d, the car select's nebula (`bcarsel.c`). `carsel_check`:
           8364 ops, 0 differ; 29 nebula mutations, 28 caught, 1
           equivalent.
+- [ ] **Select Track** (`btracksel.c`, `docs/formats/track-select.md`).
+  - [x] 12m-3c-1, retail's SelectTrackScreen as logic, 2D, the model and
+        StartRace. `tracksel_check` runs retail's on the image: 3132
+        ops, 0 differ; 171 mutations, 155 caught, 16 equivalent. On
+        Azahar it follows car select.
+  - [ ] 12m-3c-2, the TSELECT.BIN slideshow (main.c's pack hooks).
+  - [ ] Y (SQUARE) for the track's speech: no SQUARE reached the screen
+        in the Azahar run.
 - [ ] **The briefing.** "You're The Cop", with its button list over the
       track's picture.

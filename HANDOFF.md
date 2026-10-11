@@ -20510,3 +20510,76 @@ it up from here.
 - **Next.** 12m-3c-1, the logic, the 2D and StartRace, with
   `tracksel_check.py`; 12m-3c-2, the TSELECT.BIN slideshow and the
   model. Then 12m-4, the Pre Race Blurb, and 12m-5.
+
+## Session 77 -- the device crashes and the debug log
+
+- **What happened.** The user's New 3DS XL crashed twice on 2026-10-11,
+  at random points of a race: Luma's Arm9 data abort, in Process9 (the
+  console's own SD driver), in the middle of a two-sector card access
+  (R5 0x4a592; 0x094B2400 = 0x4a592 * 512). stderr was blank both times.
+- **8afa111.** At first the log's many small flushed writes looked like
+  the cause, so on the user's ask the debug log is off by default:
+  `DebugLog 1` in sdmc:/nfshp2_config.txt turns it on (configitems.c),
+  and with it off main.c opens no nfshp2_debug.txt and skips the race's
+  sums. When on, logwriter.c batches two seconds of lines and writes
+  whole 512-byte sectors through a 32 KB buffer.
+  `tools/azahar_debuglog.ps1`, dot-sourced by every run_azahar script,
+  puts `DebugLog 1` on the emulator's card.
+- **c2c079a.** It still crashed with the log off. The user's Luma dump
+  (`crash_dump_00000000.dmp`, untracked, in the repo root) has
+  Process9's cluster lookup returning NULL on a 1 KB read of the cop
+  speech's ENGLISHDAT.PCK at 0x094B2400. So it is the card or that file,
+  not the port's writes; logwriter.h's comment says so now.
+- **Open.** At the end of the session the user was copying all the
+  NFSHP2 files to the card again. If the crashes stop, it was a bad copy
+  of that file. If not: a read-only check of the card's ENGLISHDAT.PCK
+  (its hash against extracted-retail, its fragments, a read at
+  0x094B2400), then think about the card itself.
+
+## Session 77, continued -- 12m-3c-1, Select Track's logic (done)
+
+- **Ported.** `btracksel.c/.h`, retail's SelectTrackScreen on bcarsel's
+  pattern, with a `BTrackSelHooks` table: SelectableTrack and its
+  manager (the tracks, the variants, the locks, the scroll), the
+  slideshow's timing, TODMenuManager, TrackRecordDisplayer,
+  TrackLockedDisplayer, the screen's constructor, Tick, Render, both
+  callbacks and StartRace. RENDER draws the `TRACK%d_MINI` model through
+  the still camera on view 1.
+- **Retail's numbering.** TODMenuManager::SetCurrentTrack numbers
+  MENUITEM_n and TOD_BACKING_n by a counter of the times of day the
+  track has, not by the time of day itself. The first port used tod and
+  differed in 31 lines; `docs/formats/track-select.md` now says so.
+- **Outside the module.** `bmenu_set_active_item`
+  (`FlailerMenu::SetActiveMenuItem`, `0x0016a3a8`); ACTIVATE's reply,
+  so the menu starts on the time of day's item (gameflow.c and main.c's
+  `hookEnterScreen`); `nfs_format_unlock_blurb_for_track` (`0x0024b6b0`)
+  in nfsrewards.c; `fpi_get_selected_car_class` (`0x00187970`) in
+  fredrace.c, for the records. bootflow_check sends ACTIVATE with
+  param -1 as retail does. main.c binds "Select Track"
+  (`0x15417b53`) to `btracksel_screen_callback`, sends it RENDER, draws
+  the car select's top screen for it, and adds the hooks: the speech
+  (SPCH 155 with `speech_convert_track_number`), the unlocks, the event
+  for a locked track's blurb, the highlight and the active item.
+- **The checker.** `tools/tracksel_check.py` with
+  `tools/src/tracksel_test.c`: one track, locked tracks, every game
+  type, unavailable tracks, the list's ends, 14 slideshow cycles, the
+  records, the options and the render's angle wrap. 3132 ops, 30026
+  lines, 0 differ. 171 mutations: 155 caught, 16 equivalent, each
+  explained in the checker's `EQUIVALENT`. carsel, endgame, endresults,
+  fredend and bootflow still check 0 differ (bootflow: 61 scenarios).
+- **Checked on Azahar.** build_cia.ps1 built clean.
+  `run_azahar_carsel.ps1 -Choose -RunSeconds 120` passed: car select
+  goes on to Select Track ("flow tracksel up, 20 tracks, track 11").
+  The shots show Coastal Parklands with its stats, Sunny and Overcast
+  with the box, the strip, the arrow and the model. RIGHT shows National
+  Forest locked, with "Complete Championship Event 1 to unlock this
+  track for Challenge Mode". DOWN moves the box to Overcast, and BACK
+  returns to car select. It exited cleanly.
+- **Not working yet.** Y (SQUARE, the track's speech) never reached the
+  screen: the log has no SQUARE line, though bmenu sends it and the
+  port binds KEY_Y. The script sends Azahar key X for it; check that
+  this is really the 3DS Y on Azahar before looking at the code.
+- **Next.** 12m-3c-2: the TSELECT.BIN slideshow, the five pack hooks in
+  main.c over `texturestream.h` (`packNew`, `packDelete`,
+  `packUnloadAll`, `packHasTexture`, `packLoad`). Then 12m-4, the Pre
+  Race Blurb, and 12m-5, a Be A Cop race from the frontend.

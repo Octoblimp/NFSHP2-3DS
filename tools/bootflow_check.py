@@ -398,8 +398,11 @@ class Flow(object):
                 # activated after it.
                 self.say("ui open %08x" % found[1])
                 self.active_item = ITEM_MENUITEM_1
-                self.send(SCREEN_ACTIVATE, {"itemHash": found[1], "port": 0,
-                                            "param": 0, "noise": 0})
+                # Param goes in as -1, and the noise is played after.
+                data = {"itemHash": found[1], "port": 0, "param": -1,
+                        "noise": 0}
+                self.send(SCREEN_ACTIVATE, data)
+                self.sound(data["noise"])
                 self.say("ui enter %08x" % found[1])
         return 1 if self.screen else 0
 
@@ -2600,9 +2603,14 @@ MUTATIONS += [
      "            HOOK_VOID(gf, openScreen, n);" + NL
      + "            memset(&data, 0, sizeof(data));" + NL
      + "            data.itemHash = n->hash;" + NL
+     + "            // The reply: a Param other than -1 puts the menu on item" + NL
+     + "            // Param - 1 (Select Track answers its time of day's item)." + NL
+     + "            // The noise is played after the callback, as BACK's is." + NL
+     + "            data.param = -1;" + NL
      + "            bgf_send(gf, BMSG_SCREEN_ACTIVATE, &data);",
      "            memset(&data, 0, sizeof(data));" + NL
      + "            data.itemHash = n->hash;" + NL
+     + "            data.param = -1;" + NL
      + "            bgf_send(gf, BMSG_SCREEN_ACTIVATE, &data);" + NL
      + "            HOOK_VOID(gf, openScreen, n);"),
 ]

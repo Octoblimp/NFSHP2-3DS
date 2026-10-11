@@ -278,6 +278,24 @@ bool bmenu_joy(BMenu* m, int port, BJoyEvent ev, bool pressed)
     return menu_joy(m, port, ev);
 }
 
+// FlailerMenu::SetActiveMenuItem (0x0016a3a8): FindItem, then nothing for
+// no item, the current one, or one that is not ENABLED; otherwise the
+// current item unhighlights and the new one highlights.
+bool bmenu_set_active_item(BMenu* m, uint32_t itemHash)
+{
+    int i;
+    if (!m) return false;
+    for (i = 0; i < m->numItems && m->items[i].itemHash != itemHash; i++)
+        ;
+    if (i == m->numItems || i == m->current
+        || !(m->items[i].state & BMENU_ENABLED))
+        return false;
+    unhighlight(m, m->current, m->filterPort);
+    m->current = i;
+    highlight(m, m->current, m->filterPort);
+    return true;
+}
+
 bool bmenu_set_item_enabled(BMenu* m, int itemID, bool enabled)
 {
     if (!m) return false;

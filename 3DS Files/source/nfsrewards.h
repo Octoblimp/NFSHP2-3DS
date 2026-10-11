@@ -84,6 +84,10 @@ typedef struct NFSRewardHooks {
     // Pursuit) and the event's number.
     int (*findEventForCar)(void* user, int32_t carType, int32_t* treeType,
                            int32_t* eventNumber);
+    // IsTrackAnEventReward and FindEventThatTrackIsARewardFor (0x001ffaa8,
+    // 0x001ffa38), the same for a track and its direction.
+    int (*findEventForTrack)(void* user, int32_t track, int32_t direction,
+                             int32_t* treeType, int32_t* eventNumber);
 } NFSRewardHooks;
 
 // FormatUnlockBlurbForCar (0x0024b548): how `carType` is unlocked, into
@@ -92,5 +96,13 @@ typedef struct NFSRewardHooks {
 void nfs_format_unlock_blurb_for_car(const NFSRewardHooks* h, char* buf,
                                      int len, int32_t carType,
                                      int32_t gameType, int flag);
+
+// FormatUnlockBlurbForTrack (0x0024b6b0): how the track is unlocked, for
+// Select Track's locked box. An event's reward says which event (a tree
+// type other than 0 or 1 takes string 0's text); any other track, "This
+// track should be unlocked". Retail ignores `len`; the port bounds by it.
+void nfs_format_unlock_blurb_for_track(const NFSRewardHooks* h, char* buf,
+                                       int len, int32_t track,
+                                       int32_t direction);
 
 #endif

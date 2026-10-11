@@ -79,6 +79,11 @@ static int32_t car_class(int32_t type)
     return valid_type(type) ? cartypeinfo_get(type)->CarClass : 5;
 }
 
+int32_t fpi_get_selected_car_class(FrontendPlayerInfo *p)
+{
+    return car_class(fpi_get_selected_ride_info(p, Fred.GameType)->Type);
+}
+
 // --------------------------------------------------------- the drivers
 
 void ride_info_init(RideInfo *r, int32_t type, int32_t skin, int32_t dash,

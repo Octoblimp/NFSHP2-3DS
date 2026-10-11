@@ -72,6 +72,7 @@
 #include "cammover.h"
 #include "bscreens.h"
 #include "bcarsel.h"
+#include "btracksel.h"
 #include "nfsrewards.h"
 #include "bsetup.h"
 #include "carcontroller.h"
@@ -154,6 +155,8 @@
 #include "soundscape.h"
 #include "sedwedge.h"
 #include "speechmgr.h"
+#include "speechconv.h"
+#include "spch.h"
 #include "speechnoise.h"
 #include "selcam.h"
 #include "player.h"
@@ -344,7 +347,7 @@ static const BScreenConfig kScreens[] = {
     // Where car select goes on to for every game type but the single race
     // and the championship, You're The Cop's included.
     { "Select Track",            0x15417b53u,   // TrackSelectScreenCallback
-      bgf_plain_screen_callback },
+      btracksel_screen_callback },
     // Same Flailer screen as "Language Options Pre FE" above, entered under
     // a second name from the Options menu. The ELF registers both, to one
     // Callback that picks the class by name; this one's slide-on is still
@@ -1270,7 +1273,8 @@ static void hookEnterScreen(void* user, const BScreenConfig* cfg)
 {
     Boot* b = (Boot*)user;
     (void)cfg;
-    if (b->hasMenu) bmenu_activate(&b->menu, 0);
+    // On the item SCREEN_ACTIVATE's reply asked for, else the first.
+    if (b->hasMenu) bmenu_activate(&b->menu, g_flow.activateItem);
 }
 
 static void hookLeaveScreen(void* user, const BScreenConfig* cfg)
@@ -3382,16 +3386,20 @@ static void hookCarSelRenderText(void* user, uint32_t screen,
                           (float)flailer_get_width(screen, rect) * sx, 1.0f);
 }
 
-// FlailerScreenList::RenderFlailerModels' RENDER to the car select,
-// which draws its platform and, through the hook, its unlock blurb.
+// FlailerScreenList::RenderFlailerModels' RENDER to the screen with
+// models: the car select, which draws its platform and, through the hook,
+// its unlock blurb; or Select Track, its turning miniature and its locked
+// box's blurb.
 static void carselRender(void* user)
 {
     (void)user;
-    if (g_flow.screen && g_flow.screen->callback == bcarsel_screen_callback) {
+    if (g_flow.screen
+        && (g_flow.screen->callback == bcarsel_screen_callback
+            || g_flow.screen->callback == btracksel_screen_callback)) {
         BScreenCallbackData rd;
         memset(&rd, 0, sizeof(rd));
         rd.itemHash = g_flow.screen->hash;
-        bcarsel_screen_callback(&g_flow, BMSG_SCREEN_RENDER, &rd);
+        g_flow.screen->callback(&g_flow, BMSG_SCREEN_RENDER, &rd);
     }
 }
 
@@ -3496,6 +3504,102 @@ static void hookCarSelClose(void* user)
     (void)user;
     bcarsel_close_screen();
     carloader_unload_everything(&TheCarLoader);
+}
+
+// ------------------------------------------------------------ track select
+//
+// BTrackSelHooks, for btracksel.c: retail's SelectTrackScreen (12m-3c).
+// The language table, the speech's fade, the blurb's text and the race's
+// start are car select's. The slideshow's TexturePack (TSELECT.BIN) is
+// not loaded yet (12m-3c-2): with no pack, each track shows its own
+// TRACKn picture and nothing cross-fades.
+
+static BTrackSel g_tracksel;
+
+// SQUARE: SPCH_AddEventV(155, 1, Speech::ConvertTrackNumber(track)), the
+// track's name.
+static void hookTrackSelSpeak(void* user, int32_t track)
+{
+    (void)user;
+    spch_add_event_v(155, 1, speech_convert_track_number(track));
+}
+
+static int hookTrackSelUnlocked(void* user, int32_t track, int32_t dir)
+{
+    (void)user;
+    return is_track_unlocked(track, dir) != 0;
+}
+
+// IsTrackAnEventReward and FindEventThatTrackIsARewardFor, as
+// FormatUnlockBlurbForTrack asks them.
+static int hookFindEventForTrack(void* user, int32_t track, int32_t dir,
+                                 int32_t* treeType, int32_t* eventNumber)
+{
+    EventInfo* e;
+    (void)user;
+    if (!is_track_an_event_reward(track, dir))
+        return 0;
+    e = find_event_that_track_is_a_reward_for(track, dir);
+    if (!e)
+        return 0;
+    *treeType    = event_info_tree(e)->nType;
+    *eventNumber = e->nNumber;
+    return 1;
+}
+
+static void hookTrackSelFormatUnlockBlurb(void* user, char* buf, int len,
+                                          int32_t track, int32_t dir)
+{
+    NFSRewardHooks h;
+    memset(&h, 0, sizeof(h));
+    h.user              = user;
+    h.translate         = hookCarSelTranslate;
+    h.language          = hookCarSelLanguage;
+    h.findEventForTrack = hookFindEventForTrack;
+    nfs_format_unlock_blurb_for_track(&h, buf, len, track, dir);
+}
+
+// SetActiveMenuItem (0x0016d3d0): the time of day's item in the screen's
+// menu. During SCREEN_ACTIVATE the menu is not up yet; ACTIVATE's answer
+// picks the item then (hookEnterScreen).
+static void hookTrackSelSetActive(void* user, uint32_t item)
+{
+    Boot* b = (Boot*)user;
+    if (b->hasMenu) (void)bmenu_set_active_item(&b->menu, item);
+}
+
+// tHighlightAnimation, on the flow's kit with the flow's clock, as the
+// popups' bloom.
+static BAnim* trackSelKit(void)
+{
+    if (g_flow.anim)
+        banim_set_clock(g_flow.anim, (int32_t)g_flow.realTimer,
+                        g_flow.realElapsed);
+    return g_flow.anim;
+}
+
+static void hookTrackSelHighlightInit(void* user, BHighlightAnim* hl,
+                                      uint32_t screen, uint32_t object,
+                                      int32_t color)
+{
+    BAnim* a = trackSelKit();
+    (void)user;
+    if (a) banim_highlight_init(a, hl, screen, object, color);
+}
+
+static void hookTrackSelHighlightItem(void* user, BHighlightAnim* hl,
+                                      uint32_t item)
+{
+    BAnim* a = trackSelKit();
+    (void)user;
+    if (a) banim_highlight_set_item(a, hl, item);
+}
+
+static void hookTrackSelHighlightAnimate(void* user, BHighlightAnim* hl)
+{
+    BAnim* a = trackSelKit();
+    (void)user;
+    if (a) banim_highlight_animate(a, hl);
 }
 
 // BeginGameFlowUnloadingFrontEnd's resource loop: FRONTB goes, and the
@@ -6024,6 +6128,25 @@ int main(int argc, char** argv)
     carselHooks.trace              = hookTrace;
     bcarsel_init(&g_carsel, &carselHooks);
 
+    BTrackSelHooks trackselHooks;
+    memset(&trackselHooks, 0, sizeof(trackselHooks));
+    trackselHooks.user              = &g_boot;
+    trackselHooks.translate         = hookCarSelTranslate;
+    trackselHooks.speechFade        = hookCarSelSpeechFade;
+    trackselHooks.speakTrack        = hookTrackSelSpeak;
+    trackselHooks.isTrackUnlocked   = hookTrackSelUnlocked;
+    trackselHooks.formatUnlockBlurb = hookTrackSelFormatUnlockBlurb;
+    trackselHooks.renderTextIntoRectangle = hookCarSelRenderText;
+    trackselHooks.setActiveMenuItem = hookTrackSelSetActive;
+    trackselHooks.getActiveMenuItem = hookActiveMenuItem;
+    trackselHooks.highlightInit     = hookTrackSelHighlightInit;
+    trackselHooks.highlightSetItem  = hookTrackSelHighlightItem;
+    trackselHooks.highlightAnimate  = hookTrackSelHighlightAnimate;
+    trackselHooks.language          = hookCarSelLanguage;
+    trackselHooks.startRace         = hookCarSelStartRace;
+    trackselHooks.trace             = hookTrace;
+    btracksel_init(&g_tracksel, &trackselHooks);
+
     // Retail's main (0x0012f000), after InitializeEverything: with SkipFE
     // set, StartSkipFEGame on Fred, whose StartRace asks for
     // LOADING_TRACK_COMMON straight from NONE; else
@@ -6366,7 +6489,7 @@ int main(int argc, char** argv)
                 C2D_TargetClear(top, clear);
             }
             C2D_SceneBegin(top);
-            if (!g_track.attached && bcarsel_active())
+            if (!g_track.attached && (bcarsel_active() || btracksel_active()))
                 drawCarSelTop(&ui);
             else
                 uirender_draw_visible(&ui, 1.0f);

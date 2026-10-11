@@ -35,6 +35,8 @@ const NFSPointsRewards NFSPointsRewardsArray[NFS_NUM_POINTS_REWARDS] = {
 #define LANG_POINTS_BLURB        0xbfb8   // "Accumulate %s NFS Points ..."
 #define LANG_CHAMPIONSHIP_BLURB  0xc030   // "Complete Championship Event %d ..."
 #define LANG_HOT_PURSUIT_BLURB   0xc031   // "Complete Hot Pursuit Event %d ..."
+#define LANG_TRACK_CHAMPIONSHIP_BLURB 0xd6d9  // the track's, by tree type
+#define LANG_TRACK_HOT_PURSUIT_BLURB  0xd6da
 
 #define GAME_TYPE_BE_A_COP 7
 
@@ -151,4 +153,23 @@ void nfs_format_unlock_blurb_for_car(const NFSRewardHooks* h, char* buf,
         return;
     }
     b_snprintf(buf, (size_t)len, "This car should be unlocked");
+}
+
+void nfs_format_unlock_blurb_for_track(const NFSRewardHooks* h, char* buf,
+                                       int len, int32_t track,
+                                       int32_t direction)
+{
+    int32_t treeType = 0, eventNumber = 0;
+
+    if (h && h->findEventForTrack
+        && h->findEventForTrack(h->user, track, direction, &treeType,
+                                &eventNumber)) {
+        int32_t id = treeType == 0   ? LANG_TRACK_CHAMPIONSHIP_BLURB
+                     : treeType == 1 ? LANG_TRACK_HOT_PURSUIT_BLURB
+                                     : 0;
+        b_snprintf(buf, (size_t)len, translate(h, id),
+                   (int)(int8_t)eventNumber);
+        return;
+    }
+    b_snprintf(buf, (size_t)len, "This track should be unlocked");
 }

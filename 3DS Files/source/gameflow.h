@@ -380,6 +380,12 @@ struct BGameFlow {
 
     BScreenStack         stack;
     const BScreenConfig* screen;   // FlailerScreenList::pCurrent, +412
+    // FlailerScreen's +12 as Activate (0x0016a858) leaves it: the item the
+    // menu starts on, which the enterScreen hook takes. SCREEN_ACTIVATE's
+    // Param, sent as -1, sets it to Param - 1 when the callback writes it.
+    // Retail otherwise keeps the item its UnActivate saved, so a screen
+    // comes back on the item it was left on; the port starts at 0.
+    int activateItem;
     // FlailerScreenList's panel movie. +460, PANELMOVIE's texture, is found
     // by StartMovie and forgotten by StopMovie, and is the gate all three
     // read; +484 is the file StartMovie was given, which StopMovie leaves.
