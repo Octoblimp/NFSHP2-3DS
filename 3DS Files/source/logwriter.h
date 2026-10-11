@@ -14,14 +14,12 @@
 //
 // The writer gathers two seconds of lines at a time and writes whole
 // 512-byte sectors, the part-sector tail held for the next batch (five
-// seconds at most), through a 32 KB FILE buffer. Two device crashes on
-// 2026-10-11 were the console's own SD driver (Process9, an Arm9 data
-// abort in the middle of a two-sector card access), both as a race's
-// once-a-second lines were going to the card: four or so small flushed
-// writes a second, each covering parts of sectors, on a card whose writes
-// had already taken up to 1.2 s. Now a race writes once every two seconds,
-// a few KB of whole sectors, and only when sdmc:/nfshp2_config.txt says
-// "DebugLog 1": main.c opens no log otherwise (configitems.h).
+// seconds at most), through a 32 KB FILE buffer. And only when
+// sdmc:/nfshp2_config.txt says "DebugLog 1": main.c opens no log otherwise
+// (configitems.h). The 2026-10-11 device crashes (Process9, an Arm9 data
+// abort) were first blamed on the log's writes; they went on with no log,
+// and the Luma dump has Process9 reading the cop speech's ENGLISHDAT.PCK,
+// 1 KB at 0x094B2400, when its own cluster lookup came back NULL.
 
 #ifndef LOGWRITER_H
 #define LOGWRITER_H
