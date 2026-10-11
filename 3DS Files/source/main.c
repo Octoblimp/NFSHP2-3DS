@@ -1051,12 +1051,23 @@ static void sndCarSoundMute(void* c, void* sound, int on)
 }
 
 // joyhid's race layout, X the horn: only while the race runs, so every
-// menu -- the pause screen's included -- keeps X as "back".
+// menu -- the pause screen's included -- keeps X as "back". In Be A Cop,
+// in the player cop's car, the D-pad calls the helicopter and the
+// roadblock as well (12m-3).
 static int32_t joyhidRaceLayout(void)
 {
-    return pRaceCoordinator != NULL
-        && racecoordinator_get_current_state(pRaceCoordinator)
-           == RCSTATE_RACE_IN_PROGRESS;
+    const struct Player *p = PlayerPlayersByNumber[0];
+    const tCop *cop;
+
+    if (pRaceCoordinator == NULL
+        || racecoordinator_get_current_state(pRaceCoordinator)
+           != RCSTATE_RACE_IN_PROGRESS)
+        return JOYHID_LAYOUT_MENU;
+    cop = copmanager_get_player_cop(pCopManager);
+    if (RaceParametersBeACop && cop != NULL && p != NULL
+        && cop->pMyCar == p->MyCar)
+        return JOYHID_LAYOUT_COP;
+    return JOYHID_LAYOUT_RACE;
 }
 
 static SoundHooks gSoundHooks = {

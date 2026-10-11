@@ -20417,3 +20417,31 @@ and green, where the first visit had shown the brushed-metal turntable.
   seam table.
 - **Next.** 12m-3, the controls: in Be A Cop the D-Pad calls the cop's
   options, and the Circle Pad steers.
+
+## Session 76, continued -- 12m-3, Be A Cop's D-Pad (done)
+
+- **Ported.** The user's plan of 2026-10-08. In a Be A Cop race, in the
+  player cop's car, D-Pad Left calls the helicopter and Right the
+  roadblock, and neither steers. Retail's calls are combos (TRIANGLE + L2
+  and TRIANGLE + R2), so `joyhid.c`'s `joyhid_cop_keys` turns a new press
+  into three readings: Y (the race layout's Triangle), Y + ZL or ZR, then
+  Y. That way the trigger lets go behind Triangle's veto and shifts no
+  gear, and the request's handler holds off the camera change that
+  Triangle's release raises. main.c's layout answers
+  `JOYHID_LAYOUT_COP` for it. Up (the HUD) and Down (the nitro) are
+  unchanged, and Y + ZL / ZR still work by hand.
+- **The checker.** `joyhid_check.py`: each key raises its request on
+  the second frame only, with the camera change on the fourth, and no
+  steer, gear change or horn. Both keys at once, a press during a call,
+  a key held over from the race layout, a second press, and Up and Down
+  are covered. 8 hand mutations of `joyhid_cop_keys`, all caught.
+- **Checked.** build_cia.ps1 built clean (relocations OK, shaders OK).
+  On Azahar (on AC), the SkipFE Be A Cop race in car 33, gas only, the
+  horn five times and then the D-Pad. A chase opened. Left set the
+  pursuit's Be A Cop helicopter behaviours (0x1e0); the helicopter took
+  its 0x20 and came (chopper state 0 to 1). Right set 0x18, and the
+  roadblock took its 0x08. The car went straight and the camera stayed.
+  30 fps, Speed 100%. The cop HUD's helicopter and roadblock icons kept
+  their colour; that is for 12m-5 to hold to retail.
+- **Docs.** `docs/formats/joystick.md`, "Be A Cop's D-pad (12m-3)".
+- **Next.** 12m-4, the Pre Race Blurb.

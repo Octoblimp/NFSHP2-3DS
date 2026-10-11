@@ -63,6 +63,31 @@ static uint8_t axis(int32_t v)
     return (uint8_t)(a < 0 ? 0 : a > 255 ? 255 : a);
 }
 
+uint32_t joyhid_cop_keys(JoyHidCop *c, uint32_t keys, int32_t on)
+{
+    uint32_t pad = keys & (JOYHID_DLEFT | JOYHID_DRIGHT);
+    uint32_t pressed = pad & ~c->last;
+
+    c->last = pad;
+    if (!on) {
+        c->step = 0;
+        return keys;
+    }
+    keys &= ~(JOYHID_DLEFT | JOYHID_DRIGHT);
+    if (c->step == 0 && pressed != 0) {
+        // Both at once: Left, the helicopter.
+        c->combo = (pressed & JOYHID_DLEFT) != 0 ? JOYHID_ZL : JOYHID_ZR;
+        c->step = 1;
+    }
+    if (c->step != 0) {
+        keys |= JOYHID_Y;
+        if (c->step == 2)
+            keys |= c->combo;
+        c->step = c->step == 3 ? 0 : c->step + 1;
+    }
+    return keys;
+}
+
 void joyhid_build(const JoyHidState *s, uint8_t buf[32])
 {
     uint32_t buttons = 0xffff;   // active low
@@ -101,6 +126,7 @@ void joyhid_build(const JoyHidState *s, uint8_t buf[32])
 void joyhid_read(int32_t port, uint8_t *buf)
 {
 #ifdef __3DS__
+    static JoyHidCop cop;
     JoyHidState s;
     circlePosition cp;
     circlePosition cs;
@@ -114,7 +140,9 @@ void joyhid_read(int32_t port, uint8_t *buf)
     s.cy = cp.dy;
     s.sx = cs.dx;
     s.sy = cs.dy;
-    s.race = gJoyHidRaceLayoutFn != NULL && gJoyHidRaceLayoutFn();
+    s.race = gJoyHidRaceLayoutFn != NULL ? gJoyHidRaceLayoutFn()
+                                         : JOYHID_LAYOUT_MENU;
+    s.keys = joyhid_cop_keys(&cop, s.keys, s.race == JOYHID_LAYOUT_COP);
     joyhid_build(&s, buf);
 #else
     (void)port;

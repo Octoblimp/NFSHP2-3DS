@@ -22,14 +22,17 @@ cop's HUD (hudcop.c, hudrender.c, hudscore.c), the setup screens
   time-out finish, the Busted and Be On Lookout speech, and each
   wrecked speeder (`docs/formats/cops.md`, "BeACopThink").
   GetBeACopSpeaker and GetBeACopTime are getters with no caller.
-- **12m-3** The controls, the user's plan of 2026-10-08: in Be A Cop
-  the D-Pad calls the cop's options (the helicopter, the roadblock)
-  and only the Circle Pad steers. Retail's are TRIANGLE + L2 and
-  TRIANGLE + R2 (scannertab.c); the horn is the siren and lights.
+- **12m-3 (done)** The controls, the user's plan of 2026-10-08: in Be
+  A Cop D-Pad Left calls the helicopter and Right the roadblock
+  (retail's TRIANGLE + L2 and + R2, sent as that combo by
+  `joyhid_cop_keys`), and only the Circle Pad steers
+  (`docs/formats/joystick.md`, "Be A Cop's D-pad").
 - **12m-4** The Pre Race Blurb (`0x001e3270` on, startrace.c): the
   objective screen before a Be A Cop race.
 - **12m-5** A Be A Cop race from the frontend in Azahar: the chase,
   the arrests, the clock, the end and the results. Fix what it shows.
+  Seen in 12m-3's run: the cop HUD's three helicopter and three
+  roadblock icons keep one colour after a call; check against retail.
 
 **Now (Session 76, 2026-10-11): Be A Cop "100% working", the user's
 ask of 2026-10-11. TASKS 41 (the Starting Grid only once the race
