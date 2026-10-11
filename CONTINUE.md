@@ -1,7 +1,8 @@
 # CONTINUE
 
 **Now (Session 76, 2026-10-11): Be A Cop "100% working", the user's
-ask of 2026-10-11, then TASKS 41.** The end of the race, RE-1 to RE-6
+ask of 2026-10-11. TASKS 41 (the Starting Grid only once the race
+has loaded) is done.** The end of the race, RE-1 to RE-6
 (below in "First"; the user's ask of Session 70: "I do need the end of
 races to be coded in"), is done. RE-1 is done (the list of screens, the classes' base, the
 callback and the End Game Menu; `docs/formats/end-game.md`), and so is
@@ -21,8 +22,8 @@ RE-6c-1 (the races an event sets, `docs/formats/event-race.md`) in
 Session 74, RE-6c-2 (FrontendDatabase's event functions,
 `docs/formats/fred-event.md`) in Session 75, and RE-6d (the career's
 end screens, `docs/formats/end-event.md`) in Session 76. Next is the
-user's ask of 2026-10-11, Be A Cop "100% working", and TASKS 41 (the
-Starting Grid shown before the race has loaded), to be done soon. 14-10d comes after them. Two asks were added to
+user's ask of 2026-10-11, Be A Cop "100% working"; TASKS 41 (the
+Starting Grid shown before the race has loaded) is done. 14-10d comes after it. Two asks were added to
 TASKS.md the same day, with no order given: task 39, the armed
 helicopter's missiles and barrels (12k-6), and task 40, the radar
 detection meter under the rear-view mirror (12n). The user's device log of
@@ -5438,7 +5439,7 @@ count. It is its own slice when it goes in.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
 - **Next:** Be A Cop (the user's ask; the end of the race, RE-1 to
-  RE-6, is done, see "First") and TASKS 41, then step 14's 14-10d. 14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5, 14-6, 14-7, 14-8a,
+  RE-6, is done, see "First"; so is TASKS 41), then step 14's 14-10d. 14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5, 14-6, 14-7, 14-8a,
   14-8b, 14-8c, 14-8d, 14-9, 14-10a, 14-10b and 14-10c are done. Of step 12,
   12a to 12k-2, the light flares, 12k-3's planners, 12k-3a, 12k-3b,
   12k-4a, 12k-4b, 12k-7, 12l-1 and 12l-2 are done. See

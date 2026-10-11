@@ -3652,15 +3652,30 @@ static double ticksMs(uint64_t ticks)
 // and everything the race can draw is made then (trackview_prepare): a
 // bake or an upload mid-race is a hitch. The Begin of loading renamed the
 // file for hot chunking, so it goes by its .BUN name.
+//
+// Until then the race's frames draw nothing (raceHoldsLoadingScreen), so
+// the Loading screen stays up through the attach's seconds and the first
+// frame shown is the fly-by under the Starting Grid, as retail's is
+// (TASKS 41). The streams are read in place first, for up to two seconds:
+// a read is made whole in the service and its callback runs in the next,
+// so the frames' wait is only for a stream that takes longer.
+static bool raceAttachGaveUp;
+
 static bool raceAttachTrack(void)
 {
     static int    waits;
+    static u64    readMs;
     char          name[32];
     ResourceFile* rf;
     uint64_t      t0;
     int           bakes, uploads, frames;
 
     if (g_track.loaded) return g_track.attached;
+    if (raceAttachGaveUp) return false;
+    t0 = osGetTime();
+    while (racePacksStreaming() > 0 && osGetTime() - t0 < 2000)
+        (void)service_resource_loading();
+    readMs += osGetTime() - t0;
     // A few frames, and no more than 150 of them.
     if (racePacksStreaming() > 0 && waits < 150) {
         waits++;
@@ -3669,11 +3684,16 @@ static bool raceAttachTrack(void)
     snprintf(name, sizeof name, "TRACKS\\TRACKB%d.BUN",
              (int)RaceParametersTrackNumber);
     rf = find_resource_file(name);
-    if (!rf || !rf->pFirstChunk) return false;
+    if (!rf || !rf->pFirstChunk) {
+        logLine("race: track not attached: %s not loaded", name);
+        raceAttachGaveUp = true;
+        return false;
+    }
     g_track.track = (int)RaceParametersTrackNumber;
     if (!trackview_attach(&g_track, rf->pFirstChunk,
                           (size_t)rf->SizeofChunks)) {
         logLine("race: track not attached: %s", g_track.note);
+        raceAttachGaveUp = true;
         return false;
     }
     logTrackView("attached to");
@@ -3682,12 +3702,14 @@ static bool raceAttachTrack(void)
     uploads = g_track.uploads;
     frames  = g_track.frameUploads;
     trackview_prepare(&g_track);
-    logLine("race: prepared in %.0f ms after %d frames' wait (%d still "
-            "streaming): %d models, %d bakes, %d uploads (%d past the "
-            "models', %d left out, %lu KB), %d flipbook frames; %d other "
-            "solids, %d textures (%d in VRAM, %lu KB, %lu KB of VRAM "
-            "free), %lu KB linear free, %lu KB heap free",
-            ticksMs(svcGetSystemTick() - t0), waits, racePacksStreaming(),
+    logLine("race: prepared in %.0f ms after %llu ms of reads and %d "
+            "frames' wait (%d still streaming): %d models, %d bakes, %d "
+            "uploads (%d past the models', %d left out, %lu KB), %d "
+            "flipbook frames; %d other solids, %d textures (%d in VRAM, "
+            "%lu KB, %lu KB of VRAM free), %lu KB linear free, %lu KB "
+            "heap free",
+            ticksMs(svcGetSystemTick() - t0), (unsigned long long)readMs,
+            waits, racePacksStreaming(),
             g_track.preparedModels, g_track.bakes - bakes,
             g_track.uploads - uploads, g_track.preparedTextures,
             g_track.preparedSkipped,
@@ -3701,6 +3723,7 @@ static bool raceAttachTrack(void)
                 / 1024);
     g_track.worstTicks = 0;
     waits = 0;
+    readMs = 0;
     {
         bNode* n;
 
@@ -3720,6 +3743,13 @@ static bool raceAttachTrack(void)
         }
     }
     return true;
+}
+
+// A race is up and its track is still to be attached: the frame draws
+// nothing, and the screens keep the last one drawn, the Loading screen.
+static bool raceHoldsLoadingScreen(void)
+{
+    return pRaceCoordinator != NULL && !g_track.loaded && !raceAttachGaveUp;
 }
 
 // Where the race is, once a second: the coordinator's state, the race's
@@ -6175,6 +6205,7 @@ int main(int argc, char** argv)
             // The Begin of unloading deleted the coordinator and is
             // unloading the track's files: the view lets go of the bundle
             // before anything else can read it.
+            if (pRaceCoordinator == NULL) raceAttachGaveUp = false;
             if (pRaceCoordinator == NULL && g_track.attached) {
                 trackview_free(&g_track);
                 struct mallinfo mi = mallinfo();
@@ -6207,6 +6238,18 @@ int main(int argc, char** argv)
             }
 
             updateBlurb(&g_boot, RealTimeElapsed);
+
+            // The frame the flow makes the race in, and any the attach
+            // waits on, draw nothing: the Loading screen stays up until
+            // the track is attached (raceAttachTrack). They keep the blank's
+            // pace and the loads' service.
+            if (raceHoldsLoadingScreen()) {
+                hangwatch_mark("race: the Loading screen held");
+                C3D_FrameSync();
+                (void)service_resource_loading();
+                bootServiceLoads(&g_boot);
+                continue;
+            }
 
             // The race is paced at 30 (step 13b-1): a frame takes two
             // vertical blanks at least, so none is 16.7 ms between two of

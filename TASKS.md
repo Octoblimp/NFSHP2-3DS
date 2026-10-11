@@ -2370,7 +2370,7 @@ phases.
         checker against retail, bind it in `main.c`, and check in
         Azahar that the lights climb near a cop and turn yellow for a
         roadblock or spikes ahead.
-41. [ ] **The Starting Grid before the track has loaded.** Asked for
+41. [x] **The Starting Grid before the track has loaded.** Asked for
         on 2026-10-11, with an Azahar shot: the Pre Race Stats screen
         (Starting Grid) comes up over a black screen while the race is
         still loading behind it -- "make it to where it doesn't show
@@ -2383,6 +2383,13 @@ phases.
         finish it under the Loading screen before the flow enters
         RACING or before Pre Race Stats is summoned, and check in Azahar
         that the grid appears over a drawn flyby at full frame rate.
+        Done in Session 76: the first frame's 9.3 s was the track's
+        attach and prepare (`raceAttachTrack`, main.c). A race's frames
+        before the attach now draw nothing (`raceHoldsLoadingScreen`),
+        so the Loading screen stays up through it, and the streamed
+        packs are read in place first. On Azahar the Loading screen
+        held at App 0 FPS, then the grid came up over the drawn fly-by
+        at 30 FPS.
 
 ### The retail frontend
 

@@ -20328,3 +20328,28 @@ and green, where the first visit had shown the brushed-metal turntable.
 - **Next.** RE is done. Be A Cop "100% working" (the user's ask of
   2026-10-11), and TASKS 41 (the Starting Grid only once the race has
   loaded). Then 14-10d, and TASKS 39 and 40.
+
+## Session 76, continued -- TASKS 41, the Starting Grid after the load (done)
+
+- **The cause.** The flow's pass that enters RACING hides the Loading
+  screen (Part6), and the End makes the coordinator, whose fly-by puts
+  up Pre Race Stats. That frame drew the grid over nothing. The next
+  frame's `raceAttachTrack` (main.c) attached and prepared the track
+  for 9.3 s (attach about 5 s, `trackview_prepare` 3.3 to 4.4 s), with
+  the grid over black on the screen all that time.
+- **The fix.** `raceHoldsLoadingScreen`: while a race is up and its
+  track is not attached (and the attach has not given up), the frame
+  draws nothing. It keeps the blank's pace and the loads' service, and
+  the screens keep the last frame drawn, the Loading screen. The attach
+  stays after the first `raceFrame`, as before. It now reads the
+  streamed packs in place for up to two seconds before the frames'
+  wait (bfile's reads are whole in the service), and it gives up on a
+  missing file or a failed attach instead of trying each frame. The
+  log line says the ms of reads too.
+- **Checked.** build_cia.ps1 built clean. On Azahar (on AC), a Hot
+  Pursuit quick race with no keys, shots every 2 s: the Loading screen
+  stayed up at App 0 FPS through the 9.3 s, then the Starting Grid
+  came up over the drawn fly-by at 30 FPS. A gas-only run
+  (`-HoldKeys 65`): PASS, 30.0 fps.
+- **Next.** Be A Cop "100% working": an audit of retail's Be A Cop
+  paths against the port first. Then 14-10d, and TASKS 39 and 40.
