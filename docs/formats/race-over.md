@@ -13,7 +13,8 @@ the next screens and the next race need:
 The code is FrontendDatabase's end of a race, `0x00186e08` to
 `0x001878b0`, and the rewards' checks in NFSRewards, `0x0024ab90` to
 `0x0024b914`. Slice RE-2a ported both in `3DS Files/source/fredend.c`.
-The screens that read the results are in [end-game.md](end-game.md).
+The screens that read the results are in [end-game.md](end-game.md)
+and [race-results.md](race-results.md).
 
 ## When it runs
 

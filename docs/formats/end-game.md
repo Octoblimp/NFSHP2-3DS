@@ -250,8 +250,10 @@ The seams are in `endgame.h`. main.c fills them:
 | `gFEDIsThereAnotherRaceFn`, `gFEDIsMultiTrackFn` | `fedIsThereAnotherRace`, `fedIsMultiTrack`, on `Fred` |
 
 The eleven screens are rows of `kScreens` with `endgame_screen_callback`.
-Until their classes are ported (RE-2, RE-3, RE-6), each one shows the
-screen with a bare base, which only walks the list.
+Race Results, Points Rewards and Task Rewards have their classes
+(`endresults.c`, RE-2b; [race-results.md](race-results.md)). Until the
+others are ported (RE-3, RE-6), each one shows the screen with a bare
+base, which only walks the list.
 
 Three of retail's reads are tested first in the port:
 

@@ -157,6 +157,7 @@
 #include "mellowmover.h"
 #include "pausemenu.h"
 #include "endgame.h"
+#include "endresults.h"
 #include "physcomp.h"
 #include "physicscar.h"
 #include "physicssystem.h"
@@ -4389,6 +4390,14 @@ static int32_t fedIsMultiTrack(void)
     return fred_is_multi_track(&Fred);
 }
 
+// RenderTextIntoGroup on the flow's screens: the reward screens' blurbs
+// and car counts (endresults.c).
+static void endRenderTextIntoGroup(uint32_t screen, uint32_t group,
+                                   const char* str)
+{
+    bpopup_render_text_into_group(&g_flow, screen, group, str);
+}
+
 // The end of the race on Fred (fredend.c): what it keeps of the race, the
 // points and the rewards earned, when the race is over, quit, restarted
 // or left; the rows the post-race camera picks its player by.
@@ -4709,6 +4718,16 @@ int main(int argc, char** argv)
     gSetAutosaveCompletionCallbackFn = endGameAutosaveNow;
     gFEDIsThereAnotherRaceFn = fedIsThereAnotherRace;
     gFEDIsMultiTrackFn = fedIsMultiTrack;
+    // The results (endresults.c): Race Results, Points Rewards and Task
+    // Rewards. The race event's rewards stay NULL until step 16, the
+    // reward speeches until 14-10c.
+    gEndGameScreenCtorFns[END_GAME_CLASS_RACE_RESULTS] =
+        race_results_construct;
+    gEndGameScreenCtorFns[END_GAME_CLASS_POINTS_REWARDS] =
+        points_rewards_construct;
+    gEndGameScreenCtorFns[END_GAME_CLASS_TASK_REWARDS] =
+        task_rewards_construct;
+    gRenderTextIntoGroupFn = endRenderTextIntoGroup;
     // Fred's end of the race (fredend.c): TransientStats, the points, the
     // task and points rewards the End Game screens read, and which cars
     // they unlock. The high scores (RE-3) and the race events (step 16)

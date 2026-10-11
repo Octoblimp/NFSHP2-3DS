@@ -19694,3 +19694,55 @@ Picked up from Session 64's steps:
   from RE-6) and RE-3 (the best times) must land before the user's next
   build.
 - docs/formats/race-over.md. Next: RE-2b.
+
+## Session 70, continued -- RE-2b, Race Results and the reward screens
+
+- `endresults.{c,h}`: Race Results from retail. That is the
+  constructor, Scroll, Tick and destructor, the stats slideshow
+  (tSlideshowStats: its column tests, SetupDataset, SetAlphaScale, Tick
+  and ChangeStats) and the points tally (its lines, Start, Tick and
+  destructor, and ShowPointsResults). Also the Points Rewards and Task
+  Rewards screens, the reward screens' car count and counts,
+  GetNumPointsRewardsEarned and the tasks' lookups by number.
+- `tools/endresults_check.py` with `tools/src/endresults_test.c`: 6455
+  ops, 45145 lines, 0 differ. 144 mutations, all caught. Two had
+  survived the first pass. The script's car types had no usage 0 or 1
+  car with lock status 2, and as many cop cars with lock 0 as with
+  lock 2.
+- The check found two port bugs, now fixed:
+  - GetNumPointsRewardsEarned counts the earned rewards (`movn` adds
+    one each time); the port had taken the last one's place.
+  - The harness prints the two list nodes at retail's sizes (76, 16),
+    as the 64-bit host makes them wider.
+- Retail's quirks, kept:
+  - ShowPointsResults sets the screens' first speech flag and then
+    tests it, so PointsScreenSpeech never plays from Race Results.
+  - The Time column is "Eliminated" for every car but the winner in a
+    RaceType 3 race, even one the cops caught.
+  - A gap of 0 is printed.
+  - A first tick after 5.5 seconds reads the constructor's leftover
+    `Refresh`.
+- Guarded where retail reads through NULL or out of bounds:
+  - a row with no car or no driver;
+  - a one-player race with no row for driver 0 (retail puts its list
+    head up as a line);
+  - more than 8 rows;
+  - the points table, whose bytes either side are 0.
+
+  The script stays clear of these, and the docs list them.
+- main.c binds `gEndGameScreenCtorFns` for RACE_RESULTS,
+  POINTS_REWARDS and TASK_REWARDS, and `gRenderTextIntoGroupFn` to
+  `bpopup_render_text_into_group` on the flow.
+- Azahar, on AC, with a test-only hook that finished the player after
+  600 frames (removed, rebuilt clean):
+  - Race Results shows "Race Results", "National Forest", "1 Player1",
+    "Opel Speedster", the time, and the points tally ("Points Earned: 0",
+    "Total NFS Points: 0").
+  - D-Pad right stepped Time, Best Lap, Avg. Speed; left went back to
+    Best Lap. The tally turned over to "Total Points Earned:".
+  - Speed was 100%, 30 fps.
+  - `race_finish_car_by_car` passes the car's place, so the forced
+    finish sets no time and the Time cell is blank. A forced finish with
+    place 0 projects one (31:24.54 over 8 laps).
+- docs/formats/race-results.md, linked from end-game.md and
+  race-over.md. Next: RE-3, the best times.

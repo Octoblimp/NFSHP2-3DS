@@ -5,10 +5,12 @@ below in "First", is the user's ask: "I do need the end of races to be
 coded in".** RE-1 is done (the list of screens, the classes' base, the
 callback and the End Game Menu; `docs/formats/end-game.md`), and so is
 RE-2a (what Fred keeps of the race and the rewards;
-`docs/formats/race-over.md`). RE-2b is next, then RE-3: until both land,
-Race Results, Best Lap Times and Best Total Times show EA's layout
-placeholders ("WWWWWWWW", "blablabla"), which is the "random text" the
-user saw. 14-10c and 14-10d come after RE-6. Two asks were added to
+`docs/formats/race-over.md`), and RE-2b (Race Results with its stats
+slideshow and points tally, and the Points and Task Rewards screens;
+`docs/formats/race-results.md`). RE-3 is next: until it lands, Best Lap
+Times and Best Total Times show EA's layout placeholders ("WWWWWWWW",
+"blablabla"), the rest of the "random text" the user saw. 14-10c and
+14-10d come after RE-6. Two asks were added to
 TASKS.md the same day, with no order given: task 39, the armed
 helicopter's missiles and barrels (12k-6), and task 40, the radar
 detection meter under the rear-view mirror (12n). The user's device log of
@@ -239,12 +241,19 @@ The slices:
   `gTransientStatsGetDriverFn`, `gRaceIsLeavingFn`, `gIsCarUnlockedFn`
   and SetAudioDataFromSound. The high scores (MaybeRecordHighScore) are
   RE-3's and the race events step 16's; both stay NULL.
-- **RE-2b, next:** RaceResultsScreen (0x001dffe8, Scroll 0x001e0838,
-  tSlideshowStats 0x001df410, 0x001dfdb8, 0x001dc5d8, SprintfAndHash
-  0x001dc4d0) and ShowPointsResults (0x001e0430). The Task Rewards and
-  Points Rewards screens (0x001de6a8, 0x001de568) come with it, from
-  RE-6, because an earned reward now puts them on the list.
-- **RE-3:** BestLapTimes (0x001ddc10), BestTotalTimes (0x001ddfd0) and
+- **RE-2b, done (Session 70):** RaceResultsScreen (0x001dffe8, Scroll
+  0x001e0838, Tick 0x001e0868, the destructor 0x001e23b8),
+  tSlideshowStats (0x001df3a0 .. 0x001dfd40), the points tally
+  (0x001dfdb8 .. 0x001dffe4, 0x001e2410 .. 0x001e25d0) and
+  ShowPointsResults (0x001e0430). Also the Points Rewards and Task
+  Rewards screens (0x001de568, 0x001de6a8) with the car count
+  (0x001de3a8 .. 0x001de550), GetNumPointsRewardsEarned, the tasks'
+  lookups and the car counts (0x0024af40 .. 0x0024b430). `endresults.c`,
+  `tools/endresults_check.py` (0 differ, 144 of 144 mutations caught),
+  `docs/formats/race-results.md`. main.c binds the three classes'
+  constructors and RenderTextIntoGroup. The race event's rewards stay
+  NULL until step 16, the two speeches until 14-10c (RE-5).
+- **RE-3, next:** BestLapTimes (0x001ddc10), BestTotalTimes (0x001ddfd0) and
   the Lap Times screens (0x001e0bd0, 0x001e10f0), with what records the
   times: MaybeRecordHighScore (0x00186af0) and its helpers (0x00186938,
   0x001869d0, 0x00186a20, 0x00186a50), and SetRecordTimesToBeat.
@@ -5351,8 +5360,8 @@ count. It is its own slice when it goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** the end of the race, RE-2b (see "First"; RE-1 and RE-2a
-  are done), then RE-3 to RE-6, then step 14's 14-10c. 14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5, 14-6, 14-7, 14-8a,
+- **Next:** the end of the race, RE-3 (see "First"; RE-1, RE-2a and
+  RE-2b are done), then RE-4 to RE-6, then step 14's 14-10c. 14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5, 14-6, 14-7, 14-8a,
   14-8b, 14-8c, 14-8d, 14-9, 14-10a and 14-10b are done. Of step 12,
   12a to 12k-2, the light flares, 12k-3's planners, 12k-3a, 12k-3b,
   12k-4a, 12k-4b, 12k-7, 12l-1 and 12l-2 are done. See
