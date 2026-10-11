@@ -195,7 +195,8 @@ int32_t raceevent_user_won(const RaceEvent *ev);
 
 // --------------------------------------------------------- the seams
 
-// EventTrack::SetRace (0x001fec20), RE-6c's. NULL does nothing.
+// EventTrack::SetRace (0x001fec20, eventrace.h's event_track_set_race).
+// NULL does nothing.
 extern void (*gEventTrackSetRaceOnFn)(const EventTrack *t,
                                       RaceParameters *rp);
 

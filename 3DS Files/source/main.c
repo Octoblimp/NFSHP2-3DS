@@ -181,6 +181,7 @@
 #include "race.h"
 #include "racecoord.h"
 #include "raceevent.h"
+#include "eventrace.h"
 #include "raceinit.h"
 #include "raceovermsg.h"
 #include "racerun.h"
@@ -1801,6 +1802,18 @@ static const char* fredTranslate(int32_t id)
 static const char* raceOverTranslate(int32_t id)
 {
     static char text[256];
+    if (!g_boot.ui || !g_boot.ui->hasLang) return NULL;
+    if (langtab_copy(&g_boot.ui->lang, id, text, sizeof(text)) == 0)
+        return NULL;
+    return text;
+}
+
+// GetTranslatedString for EventTree::SetRace (eventrace.c): the reward's
+// name, then the event's description, which can run past the other
+// buffers before it is cut to the objective's 511.
+static const char* eventRaceTranslate(int32_t id)
+{
+    static char text[1024];
     if (!g_boot.ui || !g_boot.ui->hasLang) return NULL;
     if (langtab_copy(&g_boot.ui->lang, id, text, sizeof(text)) == 0)
         return NULL;
@@ -4599,6 +4612,14 @@ static void raceEventRestart(void)
     raceevent_restart(&TheRaceEvent);
 }
 
+// StartRace's EventTrack::SetRace (fredrace.c): the track of the event's
+// race index, of TheRaceEvent's eight.
+static void eventTrackSetRace(int32_t index, RaceParameters* rp)
+{
+    if (index >= 0 && index < 8)
+        event_track_set_race(&TheRaceEvent.aTracks[index], rp);
+}
+
 // NumAvailableCars' first byte of reward `i` (TheRaceEvent+244), and
 // 0x00200b30 on it with no state: the event's own.
 static int32_t raceEventRewardType(int32_t i)
@@ -5028,8 +5049,9 @@ int main(int argc, char** argv)
     // SetupCarsForRace's reads, each finish recorded, the results posted,
     // saved and cycled, the End Game Menu's tests, the rewards, the grid's
     // race count and points, and NEXT_RACE's SetupNextRace. EventTrack's
-    // SetRace, the fake challenge knockout and the tree's event word are
-    // RE-6c's.
+    // SetRace (eventrace.c, RE-6c) puts the event's track for the race
+    // into the race parameters; the fake challenge knockout and the tree's
+    // event word are RE-6c-2's.
     gRaceEventGetStatusFn = raceEventGetStatus;
     gRaceEventResetStateFn = raceEventResetState;
     gRaceEventGetRaceIndexFn = raceEventGetRaceIndex;
@@ -5054,6 +5076,11 @@ int main(int argc, char** argv)
     gRaceEventUserWonFn = raceEventUserWon;
     gRaceEventGetTournamentStateFn = raceEventGetTournamentState;
     gFEDSetupNextRaceFn = fedSetupNextRace;
+    gEventTrackSetRaceFn = eventTrackSetRace;
+    gEventTrackSetRaceOnFn = event_track_set_race;
+    // EventTree::SetRace's reward name and description.
+    gEventRaceTranslateFn = eventRaceTranslate;
+    gEventRaceTranslateStringFn = startRaceTranslateString;
     // StartRace's RaceParameters New784 (fredrace.c): the trees' reward
     // cars earned, 0x001ff978.
     gEventRewardCarsUnlockedFn = event_trees_num_cars_unlocked;

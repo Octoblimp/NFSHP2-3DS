@@ -98,7 +98,8 @@ typedef struct EventReward {
 
 // An event, 188 bytes, the chunk's record. The arrays index the tree's
 // tables; only the first n of each are set, the rest is the tool's garbage.
-// Bytes 45 .. 58 are SetRace's, which this slice does not reach.
+// Bytes 52 .. 58 are the cops' options, which EventTree::SetRace
+// (eventrace.c) puts into the race parameters.
 typedef struct EventInfo {
     uint32_t TreeHandle;           //   0  retail's pTree (see above)
     uint32_t StateOffset;          //   4  retail's pState (see above)
@@ -110,7 +111,13 @@ typedef struct EventInfo {
     int8_t   nCops;                //  44
     uint8_t  pad45[3];             //  45
     int32_t  eCopStrength;         //  48
-    uint8_t  Race52[7];            //  52  the cops' options, SetRace's
+    int8_t   bRoadBlocks;          //  52
+    int8_t   bHelicopter;          //  53
+    int8_t   bSpikeStrips;         //  54
+    int8_t   bTickets;             //  55
+    int8_t   New56;                //  56  RaceParameters' New624
+    int8_t   nNumBeACopRoadBlocks; //  57
+    int8_t   nNumBeACopChoppers;   //  58
     int8_t   nCars;                //  59
     int8_t   nTracks;              //  60
     int8_t   nGoals;               //  61

@@ -20203,3 +20203,51 @@ and green, where the first visit had shown the brushed-metal turntable.
   GetEventTree 0x00185568, the event word, 0x001f7458); bind
   gEventTrackSetRaceOnFn and gEventTrackSetRaceFn. Then RE-6d, 14-10d,
   and TASKS 39 and 40.
+
+## Session 74 -- RE-6c-1, the races an event sets (done)
+
+- **Done.** `3DS Files/source/eventrace.{c,h}`: EventTrack::SetRace
+  (0x001fec20) and SetFromRace (0x001fed30), EventTree::SetRace
+  (0x001fee20), and the description: GetEventDescriptionToken
+  (0x001f5d58), FormatEventDescriptionToken (0x001f5dd0) and
+  FormatEventDescription (0x001f5f88), with the token table (0x0031b200).
+  eventtree.h's EventInfo bytes 52 .. 58 are named now (the cops'
+  options, which SetRace puts into the race parameters).
+  `docs/formats/event-race.md` has the decode, where it is wired and where
+  it differs (copies stop at the arrays' ends, the reward's name is held
+  to 31 and the NUL, a NULL state leaves New780, the description is
+  retail's cut one short so nothing lands in NFSRaceMode).
+- **The checker.** `tools/eventrace_check.py` with
+  `tools/src/eventrace_test.c`: 7337 ops, 13534 lines, 0 differ. Of 136
+  mutations, 134 are caught and 2 are equivalent (SetFromRace's masks,
+  whose extra bit the next field's mask clears). Three survivors of the
+  first pass led to new cases: track names of 29 to 60 characters,
+  descriptions that fill the 512, and tournaments on a race's boundary.
+  A fourth, a token's text across n - 1 followed by $TARGET_TIME, is a
+  fixed case now. The model fixes up retail's two overruns (bStrNCpy's
+  32 characters without a NUL, the NUL at rp+596) before printing.
+- **Wired.** main.c binds gEventTrackSetRaceFn (StartRace's, on
+  TheRaceEvent's track `index`, 0 .. 7) and gEventTrackSetRaceOnFn
+  (SetupNextRace's and Restart's) to event_track_set_race;
+  gEventRaceTranslateFn to a GetTranslatedString(int) of its own with a
+  1024-byte buffer (a description can run past the ring's 256), and
+  gEventRaceTranslateStringFn to the car select's string translation.
+  Restart Event is only offered for events, and StartRace sets no track
+  for an event without tracks, so a quick race is unchanged. Nothing
+  calls event_tree_set_race yet: tTreeDetails::StartEvent (0x001f6a84)
+  is the event tree's screen, step 16's.
+- **Checked.** eventtree, raceevent, fredrace, startrace, endgame,
+  endresults, endtimes, fredend, raceover and racespeech checkers: 0
+  differ. build_cia.ps1 built clean (relocations OK, shaders OK). On
+  Azahar (on AC), a gas-only Hot Pursuit quick race from the frontend
+  (`run_azahar_quickrace.ps1 -HoldKeys 65`): PASS, 30.1 fps.
+- **Next.** RE-6c-2, FrontendDatabase's event functions:
+  GetEventTree (0x00185568: GameType 8 is "Championship", 9 "Hot
+  Pursuit", each "... E3" under bVersionE3 at gp-23224, else NULL),
+  MakeEventCarsAvailable 0x00183d80, MaybeSetSelectedCarForMultiTrackEvent
+  0x00184318, ContinueMultiTrackEvent 0x001843e8, RandomizeList
+  0x00184578, PickRandomTracksForChallengeKnockout 0x001846a0,
+  SetupFakeRaceEventForChallengeKnockout 0x001849f0, and 0x001f7458
+  (gRaceEventNumOpenedFn); bind gFredEventWordFn (IsLastOpen on
+  GetEventTree's current event) and the rest. Then RE-6d, 14-10d, and
+  TASKS 39 and 40.

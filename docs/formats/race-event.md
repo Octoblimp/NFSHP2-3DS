@@ -183,10 +183,12 @@ main.c binds each seam to a wrapper on TheRaceEvent:
   race event (GameType 4, 8 or 9).
 
 Every call but RecordResults sits behind `UseTheRaceEvent` or an event
-type. Until RE-6c copies an event in (`EventTree::SetRace`, the fake
-challenge knockout, `gEventTrackSetRaceOnFn`), TheRaceEvent stays zeroed
-and its state NULL. The events the race opened (`0x001f7458`) and the
-tree's event word are RE-6c's too.
+type. `gEventTrackSetRaceOnFn` is `EventTrack::SetRace`
+([event-race](event-race.md)). Until an event is copied in
+(`EventTree::SetRace`, called from the tree's screen, or the fake
+challenge knockout), TheRaceEvent stays zeroed and its state NULL. The
+fake challenge knockout, the events the race opened (`0x001f7458`) and
+the tree's event word are RE-6c-2's.
 
 ## Where the port differs
 
