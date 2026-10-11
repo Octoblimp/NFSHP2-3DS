@@ -65,6 +65,12 @@ extern int32_t ForceAllAICarsToBeThisType;  // gp-23116, -1
 extern int32_t MaximumNumAICars;            // gp-23112, 7
 extern int32_t TunePreRaceSequence;         // gp-23108, 0
 
+// The port's own word, not retail's: "DebugLog 1" has main.c write
+// sdmc:/nfshp2_debug.txt. Off by default: on 2026-10-11 the console's
+// SD driver (Process9) crashed twice as the log went to the card in a
+// race (logwriter.h).
+extern int32_t ConfigDebugLog;              // 0
+
 // SkipFE as the image reads it, `lw -23220(gp)`: gameflow's skipFE
 // through gPlayerCamSkipFE, 0 while that is unset.
 int32_t config_skip_fe(void);

@@ -39,6 +39,7 @@
 #include <citro2d.h>
 #include <citro3d.h>
 #include <malloc.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -552,14 +553,41 @@ static TrackView g_feView;
 // without anyone watching the window.
 static FILE* g_log;
 
+// abort() raises SIGABRT and never runs atexit: the lines the writer has
+// not put on the card yet go there first, before the process does.
+static void logOnAbort(int sig)
+{
+    (void)sig;
+    logwriter_drain();
+}
+
 static void logOpen(void)
 {
-    g_log = fopen("sdmc:/nfshp2_debug.txt", "w");
+    // Only when the config file says "DebugLog 1" (configitems.h). The
+    // words are read again, and logged, by readConfigItems.
+    {
+        static char text[4096];
+        FILE*  f = fopen(CONFIG_ITEMS_FILE, "rb");
+        size_t n;
+        int    skipFE = 0;
+
+        if (f != NULL) {
+            n = fread(text, 1, sizeof text - 1, f);
+            fclose(f);
+            text[n] = '\0';
+            config_items_apply_text(text, &skipFE, NULL);
+        }
+    }
+    if (ConfigDebugLog)
+        g_log = fopen("sdmc:/nfshp2_debug.txt", "w");
     // The lines go to the card from a thread of their own (logwriter.h):
     // written in place, a race's once-a-second lines cost the device that
     // second's frame, and more while the card was slow.
-    logwriter_start(g_log);
-    atexit(logwriter_drain);
+    if (g_log) {
+        logwriter_start(g_log);
+        atexit(logwriter_drain);
+        signal(SIGABRT, logOnAbort);
+    }
     // stderr is where bMalloc and the other fatal paths say why they abort,
     // just before they do; on the device it would otherwise go nowhere.
     // It stays unbuffered and in place, so the reason is on the card
@@ -3782,6 +3810,8 @@ static void logRaceState(void)
     const struct Player* p = PlayerNumPlayers > 0 ? PlayerPlayersByIndex[0]
                                                   : NULL;
 
+    // With no log (DebugLog 0), none of the second's sums are made.
+    if (!g_log) return;
     if (p && p->nZoneCurrent != lastZone) {
         logLine("race: zone %d -> %d at world frame %ld, mover %d, "
                 "time scale %.2f", (int)lastZone, (int)p->nZoneCurrent,

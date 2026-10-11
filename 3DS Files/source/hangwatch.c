@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "georender.h"
+#include "logwriter.h"
 
 // citro3d's context, whose first member is the GX queue its frames go
 // through: C3D_FrameBegin waits on it, stops it and clears it, and
@@ -152,6 +153,8 @@ static void watch_main(void *arg)
         log_marks(since, moving);
         log_queue("hangwatch");
         if (!stalled) log_regs("hangwatch");
+        // The report on the card now, not with the next batch.
+        logwriter_flush_soon();
         stalled = true;
         next = next < 10000 ? 10000 : next + 30000;
     }

@@ -133,6 +133,7 @@ public class Hp2Cap {
 $VK_A = 65; $VK_S = 83; $VK_M = 77; $VK_N = 78; $VK_T = 84; $VK_G = 71; $VK_H = 72; $VK_F = 70
 
 $debugLog  = Join-Path $env:APPDATA "Azahar\sdmc\nfshp2_debug.txt"
+. (Join-Path $PSScriptRoot "azahar_debuglog.ps1")   # DebugLog 1
 $azaharLog = Join-Path $env:APPDATA "Azahar\log\azahar_log.txt"
 Remove-Item $debugLog  -ErrorAction SilentlyContinue
 Remove-Item $azaharLog -ErrorAction SilentlyContinue
