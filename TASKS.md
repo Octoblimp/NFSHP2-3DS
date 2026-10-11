@@ -2390,6 +2390,21 @@ phases.
         packs are read in place first. On Azahar the Loading screen
         held at App 0 FPS, then the grid came up over the drawn fly-by
         at 30 FPS.
+42. [ ] **The Circle Pad in the menus.** Asked for on 2026-10-11 ("add
+        it later, I just want it known"): the Circle Pad should move
+        through every menu as the D-Pad does, the frontend's screens,
+        the pause menu, the end-of-race menus and the rest, so either
+        one navigates. The stick already reaches the joystick layer
+        as the left analog stick, whose rows raise
+        `JOY_EVENT_MENU_ANALOG_LEFT/RIGHT/UP/DOWN` with
+        `DigitalRepeat`'s timing (`joyhid_check.py` tests them), but
+        nothing in the port handles those events, and menus that read
+        `hidKeysDown` see only the D-Pad. Find each menu's input path
+        (the Flailer menus' SCROLL handlers, the pause screen, the
+        frontend's kDown reads), have the stick's crossings move them
+        the same way, keep its repeat no faster than the D-Pad's, and
+        check on Azahar that the frontend, the pause menu and the
+        results screens all scroll with the Circle Pad.
 
 ### The retail frontend
 
