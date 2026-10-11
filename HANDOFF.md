@@ -19780,3 +19780,58 @@ Picked up from Session 64's steps:
   it is 0x00144ba0.
 - docs/formats/race-over-overlay.md, linked from hud-features.md.
   Next: RE-3, the best times.
+
+## Session 70, continued -- RE-3, the records and the best times
+
+- `highscore.{c,h}`: MaybeRecordHighScore (0x00186af0), InsertPlayerName
+  (0x00186a50), LookupPlayerNameFromTable (0x00186a20), and the two
+  table lookups (0x00186d98, 0x00186dd0).
+  - A car that ran every lap offers its race time to the five totals of
+    its kind, and every car offers its best lap to the five laps. The
+    comparison is signed. The records below the place move down one and
+    the fifth drops off.
+  - The player's `BestLapRecordData` and `BestTotalRecordData` point at
+    the records it set. They are now `FredHighScore` pointers in
+    player.h; the 3DS layout is the same.
+- `endtimes.{c,h}`: WhichPlayerSetLapTimeRecord and
+  WhichPlayerSetTotalTimeRecord, BestLapTimes and BestTotalTimes, and
+  the Lap Times screens' display and callback (0x001e0bd0 .. 0x001e10f0).
+  - Both best-times screens show the five records, with the ones this
+    race set in their player's colour.
+  - The first one this race set picks who gets the record speech, said
+    once per list.
+- A port bug, found reading the disassembly before the check ran:
+  make_room always moved four records from the place. A record at place
+  k pushed k records into the next kind's table. Retail stays inside the
+  five.
+- `tools/endtimes_check.py` with `tools/src/endtimes_test.c`: 6019 ops,
+  36642 lines, 0 differ. 95 mutations, all caught. player_check and
+  fredend_check still pass with the pointer fields and the seam's int
+  answer.
+- main.c binds:
+  - the BEST_LAP_TIMES and BEST_TOTAL_TIMES constructors;
+  - Lap Times 1P and 2P as rows of `kScreens`, with
+    `lap_times_display_callback`;
+  - `gHighScoreMaybeRecordFn`, which logs the total's place and whether
+    the lap set a record;
+  - `gFEDSetRecordTimesToBeatFn`.
+
+  The record speeches stay NULL until 14-10c.
+- `tools/screen_registry.py --retail` reads SLES_507.31 with
+  out/retail_syms.txt. `--retail --check-port` shows both Lap Times
+  screens as ported.
+- Fixed in passing: race-over-overlay.md had FindFlailerObjectByGroup's
+  type as 2; the code passes 1, a text object.
+- Azahar, on AC, at 100% and 30 fps, with a test-only hook that finished
+  the player at 600 frames with a 1:00.00 best lap (removed, rebuilt
+  clean):
+  - Best Lap Times shows "1 Player1 Opel Speedster 1:00.00" in the
+    player's amber.
+  - Best Total Times is empty. The forced finish's race time is 0, which
+    places first but is hidden as no time; retail does the same.
+  - The End Game Menu lists Restart Race, View Replay, View Lap Times and
+    Quit Race.
+  - View Lap Times shows National Forest, Player1 and laps 1 to 8,
+    blank: the forced finish ran no laps. B goes back to the menu.
+- docs/formats/best-times.md, linked from end-game.md and race-over.md.
+  Next: RE-4, the post-race camera.

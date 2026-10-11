@@ -138,8 +138,8 @@ This is the Flailer copy of the frontend popup's word wrap
 chunks, not BUI objects.
 
 1. It collects the group's text objects with `FindFlailerObjectByGroup(
-   screen, group, 2, prev)`, up to 32 (`slti 32`), into an array on the
-   stack. With none it returns 0.
+   screen, group, 1, prev)` (1 is a text object), up to 32 (`slti 32`),
+   into an array on the stack. With none it returns 0.
 2. It walks the string while there is one:
    - A space, tab, NUL (`isspace`, `0x00144a68`) or `@` marks a break at
      that character.

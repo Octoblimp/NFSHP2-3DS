@@ -29,6 +29,11 @@ Usage:
     python tools/screen_registry.py                 # the table
     python tools/screen_registry.py --json out.json
     python tools/screen_registry.py --check-port    # against the 3DS port
+    python tools/screen_registry.py --retail --check-port
+
+--retail reads the retail disc's SLES_507.31 in place of the demo's ELF.
+It has no .symtab, so the names come from out/retail_syms.txt
+(`retail_match.py --out`), as retaildis.py's do, and _gp is retail's.
 """
 import argparse
 import json
@@ -40,6 +45,10 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_ELF = os.path.join(HERE, os.pardir, "PS2 Files", "NFSHP2.ELF")
+RETAIL_ELF = os.path.join(HERE, os.pardir, "PS2 Files", "Full Game",
+                          "SLES_507.31")
+RETAIL_SYMS = os.path.join(HERE, os.pardir, "out", "retail_syms.txt")
+RETAIL_GP = 0x003358f0   # retail_model.RETAIL_GP
 
 CTOR4 = "__19FlailerScreenConfigPCcPF13ScreenMessageP18ScreenCallbackData_viPi"
 CTOR7 = ("__19FlailerScreenConfigPCcPF13ScreenMessageP18ScreenCallbackData_"
@@ -99,6 +108,22 @@ def symbols(elf_path):
         m = re.match(r"([0-9a-f]{8})\s+(\d+)\s+(\S+)", line)
         if m:
             syms.append((int(m.group(1), 16), int(m.group(2)), m.group(3)))
+    syms.sort()
+    return syms
+
+
+def retail_symbols(path=RETAIL_SYMS):
+    """retail_match.py's placements: retail address, size and demo name.
+    A function retail added (kind `new`) has no demo name."""
+    syms = []
+    for line in open(path, encoding="utf-8"):
+        if line.startswith("#") or line.startswith("-"):
+            continue
+        f = line.split()
+        if len(f) < 7 or f[2] == "new":
+            continue
+        syms.append((int(f[0], 16), int(f[1]), f[6]))
+    syms.append((RETAIL_GP, 0, "_gp"))
     syms.sort()
     return syms
 
@@ -341,10 +366,17 @@ def main():
                          "not registered")
     ap.add_argument("--source", default=DEFAULT_SOURCE,
                     help="the port's source directory")
+    ap.add_argument("--retail", action="store_true",
+                    help="the retail disc's SLES_507.31, named by "
+                         "out/retail_syms.txt")
     args = ap.parse_args()
 
-    elf = Elf(args.elf)
-    syms = symbols(args.elf)
+    if args.retail:
+        elf = Elf(RETAIL_ELF)
+        syms = retail_symbols()
+    else:
+        elf = Elf(args.elf)
+        syms = symbols(args.elf)
     byname = {n: a for a, s, n in syms}
     addrs = [a for a, s, n in syms]
 

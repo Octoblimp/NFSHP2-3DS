@@ -127,8 +127,8 @@ struct Player *player_init(struct Player *p, JoystickPort port,
     p->PlayerInputMode = 0;
     p->TimeFinishedRacing = 0;
     p->FinishAnimationLength = 0;
-    p->BestLapRecordData = 0;
-    p->BestTotalRecordData = 0;
+    p->BestLapRecordData = NULL;
+    p->BestTotalRecordData = NULL;
     p->nZoneCurrent = 0;
     p->nZonePrevious = 0;
     p->pZoneSample = NULL;

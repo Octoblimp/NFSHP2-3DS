@@ -140,14 +140,19 @@ extern const char kEndGameMenuScreen[];             // "End Game Menu"
 // ---------------------------------------------------------------- the list
 
 // EndGameScreens, 72 bytes: a bPList of names and the node of the screen
-// up. Every word from 24 on is zeroed and never read.
+// up. Every word from 24 on is zeroed. The screens' classes use four of
+// them as once-only flags for the end-of-race speech: Zeroed[0] (24) is
+// set by the Race Results points tally and the Points Rewards screen,
+// Zeroed[1] (28) by the Task Rewards screen (endresults.c), Zeroed[7]
+// (52) by Best Lap Times and Zeroed[8] (56) by Best Total Times
+// (endtimes.c). Nothing reads the rest.
 typedef struct EndGameScreens {
     int32_t   ScreensEnabled;      //  0  between Resume and Suspend
     int32_t   LatestConstructed;   //  4  never written
     int32_t   ContinueRaceType;    //  8  eContinueRaceType, never read
     bNode     ScreenList;          // 12  bPNodes, each a screen's name
     bNode    *CurrentScreen;       // 20  a node of ScreenList
-    int32_t   Zeroed[12];          // 24  AutosaveCompleted, and the rest
+    int32_t   Zeroed[12];          // 24  the speech flags, and the rest
 } EndGameScreens;                  // 72
 
 #if UINTPTR_MAX == 0xFFFFFFFFu

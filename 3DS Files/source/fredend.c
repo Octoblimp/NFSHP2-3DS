@@ -17,8 +17,8 @@
 #include "racerun.h"
 #include "racesplit.h"
 
-void (*gHighScoreMaybeRecordFn)(HighScoreTable *t, Race *r,
-                                struct RacingCar *rc);
+int32_t (*gHighScoreMaybeRecordFn)(HighScoreTable *t, Race *r,
+                                   struct RacingCar *rc);
 void (*gSetAudioDataFromSoundFn)(uint8_t *ao, int32_t a);
 void (*gRaceEventPostResultsFn)(void);
 void (*gRaceEventMaybeDiscardResultsFn)(void);

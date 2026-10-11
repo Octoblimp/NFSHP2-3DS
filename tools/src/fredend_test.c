@@ -219,12 +219,13 @@ void race_notify_the_race_is_over(Race *r)
     printf("notify %d\n", race_index(r));
 }
 
-static void record(HighScoreTable *t, Race *r, struct RacingCar *rc)
+static int32_t record(HighScoreTable *t, Race *r, struct RacingCar *rc)
 {
     int f = t == &Fred.ChallengeHighScores ? 0
             : t == &fed2.ChallengeHighScores ? 1 : -1;
 
     printf("record %d race %d rc %d\n", f, race_index(r), rc_index(rc));
+    return 0;
 }
 
 static void audio(uint8_t *ao, int32_t a)

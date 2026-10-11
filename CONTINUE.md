@@ -8,11 +8,10 @@ RE-2a (what Fred keeps of the race and the rewards;
 `docs/formats/race-over.md`), and RE-2b (Race Results with its stats
 slideshow and points tally, and the Points and Task Rewards screens;
 `docs/formats/race-results.md`), and RE-2c (the race-over overlay's
-message, `docs/formats/race-over-overlay.md`). RE-3 is next: until it
-lands, Best Lap
-Times and Best Total Times show EA's layout placeholders ("WWWWWWWW",
-"blablabla"), the rest of the "random text" the user saw. 14-10c and
-14-10d come after RE-6. Two asks were added to
+message, `docs/formats/race-over-overlay.md`), and RE-3 (the records,
+Best Lap Times, Best Total Times and the Lap Times screens;
+`docs/formats/best-times.md`). RE-4, the post-race camera, is next.
+14-10c and 14-10d come after RE-6. Two asks were added to
 TASKS.md the same day, with no order given: task 39, the armed
 helicopter's missiles and barrels (12k-6), and task 40, the radar
 detection meter under the rear-view mirror (12n). The user's device log of
@@ -241,8 +240,8 @@ The slices:
   `tools/fredend_check.py` (0 differ, 164 of 165 mutations caught, one
   equivalent), `docs/formats/race-over.md`. main.c binds the FED seams,
   `gTransientStatsGetDriverFn`, `gRaceIsLeavingFn`, `gIsCarUnlockedFn`
-  and SetAudioDataFromSound. The high scores (MaybeRecordHighScore) are
-  RE-3's and the race events step 16's; both stay NULL.
+  and SetAudioDataFromSound. The high scores (MaybeRecordHighScore) came
+  with RE-3; the race events stay NULL until step 16.
 - **RE-2b, done (Session 70):** RaceResultsScreen (0x001dffe8, Scroll
   0x001e0838, Tick 0x001e0868, the destructor 0x001e23b8),
   tSlideshowStats (0x001df3a0 .. 0x001dfd40), the points tally
@@ -264,11 +263,18 @@ The slices:
   `tools/raceover_check.py` (0 differ; 64 of 66 mutations caught, 2
   equivalent), `docs/formats/race-over-overlay.md`. The knockout
   speech seam stays NULL until 14-10c (RE-5).
-- **RE-3, next:** BestLapTimes (0x001ddc10), BestTotalTimes (0x001ddfd0) and
-  the Lap Times screens (0x001e0bd0, 0x001e10f0), with what records the
-  times: MaybeRecordHighScore (0x00186af0) and its helpers (0x00186938,
-  0x001869d0, 0x00186a20, 0x00186a50), and SetRecordTimesToBeat.
-- **RE-4:** the post-race camera: DemoCameraCoordinator (0x0019a440 ..
+- **RE-3, done (Session 70):** the records and the screens that list
+  them. MaybeRecordHighScore (0x00186af0), the name table (0x00186a20,
+  0x00186a50) and the two table lookups (0x00186d98, 0x00186dd0) are in
+  `highscore.c`. BestLapTimes (0x001ddc10), BestTotalTimes (0x001ddfd0),
+  WhichPlayerSet*Record (0x001ddb80, 0x001ddbc8) and the Lap Times
+  screens (0x001e0bd0 .. 0x001e10f0) are in `endtimes.c`.
+  `tools/endtimes_check.py` gives 0 differ and catches all 95 mutations;
+  the decode is `docs/formats/best-times.md`. main.c binds both
+  constructors, the Lap Times rows, MaybeRecordHighScore and
+  SetRecordTimesToBeat. The two record speeches stay NULL until 14-10c
+  (RE-5).
+- **RE-4, next:** the post-race camera: DemoCameraCoordinator (0x0019a440 ..
   0x0019abd8), PostRaceCameraCoordinator (0x0019b280 .. 0x0019b4ac),
   Player::BeginDemoCameras (0x00176868) and the demo-camera seams. With
   no replay, it follows the live cars.
@@ -5371,8 +5377,8 @@ count. It is its own slice when it goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** the end of the race, RE-3 (see "First"; RE-1, RE-2a,
-  RE-2b and RE-2c are done), then RE-4 to RE-6, then step 14's 14-10c. 14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5, 14-6, 14-7, 14-8a,
+- **Next:** the end of the race, RE-4 (see "First"; RE-1 to RE-3
+  are done), then RE-5 and RE-6, then step 14's 14-10c. 14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5, 14-6, 14-7, 14-8a,
   14-8b, 14-8c, 14-8d, 14-9, 14-10a and 14-10b are done. Of step 12,
   12a to 12k-2, the light flares, 12k-3's planners, 12k-3a, 12k-3b,
   12k-4a, 12k-4b, 12k-7, 12l-1 and 12l-2 are done. See

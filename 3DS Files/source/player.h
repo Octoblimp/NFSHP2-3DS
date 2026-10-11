@@ -45,6 +45,7 @@ struct CameraMover;
 struct CountdownCameraCoordinator;
 struct DemoCameraCoordinator;
 struct FlailerObjectChunk;
+struct FredHighScore;
 struct HudAnimator;
 struct NisCameraCoordinator;
 struct NisManager;
@@ -225,8 +226,9 @@ struct Player {
     int32_t       New2540;                       // 2540
     int32_t       bCollisionDetected;            // 2544
     int32_t       bSmokeableHit;                 // 2548
-    uint32_t      BestLapRecordData;             // 2552
-    uint32_t      BestTotalRecordData;           // 2556
+    // The records this race set (highscore.c), NULL for none.
+    struct FredHighScore *BestLapRecordData;     // 2552
+    struct FredHighScore *BestTotalRecordData;   // 2556
     NISOverlayManager mFlailerNIS;               // 2560
     struct Car   *lastCar;                       // 2616
     Timer         LastCrossingTime;              // 2620

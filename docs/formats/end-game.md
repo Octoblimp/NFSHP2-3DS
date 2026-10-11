@@ -128,7 +128,7 @@ rows. Retail registers them, at `0x001e2018`, `0x001e20c8` and
 | Be The Cop Results 2P | 8 | BeACopResults2P | `0x001e0a10` |
 
 A name with no class leaves the instance as it was. The Lap Times screens
-have a callback of their own (`0x001e10f0`, RE-3).
+have a callback of their own (`0x001e10f0`, [best-times.md](best-times.md)).
 
 ### `EndGameMenusBase`, 8 bytes
 
@@ -251,9 +251,12 @@ The seams are in `endgame.h`. main.c fills them:
 
 The eleven screens are rows of `kScreens` with `endgame_screen_callback`.
 Race Results, Points Rewards and Task Rewards have their classes
-(`endresults.c`, RE-2b; [race-results.md](race-results.md)). Until the
-others are ported (RE-3, RE-6), each one shows the screen with a bare
-base, which only walks the list.
+(`endresults.c`, RE-2b; [race-results.md](race-results.md)), and so do
+Best Lap Times and Best Total Times (`endtimes.c`, RE-3;
+[best-times.md](best-times.md)). Until the others are ported (RE-6),
+each one shows the screen with a bare base, which only walks the list.
+Lap Times 1P and 2P are rows of their own, with
+`lap_times_display_callback`.
 
 Three of retail's reads are tested first in the port:
 

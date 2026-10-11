@@ -33,9 +33,9 @@
 // fred.h's gIsCarUnlockedFn, which the car lists and the end of the race
 // ask.
 //
-// HighScoreTable::MaybeRecordHighScore (0x00186af0) is RE-3's, with the
-// lap times' screens, and the race events are step 16's: both go through
-// the seams at the bottom. docs/formats/race-over.md has the decode.
+// HighScoreTable::MaybeRecordHighScore (0x00186af0) is highscore.c's
+// (RE-3), and the race events are step 16's: both go through the seams
+// at the bottom. docs/formats/race-over.md has the decode.
 
 #ifndef FREDEND_H
 #define FREDEND_H
@@ -167,9 +167,10 @@ int32_t nfs_is_car_unlocked(int32_t carType, int32_t gameType);
 extern int32_t (*gIsCarAnEventRewardFn)(int32_t carType);
 extern int32_t (*gEventTreeIsCarUnlockedFn)(int32_t carType);
 
-// HighScoreTable::MaybeRecordHighScore (0x00186af0), RE-3's.
-extern void (*gHighScoreMaybeRecordFn)(HighScoreTable *t, Race *r,
-                                       struct RacingCar *rc);
+// HighScoreTable::MaybeRecordHighScore (0x00186af0), highscore.c's.
+// Its answer is dropped.
+extern int32_t (*gHighScoreMaybeRecordFn)(HighScoreTable *t, Race *r,
+                                          struct RacingCar *rc);
 
 // SetAudioDataFromSound (0x001eef60) on Fred's AudioOptionsScreenData,
 // with 0 (jukebox.h).

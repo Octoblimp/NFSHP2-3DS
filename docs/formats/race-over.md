@@ -253,7 +253,7 @@ main.c fills the seams:
 | `gTransientStatsGetDriverFn` | `fedTransientStatsGetDriver` on `Fred.TransientStatsTable` |
 | `gSetAudioDataFromSoundFn` | `fedAudioFromSound`: `jb_audio_from_sound` with the sound's audio mode |
 | `gIsCarUnlockedFn` | `nfs_is_car_unlocked` |
-| `gHighScoreMaybeRecordFn` | NULL until RE-3 |
+| `gHighScoreMaybeRecordFn` | `fedMaybeRecordHighScore`: highscore.c's, logged ([best-times.md](best-times.md)) |
 | `gRaceEventPostResultsFn`, `MaybeDiscardResultsFn`, `CycleResultsFn`, `gIsCarAnEventRewardFn`, `gEventTreeIsCarUnlockedFn` | NULL until the race events (step 16) |
 
 Before RE-2a, `TaskRewardEarned` was never set to -1. Its 0 put the Task

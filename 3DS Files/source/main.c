@@ -158,6 +158,8 @@
 #include "pausemenu.h"
 #include "endgame.h"
 #include "endresults.h"
+#include "endtimes.h"
+#include "highscore.h"
 #include "physcomp.h"
 #include "physicscar.h"
 #include "physicssystem.h"
@@ -356,8 +358,8 @@ static const BScreenConfig kScreens[] = {
     // one callback that makes its class by name. The four reward screens
     // share one Flailer screen. The classes not ported yet are the bare
     // EndGameMenusBase, which SELECT passes and BACK walks back from. The
-    // Lap Times screens View Lap Times goes to, and the Autosave screen,
-    // are not ported.
+    // Autosave screen is not ported. The Lap Times screens View Lap Times
+    // goes to have their own callback (endtimes.c).
     { "Points Rewards",          END_GAME_REWARDS_SCREEN,
       endgame_screen_callback },
     { "Task Rewards",            END_GAME_REWARDS_SCREEN,
@@ -380,6 +382,10 @@ static const BScreenConfig kScreens[] = {
       endgame_screen_callback },
     { "Be The Cop Results 2P",   END_GAME_BTC_2P_SCREEN,
       endgame_screen_callback },
+    { "Lap Times 1P",            END_GAME_LAP_TIMES_1P_SCREEN,
+      lap_times_display_callback },
+    { "Lap Times 2P",            END_GAME_LAP_TIMES_2P_SCREEN,
+      lap_times_display_callback },
 };
 #define NUM_SCREENS ((int)(sizeof(kScreens) / sizeof(kScreens[0])))
 
@@ -4445,6 +4451,25 @@ static void fedTheRaceIsLeaving(Race* r)
     fred_the_race_is_leaving(&Fred);
 }
 
+// The challenge records (highscore.c): what TheRaceIsOver records for each
+// player's car, logged, and the records to beat each player car's HUD
+// shows from the start (rcstates.c).
+static int32_t fedMaybeRecordHighScore(HighScoreTable* t, Race* r,
+                                       struct RacingCar* rc)
+{
+    int32_t place = high_score_table_maybe_record_high_score(t, r, rc);
+    const struct Player* p = racingcar_get_player(rc);
+
+    logLine("high score: total place %d, lap record %s", (int)place,
+            p != NULL && p->BestLapRecordData != NULL ? "set" : "none");
+    return place;
+}
+
+static void fedSetRecordTimesToBeat(int32_t player)
+{
+    fred_set_record_times_to_beat(&Fred, player);
+}
+
 static const TransientStatsElement* fedTransientStatsGetDriver(int32_t n)
 {
     return transient_stats_get_driver(&Fred.TransientStatsTable, n);
@@ -4740,10 +4765,19 @@ int main(int argc, char** argv)
     gEndGameScreenCtorFns[END_GAME_CLASS_TASK_REWARDS] =
         task_rewards_construct;
     gRenderTextIntoGroupFn = endRenderTextIntoGroup;
+    // The records (endtimes.c, highscore.c): Best Lap Times, Best Total
+    // Times, what the race records and the records to beat. The record
+    // speeches stay NULL until 14-10c.
+    gEndGameScreenCtorFns[END_GAME_CLASS_BEST_LAP_TIMES] =
+        best_lap_times_construct;
+    gEndGameScreenCtorFns[END_GAME_CLASS_BEST_TOTAL_TIMES] =
+        best_total_times_construct;
+    gHighScoreMaybeRecordFn = fedMaybeRecordHighScore;
+    gFEDSetRecordTimesToBeatFn = fedSetRecordTimesToBeat;
     // Fred's end of the race (fredend.c): TransientStats, the points, the
     // task and points rewards the End Game screens read, and which cars
-    // they unlock. The high scores (RE-3) and the race events (step 16)
-    // stay NULL.
+    // they unlock. The high scores are bound above; the race events stay
+    // NULL until step 16.
     gFEDCheckForAbortionFn = fedCheckForAbortion;
     gFEDTheRaceIsOverFn = fedTheRaceIsOver;
     gFEDTheRaceWasQuitFn = fedTheRaceWasQuit;
