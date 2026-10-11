@@ -188,7 +188,7 @@ type. `gEventTrackSetRaceOnFn` is `EventTrack::SetRace`
 (`EventTree::SetRace`, called from the tree's screen, or the fake
 challenge knockout), TheRaceEvent stays zeroed and its state NULL. The
 fake challenge knockout, the events the race opened (`0x001f7458`) and
-the tree's event word are RE-6c-2's.
+the tree's event word are [fred-event](fred-event.md)'s.
 
 ## Where the port differs
 

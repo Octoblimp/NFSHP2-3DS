@@ -33,7 +33,8 @@ An event's tracks are 4-byte words in the tree's table
 `0x00153420`) when it has one; without one, `Point2Point` stays as it
 was.
 
-`EventTrack::SetFromRace` (`0x001fed30`), which nothing in retail calls,
+`EventTrack::SetFromRace` (`0x001fed30`), which nothing in retail calls
+(the challenge knockout has its code inline, [fred-event](fred-event.md)),
 writes the fields back into the word. The two shares are times `100.0f`,
 truncated (`cvt.w.s`): the density keeps 7 bits, and the oncoming share
 whatever of its word the shift by 25 leaves.
@@ -152,8 +153,9 @@ None of it is visible to the game.
 - **The floats.** SetFromRace's multiply is eefpu.h's `ee_mul`, which
   clamps as the R5900 does but rounds to nearest where `mul.s` rounds
   toward zero, so a share of 0.29 can come back as 29 where retail's
-  gives 28. Nothing calls SetFromRace. The check's emulator rounds to
-  nearest too.
+  gives 28. The challenge knockout's tracks use it for every race of
+  setup mode 1 ([fred-event](fred-event.md)). The check's emulator rounds
+  to nearest too.
 
 ## The check
 

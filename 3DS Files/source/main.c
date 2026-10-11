@@ -121,6 +121,7 @@
 #include "frameprof.h"
 #include "fred.h"
 #include "fredend.h"
+#include "fredevent.h"
 #include "fredrace.h"
 #include "frontres.h"
 #include "gameflow.h"
@@ -4607,6 +4608,13 @@ static void raceEventKeepState(void)
     raceevent_keep_state(&TheRaceEvent);
 }
 
+// ShouldSeeRewardScreen's count (0x001f7458): the events this race opened
+// whose goals TheRaceEvent's state now passes (fredevent.c).
+static int32_t raceEventNumOpened(void)
+{
+    return events_opened_num_passed(&TheEventsOpened, &TheRaceEvent);
+}
+
 static void raceEventRestart(void)
 {
     raceevent_restart(&TheRaceEvent);
@@ -5050,8 +5058,9 @@ int main(int argc, char** argv)
     // saved and cycled, the End Game Menu's tests, the rewards, the grid's
     // race count and points, and NEXT_RACE's SetupNextRace. EventTrack's
     // SetRace (eventrace.c, RE-6c) puts the event's track for the race
-    // into the race parameters; the fake challenge knockout and the tree's
-    // event word are RE-6c-2's.
+    // into the race parameters. FrontendDatabase's event calls (fredevent.c,
+    // RE-6c-2): the challenge knockout's fake event, the tree's event word
+    // and opponents, the multi-track event's car, and the events opened.
     gRaceEventGetStatusFn = raceEventGetStatus;
     gRaceEventResetStateFn = raceEventResetState;
     gRaceEventGetRaceIndexFn = raceEventGetRaceIndex;
@@ -5070,6 +5079,7 @@ int main(int argc, char** argv)
     gRaceEventStatusAdvancedFn = raceEventStatusAdvanced;
     gRaceEventStatusFellFn = raceEventStatusFell;
     gRaceEventKeepStateFn = raceEventKeepState;
+    gRaceEventNumOpenedFn = raceEventNumOpened;
     gRaceEventRestartFn = raceEventRestart;
     gRaceEventRewardTypeFn = raceEventRewardType;
     gRaceEventRewardEarnedFn = raceEventRewardEarned;
@@ -5078,6 +5088,12 @@ int main(int argc, char** argv)
     gFEDSetupNextRaceFn = fedSetupNextRace;
     gEventTrackSetRaceFn = eventTrackSetRace;
     gEventTrackSetRaceOnFn = event_track_set_race;
+    gSetupFakeRaceEventForChallengeKnockoutFn =
+        fred_setup_fake_race_event_for_challenge_knockout;
+    gFredEventWordFn = fred_event_word;
+    gFredEventOpponentFn = fred_event_opponent;
+    gFredMaybeSetSelectedCarForMultiTrackEventFn =
+        fred_maybe_set_selected_car_for_multi_track_event;
     // EventTree::SetRace's reward name and description.
     gEventRaceTranslateFn = eventRaceTranslate;
     gEventRaceTranslateStringFn = startRaceTranslateString;

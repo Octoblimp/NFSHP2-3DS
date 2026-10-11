@@ -20251,3 +20251,49 @@ and green, where the first visit had shown the brushed-metal turntable.
   (gRaceEventNumOpenedFn); bind gFredEventWordFn (IsLastOpen on
   GetEventTree's current event) and the rest. Then RE-6d, 14-10d, and
   TASKS 39 and 40.
+
+## Session 75 -- RE-6c-2, FrontendDatabase's event calls (done)
+
+- **Done.** `3DS Files/source/fredevent.{c,h}`: GetEventTree
+  (0x00185568), DataEventSelectScreen's GetSelectedEvent, SetSelectedEvent
+  and SetTreeType (0x001f5d00 .. 0x001f5d50), FlushAvailableCars
+  (0x00187928), MakeEventCarsAvailable (0x00183d80),
+  MaybeSetSelectedCarForMultiTrackEvent (0x00184318),
+  ContinueMultiTrackEvent (0x001843e8), RandomizeList (0x00184578),
+  PickRandomTracksForChallengeKnockout (0x001846a0),
+  SetupFakeRaceEventForChallengeKnockout (0x001849f0), StartRace's event
+  word (0x001850e0), SetupCarsForRace's opponent (0x00185a1c), and the
+  list of the events opened after TheRaceEvent (0x0031b7b0: 0x001f72a8,
+  0x001f72b0, 0x001f7398, 0x001f7458). `docs/formats/fred-event.md` has
+  the decode, the wiring and where the port differs (an array for the
+  pick list, nothing past the list or eight races, a missing event's word
+  0, the bottom of memory's zeros, the traffic shares rounded to nearest).
+- **The checker.** `tools/fredevent_check.py` with
+  `tools/src/fredevent_test.c`: 18963 ops, 43736 lines, 0 differ; all 99
+  mutations caught. The harness prints TheRaceEvent's offsets as retail's
+  (the host's pointers are 8 bytes) and splits up to 72 fields (a bRandom
+  queue of 64). Three survivors of the first pass led to new cases: d[1]
+  and d[2] that differ, a made-up car table after the data and none, and
+  StartRace's word on the last event open (all else passed).
+- **Wired.** main.c binds gSetupFakeRaceEventForChallengeKnockoutFn,
+  gFredEventWordFn, gFredEventOpponentFn,
+  gFredMaybeSetSelectedCarForMultiTrackEventFn, and gRaceEventNumOpenedFn
+  (a wrapper, 0x001f7458 on TheEventsOpened and TheRaceEvent). GameType
+  4, 8 and 9 are not reached yet; the event tree screen (step 16) will
+  call MakeEventCarsAvailable, ContinueMultiTrackEvent, SetSelectedEvent
+  and StartEvent's list (0x001f7480).
+- **Checked.** No source an earlier checker builds changed (main.c is
+  in none). build_cia.ps1 built clean (relocations OK, shaders OK). On
+  Azahar (on AC), a gas-only Hot Pursuit quick race from the frontend
+  (`run_azahar_quickrace.ps1 -HoldKeys 65`): PASS, 30.0 fps.
+- **The user's asks this session.** After RE, Be A Cop "100% working"
+  (memory be-a-cop-after-re). And TASKS 41, "sometime soon": the
+  Starting Grid comes up over black while the race still loads (in this
+  run at 41.7 s, App 4 FPS, and 46.8 s, App 0 FPS); show it only once
+  the race has loaded, over the flyby as retail does.
+- **Next.** RE-6d, the career's screens: Tourney Standings (0x001dd5d0,
+  with `tournament_race_speech`), Events Unlocked (0x001df180), the
+  event's results (0x001def38, with `race_event_speech` and
+  `race_event_reward_speech`), the Reward menu, and FormatStatus
+  (0x001f60e8). Then Be A Cop and TASKS 41, then 14-10d and TASKS 39
+  and 40.

@@ -17,8 +17,12 @@ career's screens, is under way, split into RE-6a to RE-6d: RE-6a (the
 event trees, `docs/formats/event-tree.md`) is done in Session 71,
 RE-6b (RaceEvent, `docs/formats/race-event.md`) in Session 73,
 RE-6c-1 (the races an event sets, `docs/formats/event-race.md`) in
-Session 74, and RE-6c-2 (FrontendDatabase's event functions) is next;
-HANDOFF's Session 70 entry has the split, and Session 74's the rest. 14-10d comes after RE-6. Two asks were added to
+Session 74, RE-6c-2 (FrontendDatabase's event functions,
+`docs/formats/fred-event.md`) in Session 75, and RE-6d (the career's
+screens) is next; HANDOFF's Session 70 entry has the split, and Session
+75's the rest. After RE the user's ask of 2026-10-11 is Be A Cop "100%
+working", and TASKS 41 (the Starting Grid shown before the race has
+loaded) is to be done soon. 14-10d comes after them. Two asks were added to
 TASKS.md the same day, with no order given: task 39, the armed
 helicopter's missiles and barrels (12k-6), and task 40, the radar
 detection meter under the rear-view mirror (12n). The user's device log of
@@ -327,8 +331,9 @@ The slices:
   `docs/formats/event-tree.md`), RE-6b (RaceEvent, done in
   Session 73: `raceevent.{c,h}`, `docs/formats/race-event.md`),
   RE-6c (the races an event sets; RE-6c-1 done in Session 74:
-  `eventrace.{c,h}`, `docs/formats/event-race.md`; RE-6c-2 next) and
-  RE-6d (the screens). In all,
+  `eventrace.{c,h}`, `docs/formats/event-race.md`; RE-6c-2 in Session
+  75: `fredevent.{c,h}`, `docs/formats/fred-event.md`) and RE-6d (the
+  screens, next). In all,
   the career's screens: Tourney Standings (with
   `tournament_race_speech`), Events Unlocked, the event's results
   (0x001def38, with `race_event_speech` and
@@ -5431,8 +5436,9 @@ count. It is its own slice when it goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** the end of the race, RE-6c-2 (see "First"; RE-1 to RE-5,
-  RE-6a, RE-6b and RE-6c-1 are done), then step 14's 14-10d. 14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5, 14-6, 14-7, 14-8a,
+- **Next:** the end of the race, RE-6d (see "First"; RE-1 to RE-5,
+  RE-6a, RE-6b, RE-6c-1 and RE-6c-2 are done), then Be A Cop (the
+  user's ask) and TASKS 41, then step 14's 14-10d. 14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5, 14-6, 14-7, 14-8a,
   14-8b, 14-8c, 14-8d, 14-9, 14-10a, 14-10b and 14-10c are done. Of step 12,
   12a to 12k-2, the light flares, 12k-3's planners, 12k-3a, 12k-3b,
   12k-4a, 12k-4b, 12k-7, 12l-1 and 12l-2 are done. See

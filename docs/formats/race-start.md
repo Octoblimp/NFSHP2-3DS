@@ -250,8 +250,11 @@ event game's opponents read a tree. The four words of TheRaceEvent
 | `gFredGameFlowStateFn` | CurrentGameFlowState, gp-21420 | state 0 |
 | `gFredChangeGameFlowFn` | ChangeGameFlow, `0x001680d8` | nothing |
 
-`main.c` sets only the last two, to the flow's current state and
-`bgf_change_state(state, BGF_NONE)`.
+`main.c` sets all but `gDemoModeReplayStartRaceFn`: the race event's to
+raceevent.c ([race-event](race-event.md)), the fake knockout, the word,
+the opponent and the multi-track car to fredevent.c
+([fred-event](fred-event.md)), and the last two to the flow's current
+state and `bgf_change_state(state, BGF_NONE)`.
 
 Where the image reads past what it has, the port reads something safe
 instead:
