@@ -41,6 +41,7 @@ EndGameScreenCtor gEndGameScreenCtorFns[END_GAME_NUM_CLASSES];
 const char *(*gEndGameTranslateFn)(int32_t id);
 BAnim *(*gEndGameMenuAnimFn)(void);
 void (*gSetAutosaveCompletionCallbackFn)(void (*cb)(void));
+int32_t (*gEndGameReplayViewableFn)(void);
 int32_t (*gRaceEventRewardTestFn)(int32_t i);
 int32_t (*gRaceEventStatusAdvancedFn)(void);
 int32_t (*gRaceEventStatusFellFn)(void);
@@ -697,13 +698,16 @@ static int32_t has_restart_event(void)
 }
 
 // The replay's word at +12 clear. Retail reads it through pReplayManager
-// with no test, since InitForRace always makes one; the port's is NULL
-// until the replay is ported, which reads as no replay to view.
+// with no test, since InitForRace always makes one; a NULL one reads as
+// no replay to view. The port's ReplayManager is a stand-in until the
+// replay is ported, and gEndGameReplayViewableFn says so.
 static int32_t has_view_replay(void)
 {
     const struct ReplayManager *rm = pReplayManager;
 
     if (rm == NULL)
+        return 0;
+    if (gEndGameReplayViewableFn != NULL && gEndGameReplayViewableFn() == 0)
         return 0;
     return gReplayMuteHighlightsFn == NULL || gReplayMuteHighlightsFn(rm) == 0;
 }

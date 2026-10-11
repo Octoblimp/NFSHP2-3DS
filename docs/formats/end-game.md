@@ -247,6 +247,7 @@ The seams are in `endgame.h`. main.c fills them:
 | `gEndGameTranslateFn` | `startRaceTranslate` |
 | `gEndGameMenuAnimFn` | `pauseMenuAnim`, the pause menu's |
 | `gSetAutosaveCompletionCallbackFn` | `endGameAutosaveNow`: no Autosave screen, so the callback runs at once |
+| `gEndGameReplayViewableFn` | `endGameReplayViewable`: 0 while `RCSTATE_INSTANT_REPLAY` has no handler |
 | `gFEDIsThereAnotherRaceFn`, `gFEDIsMultiTrackFn` | `fedIsThereAnotherRace`, `fedIsMultiTrack`, on `Fred` |
 
 The eleven screens are rows of `kScreens` with `endgame_screen_callback`.
@@ -262,8 +263,13 @@ Three of retail's reads are tested first in the port:
 
 - `pEndGameScreens` in the base's SELECT, BACK and the bridge.
 - the instance for messages other than ACTIVATE and UNACTIVATE.
-- `pReplayManager` for View Replay. The port has none yet, so View Replay
-  stays hidden.
+- `pReplayManager` for View Replay. A NULL one hides the item.
+
+The port's own test also hides View Replay: `gEndGameReplayViewableFn`.
+The port's `ReplayManager` is a zeroed stand-in, so retail's test
+would offer the item. Choosing it changes to `RCSTATE_INSTANT_REPLAY`,
+which has no handler yet, and the race would sit there with nothing up.
+main.c's answer is whether that state has a handler.
 
 ## Checking
 

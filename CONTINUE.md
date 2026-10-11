@@ -226,7 +226,8 @@ The slices:
   of 272 mutations caught, two equivalent), `docs/formats/end-game.md`.
   The Autosave screen is not ported: main.c's
   SetAutosaveCompletionCallback runs the callback at once. View Replay
-  is hidden while `pReplayManager` is NULL. `screen_registry.py
+  is hidden while RCSTATE_INSTANT_REPLAY has no handler
+  (`gEndGameReplayViewableFn`). `screen_registry.py
   --check-port` flags Events Unlocked and Be The Cop Results 1P/2P
   because it reads the demo's ELF; retail registers all three
   (0x001e2018, 0x001e20c8, 0x001e20f4).

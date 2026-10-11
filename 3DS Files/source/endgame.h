@@ -368,6 +368,9 @@ extern BAnim *(*gEndGameMenuAnimFn)(void);
 // SetAutosaveCompletionCallback (0x00247d98): what to call when the
 // Autosave screen is done.
 extern void (*gSetAutosaveCompletionCallbackFn)(void (*cb)(void));
+// The port's: whether View Replay has a replay to go to. A 0 leaves the
+// item off; NULL is retail's, which only reads the ReplayManager.
+extern int32_t (*gEndGameReplayViewableFn)(void);
 // TheRaceEvent's (0x0031b600) calls, none named in the image:
 //   0x00200b30(ev, i, ev+8)  reward `i` tested against the event's state
 //   0x00201db8               GetOldStatus against GetStatus: the race

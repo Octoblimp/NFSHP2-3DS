@@ -19835,3 +19835,18 @@ Picked up from Session 64's steps:
     blank: the forced finish ran no laps. B goes back to the menu.
 - docs/formats/best-times.md, linked from end-game.md and race-over.md.
   Next: RE-4, the post-race camera.
+
+## Session 70, continued -- View Replay hidden
+
+- The RE-3 runs showed View Replay on the End Game Menu. end-game.md
+  said it was hidden, but main.c's ReplayManager stand-in (zeroed) made
+  `pReplayManager` non-NULL. Choosing the item changes to
+  RCSTATE_INSTANT_REPLAY, which has no handler: the race would sit
+  there with nothing up.
+- New seam `gEndGameReplayViewableFn` (endgame.c). main.c answers
+  whether `gRCStateCallbacks[RCSTATE_INSTANT_REPLAY]` is set; with 0
+  the item is left off. NULL is retail's test, so endgame_check is
+  unchanged: 24325 ops, 0 differ.
+- Built clean. Not yet seen in Azahar; the RE-4 runs, which finish the
+  race, will show the menu as Restart Race, View Lap Times and Quit
+  Race.

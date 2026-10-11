@@ -4398,6 +4398,14 @@ static void endGameAutosaveNow(void (*cb)(void))
         cb();
 }
 
+// View Replay changes to RCSTATE_INSTANT_REPLAY. Until that state has a
+// handler, the race would sit there with nothing up, so the End Game Menu
+// leaves the item off; the ReplayManager is a stand-in until then.
+static int32_t endGameReplayViewable(void)
+{
+    return gRCStateCallbacks[RCSTATE_INSTANT_REPLAY] != NULL;
+}
+
 static int32_t fedIsThereAnotherRace(void)
 {
     return fred_is_there_another_race(&Fred);
@@ -4753,6 +4761,7 @@ int main(int argc, char** argv)
     gEndGameTranslateFn = startRaceTranslate;
     gEndGameMenuAnimFn = pauseMenuAnim;
     gSetAutosaveCompletionCallbackFn = endGameAutosaveNow;
+    gEndGameReplayViewableFn = endGameReplayViewable;
     gFEDIsThereAnotherRaceFn = fedIsThereAnotherRace;
     gFEDIsMultiTrackFn = fedIsMultiTrack;
     // The results (endresults.c): Race Results, Points Rewards and Task
