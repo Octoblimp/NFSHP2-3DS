@@ -96,6 +96,7 @@
 #include "pullover.h"
 #include "pursuitspeech.h"
 #include "fillerspeech.h"
+#include "racespeech.h"
 #include "nisinfo.h"
 #include "nismanager.h"
 #include "playernis.h"
@@ -984,6 +985,13 @@ static void speechRaiseRacerCaught(uint32_t speaker, uint32_t n,
 {
     speechmgr_raise_racer_caught(speechmgr_get_instance(), speaker,
                                  (int32_t)n, arrestType);
+}
+
+// The reward screens' RewardCarSpeech (racespeech.h, RE-5): they don't
+// read whether it was said.
+static void rewardCarSpeech(int32_t carType)
+{
+    (void)reward_car_speech(carType);
 }
 
 // The chopper's sound (14-7): Chopper::UpdateSound and Mute, which
@@ -5496,6 +5504,19 @@ int main(int argc, char** argv)
     gSpeechRaiseRotorConfirmFn         = speechRaiseRotorConfirm;
     gSpeechRaiseDispatchHelicopterNAFn = speechRaiseDispatchHelicopterNA;
     gSpeechRaiseRacerCaughtFn          = speechRaiseRacerCaught;
+    // The race's own speech (racespeech.h, RE-5): the announcer at the
+    // finish, after each lap, over a knockout, the records and the
+    // rewards, a pullover and Be A Cop's arrests. RaceEvent's won test
+    // stays NULL until RaceEvent is ported, so an event's win says nothing.
+    gRaceFinishedSpeechFn              = race_finished_speech;
+    gLapFinishedSpeechFn               = lap_finished_speech;
+    gMaybeDoKnockoutRaceOverSpeechFn   = maybe_do_knockout_race_over_speech;
+    gPostGameLapRecordFn               = post_game_lap_record;
+    gPostGameTimeRecordFn              = post_game_time_record;
+    gRewardCarSpeechFn                 = rewardCarSpeech;
+    gPointsScreenSpeechFn              = points_screen_speech;
+    gSpeechPulloverEventFn             = pullover_speech;
+    gSpeechBeACopArrestFn              = be_a_cop_arrest_speech;
     logPrintf("car loader: pool %s\n", LoadedCarSlotPool ? "up" : "missing");
 
     // The blurb moves to the bottom screen, so the top screen stops drawing

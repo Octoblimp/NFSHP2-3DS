@@ -19900,3 +19900,45 @@ Picked up from Session 64's steps:
 - Docs: "The demo camera" in docs/formats/camera-coordinator.md, and
   cameracoord.h's header now points at democam.h. Next: RE-5, 14-10c,
   the race's speech.
+
+## Session 70, continued -- RE-5, the race's speech
+
+- `racespeech.{c,h}`: all of RaceSpeech.obj (0x00206900 .. 0x00207870),
+  the announcer's lines about the race rather than the cops' radio.
+  - The finish (RaceFinishedSpeech, once per player): busted, the last
+    place's special lines, or the place.
+  - After each lap (LapFinishedSpeech): a lap record (event 164), or
+    the one- or two-player builder's TypeA (event 160). Retail drops
+    TypeB to TypeD; so does the port.
+  - The knockout's verdict, the two records, the tournament, an event's
+    result and reward, the reward car and track, the points bonus, the
+    pullover, Be A Cop's arrests and PlayBustedSpeech.
+- `speechconv.{c,h}`: ConvertRewardCarType (0x00223328), the four event
+  conversions (0x00223358 .. 0x002233b8), ConvertTrackNumber
+  (0x002233d8) and the unlocked track's (0x00223480).
+- `tools/racespeech_check.py` with `tools/src/racespeech_test.c`:
+  773239 ops, 90612 lines, 0 differ.
+  - 516 mutations (every table entry and limit generated, the rest by
+    hand): 512 caught and 4 equivalent (the demos' range, the event
+    tables' bound, ConvertRewardCarType's two bounds over zero words).
+  - It found one bug. Retail's LapRecordSpeech zeroes its answer in the
+    delay slot before it tests the track's best for 0, so a 0 best is
+    no record. The port spoke it.
+- main.c binds gRaceFinishedSpeechFn, gLapFinishedSpeechFn,
+  gMaybeDoKnockoutRaceOverSpeechFn, gPostGameLapRecordFn,
+  gPostGameTimeRecordFn, gRewardCarSpeechFn (through a wrapper that
+  drops the answer), gPointsScreenSpeechFn, gSpeechPulloverEventFn and
+  gSpeechBeACopArrestFn.
+  - Not bound yet: RaceEvent's won test (until RaceEvent), the
+    tournament's, the event's and its reward's speeches (their screens,
+    RE-6), and PlayBustedSpeech (BeACopThink, 12m).
+- Azahar, with a test-only hook logging each SPCH event (removed,
+  rebuilt clean):
+  - SkipFE's race has one car, so nothing is said, as in retail.
+  - The frontend's Quick Race (seven AI, two laps): event 160 with 0
+    after lap 1 (the last lap's TypeD), 160 with 4 after lap 2, and 165
+    with 0x40000 at the finish, seventh. The library took all three.
+    Race Results and Best Lap Times followed.
+- Docs: docs/formats/race-speech.md; best-times.md, race-over-overlay.md
+  and race-results.md now name the bound seams. Next: RE-6, the
+  career's screens.

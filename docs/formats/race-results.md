@@ -188,8 +188,9 @@ main.c binds `gEndGameScreenCtorFns` for RACE_RESULTS, POINTS_REWARDS
 and TASK_REWARDS. `gRenderTextIntoGroupFn` is
 `bpopup_render_text_into_group` on the flow. The race event's rewards
 (`gRaceEventRewardTypeFn`, `gRaceEventRewardEarnedFn`) stay NULL until
-step 16. The two speeches (`gRewardCarSpeechFn`,
-`gPointsScreenSpeechFn`) stay NULL until 14-10c.
+step 16. main.c binds the two speeches (`gRewardCarSpeechFn`,
+`gPointsScreenSpeechFn`) to RewardCarSpeech and PointsScreenSpeech
+([race-speech.md](race-speech.md)).
 
 Retail reads these unchecked; the port guards them:
 

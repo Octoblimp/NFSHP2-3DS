@@ -172,7 +172,7 @@ main.c binds:
 | `kScreens`' Lap Times 1P and 2P | `lap_times_display_callback` |
 | `gHighScoreMaybeRecordFn` | `fedMaybeRecordHighScore`, which logs the total's place and whether the lap set a record |
 | `gFEDSetRecordTimesToBeatFn` | `fred_set_record_times_to_beat` on `Fred` ([race-start.md](race-start.md)) |
-| `gPostGameLapRecordFn`, `gPostGameTimeRecordFn` | NULL until 14-10c |
+| `gPostGameLapRecordFn`, `gPostGameTimeRecordFn` | `post_game_lap_record`, `post_game_time_record` ([race-speech.md](race-speech.md)) |
 
 `Player`'s `BestLapRecordData` and `BestTotalRecordData` are now
 `FredHighScore` pointers. The 3DS layout is unchanged.

@@ -173,7 +173,8 @@ SetHudFeatures runs it. The two seams are:
   would cut German's 59017. The place helper copies the format out
   before it asks for the place's word, since the seam's answer need not
   outlast the next call.
-- `gMaybeDoKnockoutRaceOverSpeechFn`, which stays NULL until 14-10c.
+- `gMaybeDoKnockoutRaceOverSpeechFn`, `maybe_do_knockout_race_over_speech`
+  ([race-speech.md](race-speech.md)).
 
 `timer_print_to_string_rounded` in `timer.c` is
 `PrintToString(char *, float, int)`.

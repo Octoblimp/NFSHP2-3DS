@@ -11,9 +11,9 @@ slideshow and points tally, and the Points and Task Rewards screens;
 message, `docs/formats/race-over-overlay.md`), and RE-3 (the records,
 Best Lap Times, Best Total Times and the Lap Times screens;
 `docs/formats/best-times.md`), and RE-4 (the post-race camera;
-`docs/formats/camera-coordinator.md`, "The demo camera"). RE-5, the
-race's speech (14-10c), is next.
-14-10c and 14-10d come after RE-6. Two asks were added to
+`docs/formats/camera-coordinator.md`, "The demo camera"), and RE-5
+(the race's speech, 14-10c; `docs/formats/race-speech.md`). RE-6, the
+career's screens, is next. 14-10d comes after RE-6. Two asks were added to
 TASKS.md the same day, with no order given: task 39, the armed
 helicopter's missiles and barrels (12k-6), and task 40, the radar
 detection meter under the rear-view mirror (12n). The user's device log of
@@ -256,7 +256,7 @@ The slices:
   `tools/endresults_check.py` (0 differ, 144 of 144 mutations caught),
   `docs/formats/race-results.md`. main.c binds the three classes'
   constructors and RenderTextIntoGroup. The race event's rewards stay
-  NULL until step 16, the two speeches until 14-10c (RE-5).
+  NULL until step 16. The two speeches are bound since RE-5.
 - **RE-2c, done (Session 70):** the race-over overlay's message,
   which had read "You finished" twice (the layout's placeholder):
   FillInRaceOverMessages (0x00181558) with its two format helpers
@@ -265,7 +265,7 @@ The slices:
   `flailerwrap.c`, `timer_print_to_string_rounded` in `timer.c`,
   `tools/raceover_check.py` (0 differ; 64 of 66 mutations caught, 2
   equivalent), `docs/formats/race-over-overlay.md`. The knockout
-  speech seam stays NULL until 14-10c (RE-5).
+  speech seam is bound since RE-5.
 - **RE-3, done (Session 70):** the records and the screens that list
   them. MaybeRecordHighScore (0x00186af0), the name table (0x00186a20,
   0x00186a50) and the two table lookups (0x00186d98, 0x00186dd0) are in
@@ -275,8 +275,7 @@ The slices:
   `tools/endtimes_check.py` gives 0 differ and catches all 95 mutations;
   the decode is `docs/formats/best-times.md`. main.c binds both
   constructors, the Lap Times rows, MaybeRecordHighScore and
-  SetRecordTimesToBeat. The two record speeches stay NULL until 14-10c
-  (RE-5).
+  SetRecordTimesToBeat. The two record speeches are bound since RE-5.
 - **RE-4, done (Session 70):** the post-race camera.
   DemoCameraCoordinator (0x0019a440 .. 0x0019abd8), the near-plane test
   (0x001044c8) and Player::BeginDemoCameras (0x00176868) are in
@@ -288,10 +287,24 @@ The slices:
   race. Seen in Azahar on TRACKB12: highlight shots behind the end
   screens, and the drive camera where no highlight holds the car. The
   End Game Menu shows Restart Race, View Lap Times and Quit Race.
-- **RE-5, next:** 14-10c, the race's speech (RaceFinishedSpeech and the
-  rest, below under 14-10).
-- **RE-6:** the career's screens: Tourney Standings, Events Unlocked,
-  the Reward menu and Be The Cop Results, with step 16's event tree.
+- **RE-5, done (Session 70):** 14-10c, the race's speech, all of
+  RaceSpeech.obj (0x00206900 .. 0x00207870) in `racespeech.c`, and
+  Speech's conversions (0x00223328 .. 0x00223480, ConvertTrackNumber
+  too) in `speechconv.c`. `tools/racespeech_check.py`: 773239 ops,
+  90612 lines, 0 differ; 516 mutations, 512 caught and 4 equivalent. It
+  found one bug: a lap record over a 0 best (retail's delay slot says
+  none). main.c binds the finish, the laps, the knockout, the two
+  records, the reward car, the points, the pullover and Be A Cop's
+  arrests. The event's won test stays NULL until RaceEvent; the
+  tournament's, the event's and its reward's speeches wait for RE-6;
+  PlayBustedSpeech waits for BeACopThink (12m). Azahar's Quick Race
+  (seven AI) said event 160 after each lap and 165 for seventh place.
+  `docs/formats/race-speech.md`.
+- **RE-6, next:** the career's screens: Tourney Standings (with
+  `tournament_race_speech`), Events Unlocked, the event's results
+  (0x001def38, with `race_event_speech` and
+  `race_event_reward_speech`), the Reward menu and Be The Cop Results,
+  with step 16's event tree.
 
 ## Step 12, the cops and cop mode (Session 56)
 
@@ -929,14 +942,16 @@ pursuit.obj, on a 10 KB manager. Its slices:
     (docs/formats/pursuit-speech.md, "The filler speech"). main.c binds
     gSayFillerSpeechFn. `tools/fillerspeech_check.py`: 81169 ops, 23198
     lines, 0 differ; 122 mutations, all caught.
-  - **14-10c:** the race's speech (0x00206900 .. 0x002077e0):
+  - **14-10c, done (RE-5, Session 70):** the race's speech
+    (0x00206900 .. 0x00207870; docs/formats/race-speech.md):
     RaceFinishedSpeech (0x00206ab8, gRaceFinishedSpeechFn),
     LapFinishedSpeech (0x00207198, gLapFinishedSpeechFn), 0x002075d8
     (gSpeechPulloverEventFn), 0x00207648 (gSpeechBeACopArrestFn),
     PlayBustedSpeech, and Speech's conversions 0x00223328,
     0x00223358 .. 0x002233b8 and 0x00223480 into speechconv.
   - **14-10d:** bcarsel's speakCar (ConvertCarType; event 211 for a
-    cop, 146 otherwise) and ConvertTrackNumber (0x002233d8).
+    cop, 146 otherwise) and its call of ConvertTrackNumber (0x002233d8,
+    ported in RE-5 as `speech_convert_track_number`).
 
   After step 14:
   - **12m** Be A Cop. The user's controls (2026-10-08): in Be A Cop
@@ -5387,9 +5402,9 @@ count. It is its own slice when it goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** the end of the race, RE-5 (see "First"; RE-1 to RE-4
-  are done), then RE-6, then step 14's 14-10d. 14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5, 14-6, 14-7, 14-8a,
-  14-8b, 14-8c, 14-8d, 14-9, 14-10a and 14-10b are done. Of step 12,
+- **Next:** the end of the race, RE-6 (see "First"; RE-1 to RE-5
+  are done), then step 14's 14-10d. 14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5, 14-6, 14-7, 14-8a,
+  14-8b, 14-8c, 14-8d, 14-9, 14-10a, 14-10b and 14-10c are done. Of step 12,
   12a to 12k-2, the light flares, 12k-3's planners, 12k-3a, 12k-3b,
   12k-4a, 12k-4b, 12k-7, 12l-1 and 12l-2 are done. See
   "First" at the top.
