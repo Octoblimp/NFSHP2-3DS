@@ -205,6 +205,75 @@ n passes of a bubble sort, quickest first, and equal cars keep their
 order. Each in turn takes the lowest slot from 1 that no driver holds, or
 9 when 1 to 8 are all taken.
 
+## SetupRaceParametersAfterRaceSetup (`0x001862b0`)
+
+The challenge games' setup screens call it on the global Fred as they
+hand over to car select. The callers are You're The Cop's select
+(`0x001b75ec`), ChallengeScreen's (`0x001b6978`) and the destructors of
+the five race setups: SingleRaceSetup (`0x001b8ac0`), FreeRunSetup
+(`0x001b8c70`), LapKnockoutSetup (`0x001b8f08`), TrackKnockoutSetup
+(`0x001b91e8`) and BeTheCopSetup (`0x001b93a8`). It turns the game's setup
+words into TheRaceParameters. The port binds it to `bsetup.h`'s
+`setupRaceParametersAfterRaceSetup` hook in `main.c`. Only You're The
+Cop's two calls exist in the port so far.
+
+It reads the game type, the two difficulties and the cams from the global
+Fred, and the rest from its argument:
+
+- from Fred: ChallengeScreenData[3] (the challenge's skill),
+  ChallengeScreenData[4] (You're The Cop's), and DisplayOptionsData's
+  JumpCams and ZoneCams bytes;
+- from the argument: NumPlayerCars, the police switch (MainMenuOpts[1])
+  and the setup words.
+
+| GameType | words | AI | traffic | catch-up | OpponentSelect | damage |
+|----------|-------|----|---------|----------|----------------|--------|
+| 3 single race | SingleRaceSetupData | [0], or [1] for one player with the cops: 1 is one AI, 2 the full grid | [5] with the cops, [4] without | [3] | [2] | [6] |
+| 4 race knockout | RaceKnockoutSetupData | with the cops 3 for one player, 2 for two, else none; without, [0] for one player, else 2 | [4] / [3] | [2] | [1] | [6] |
+| 5 lap knockout | LapKnockoutSetupData | as 4 | [4] / [3] | [2] | [1] | [5] |
+| 6 free run | FreeRunSetupData | none | [1] / [0] | 0 | 0 | [2] |
+| 7 Be A Cop | BeTheCopSetupData | 4 for one player, else none | [3] | [2] | [1] | [4] |
+| any other | | none | 0 | 1 | 0 | 1 |
+
+A single race's full grid is 7 AI for one player and 2 for two without
+the cops, and 3 for one player with them. Two players with the cops race
+alone: their setting reads as 0. Any other player count reads [0] and has
+no full grid. The AI count is then cut to 8 minus the players (`pminw`,
+signed), and:
+
+| field | value |
+|-------|-------|
+| NumAICars | the AI count |
+| PlayerStartPosition[0], [1] | the AI count plus 1 and plus 2, as bytes |
+| TrafficDensity | 0.33, 0.667, 1.0 or 0.0 by the setting (Minimum, Moderate, Maximum, Off) |
+| TrafficOncoming | 0.5 |
+| Boost, OpponentSelect | as the table above |
+| DamageEnabled | the damage word, not 0 |
+| CopStrength, OpponentStrength | ChallengeScreenData[3]; Be A Cop's [4] |
+| nMaxCops | 0 without the cops, 6 with them, 2 in Be A Cop |
+| bRoadBlocks, bSpikeStrips, New624 | the police switch as it is; 1 in Be A Cop |
+| bHelicopter | 1 |
+| BeACop | 1 in Be A Cop, else 0 |
+| nNumBeACopRoadBlocks, nNumBeACopChoppers | 3 and 3 in Be A Cop, else 0 |
+| nNumTicketsBeforeArrest | 0 in a one-player Be A Cop, else 2 |
+| BeACopResetTimerAfterArrest | 0 in a two-player Be A Cop, else 1 |
+| JumpCamsEnabled, ZoneCamsEnabled | Fred's bytes, not 0 |
+| TrainingLinesEnabled | 0 |
+| HasObjective, sObjective, TimeTrialTime | Be A Cop: 1, string `0x000ecd11` (bStrNCpy, 512), the clock; else 0, the first byte 0, and 0 |
+
+Be A Cop's clock is 300 seconds for two players. One player gets 125 at
+difficulty 1, 110 at 2 and 150 at any other, and each arrest resets it.
+TimeTrialTime packs it as seconds times 4000 plus 0.5, truncated.
+bTickets is not written. The track, the laps, the race type, the player
+count and NFSRaceMode come from the other screens.
+
+The traffic setting indexes a copy of `0x002b4220` on the stack,
+unchecked. The setup screens only write 0 to 3, and the port reads 0.0
+for anything else.
+
+This is what makes a frontend Be A Cop race differ from a SkipFE one,
+whose roadblock and chopper counts are 0, so its requests are refused.
+
 ## The records
 
 SetRecordTimesToBeat (`0x00184490`) gives a player's settings in
@@ -313,7 +382,15 @@ moved, paint types, cop characters and records. The race parameters,
 Fred, a second database, the driver table and the SkipFE words vary
 around them. Each record starts from a fill pattern.
 
-The checker has 8 scenarios, 2527 ops and 50503 lines, with 0 differ.
+The checker has 11 scenarios, 23605 ops and 120162 lines, with 0 differ.
+`s_aftersetup` (step 12m) runs SetupRaceParametersAfterRaceSetup over
+every game type from -1 to 10. It covers players 0 to 3 and past the grid,
+the police switch at 0, 1, 2 and -1, and each setup word over its range,
+with the traffic words kept to 0..3. It also covers both difficulties and
+the cam bytes, on Fred and on a second database that differs, then 600
+random setups. Its first run differed in 39 lines, all of them traffic
+words the script had set outside 0..3, which the image reads off its
+stack. Its 59 mutations are all caught.
 
 ```bash
 python tools/fredrace_check.py

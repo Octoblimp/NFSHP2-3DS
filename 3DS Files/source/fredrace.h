@@ -160,6 +160,17 @@ void fred_start_race(FrontendDatabase *f);
 // ChangeGameFlow(LOADING_FRONTEND) when SkipFE is set.
 void fred_start_skip_fe_game(FrontendDatabase *f);
 
+// FrontendDatabase::SetupRaceParametersAfterRaceSetup, 0x001862b0: a
+// challenge game's setup screen (GameTypes 3 to 7) into TheRaceParameters
+// -- the AI count and the grid, the traffic, the catch-up, the opponents,
+// the damage, the cops, the jump and zone cams, and Be A Cop's objective,
+// clock and help. The game type, the two difficulties
+// (ChallengeScreenData[3] and [4]) and the cams are the global Fred's; the
+// players, the police switch and the setup data are `f`'s. Any other game
+// type takes the defaults: no AI, minimum traffic, damage on. A traffic
+// setting outside 0..3, which the image reads off its stack, is none.
+void fred_setup_race_parameters_after_race_setup(FrontendDatabase *f);
+
 // --------------------------------------------------------- the seams
 
 // StartRace reads TheRaceEvent's type (nType) and its track count

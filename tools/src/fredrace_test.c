@@ -732,6 +732,9 @@ int main(int argc, char **argv)
         } else if (!strcmp(op, "SS")) {
             sscanf(rest, "%d", &p);
             fred_start_skip_fe_game(fk(p));
+        } else if (!strcmp(op, "AR")) {
+            sscanf(rest, "%d", &p);
+            fred_setup_race_parameters_after_race_setup(fk(p));
         } else if (!strcmp(op, "SR")) {
             sscanf(rest, "%d", &p);
             fred_start_race(fk(p));

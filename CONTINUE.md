@@ -27,6 +27,15 @@ cop's HUD (hudcop.c, hudrender.c, hudscore.c), the setup screens
   (retail's TRIANGLE + L2 and + R2, sent as that combo by
   `joyhid_cop_keys`), and only the Circle Pad steers
   (`docs/formats/joystick.md`, "Be A Cop's D-pad").
+- **12m-3b (done)** SetupRaceParametersAfterRaceSetup (`0x001862b0`)
+  in `fredrace.c`: the challenge setup screens' words into
+  TheRaceParameters (the AI, the traffic, the clock, three roadblocks
+  and three choppers, the objective), bound to main.c's hook
+  (`docs/formats/race-start.md`).
+- **12m-3c** Select Track (`TrackSelectScreenCallback`; its StartRace is
+  `0x001a0918`). It is still a plain screen, so a frontend Be A Cop
+  race cannot start: car select goes on to it for every game type but
+  the event games.
 - **12m-4** The Pre Race Blurb (`0x001e3270` on, startrace.c): the
   objective screen before a Be A Cop race.
 - **12m-5** A Be A Cop race from the frontend in Azahar: the chase,

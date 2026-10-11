@@ -20,6 +20,8 @@ The model is the image. These run as shipped:
     (0x001edb40), the eliminated drivers' restore (0x001edc50) and
     elimination (0x001edbc8), the model count (0x001ede08) and
     GetLocationIndex;
+  * SetupRaceParametersAfterRaceSetup (0x001862b0), the challenge
+    setup screens' race into TheRaceParameters;
   * the Mode Selects' StartQuickRace (0x00216c18), with the express
     game's track pick (0x00216aa8), IsTrackUnlocked (0x0024b760),
     MakeChallengeCarsAvailable, SetCarAvailability, AssignCarOfType and
@@ -138,6 +140,7 @@ ANY_OF_COLOUR = 0x00183f68
 UNUSED_SKIN = 0x00184018
 RECORD_TIMES = 0x00184490
 ALL_RECORD_TIMES = 0x001842a8
+AFTER_SETUP = 0x001862b0
 UNIQUE_TRACK = 0x001868a0
 UNIQUE_LAP = 0x001868d8
 TOTAL_INDEX = 0x00186938
@@ -248,7 +251,12 @@ TORQUE = 704
 IS_VALID, P2P, HIGH_SCORE_INDEX, COP_HASH = 64, 67, 70, 84
 
 # FrontendDatabase.
+CHALLENGE = 8                     # ChallengeScreenData[5]
 COPS_ON = 32                      # MainMenuOpts[1]
+SETUPS = {3: (36, 7), 4: (96, 7), 5: (124, 6), 6: (84, 3), 7: (64, 5)}
+# Each setup's traffic words (game type, word).
+TRAFFIC_WORDS = ((3, 4), (3, 5), (4, 3), (4, 4), (5, 3), (5, 4), (6, 0),
+                 (6, 1), (7, 3))
 DISPLAY = 332
 HIGH_SCORES = 1720
 NUM_TOTAL_TIMES, NUM_LAP_TIMES = 7200, 800
@@ -1096,11 +1104,99 @@ def s_tracklocks(ch):
     return s.ops
 
 
+def s_aftersetup(ch):
+    """SetupRaceParametersAfterRaceSetup: every game type from -1 to 10
+    over players 0 to 3 and the cops switch, on Fred and on a second
+    database whose game type, setups and cams differ (the image reads the
+    game type, the difficulties and the cams from Fred); each setup word of
+    each challenge game over its range, the opponents from -1 to 9; the two
+    difficulties and the cams' bytes; player counts past the grid; then
+    random setups, over a filled database too."""
+    rnd = random.Random(0x1862b0)
+    s = base(ch)
+    s.op("cp")
+    for g, (off, n) in SETUPS.items():
+        for i in range(n):
+            s.fr(1, off + 4 * i, 4, (i * 5 + g) % 4)
+    s.fr(1, DISPLAY + 6, 1, 0)
+    s.fr(1, DISPLAY + 7, 1, 1)
+    for g in range(-1, 11):
+        s.game(0, g)
+        s.game(1, (g + 4) % 11)
+        for k in (0, 1):
+            for np in (0, 1, 2, 3):
+                s.fr(k, NUM_PLAYERS, 4, np)
+                for cops in (0, 1, 2):
+                    s.fr(k, COPS_ON, 4, cops)
+                    s.op("AR", k)
+    # Each word of each game's setup; the traffic words only in range, as
+    # the image reads the table off its stack unchecked.
+    for g, (off, n) in SETUPS.items():
+        s.game(0, g)
+        for i in range(n):
+            vals = (0, 1, 2, 3) if (g, i) in TRAFFIC_WORDS else \
+                (-1, 0, 1, 2, 3, 9)
+            for v in vals:
+                s.fr(0, off + 4 * i, 4, v)
+                for np, cops in ((1, 0), (1, 1), (2, 0), (2, 1), (3, 0)):
+                    s.fr(0, NUM_PLAYERS, 4, np)
+                    s.fr(0, COPS_ON, 4, cops)
+                    s.op("AR", 0)
+            s.fr(0, off + 4 * i, 4, 1)
+    # The difficulties: Be A Cop's clock and the cops' and opponents'.
+    for g in (3, 7, 6):
+        s.game(0, g)
+        for np in (1, 2):
+            s.fr(0, NUM_PLAYERS, 4, np)
+            for which in (3, 4):
+                for v in (-1, 0, 1, 2, 3, 0x101):
+                    s.fr(0, CHALLENGE + 4 * which, 4, v)
+                    s.op("AR", 0)
+                    s.op("AR", 1)
+    # The cams.
+    for jump, zone in ((0, 0), (1, 0), (0, 1), (0xff, 2), (0x80, 0x80)):
+        s.fr(0, DISPLAY + 6, 1, jump)
+        s.fr(0, DISPLAY + 7, 1, zone)
+        s.op("AR", 0)
+        s.op("AR", 1)
+    # Players past the grid and below it.
+    for g in (3, 4, 5, 7):
+        s.game(0, g)
+        for np in (-3, -1, 4, 6, 7, 8, 9, 12, 0x7fffffff, -0x80000000):
+            s.fr(0, NUM_PLAYERS, 4, np)
+            for cops in (0, 1):
+                s.fr(0, COPS_ON, 4, cops)
+                s.op("AR", 0)
+    # Random setups.
+    for fill in ("00", "ff"):
+        if fill != "00":
+            s.setup(fill, 0x1234)
+        for i in range(300):
+            k = rnd.choice((0, 0, 1))
+            s.game(0, rnd.choice((2, 3, 4, 5, 6, 7, 7, 8)))
+            s.game(1, rnd.randrange(11))
+            s.fr(k, NUM_PLAYERS, 4, rnd.choice((0, 1, 1, 2, 2, 3, 8, 9)))
+            s.fr(k, COPS_ON, 4, rnd.choice((0, 1, 1, 2, -1)))
+            for g, (off, n) in SETUPS.items():
+                for j in range(n):
+                    if rnd.random() < 0.3:
+                        s.fr(k, off + 4 * j, 4, rnd.choice(
+                            (0, 1, 2, 3, 3, 1, -1, 5, 20)))
+            for g, j in TRAFFIC_WORDS:
+                s.fr(k, SETUPS[g][0] + 4 * j, 4, rnd.randrange(4))
+            s.fr(0, CHALLENGE + 12, 4, rnd.choice((0, 1, 2, 3)))
+            s.fr(0, CHALLENGE + 16, 4, rnd.choice((0, 1, 2, -1)))
+            s.fr(0, DISPLAY + 6, 1, rnd.choice((0, 1, 2)))
+            s.fr(0, DISPLAY + 7, 1, rnd.choice((0, 1, 0xff)))
+            s.op("AR", k)
+    return s.ops
+
+
 def script():
     ch = globalb_chunks()
     return [s_skipfe(ch), s_gametypes(ch), s_ai(ch), s_cops(ch),
             s_helpers(ch), s_positions(ch), s_patterns(ch), s_holes(ch),
-            s_quickrace(ch), s_tracklocks(ch)]
+            s_quickrace(ch), s_tracklocks(ch), s_aftersetup(ch)]
 
 
 def encode(scenarios):
@@ -1465,6 +1561,8 @@ class Model(object):
                     self.call(RP_DEFAULTS, RP)
                 elif op == "SS":
                     self.call(START_SKIP_FE, self.fk(a[0]))
+                elif op == "AR":
+                    self.call(AFTER_SETUP, self.fk(a[0]))
                 elif op == "SR":
                     self.call(START_RACE, self.fk(a[0]))
                 elif op == "SC":
@@ -2194,6 +2292,109 @@ MUTATIONS = [
       "direction);\n    return 0;", QRC),
     M("cs_index", "(const uint8_t *)p + type * (int32_t)sizeof(CarStatus)",
       "(const uint8_t *)p + (type + 1) * (int32_t)sizeof(CarStatus)", FRC),
+    # SetupRaceParametersAfterRaceSetup.
+    M("ar_players", "int32_t players = f->NumPlayerCars;",
+      "int32_t players = Fred.NumPlayerCars;"),
+    M("ar_police", "int32_t police = f->MainMenuOpts[1];",
+      "int32_t police = Fred.MainMenuOpts[1];"),
+    M("ar_strength", "int32_t strength = Fred.ChallengeScreenData[3];",
+      "int32_t strength = f->ChallengeScreenData[3];"),
+    M("ar_game", "switch (Fred.GameType) {", "switch (f->GameType) {"),
+    M("ar_default_damage", "select = 0, damage = 1;",
+      "select = 0, damage = 0;"),
+    M("ar_default_boost", "traffic = 0, boost = 1,",
+      "traffic = 0, boost = 0,"),
+    M("ar_default_tickets", "beACop = 0, tickets = 2,",
+      "beACop = 0, tickets = 0,"),
+    M("ar_default_reset", "int32_t resetTimer = 1, seconds",
+      "int32_t resetTimer = 0, seconds"),
+    M("ar_sr_one", "            if (players == 1)\n                opponents = police ? d[1] : d[0];",
+      "            if (players == 1)\n                opponents = police ? d[0] : d[1];"),
+    M("ar_sr_two", "else if (players == 2 && police)\n                opponents = 0;",
+      "else if (players == 2)\n                opponents = 0;"),
+    M("ar_sr_1", "if (opponents == 1)\n                ai = 1;",
+      "if (opponents == 1)\n                ai = 2;"),
+    M("ar_sr_cops", "ai = players == 1 ? 3 : 0;\n                else",
+      "ai = players == 1 ? 3 : 1;\n                else"),
+    M("ar_sr_7", "ai = players == 1 ? 7 : players == 2 ? 2 : 0;",
+      "ai = players == 1 ? 7 : players == 2 ? 2 : 1;"),
+    M("ar_sr_traffic", "traffic = police ? d[5] : d[4];",
+      "traffic = police ? d[4] : d[5];"),
+    M("ar_sr_damage", "damage = d[6];\n        boost = d[3];",
+      "damage = d[5];\n        boost = d[3];"),
+    M("ar_sr_select", "boost = d[3];\n        select = d[2];",
+      "boost = d[3];\n        select = d[3];"),
+    M("ar_ko_lap", "d = Fred.GameType == 4 ? f->RaceKnockoutSetupData",
+      "d = Fred.GameType == 5 ? f->RaceKnockoutSetupData"),
+    M("ar_ko_cops", "ai = players == 1 ? 3 : players == 2 ? 2 : 0;",
+      "ai = players == 1 ? 3 : players == 2 ? 2 : 1;"),
+    M("ar_ko_alone", "ai = players == 1 ? d[0] : 2;",
+      "ai = players == 1 ? d[0] : 0;"),
+    M("ar_ko_traffic", "traffic = police ? d[4] : d[3];\n        damage",
+      "traffic = police ? d[3] : d[4];\n        damage"),
+    M("ar_ko_damage", "damage = Fred.GameType == 4 ? d[6] : d[5];",
+      "damage = d[5];"),
+    M("ar_ko_boost", "boost = d[2];\n        select = d[1];\n        break;\n    case 6:",
+      "boost = d[1];\n        select = d[1];\n        break;\n    case 6:"),
+    M("ar_fr_traffic", "traffic = police ? d[1] : d[0];",
+      "traffic = d[0];"),
+    M("ar_fr_damage", "damage = d[2];\n        boost = 0;",
+      "damage = d[1];\n        boost = 0;"),
+    M("ar_fr_boost", "damage = d[2];\n        boost = 0;",
+      "damage = d[2];\n        boost = 1;"),
+    M("ar_bc_strength", "strength = Fred.ChallengeScreenData[4];",
+      "strength = Fred.ChallengeScreenData[3];"),
+    M("ar_bc_police", "police = 1;\n        beACop = 1;",
+      "beACop = 1;"),
+    M("ar_bc_rb", "roadBlocks = 3;", "roadBlocks = 2;"),
+    M("ar_bc_ch", "choppers = 3;", "choppers = 2;"),
+    M("ar_bc_ai", "ai = players == 1 ? 4 : 0;", "ai = players == 1 ? 3 : 0;"),
+    M("ar_bc_tickets", "tickets = players == 1 ? 0 : 2;",
+      "tickets = players == 1 ? 2 : 0;"),
+    M("ar_bc_traffic", "traffic = d[3];\n        damage = d[4];",
+      "traffic = d[2];\n        damage = d[4];"),
+    M("ar_bc_select", "boost = d[2];\n        select = d[1];\n        // The clock",
+      "boost = d[2];\n        select = d[0];\n        // The clock"),
+    M("ar_bc_reset", "resetTimer = 0;\n            seconds = 300;",
+      "seconds = 300;"),
+    M("ar_bc_300", "seconds = 300;", "seconds = 240;"),
+    M("ar_bc_125", "strength == 1 ? 125 :", "strength == 0 ? 125 :"),
+    M("ar_bc_110", "strength == 2 ? 110 : 150;", "strength >= 2 ? 110 : 150;"),
+    M("ar_most", "if (ai > most)", "if (ai > most + 1)"),
+    M("ar_most_8", "(int32_t)(8u - (uint32_t)players)",
+      "(int32_t)(7u - (uint32_t)players)"),
+    M("ar_maxcops", "police ? (beACop ? 2 : 6) : 0;",
+      "police ? (beACop ? 2 : 4) : 0;"),
+    M("ar_maxcops_bc", "police ? (beACop ? 2 : 6) : 0;",
+      "police ? (beACop ? 3 : 6) : 0;"),
+    M("ar_heli", "rp->bHelicopter = 1;", "rp->bHelicopter = police;"),
+    M("ar_new624", "rp->New624 = police;", "rp->New624 = police != 0;"),
+    M("ar_density", "? kSetupTrafficDensity[traffic] : 0.0f;",
+      "? kSetupTrafficDensity[3 - traffic] : 0.0f;"),
+    M("ar_density_667", "0.33f, 0.667f, 1.0f", "0.33f, 0.666f, 1.0f"),
+    M("ar_start0", "(int8_t)(uint8_t)(ai + 1);", "(int8_t)(uint8_t)(ai);"),
+    M("ar_start1", "(int8_t)(uint8_t)(ai + 2);", "(int8_t)(uint8_t)(ai + 1);"),
+    M("ar_damage", "rp->DamageEnabled = damage != 0;",
+      "rp->DamageEnabled = damage > 0;"),
+    M("ar_zone", "ZoneCamsEnabled = Fred.DisplayOptionsData.ZoneCams != 0;",
+      "ZoneCamsEnabled = f->DisplayOptionsData.ZoneCams != 0;"),
+    M("ar_jump", "JumpCamsEnabled = Fred.DisplayOptionsData.JumpCams != 0;",
+      "JumpCamsEnabled = Fred.DisplayOptionsData.JumpCams > 0;"),
+    M("ar_spikes", "rp->bSpikeStrips = police;", "rp->bSpikeStrips = 1;"),
+    M("ar_roadblocks", "rp->bRoadBlocks = police;",
+      "rp->bRoadBlocks = police != 0;"),
+    M("ar_oncoming", "rp->TrafficOncoming = 0.5f;\n    rp->OpponentStrength",
+      "rp->TrafficOncoming = 0.33f;\n    rp->OpponentStrength"),
+    M("ar_training", "rp->TrainingLinesEnabled = 0;\n    if (beACop)",
+      "rp->TrainingLinesEnabled = 1;\n    if (beACop)"),
+    M("ar_objective", "rp->HasObjective = 1;\n        b_strncpy",
+      "rp->HasObjective = 2;\n        b_strncpy"),
+    M("ar_objective_n", "(int32_t)sizeof rp->sObjective);",
+      "4);"),
+    M("ar_clock_half", "* 4000.0f + 0.5f);", "* 4000.0f + 1.0f);"),
+    M("ar_clock_off", "rp->TimeTrialTime.PackedTime = 0;\n        rp->HasObjective = 0;",
+      "rp->HasObjective = 0;"),
+    M("ar_sobjective", "rp->sObjective[0] = '\\0';", "rp->sObjective[1] = '\\0';"),
 ]
 
 EQUIVALENT = {

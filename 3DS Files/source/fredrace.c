@@ -13,6 +13,7 @@
 #include "characterinfo.h"
 #include "configitems.h"
 #include "difficultyinfo.h"
+#include "eefpu.h"
 #include "playersettings.h"
 #include "raceparams.h"
 #include "track.h"
@@ -857,4 +858,153 @@ void fred_start_skip_fe_game(FrontendDatabase *f)
 
     // The image jumps into StartRace on the global Fred, not `f`.
     fred_start_race(&Fred);
+}
+
+// ---------------------------------------------------- the challenge setup
+
+// bStrNCpy (0x002535a0): up to `n` bytes, the NUL among them; no NUL is
+// added when `src` is longer.
+static void b_strncpy(char *dst, const char *src, int32_t n)
+{
+    int32_t i;
+
+    for (i = 0; i < n; i++) {
+        dst[i] = src[i];
+        if (src[i] == '\0')
+            break;
+    }
+}
+
+static const char *translate(int32_t id)
+{
+    const char *s = gFredTranslateFn != NULL ? gFredTranslateFn(id) : NULL;
+
+    return s != NULL ? s : "NOT TRANSLATED PROPERLY";
+}
+
+// 0x002b4220, copied to the stack and read with the setting unchecked.
+static const float kSetupTrafficDensity[4] = { 0.33f, 0.667f, 1.0f, 0.0f };
+
+void fred_setup_race_parameters_after_race_setup(FrontendDatabase *f)
+{
+    RaceParameters *rp = &TheRaceParameters;
+    int32_t players = f->NumPlayerCars;
+    int32_t police = f->MainMenuOpts[1];
+    int32_t strength = Fred.ChallengeScreenData[3];
+    int32_t ai = 0, traffic = 0, boost = 1, select = 0, damage = 1;
+    int32_t beACop = 0, tickets = 2, roadBlocks = 0, choppers = 0;
+    int32_t resetTimer = 1, seconds = 0, most;
+    const int32_t *d;
+
+    switch (Fred.GameType) {
+    case 3:                                     // single race
+        d = f->SingleRaceSetupData;
+        // [0] the opponents, [1] the same with the cops, for one player;
+        // two players with the cops race alone. 1 is one AI and 2 the
+        // full grid: 7 for one player and 2 for two, 3 and none with the
+        // cops. Any other player count reads [0] and has no grid.
+        {
+            int32_t opponents = d[0];
+
+            if (players == 1)
+                opponents = police ? d[1] : d[0];
+            else if (players == 2 && police)
+                opponents = 0;
+            if (opponents == 1)
+                ai = 1;
+            else if (opponents == 2) {
+                if (police)
+                    ai = players == 1 ? 3 : 0;
+                else
+                    ai = players == 1 ? 7 : players == 2 ? 2 : 0;
+            }
+        }
+        traffic = police ? d[5] : d[4];
+        damage = d[6];
+        boost = d[3];
+        select = d[2];
+        break;
+    case 4:                                     // race knockout
+    case 5:                                     // lap knockout
+        d = Fred.GameType == 4 ? f->RaceKnockoutSetupData
+                               : f->LapKnockoutSetupData;
+        // [0] is one player's field without the cops, taken as it is.
+        if (police)
+            ai = players == 1 ? 3 : players == 2 ? 2 : 0;
+        else
+            ai = players == 1 ? d[0] : 2;
+        traffic = police ? d[4] : d[3];
+        damage = Fred.GameType == 4 ? d[6] : d[5];
+        boost = d[2];
+        select = d[1];
+        break;
+    case 6:                                     // free run
+        d = f->FreeRunSetupData;
+        traffic = police ? d[1] : d[0];
+        damage = d[2];
+        boost = 0;
+        break;
+    case GAME_TYPE_BE_A_COP:
+        d = f->BeTheCopSetupData;
+        strength = Fred.ChallengeScreenData[4];
+        police = 1;
+        beACop = 1;
+        roadBlocks = 3;
+        choppers = 3;
+        ai = players == 1 ? 4 : 0;
+        tickets = players == 1 ? 0 : 2;
+        traffic = d[3];
+        damage = d[4];
+        boost = d[2];
+        select = d[1];
+        // The clock: two players get five minutes and keep it after an
+        // arrest; one gets 2:30, 2:05 or 1:50 by the difficulty, reset by
+        // each arrest.
+        if (players != 1) {
+            resetTimer = 0;
+            seconds = 300;
+        } else
+            seconds = strength == 1 ? 125 : strength == 2 ? 110 : 150;
+        break;
+    }
+
+    most = (int32_t)(8u - (uint32_t)players);   // pminw, signed
+    if (ai > most)
+        ai = most;
+
+    rp->nMaxCops = police ? (beACop ? 2 : 6) : 0;
+    rp->bHelicopter = 1;
+    rp->New624 = police;
+    rp->NumAICars = ai;
+    rp->TrafficDensity = (uint32_t)traffic < 4u
+                       ? kSetupTrafficDensity[traffic] : 0.0f;
+    rp->PlayerStartPosition[0] = (int8_t)(uint8_t)(ai + 1);
+    rp->PlayerStartPosition[1] = (int8_t)(uint8_t)(ai + 2);
+    rp->Boost = boost;
+    rp->CopStrength = strength;
+    rp->OpponentSelect = select;
+    rp->DamageEnabled = damage != 0;
+    rp->nNumBeACopRoadBlocks = roadBlocks;
+    rp->nNumBeACopChoppers = choppers;
+    rp->nNumTicketsBeforeArrest = tickets;
+    rp->BeACopResetTimerAfterArrest = resetTimer;
+    rp->ZoneCamsEnabled = Fred.DisplayOptionsData.ZoneCams != 0;
+    rp->JumpCamsEnabled = Fred.DisplayOptionsData.JumpCams != 0;
+    rp->bRoadBlocks = police;
+    rp->bSpikeStrips = police;
+    rp->TrafficOncoming = 0.5f;
+    rp->OpponentStrength = strength;
+    rp->BeACop = beACop;
+    rp->TrainingLinesEnabled = 0;
+    if (beACop) {
+        rp->HasObjective = 1;
+        b_strncpy(rp->sObjective, translate(0x000ecd11),
+                  (int32_t)sizeof rp->sObjective);
+        rp->TimeTrialTime.PackedTime =
+            (uint32_t)ee_trunc_w((float)seconds * 4000.0f + 0.5f);
+    } else {
+        rp->TimeTrialTime.PackedTime = 0;
+        rp->HasObjective = 0;
+        rp->sObjective[0] = '\0';
+    }
 }

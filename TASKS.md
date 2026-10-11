@@ -2520,9 +2520,10 @@ ahead of step 6's second slice, which waits on `wip/carrenderinfo`.
   - [ ] `mPolice` from Fred+32. The port reads `gf->copsOn`, as
         `bscreens.c` keeps it; the Mode Selects' state belongs in the Fred
         image.
-  - [ ] The three car calls in the constructor and SELECT
+  - [x] The three car calls in the constructor and SELECT
         (`MakeChallengeCarsAvailable`, `0x00183ec0`'s preload,
-        `SetupRaceParametersAfterRaceSetup`), with car select.
+        `SetupRaceParametersAfterRaceSetup`), with car select. The last
+        was ported in step 12m (`fredrace.c`, `race-start.md`).
 - [x] **The Setup screen.** Catch-up, traffic and damage, with arrows on
       the current row and the movie behind. "Be The Cop Setup" is
       `BeTheCopSetup` (`0x001b9248`) on `RaceSetupBaseClass`

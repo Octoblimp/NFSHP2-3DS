@@ -2653,10 +2653,15 @@ static void hookSetupPreloadCars(void* user)
     bcarsel_preload();
 }
 
+// FrontendDatabase::SetupRaceParametersAfterRaceSetup (0x001862b0), which
+// the setup screens call on the global Fred.
 static void hookSetupRaceAfterSetup(void* user)
 {
     (void)user;
-    logLine("fred SetupRaceParametersAfterRaceSetup (not ported)");
+    fred_setup_race_parameters_after_race_setup(&Fred);
+    logLine("fred race setup game=%ld ai=%ld cops=%ld beacop=%ld",
+            (long)Fred.GameType, (long)TheRaceParameters.NumAICars,
+            (long)TheRaceParameters.nMaxCops, (long)TheRaceParameters.BeACop);
 }
 
 static void hookSetupRaceParameters(void* user, int32_t numPlayerCars,

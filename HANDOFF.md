@@ -20445,3 +20445,34 @@ and green, where the first visit had shown the brushed-metal turntable.
   their colour; that is for 12m-5 to hold to retail.
 - **Docs.** `docs/formats/joystick.md`, "Be A Cop's D-pad (12m-3)".
 - **Next.** 12m-4, the Pre Race Blurb.
+
+## Session 76, continued -- 12m-3b, the challenge setup into the race (done)
+
+- **Why.** Before the Pre Race Blurb, a look at what a frontend Be A Cop
+  race would carry showed that `SetupRaceParametersAfterRaceSetup`
+  (`0x001862b0`) was only a log line in main.c. So You're The Cop's
+  setup (the AI, the traffic, the catch-up, the damage, the clock, the
+  three roadblocks and three choppers, the objective) never reached
+  TheRaceParameters.
+- **Ported.** `fredrace.c`'s `fred_setup_race_parameters_after_race_setup`,
+  for all five challenge games (single race, both knockouts, free run,
+  Be A Cop). The game type, the two difficulties and the cams are read
+  from the global Fred, and the rest from the argument, as the image
+  does. The traffic table's index is unchecked in the image, and the
+  port reads 0.0 outside 0..3. main.c's `hookSetupRaceAfterSetup` now
+  calls it on Fred and logs the game, AI, cops and BeACop.
+- **The checker.** `fredrace_check.py` has a new op `AR` and a new
+  scenario, `s_aftersetup`: 11 scenarios, 23605 ops, 120162 lines,
+  0 differ. The first run differed in 39 lines, all of them traffic
+  words set outside 0..3, which the image reads off its stack, so the
+  script keeps those words in range. 59 new mutations, all caught.
+- **Built.** build_cia.ps1 built clean (relocations OK, shaders OK).
+  There was no Azahar run: car select goes on to Select Track, which is
+  still a plain screen, so a frontend Be A Cop race cannot start yet.
+  Quick Race resets TheRaceParameters to the defaults first, so a setup
+  left behind by backing out of You're The Cop does not carry over.
+- **Docs.** `docs/formats/race-start.md`, "SetupRaceParametersAfterRaceSetup";
+  `frontend-setup.md`; TASKS' car calls ticked.
+- **Next.** 12m-3c, Select Track (`TrackSelectScreenCallback`, whose
+  StartRace is `0x001a0918`), so the frontend can start the race. Then
+  12m-4, the Pre Race Blurb, and 12m-5, the race on Azahar.

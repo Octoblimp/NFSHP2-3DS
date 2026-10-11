@@ -192,7 +192,7 @@ with two, either port can. Then:
    - Players or Skill Level (an unsigned range test on the two hashes):
      "Select Car2P" with two players, else "Select Car". Before it,
      `MakeChallengeCarsAvailable` and `SetupRaceParametersAfterRaceSetup`
-     (`0x001862b0`).
+     (`0x001862b0`, ported in `fredrace.c`; `race-start.md`).
    - Setup: "Be The Cop Setup".
    - Anything else: "", so the screen goes nowhere.
 3. `bMalloc(28)`, then `tExitScreenAnimation(screen, target, 1)`.
