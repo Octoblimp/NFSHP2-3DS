@@ -12,6 +12,11 @@ the CameraMover base, Camera::SetCameraMatrix and the matrix layer, over
 retail's own eView table. The harness (tools/src/selcam_test.c) runs the
 port over the same script, and the two transcripts are diffed.
 
+StillCameraMover (stillcam.c), Select Track's camera, runs here too: its
+constructor (0x0015e6a0), and its destructor (0x0015e718) and Update
+(0x0015e730) through its vtable (0x002b1850), with its four setters
+(0x0015fa80 .. 0x0015faa8). Its ops are K, k, u, e, l, p, f and g.
+
 Stubs: bFunkDoesServerExist answers 0, and the sound is a recorder. The
 constructor's bSound::Region, bOMalloc, the bSample constructor, Sample,
 Initialize and SetCategory build a fake sample that knows its name, and
@@ -58,7 +63,8 @@ NL = chr(10)
 
 HARNESS = "tools/src/selcam_test.c"
 SELC = "3DS Files/source/selcam.c"
-SOURCES = [HARNESS, SELC] + ["3DS Files/source/" + f for f in (
+STILLC = "3DS Files/source/stillcam.c"
+SOURCES = [HARNESS, SELC, STILLC] + ["3DS Files/source/" + f for f in (
     "camera.c", "cammover.c", "eview.c", "emath.c", "bmatrix.c", "bmath.c",
     "bmathtab.c", "bvector.c", "bquat.c")]
 
@@ -88,6 +94,14 @@ SET_DVERT = 0x0015fac0
 SET_DHORIZ = 0x0015fac8
 GET_MODE_PARAM = 0x0015fad8
 SLERP = 0x001a7280
+STILL_CTOR = 0x0015e6a0
+STILL_DTOR = 0x0015e718
+STILL_UPDATE = 0x0015e730
+STILL_VTBL = 0x002b1850
+STILL_FOV = 0x0015fa80
+STILL_UP = 0x0015fa88
+STILL_LOOK = 0x0015fa98
+STILL_EYE = 0x0015faa8
 FUNK_EXISTS = 0x0025d220
 EMATH_SINIT = 0x0011bf70          # writes eMulVector's (0, 0, 0, 1)
 JOLLY = 0x002fa860
@@ -131,6 +145,10 @@ VEC = 0x01080000                  # a setter's vector
 QA = 0x01080100                   # the helpers' quaternions
 QB = 0x01080110
 QO = 0x01080120
+STILL_SIZE = 112
+STILLS = 0x01090000
+STILL_STRIDE = 128
+NSTILL = 2
 
 PATTERN = 0xa5
 
@@ -172,6 +190,10 @@ def mov_at(j):
 
 def view_at(i):
     return VIEWS + VIEW_STRIDE * i
+
+
+def still_at(j):
+    return STILLS + STILL_STRIDE * j
 
 
 # ============================================================ the scenarios
@@ -427,6 +449,57 @@ def s_quat(rnd):
     return out
 
 
+def vec(v):
+    return " ".join(h(x) for x in v)
+
+
+def s_still(rnd):
+    """StillCameraMover: built, queried, set and updated, Select Track's
+    own eye and target, frozen, two at once, and on a view with a car
+    select mover too."""
+    eye = [25.12, -2.564, 16.9, 0.0]
+    look = [2.56, -0.512, 0.512, 0.0]
+    out = ["C 0", "C 1", "V 1 0", "V 2 1", "K 0 1", "g 0", "u 0"]
+    out += ["e 0 %s" % vec(eye), "l 0 %s" % vec(look), "u 0", "u 0"]
+    out += ["f 0 2000", "u 0", "f 0 ffff", "u 0", "f 0 0000", "u 0"]
+    out += ["Z 1", "f 0 1770", "u 0", "Z 0", "u 0"]
+    out += ["T 00000000", "u 0", "T %s" % h(0.25), "u 0",
+            "T %s" % h(1.0 / 60.0)]
+    out += ["p 0 %s" % vec([0.0, 1.0, 0.0, 5.0]), "u 0",
+            "p 0 %s" % vec([0.3, -0.2, 0.9, -1.0]), "u 0"]
+    # The eye on the target, and on the up line.
+    out += ["e 0 %s" % vec(look), "u 0",
+            "e 0 %s" % vec([2.56, -0.512, 9.0, 0.0]),
+            "p 0 %s" % vec([0.0, 0.0, 1.0, 0.0]), "u 0"]
+    # A second on another view, and a car select mover on the first's.
+    out += ["K 1 2", "e 1 %s" % vec(eye), "u 1", "g 1", "O 0 1", "u 0",
+            "U 0", "k 0", "D 0", "k 1"]
+    # Detached.
+    out += ["K 1 -1", "k 1"]
+    out += ["K 0 1"]
+    for _ in range(80):
+        k = rnd.random()
+        if k < 0.4:
+            out.append("u 0")
+        elif k < 0.55:
+            out.append("e 0 %s" % vec([rnd.uniform(-60, 60)
+                                       for _ in range(4)]))
+        elif k < 0.7:
+            out.append("l 0 %s" % vec([rnd.uniform(-60, 60)
+                                       for _ in range(4)]))
+        elif k < 0.8:
+            out.append("p 0 %s" % vec([rnd.uniform(-1, 1)
+                                       for _ in range(4)]))
+        elif k < 0.88:
+            out.append("f 0 %04x" % rnd.randrange(0x10000))
+        elif k < 0.94:
+            out.append("T %s" % h(rnd.uniform(0.001, 0.1)))
+        else:
+            out.append("Z %d" % (rnd.random() < 0.3))
+    out += ["Z 0", "u 0", "k 0"]
+    return out
+
+
 def s_walk(rnd, n):
     """A random car select: the sticks, the modes, the time and the
     setters, in any order."""
@@ -466,6 +539,7 @@ def script():
     rnd = random.Random(0x5e1ca111)
     sc = [s_ctor(rnd), s_setters(rnd), s_modes(rnd), s_run(rnd),
           s_edges(rnd), s_two(rnd), s_slerp(rnd), s_quat(rnd)]
+    sc.append(s_still(random.Random(0x571c4a11)))
     for n in (300, 900, 1500):
         sc.append(s_walk(rnd, n))
     return sc
@@ -508,7 +582,12 @@ class Model(object):
         self.region = None
         self.next_sample = 0
         self.sample_names = {}
-        self.names = {0: "null", BASE_VTBL: "base", SEL_VTBL: "selcam"}
+        self.names = {0: "null", BASE_VTBL: "base", SEL_VTBL: "selcam",
+                      STILL_VTBL: "still"}
+        assert e.u32(STILL_VTBL + SLOTS["update"]) == STILL_UPDATE
+        assert e.u32(STILL_VTBL + SLOTS["destroy"]) == STILL_DTOR
+        for j in range(NSTILL):
+            self.names[still_at(j)] = "k%d" % j
         for k in range(NCAM):
             c = cam_at(k)
             self.names[c] = "c%d" % k
@@ -597,6 +676,7 @@ class Model(object):
         e = self.e
         self.fill(CAMS, CAM_SIZE * NCAM)
         self.fill(MOVS, MOV_STRIDE * NMOV)
+        self.fill(STILLS, STILL_STRIDE * NSTILL)
         for i in range(NVIEWS):
             v = view_at(i)
             e.put32(v + V_CAMERA, 0)
@@ -631,15 +711,30 @@ class Model(object):
                   % (w(c + 432), fx(w(c + 436)), w(c + 440), w(c + 444),
                      w(c + 448)))
 
+    def dump_base(self, m):
+        w = self.w
+        self.emit("  %s type %d view %d en %d pview %s pcam %s player %08x"
+                  " carnot %08x dash %08x vtbl %s next %s prev %s"
+                  % (self.name(m), s32(w(m + 8)), s32(w(m + 12)),
+                     s32(w(m + 16)), self.name(w(m + 20)),
+                     self.name(w(m + 24)), w(m + 28), w(m + 32), w(m + 36),
+                     self.name(w(m + 40)), self.name(w(m)),
+                     self.name(w(m + 4))))
+
+    def dump_still(self, j):
+        m = still_at(j)
+        w = self.w
+        self.dump_base(m)
+        self.emit("    eye %s look %s up %s fov %04x pad %08x" % (
+            " ".join(fx(w(m + 48 + 4 * i)) for i in range(4)),
+            " ".join(fx(w(m + 64 + 4 * i)) for i in range(4)),
+            " ".join(fx(w(m + 80 + 4 * i)) for i in range(4)),
+            self.e.u16(m + 96), w(m + 44)))
+
     def dump_mov(self, j):
         m = mov_at(j)
         w, hw = self.w, self.e.u16
-        self.emit("  o%d type %d view %d en %d pview %s pcam %s player %08x"
-                  " carnot %08x dash %08x vtbl %s next %s prev %s"
-                  % (j, s32(w(m + 8)), s32(w(m + 12)), s32(w(m + 16)),
-                     self.name(w(m + 20)), self.name(w(m + 24)), w(m + 28),
-                     w(m + 32), w(m + 36), self.name(w(m + 40)),
-                     self.name(w(m)), self.name(w(m + 4))))
+        self.dump_base(m)
         self.emit("    mode %d blend %s u52 %08x az %04x u58 %04x ts %04x"
                   " to %04x rs %s"
                   % (s32(w(m + 44)), fx(w(m + 48)), w(m + 52), hw(m + 56),
@@ -677,9 +772,9 @@ class Model(object):
 
     # ---- the ops ---------------------------------------------------------
 
-    def vcall(self, j, slot, *args):
+    def vcall(self, j, slot, *args, at=None):
         e = self.e
-        m = mov_at(j)
+        m = mov_at(j) if at is None else at
         vt = self.w(m + 40)
         delta = struct.unpack("<h", struct.pack("<H", e.u16(vt + slot - 4)))[0]
         fn = self.w(vt + slot)
@@ -701,6 +796,21 @@ class Model(object):
                   " tgt %s"
                   % (j, fx(mode), self.name(info), self.name(pov), ext, lb,
                      fx(gap), self.name(car), self.name(tgt)))
+
+    def query_still(self, j):
+        e = self.e
+        a = still_at(j)
+        info = self.vcall(0, SLOTS["info"], at=a)
+        pov = self.vcall(0, SLOTS["pov"], 0, at=a)
+        ext = self.vcall(0, SLOTS["ext"], at=a)
+        lb = self.vcall(0, SLOTS["lookback"], at=a)
+        self.vcall(0, SLOTS["gap"], at=a)
+        gap = e.fpr[0]
+        car = self.vcall(0, SLOTS["car"], at=a)
+        tgt = self.vcall(0, SLOTS["target"], at=a)
+        self.emit("  q k%d info %s pov %s ext %d lb %d gap %s car %s tgt %s"
+                  % (j, self.name(info), self.name(pov), ext, lb, fx(gap),
+                     self.name(car), self.name(tgt)))
 
     def put_words(self, a, t):
         for i, x in enumerate(t):
@@ -779,6 +889,36 @@ class Model(object):
             fn = {"r": SET_DRADIUS, "v": SET_DVERT, "h": SET_DHORIZ}[t[2]]
             self.call_f(fn, j, int(t[3], 16))
             self.dump_mov(j)
+        elif c == "K":
+            j, view = int(t[1]), int(t[2])
+            self.fill(still_at(j), STILL_SIZE)
+            e.call(STILL_CTOR, still_at(j), view, limit=400000)
+            self.dump_still(j)
+            self.dump_views()
+        elif c == "k":
+            j = int(t[1])
+            self.vcall(0, SLOTS["destroy"], 0, at=still_at(j))
+            self.dump_still(j)
+            self.dump_views()
+        elif c == "u":
+            j = int(t[1])
+            self.vcall(0, SLOTS["update"], at=still_at(j))
+            self.dump_still(j)
+            cam = self.w(still_at(j) + 24)
+            if cam:
+                self.dump_cam(cam)
+        elif c in "elp":
+            j = int(t[1])
+            self.put_words(VEC, t[2:6])
+            fn = {"e": STILL_EYE, "l": STILL_LOOK, "p": STILL_UP}[c]
+            e.call(fn, still_at(j), VEC, limit=1000)
+            self.dump_still(j)
+        elif c == "f":
+            j = int(t[1])
+            e.call(STILL_FOV, still_at(j), int(t[2], 16), limit=1000)
+            self.dump_still(j)
+        elif c == "g":
+            self.query_still(int(t[1]))
         elif c == "G":
             self.query(int(t[1]))
         elif c == "F":
@@ -1137,6 +1277,39 @@ MUTATIONS = [
     M("sl-out-x", "o->x = w0 * a->x + w1 * b->x;",
       "o->x = w0 * a->x - w1 * b->x;"),
     M("sl-out-z", "o->z = w0 * a->z + w1 * b->z;", "o->z = w0 * a->z;"),
+    # StillCameraMover
+    M("st-type", "viewID, CM_STILL);", "viewID, CM_STILL + 1);", STILLC),
+    M("st-eye-x", "    m->Eye.x = 1.0f;\n", "    m->Eye.x = 0.0f;\n", STILLC),
+    M("st-eye-z", "    m->Eye.z = 1.0f;\n", "", STILLC),
+    M("st-look", "    m->Look.y = 0.0f;\n", "    m->Look.y = 1.0f;\n", STILLC),
+    M("st-up-z", "    m->Up.z = 1.0f;\n", "    m->Up.z = -1.0f;\n", STILLC),
+    M("st-up-y", "    m->Up.y = 0.0f;\n", "", STILLC),
+    M("st-up-w", "    m->Up.z = 1.0f;\n", "    m->Up.z = 1.0f;\n"
+      "    m->Up.pad = 0.0f;\n", STILLC),
+    M("st-vtbl", "    m->base.vtbl = &StillCameraMoverVtbl;\n    m->FOV",
+      "    m->FOV", STILLC),
+    M("st-fov", "m->FOV = 6000;", "m->FOV = 6001;", STILLC),
+    M("st-dtor-vtbl", "    m->base.vtbl = &StillCameraMoverVtbl;\n"
+      "    camera_mover_destroy", "    camera_mover_destroy", STILLC),
+    M("st-dtor-base", "    camera_mover_destroy(&m->base);\n}", "}", STILLC),
+    M("st-upd-order", "eCreateLookAtMatrix(&mat, &eye, &look, &up);",
+      "eCreateLookAtMatrix(&mat, &look, &eye, &up);", STILLC),
+    M("st-upd-up", "eCreateLookAtMatrix(&mat, &eye, &look, &up);",
+      "eCreateLookAtMatrix(&mat, &eye, &look, &eye);", STILLC),
+    M("st-upd-stop", "    if (!CameraStopUpdating)\n        m->base.pCamera",
+      "    if (1)\n        m->base.pCamera", STILLC),
+    M("st-upd-fov", "CurrentKey.FieldOfView = fov;",
+      "CurrentKey.FieldOfView = 6000;", STILLC),
+    M("st-upd-time", "camera_set_matrix(m->base.pCamera, &mat, RealTimeElapsed);",
+      "camera_set_matrix(m->base.pCamera, &mat, 1.0f / 60.0f);", STILLC),
+    M("st-set-fov", "    m->FOV = fov;", "    m->FOV = (uint16_t)(fov + 1);",
+      STILLC),
+    M("st-set-up", "    m->Up = *v;", "    m->Up = *v; m->Up.pad = 0.0f;",
+      STILLC),
+    M("st-set-look", "    m->Look = *v;", "    m->Eye = *v;", STILLC),
+    M("st-set-eye", "    m->Eye = *v;", "    m->Eye = *v; m->Eye.x = v->y;",
+      STILLC),
+    M("st-car", "    (void)m;\n    return NULL;", "    return m;", STILLC),
     # the vtable
     M("vt-target", "    return &m->pCamera->CurrentKey.Target;",
       "    return &m->pCamera->CurrentKey.Position;"),
@@ -1147,6 +1320,8 @@ EQUIVALENT = {
     "dtor-vtbl": "the base's destructor puts its own vtable in straight "
                  "after, and the deletes between go through the samples'",
     "upd-pos-pad": "eTranslate's translation matrix takes x, y and z only",
+    "st-dtor-vtbl": "the base's destructor puts its own vtable in straight "
+                    "after, and nothing between reads it",
 }
 
 

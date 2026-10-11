@@ -1833,6 +1833,49 @@ and `SetRearViewMirrorCameraMover` on retail's image against the port.
     python tools/rvmcam_check.py           # 7 scenarios, 2088 ops, 9863 lines, 0 differ
     python tools/rvmcam_check.py --mutate  # 52 mutations, 51 caught, 1 equivalent
 
+## The still camera
+
+`StillCameraMover` (`CM_STILL`, 112 bytes, vtable `0x002b1850`) looks
+from a point at a point. Select Track makes one on view 1 for its
+spinning track model (`docs/formats/track-select.md`), and its Tick
+writes the eye and the target straight into the mover. The port is
+`stillcam.c`. The vtable is the base's but for the destructor and
+`Update`. The demo has the same class at `0x0015ae50`.
+
+| Offset | Field |
+| --- | --- |
+| +44 | never written |
+| +48 | the eye, (1, 1, 1) from the constructor |
+| +64 | the target, (0, 0, 0) |
+| +80 | up, (0, 0, 1) |
+| +96 | the field of view (uint16), 6000 |
+
+- **The constructor** (`0x0015e6a0`) runs the base's with `CM_STILL`,
+  then writes the three vectors' x, y and z, not their fourth lanes,
+  then the vtable and the field of view.
+- **The destructor** (`0x0015e718`) puts its own vtable back, then runs
+  the base's destructor, which puts the base's in straight after.
+- **`Update`** (`0x0015e730`) builds `eCreateLookAtMatrix` from copies
+  of the eye, the target and up. Unless `Camera::StopUpdating` is set,
+  the field of view goes onto the camera's current key. The camera
+  takes the matrix by `RealTimeElapsed`.
+- **The setters** `SetFOV` (`0x0015fa80`), `SetUp` (`0x0015fa88`),
+  `SetLook` (`0x0015fa98`) and `SetEye` (`0x0015faa8`) copy each vector
+  whole, its fourth lane too.
+
+### The check
+
+`tools/selcam_check.py` runs the still mover beside the car select's
+camera: the constructor, and the destructor and `Update` through
+retail's vtable, with the four setters (ops K, k, u, e, l, p, f, g).
+
+    python tools/selcam_check.py           # 12 scenarios, 4398 ops, 53228 lines, 0 differ
+    python tools/selcam_check.py --mutate --only st-...  # 21 mutations, 20 caught, 1 equivalent
+
+The equivalent one, `st-dtor-vtbl`, drops the destructor's own vtable
+store: the base's destructor writes its vtable straight after, and
+nothing between reads it.
+
 ## Divergences from the disc
 
 Each of these is in the source as a comment at the point it happens.

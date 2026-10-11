@@ -1,5 +1,6 @@
 // Host harness for 3DS Files/source/selcam.c, the car select's turntable
-// camera. Runs the op script tools/selcam_check.py writes and prints the
+// camera, and stillcam.c, Select Track's still camera (the ops K, k, u, e,
+// l, p, f and g). Runs the op script tools/selcam_check.py writes and prints the
 // transcript it diffs against the retail image, run in mipsemu over the
 // same script.
 //
@@ -22,9 +23,11 @@
 #include "eview.h"
 #include "realtime.h"
 #include "selcam.h"
+#include "stillcam.h"
 
 #define NCAM 4
 #define NMOV 3
+#define NSTILL 2
 
 // What selcam.c links against, the harness's own.
 float   RealTimeElapsed = 1.0f / 60.0f;
@@ -32,6 +35,7 @@ int32_t SoundEnabled = 1;
 
 static Camera cams[NCAM];
 static SelectCarCameraMover movs[NMOV];
+static StillCameraMover stills[NSTILL];
 
 static const char *const kSample[SELCAM_SND_COUNT] = {
     "MenuCarDisplayOn", "MenuCarDisplayOff", "MenuCarDisplayActive",
@@ -51,6 +55,8 @@ static const char *nm(const void *p)
         return "base";
     if (p == &SelectCarCameraMoverVtbl)
         return "selcam";
+    if (p == &StillCameraMoverVtbl)
+        return "still";
     for (i = 0; i < NCAM; i++) {
         if (p == &cams[i]) {
             sprintf(b, "c%d", i);
@@ -64,6 +70,12 @@ static const char *nm(const void *p)
     for (i = 0; i < NMOV; i++) {
         if (p == &movs[i]) {
             sprintf(b, "o%d", i);
+            return b;
+        }
+    }
+    for (i = 0; i < NSTILL; i++) {
+        if (p == &stills[i]) {
+            sprintf(b, "k%d", i);
             return b;
         }
     }
@@ -186,18 +198,40 @@ static void pquat(const char *tag, const bQuaternion *q)
     printf(" %s %s %s %s %s", tag, fx(q->x), fx(q->y), fx(q->z), fx(q->w));
 }
 
-static void pmov(int j)
+static void pbase(const CameraMover *m)
 {
-    const SelectCarCameraMover *o = &movs[j];
-    const CameraMover *m = &o->base;
-
-    printf("  o%d type %d view %d en %d pview %s pcam %s player %08lx"
+    printf("  %s type %d view %d en %d pview %s pcam %s player %08lx"
            " carnot %08lx dash %08lx vtbl %s next %s prev %s\n",
-           j, (int)m->Type, m->ViewID, m->Enabled, nm(m->pView),
+           nm(m), (int)m->Type, m->ViewID, m->Enabled, nm(m->pView),
            nm(m->pCamera), (unsigned long)(uint32_t)(uintptr_t)m->pPlayer,
            (unsigned long)(uint32_t)(uintptr_t)m->CarNotToRender,
            (unsigned long)(uint32_t)m->RenderDash, nm(m->vtbl),
            nm(m->Node.next), nm(m->Node.prev));
+}
+
+static void pvec(const char *tag, const bVector3 *v)
+{
+    printf(" %s %s %s %s %s", tag, fx(v->x), fx(v->y), fx(v->z), fx(v->pad));
+}
+
+static void pstill(int j)
+{
+    const StillCameraMover *k = &stills[j];
+
+    pbase(&k->base);
+    printf("   ");
+    pvec("eye", &k->Eye);
+    pvec("look", &k->Look);
+    pvec("up", &k->Up);
+    printf(" fov %04x pad %08lx\n", (unsigned)k->FOV,
+           (unsigned long)(uint32_t)k->Pad44);
+}
+
+static void pmov(int j)
+{
+    const SelectCarCameraMover *o = &movs[j];
+
+    pbase(&o->base);
     printf("    mode %ld blend %s u52 %08lx az %04x u58 %04x ts %04x to %04x"
            " rs %s\n",
            (long)o->Mode, fx(o->Blend), (unsigned long)(uint32_t)o->Unused52,
@@ -247,6 +281,7 @@ static void reset(void)
 
     memset(cams, 0xa5, sizeof cams);
     memset(movs, 0xa5, sizeof movs);
+    memset(stills, 0xa5, sizeof stills);
     for (i = 0; i < EVIEW_NUM_VIEWS; i++) {
         eViews[i].pCamera = 0;
         eViews[i].CameraMoverList.next = &eViews[i].CameraMoverList;
@@ -300,6 +335,18 @@ static void query(int j)
            " tgt %s\n",
            j, fx(selcam_get_mode_param(&movs[j])), nm(vt->GetCameraInfo(m)),
            nm(vt->GetPOV(m, 0)), vt->IsExteriorView(m), vt->IsLookingBack(m),
+           fx(vt->GetWallGap(m)), nm(vt->GetCarToFollow(m)),
+           nm(vt->GetTarget(m)));
+}
+
+static void query_still(int j)
+{
+    CameraMover *m = &stills[j].base;
+    const CameraMoverVtbl *vt = m->vtbl;
+
+    printf("  q k%d info %s pov %s ext %d lb %d gap %s car %s tgt %s\n",
+           j, nm(vt->GetCameraInfo(m)), nm(vt->GetPOV(m, 0)),
+           vt->IsExteriorView(m), vt->IsLookingBack(m),
            fx(vt->GetWallGap(m)), nm(vt->GetCarToFollow(m)),
            nm(vt->GetTarget(m)));
 }
@@ -454,6 +501,45 @@ int main(int argc, char **argv)
             else
                 selcam_set_desired_horiz_orbit_speed(&movs[j], v);
             pmov(j);
+        } else if (!strcmp(t, "K")) {
+            int j = itok(), view = itok();
+
+            memset(&stills[j], 0xa5, sizeof stills[j]);
+            still_camera_mover_init(&stills[j], view);
+            pstill(j);
+            pviews();
+        } else if (!strcmp(t, "k")) {
+            int j = itok();
+
+            stills[j].base.vtbl->Destroy(&stills[j].base);
+            pstill(j);
+            pviews();
+        } else if (!strcmp(t, "u")) {
+            int j = itok();
+
+            stills[j].base.vtbl->Update(&stills[j].base);
+            pstill(j);
+            if (stills[j].base.pCamera)
+                pcam(stills[j].base.pCamera);
+        } else if (!strcmp(t, "e") || !strcmp(t, "l") || !strcmp(t, "p")) {
+            int j = itok();
+            bVector3 v;
+
+            read_vec(&v);
+            if (*t == 'e')
+                still_camera_mover_set_eye(&stills[j], &v);
+            else if (*t == 'l')
+                still_camera_mover_set_look(&stills[j], &v);
+            else
+                still_camera_mover_set_up(&stills[j], &v);
+            pstill(j);
+        } else if (!strcmp(t, "f")) {
+            int j = itok();
+
+            still_camera_mover_set_fov(&stills[j], (uint16_t)xtok());
+            pstill(j);
+        } else if (!strcmp(t, "g")) {
+            query_still(itok());
         } else if (!strcmp(t, "G")) {
             query(itok());
         } else if (!strcmp(t, "F")) {

@@ -20476,3 +20476,37 @@ and green, where the first visit had shown the brushed-metal turntable.
 - **Next.** 12m-3c, Select Track (`TrackSelectScreenCallback`, whose
   StartRace is `0x001a0918`), so the frontend can start the race. Then
   12m-4, the Pre Race Blurb, and 12m-5, the race on Azahar.
+
+## Session 76, continued -- 12m-3c, Select Track (in progress)
+
+The session hit its limit in the middle of this slice; Session 77 picks
+it up from here.
+
+- **Done: the still camera.** Select Track's spinning track model is
+  seen through a `StillCameraMover` on view 1, which the port did not
+  have. `stillcam.c/.h` ports its constructor (`0x0015e6a0`), destructor
+  (`0x0015e718`), `Update` (`0x0015e730`) and the four setters
+  (`0x0015fa80` .. `0x0015faa8`). `tools/selcam_check.py` and
+  `tools/src/selcam_test.c` run it beside the car select's camera:
+  12 scenarios, 4398 ops, 53228 lines, 0 differ. 21 mutations, 20
+  caught, 1 equivalent (`st-dtor-vtbl`: the base's destructor puts its
+  vtable in straight after). Written up in `docs/formats/camera.md`,
+  "The still camera". build_cia.ps1 built clean with it (relocations
+  OK, shaders OK); nothing calls it yet.
+- **Done: the decode.** All of retail's Select Track code
+  (`0x0019dd20` to `0x001a0c80`) is written up in
+  `docs/formats/track-select.md`: the track helpers, SelectableTrack,
+  the manager, the slideshow, the time-of-day menu, the records, the
+  locked box, the screen's constructor, Tick, Render, both callbacks,
+  StartRace, and the screen's 89 objects in FRONTB (`0x15417b53`). The
+  doc's "The plan" says how to port it.
+- **Not started: `btracksel.c`.** In main.c "Select Track" is still
+  `bgf_plain_screen_callback`, so a frontend race cannot start from car
+  select. Two things outside the module are needed: ACTIVATE's reply
+  (the screen's constructor answers the time of day's menu item, and
+  the port's `bgf_change_to_screen` and `hookEnterScreen` ignore it),
+  and `bmenu_set_active_item` (`FlailerMenu::SetActiveMenuItem`,
+  `0x0016a3a8`).
+- **Next.** 12m-3c-1, the logic, the 2D and StartRace, with
+  `tracksel_check.py`; 12m-3c-2, the TSELECT.BIN slideshow and the
+  model. Then 12m-4, the Pre Race Blurb, and 12m-5.

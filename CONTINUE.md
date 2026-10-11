@@ -32,10 +32,16 @@ cop's HUD (hudcop.c, hudrender.c, hudscore.c), the setup screens
   TheRaceParameters (the AI, the traffic, the clock, three roadblocks
   and three choppers, the objective), bound to main.c's hook
   (`docs/formats/race-start.md`).
-- **12m-3c** Select Track (`TrackSelectScreenCallback`; its StartRace is
-  `0x001a0918`). It is still a plain screen, so a frontend Be A Cop
-  race cannot start: car select goes on to it for every game type but
-  the event games.
+- **12m-3c (in progress)** Select Track (`TrackSelectScreenCallback`,
+  `0x001a0920`; its StartRace is `0x001a0790`). It is still a plain
+  screen, so a frontend Be A Cop race cannot start: car select goes on
+  to it for every game type but the event games. Read HANDOFF.md's
+  "Session 76, continued -- 12m-3c" first. The still camera
+  (`stillcam.c`) is ported and checked, and the whole screen is decoded
+  in `docs/formats/track-select.md`, whose "The plan" lays out the port:
+  - **12m-3c-1** `btracksel.c`: the logic, the 2D and StartRace, with
+    ACTIVATE's reply, `bmenu_set_active_item` and `tracksel_check.py`.
+  - **12m-3c-2** The TSELECT.BIN slideshow and the spinning model.
 - **12m-4** The Pre Race Blurb (`0x001e3270` on, startrace.c): the
   objective screen before a Be A Cop race.
 - **12m-5** A Be A Cop race from the frontend in Azahar: the chase,
