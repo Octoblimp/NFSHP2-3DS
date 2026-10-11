@@ -37,7 +37,7 @@ the pullover 12l's.
 | DoStateTransition | `0x0022a190` | `tpursuit_do_state_transition` |
 | GetSpeedMPHOrKPH | `0x0022a220` | `tpursuit_get_speed_mph_or_kph` |
 | ReleaseAllCops | `0x0022a260` | `tpursuit_release_all_cops` |
-| (the helicopter let go) | `0x0022a310` | `release_chopper` |
+| (the helicopter let go) | `0x0022a310` | `release_chopper`; `tpursuit_release_chopper` outside `pursuit.c` (12m-1) |
 | GetCopSpeaker | `0x0022ab30` | `tpursuit_get_cop_speaker` |
 | GetSecondaryCopSpeaker | `0x0022ab70` | `tpursuit_get_secondary_cop_speaker` |
 | IsPlayerInvolved | `0x0022bbd8` | `tpursuit_is_player_involved` |

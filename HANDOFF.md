@@ -20353,3 +20353,39 @@ and green, where the first visit had shown the brushed-metal turntable.
   (`-HoldKeys 65`): PASS, 30.0 fps.
 - **Next.** Be A Cop "100% working": an audit of retail's Be A Cop
   paths against the port first. Then 14-10d, and TASKS 39 and 40.
+
+## Session 76, continued -- 12m-1, Be A Cop's player cop (done)
+
+- **Ported.** `playercop.{c,h}`: tPlayerCop's Think (`0x0022d5c8`),
+  ChangeChaseTarget (`0x0022d700`) and SelectCarToChase (`0x0022d898`),
+  and the horn's tCopManager::BeACopToggleSirenAndLights (`0x002289b8`).
+  The horn picks the nearest car ahead within 175 m (or any within
+  20 m), holding the last two picks back for 5 s. The first pick asks
+  for a pursuit, a new pick turns the pursuit to it, and the same pick
+  plays BeACopRequestFailed. With no pick and no pursuit the horn turns
+  the lights on and off. Think keeps the siren and lights with the
+  chase, and lets a helicopter go after 4 salvos. pursuitspeech.c gains
+  the change of target (`0x0022cb30`), and pursuit.c exports
+  `tpursuit_release_chopper`. main.c binds `gPlayerCopThinkFn` and
+  `gCopManagerBeACopToggleSirenAndLightsFn`.
+- **The checkers.** `tools/playercop_check.py` with
+  `tools/src/playercop_test.c`: 14414 lines, 0 differ. Of 60 mutations,
+  58 are caught and 2 are equivalent (the 185, and the old picks'
+  order). `pursuitspeech_check.py` covers the change of target: 261198
+  ops, 0 differ. Of 289 mutations, 288 are caught and 1 is equivalent
+  (the description and the paint read in either order). Its generated
+  ConvertCarType table mutations were not unique since RE-5's reward
+  table, and some were silently not run; they now carry the table's rows
+  as context.
+- **Checked.** build_cia.ps1 built clean (relocations OK, shaders OK).
+  On Azahar (on AC), a SkipFE Be A Cop race on track 12 in car 33 (the
+  CORVETTECOP; `DefaultPlayer1CarType 33` is now in
+  `nfshp2_config.txt.beacop`), gas only with the horn (X, key 90) at
+  4 s steps: 30 fps, Speed 100%. The first press opened a pursuit on a
+  racer (chases 0 to 1), and the chase marker came up over it. In car
+  37, a racer's type, the horn does nothing, as in retail (RealDriver
+  wants UsageType 1).
+- **Docs.** `docs/formats/cops.md`, "Be A Cop's player cop";
+  `pursuit-speech.md`, "The change of target".
+- **Next.** 12m-2, BeACopThink: the clock, the time-out, the Busted and
+  Be On Lookout speech and the wrecked speeders.

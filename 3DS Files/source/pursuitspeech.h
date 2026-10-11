@@ -6,7 +6,7 @@
 // on the radio while tCopManager's fSupervisorTimer is within 0.001 of 0.
 //
 // Not ported: 0x0022b990 (the chased car's heading as a direction_t, no
-// callers); ChangeChaseTarget's speech (0x0022cb30) is Be A Cop's, 12m.
+// callers).
 //
 // docs/formats/pursuit-speech.md has the rest; tools/pursuitspeech_check.py
 // runs retail's code against this.
@@ -95,5 +95,12 @@ void tpursuit_ai_ticket_speech(tPursuit *p);
 // SuperInitiates, 0x0022b908, SupervisorActivate's: the speaker, speed,
 // landmark, description and paint to the supervisor.
 void tpursuit_super_initiates(tPursuit *p);
+
+// 0x0022cb30, tPlayerCop::ChangeChaseTarget's when Be A Cop's player
+// picks another car: the chase turns to `car`, the helicopter stops
+// following (FollowThisCar(NULL)), and Be A Cop's speaker (else the
+// chase's) begins the pursuit with the car's description and paint,
+// or the general call for a car the cops cannot tell.
+void tpursuit_change_chase_target(tPursuit *p, struct Car *car);
 
 #endif

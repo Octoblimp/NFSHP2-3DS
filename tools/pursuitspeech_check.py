@@ -8,7 +8,8 @@ and speechconv.c against the retail image, SLES_507.31, run in mipsemu.
 (0x0022ad30), BeginPursuitCollisionSpeech (0x0022aef8), StartPursuitSpeech
 (0x0022afb8), JoinPursuitSpeech (0x0022b288), RoadblockFailedSpeech
 (0x0022b3f8), RoadBlockSetSpeech (0x0022b5d0), CopBackOffSpeech
-(0x0022b788), AITicketSpeech (0x0022b840) and SuperInitiates (0x0022b908),
+(0x0022b788), AITicketSpeech (0x0022b840), SuperInitiates (0x0022b908)
+and Be A Cop's change of target (0x0022cb30),
 with Speech::ConvertCarType (0x002232f8) and its table run for real. The
 harness (tools/src/pursuitspeech_test.c) runs the port and prints the same
 lines.
@@ -20,7 +21,7 @@ queue, then an answer), SwitchPursuitState (which sets the state), the
 manager's GetCurrentCopSpeaker, NextCopSpeaker and ReserveCopSpeaker
 (counters), GetNumTickets, FindLandmark (the one landmark, or none),
 CarCausedRecentCollision, bRandom (a queue, then an answer), the speech
-manager's FlushQueue and the 30 raise functions. The car types'
+manager's FlushQueue, Chopper::FollowThisCar and the 30 raise functions. The car types'
 UsageType, the language and the race coordinator's state are memory both
 sides read.
 
@@ -72,7 +73,7 @@ F = {
     "backup": 0x0022acc0, "declare": 0x0022ad30, "collspeech": 0x0022aef8,
     "start": 0x0022afb8, "join": 0x0022b288, "rbfail": 0x0022b3f8,
     "rbset": 0x0022b5d0, "backoff": 0x0022b788, "ticket": 0x0022b840,
-    "super": 0x0022b908,
+    "super": 0x0022b908, "change": 0x0022cb30,
 }
 RETURNS = ("colour", "exact", "cansup")
 F_CONV = 0x002232f8                     # Speech::ConvertCarType
@@ -90,6 +91,7 @@ S_LANDMARK = 0x00228a58
 S_COLL = 0x00231118
 S_RANDOM = 0x0025a488
 S_FLUSH = 0x0020a230
+S_FOLLOW = 0x001e7f80                   # Chopper::FollowThisCar
 
 # The raises: the address, the harness's name and the arguments after the
 # manager, i an int register in turn and f a float one.
@@ -172,6 +174,7 @@ class Model(object):
         e.put32(G_CTI, self.cti)
         self.skin = block(64, "SK")
         self.lm = block(64, "L")
+        self.chopper = block(16, "H")
         self.lm_on = 0
         self.player = block(16, "PL")
         self.rbs = [block(128, "RB%d" % k) for k in range(NRB)]
@@ -199,7 +202,8 @@ class Model(object):
                          (S_LANDMARK, self.s_landmark),
                          (S_COLL, self.s_coll),
                          (S_RANDOM, self.s_random),
-                         (S_FLUSH, self.s_flush)):
+                         (S_FLUSH, self.s_flush),
+                         (S_FOLLOW, self.s_follow)):
             e.stub(addr, fn)
         for addr, nm, args in RAISES:
             e.stub(addr, self.raiser(nm, args))
@@ -307,6 +311,10 @@ class Model(object):
         self.emit("  random %d -> %d" % (s32(em.reg[4]), r))
         return r
 
+    def s_follow(self, em):
+        self.emit("  follow %s %s" % (self.sym(em.reg[4]),
+                                      self.sym(em.reg[5])))
+
     def s_flush(self, em):
         self.emit("  flush%s" % self.mgr_ok(em))
 
@@ -385,6 +393,9 @@ class Model(object):
             self.speedqi = 0
         elif o == "speed":
             self.speed = v(1)
+        elif o == "chop":
+            e.put32(self.ps[int(a[1])] + 24,
+                    self.chopper if v(2) else 0)
         elif o == "conv":
             r = e.call(F_CONV, v(1), limit=200000)
             self.emit("conv %d -> %d" % (s32(v(1)), s32(r)))
@@ -395,7 +406,12 @@ class Model(object):
                 args.append(self.cars[int(a[2])])
             elif o == "rbfail":
                 args.append(v(2))
+            elif o == "change":
+                args.append(self.cars[int(a[2])])
             r = e.call(F[o], *args, limit=200000)
+            if o == "change":
+                self.emit("chased U%d %s" % (
+                    k, self.sym(e.u32(self.ps[k] + 16))))
             if o in RETURNS:
                 self.emit("%s U%d -> %d" % (o, k, s32(r)))
             self.emit("%s U%d" % (o, k))
@@ -615,6 +631,28 @@ def super_cases():
     return out
 
 
+def change_cases():
+    """Be A Cop's change of target: each car (one the cops can tell, one
+    they cannot, a cop car), with and without a helicopter, in and out
+    of Be A Cop, with each language for the cars only some can tell."""
+    out = []
+    for beacop in (0, 1):
+        for chop in (0, 1):
+            for k, chased in ((0, 0), (1, 2), (2, -1)):
+                for t in range(NCARS):
+                    out += base() + ["rp|BeACop|%d" % beacop,
+                                     pset(k, chased=chased),
+                                     "chop|%d|%d" % (k, chop),
+                                     "change|%d|%d" % (k, t)]
+    for lang in range(4):
+        for t in (5, 13, 22, 66):
+            out += base() + ["lang|%d" % lang, "ride|2|%d|3" % t,
+                             "m|beacopid|0x1234", "rp|BeACop|1",
+                             pset(0, chased=1), "change|0|2",
+                             "chop|0|1", "change|0|1"]
+    return out
+
+
 OPS = ("colour", "exact", "cansup", "backup", "declare", "start", "join",
        "rbfail", "rbset", "backoff", "ticket", "super")
 
@@ -676,10 +714,13 @@ def random_runs(rng):
                             chopper=rng.randrange(4),
                             flags=rng.choice((0, 0x10, 0x30, 0xff))))
         else:
-            o = rng.choice(OPS + ("collspeech", "rbfail"))
+            o = rng.choice(OPS + ("collspeech", "rbfail", "change"))
             k = rng.randrange(NP)
             if o == "collspeech":
                 out.append("collspeech|%d|%d" % (k, rng.randrange(NCARS)))
+            elif o == "change":
+                out += ["chop|%d|%d" % (k, rng.randrange(2)),
+                        "change|%d|%d" % (k, rng.randrange(NCARS))]
             elif o == "rbfail":
                 out.append("rbfail|%d|%d" % (k, rng.randrange(2)))
             else:
@@ -691,7 +732,7 @@ def script():
     return (query_cases() + backup_cases() + declare_cases()
             + collision_cases() + start_cases() + join_cases()
             + rbfail_cases() + rbset_cases() + backoff_cases()
-            + ticket_cases() + super_cases()
+            + ticket_cases() + super_cases() + change_cases()
             + random_runs(random.Random(0x14a)))
 
 
@@ -733,24 +774,36 @@ P = PSP
 C = CONV
 
 
+CONV_FN = "int32_t speech_convert_car_type(int32_t carType)\n{\n"
+
+
 def _conv_mutations():
-    """Each table entry of speechconv.c changed on its own: a set bit
-    moved up one, a 0 made 1."""
+    """Each entry of speechconv.c's car type table changed on its own: a
+    set bit moved up one, a 0 made 1. The file's other tables are
+    racespeech_check.py's."""
     out = []
-    for ln in (ROOT / CONV).read_text().splitlines():
+    lines = (ROOT / CONV).read_text().splitlines()
+    first = next(i for i, ln in enumerate(lines)
+                 if ln.startswith("static const uint32_t kCarTypeDescription"))
+    last = next(i for i in range(first, len(lines)) if lines[i] == "};")
+    for i in range(first + 1, last):
+        ln = lines[i]
         if "//" not in ln or not ln.lstrip().startswith(("0x", "0,")):
             continue
         body, row = ln.split("//")
         row = int(row)
         vals = [x.strip() for x in body.split(",") if x.strip()]
+        # The rows from the table's name down, so that a row the other
+        # tables share is still one place.
+        head = NL.join(lines[first:i]) + NL
         for j, x in enumerate(vals):
             n = int(x, 0)
             new = "0x%08x" % (n << 1 if n else 1)
             parts = [y for y in vals]
             parts[j] = new
             after = body.replace(body.strip(), ", ".join(parts) + ",")
-            out.append(("cv-t%d" % (row + j), C, ln, after + "//" + ln.split(
-                "//")[1]))
+            out.append(("cv-t%d" % (row + j), C, head + ln,
+                        head + after + "//" + ln.split("//")[1]))
     return out
 
 
@@ -778,11 +831,13 @@ SPEC_ARGS = ("speechmgr_raise_begin_pursuit_id_specific(mgr, speaker, 0, "
              "colour);")
 MUTATIONS = _conv_mutations() + _case_mutations() + [
     # ---- speechconv.c's bounds
-    ("cv-lo", C, "    if (carType < 0 || carType >= 67)",
-     "    if (carType < 1 || carType >= 67)"),
-    ("cv-hi48", C, "carType >= 67)", "carType >= 48)"),
-    ("cv-ret", C, "    if (carType < 0 || carType >= 67)\n        return 0;",
-     "    if (carType < 0 || carType >= 67)\n        return 1;"),
+    ("cv-lo", C, CONV_FN + "    if (carType < 0 || carType >= 67)",
+     CONV_FN + "    if (carType < 1 || carType >= 67)"),
+    ("cv-hi48", C, CONV_FN + "    if (carType < 0 || carType >= 67)",
+     CONV_FN + "    if (carType < 0 || carType >= 48)"),
+    ("cv-ret", C, CONV_FN + "    if (carType < 0 || carType >= 67)\n"
+     "        return 0;", CONV_FN + "    if (carType < 0 || carType >= 67)\n"
+     "        return 1;"),
     # ---- the shared tests
     ("sup-le", P, "<= 0.001f;", "< 0.001f;"),
     ("sup-val", P, "<= 0.001f;", "<= 0.002f;"),
@@ -1291,13 +1346,42 @@ MUTATIONS = _conv_mutations() + _case_mutations() + [
     ("su-exact", P, "speechmgr_raise_super_initiate(mgr, speaker, speed, "
      "location, exact,", "speechmgr_raise_super_initiate(mgr, speaker, "
      "speed, location, 0,"),
-    ("su-colour", P, "                                   colour);\n}",
-     "                                   exact);\n}"),
+    ("su-colour", P, "location, exact,\n                                   colour);",
+     "location, exact,\n                                   exact);"),
+    # ---- the change of target
+    ("ct-chased", P, "    p->pChasedCar = car;\n    if (p->pChopper",
+     "    if (p->pChopper"),
+    ("ct-chopper", P, "        gChopperFollowThisCarFn(p->pChopper, NULL);",
+     "        gChopperFollowThisCarFn(p->pChopper, car);"),
+    ("ct-nochop", P, "        gChopperFollowThisCarFn(p->pChopper, NULL);",
+     ""),
+    ("ct-speaker", P, "    speaker = TheRaceParameters.BeACop != 0 ? "
+     "pCopManager->BeACopId", "    speaker = TheRaceParameters.BeACop == 0 ? "
+     "pCopManager->BeACopId"),
+    ("ct-order", P, "    exact = tpursuit_get_exact_description(p);\n"
+     "    colour = tpursuit_get_chased_car_colour(p);\n    mgr",
+     "    colour = tpursuit_get_chased_car_colour(p);\n"
+     "    exact = tpursuit_get_exact_description(p);\n    mgr"),
+    ("ct-general", P, "        speechmgr_raise_begin_pursuit_id_general(mgr, "
+     "speaker, 1, colour);\n    else\n", "        speechmgr_raise_begin_"
+     "pursuit_id_general(mgr, speaker, 0, colour);\n    else\n"),
+    ("ct-specific", P, "speaker, 1, colour);\n    else\n        speechmgr_"
+     "raise_begin_pursuit_id_specific(mgr, speaker, 0, exact,",
+     "speaker, 1, colour);\n    else\n        speechmgr_"
+     "raise_begin_pursuit_id_specific(mgr, speaker, 1, exact,"),
+    ("ct-test", P, "    if (exact == PURSUIT_NO_DESCRIPTION)\n        "
+     "speechmgr_raise_begin_pursuit_id_general(mgr, speaker, 1, colour);\n"
+     "    else", "    if (exact == 0)\n        "
+     "speechmgr_raise_begin_pursuit_id_general(mgr, speaker, 1, colour);\n"
+     "    else"),
     ("su-speed", P, "speechmgr_raise_super_initiate(mgr, speaker, speed,",
      "speechmgr_raise_super_initiate(mgr, speaker, 0.0f,"),
 ]
 
 EQUIVALENT = {
+    "ct-order": "GetExactDescription reads the language and the car type "
+                "and does nothing the paint's GetSkinInfo could be ordered "
+                "against",
 }
 
 

@@ -3,6 +3,8 @@
 #include "pursuitspeech.h"
 
 #include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include "bmath.h"
 #include "car.h"
@@ -384,4 +386,32 @@ void tpursuit_super_initiates(tPursuit *p)
 
     speechmgr_raise_super_initiate(mgr, speaker, speed, location, exact,
                                    colour);
+}
+
+void tpursuit_change_chase_target(tPursuit *p, struct Car *car)
+{
+    SpeechMgr *mgr;
+    uint32_t speaker;
+    int32_t exact;
+    int32_t colour;
+
+    p->pChasedCar = car;
+    if (p->pChopper != NULL) {
+        if (gChopperFollowThisCarFn == NULL) {
+            fprintf(stderr, "pursuitspeech: the chopper (12k) is not "
+                    "ported\n");
+            abort();
+        }
+        gChopperFollowThisCarFn(p->pChopper, NULL);
+    }
+    speaker = TheRaceParameters.BeACop != 0 ? pCopManager->BeACopId
+                                            : tpursuit_get_cop_speaker(p);
+    exact = tpursuit_get_exact_description(p);
+    colour = tpursuit_get_chased_car_colour(p);
+    mgr = speechmgr_get_instance();
+    if (exact == PURSUIT_NO_DESCRIPTION)
+        speechmgr_raise_begin_pursuit_id_general(mgr, speaker, 1, colour);
+    else
+        speechmgr_raise_begin_pursuit_id_specific(mgr, speaker, 0, exact,
+                                                  colour);
 }

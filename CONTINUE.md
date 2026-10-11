@@ -1,5 +1,36 @@
 # CONTINUE
 
+## Be A Cop, step 12m (the audit of Session 76)
+
+A SkipFE Be A Cop race (`SkipFEBeACop 1` and `DefaultPlayer1CarType
+33`, the CORVETTECOP, parked on the SD card as
+`nfshp2_config.txt.beacop`; copy it to `nfshp2_config.txt` for a run and
+delete that after) runs at 30 fps. Since 12m-1 the horn (3DS X, Azahar
+key 90) opens a chase, but Time Left stays at 300. Ported already: tPursuit's Be A Cop branches
+(the catch speeds, the roadblock count, the arrests' speech), the
+requests for a roadblock and the chopper (pursuitchopper.c), the
+cop's HUD (hudcop.c, hudrender.c, hudscore.c), the setup screens
+(bsetup.c) and You're The Cop's results (RE-6d). Missing, in order:
+
+- **12m-1 (done)** tPlayerCop's Think (`0x0022d5c8`),
+  ChangeChaseTarget (`0x0022d700`) and SelectCarToChase (`0x0022d898`),
+  and the horn's BeACopToggleSirenAndLights (`0x002289b8`), in
+  `playercop.c` (`docs/formats/cops.md`, "Be A Cop's player cop").
+  DoSnapshot (`0x0022d7e8`) is the replay's and waits for it.
+- **12m-2** tCopManager::BeACopThink (`0x00227f30`,
+  `gCopManagerBeACopThinkFn`): the clock (fBeACopTime from the race's
+  limit, x1.5), the time-out finish, the Busted and Be On Lookout
+  speech, and each wrecked speeder. With it the small ones:
+  GetBeACopSpeaker (`0x00228d78`) and GetBeACopTime (`0x00228e10`).
+- **12m-3** The controls, the user's plan of 2026-10-08: in Be A Cop
+  the D-Pad calls the cop's options (the helicopter, the roadblock)
+  and only the Circle Pad steers. Retail's are TRIANGLE + L2 and
+  TRIANGLE + R2 (scannertab.c); the horn is the siren and lights.
+- **12m-4** The Pre Race Blurb (`0x001e3270` on, startrace.c): the
+  objective screen before a Be A Cop race.
+- **12m-5** A Be A Cop race from the frontend in Azahar: the chase,
+  the arrests, the clock, the end and the results. Fix what it shows.
+
 **Now (Session 76, 2026-10-11): Be A Cop "100% working", the user's
 ask of 2026-10-11. TASKS 41 (the Starting Grid only once the race
 has loaded) is done.** The end of the race, RE-1 to RE-6

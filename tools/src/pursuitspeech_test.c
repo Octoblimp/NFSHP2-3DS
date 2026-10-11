@@ -70,6 +70,7 @@ static Car             cars[NCARS];
 static RideInfo        rides[NCARS];
 static DriverInfo      drivers[NCARS];
 static char            player[16];
+static char            chopper[16];
 
 static int32_t  lang;
 static uint32_t spk, cur, res;
@@ -99,6 +100,8 @@ static const char *sym(const void *p)
         return "SK";
     if (p == &lm)
         return "L";
+    if (p == (const void *)chopper)
+        return "H";
     for (i = 0; i < NRB; i++)
         if (p == &rbs[i]) {
             snprintf(b, 16, "RB%d", i);
@@ -224,6 +227,13 @@ int32_t bRandomI(int32_t range, uint32_t *seed)
            (int)range, (int)r);
     return r;
 }
+
+static void follow(struct Chopper *h, struct Car *car)
+{
+    printf("  follow %s %s\n", sym(h), sym(car));
+}
+
+void (*gChopperFollowThisCarFn)(struct Chopper *c, struct Car *car) = follow;
 
 SpeechMgr *speechmgr_get_instance(void)
 {
@@ -453,6 +463,9 @@ static void run(char **t, int n)
             speedq[nspeedq++] = hx(t[i]);
     } else if (strcmp(o, "speed") == 0) {
         speed_answer = hx(t[1]);
+    } else if (strcmp(o, "chop") == 0) {
+        ps[ix(t[1])].pChopper = hx(t[2]) ? (struct Chopper *)(void *)chopper
+                                         : NULL;
     } else if (strcmp(o, "conv") == 0) {
         int32_t v = (int32_t)hx(t[1]);
 
@@ -490,6 +503,10 @@ static void run(char **t, int n)
             tpursuit_ai_ticket_speech(p);
         else if (strcmp(o, "super") == 0)
             tpursuit_super_initiates(p);
+        else if (strcmp(o, "change") == 0) {
+            tpursuit_change_chase_target(p, &cars[ix(t[2])]);
+            printf("chased U%d %s\n", k, sym(p->pChasedCar));
+        }
         else {
             fprintf(stderr, "unknown op %s\n", o);
             exit(2);

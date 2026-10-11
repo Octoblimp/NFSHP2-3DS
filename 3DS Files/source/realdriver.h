@@ -273,8 +273,9 @@ extern int32_t (*gPlayerIsAllowedToResetFn)(struct Player *p);
 extern void    (*gPlayerSelectedResetFn)(struct Player *p);
 
 // tCopManager::GetResetDirection (0x00214740) and
-// BeACopToggleSirenAndLights (0x00214610). Task 26. A NULL direction seam
-// leaves the reset facing forward, 1.0, as a non-cop car's always is.
+// BeACopToggleSirenAndLights (the demo's 0x00214610, retail's 0x002289b8;
+// main.c binds playercop.h's). Task 26. A NULL direction seam leaves the
+// reset facing forward, 1.0, as a non-cop car's always is.
 extern float (*gCopManagerGetResetDirectionFn)(struct tCopManager *m);
 extern void  (*gCopManagerBeACopToggleSirenAndLightsFn)(struct tCopManager *m);
 

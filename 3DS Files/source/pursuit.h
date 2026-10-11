@@ -84,6 +84,11 @@ float tpursuit_get_speed_mph_or_kph(const tPursuit *p);
 // place, so of two cops only the first is released.
 void tpursuit_release_all_cops(tPursuit *p);
 
+// 0x0022a310: the helicopter let go, unless its word at 960 holds it:
+// bChopperBusy off, FollowThisCar(NULL), ECS_NO_CHOPPER and no
+// pChopper. Nothing with no helicopter. tPlayerCop's Think's.
+void tpursuit_release_chopper(tPursuit *p);
+
 // DisbandRoadBlock, 0x0022c5a0: the roadblock's cops back on patrol (and
 // with `b`, those within 30 of the chased car asked to join the chase),
 // its speaker passed on or given back, its spike strips and barrels

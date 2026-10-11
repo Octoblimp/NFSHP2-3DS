@@ -91,6 +91,7 @@
 #include "cop.h"
 #include "copdriver.h"
 #include "copmgr.h"
+#include "playercop.h"
 #include "pursuit.h"
 #include "pursuitchopper.h"
 #include "pullover.h"
@@ -5719,6 +5720,12 @@ int main(int argc, char** argv)
     // A cop asking to chase a car, and each chase's step in the manager's
     // Think, over once it returns nonzero, with its roadblocks (pursuit.h).
     gCopManagerRequestPursuitFn = copmanager_request_pursuit;
+    // Be A Cop's player cop (12m-1): the horn picks the speeder to chase
+    // or turns the chase to the next, and the cop's Think keeps the lights
+    // and siren with it (playercop.h).
+    gPlayerCopThinkFn = tplayercop_think;
+    gCopManagerBeACopToggleSirenAndLightsFn =
+        copmanager_be_a_cop_toggle_siren_and_lights;
     gPursuitUpdateFn            = tpursuit_update;
     gPursuitCreateRoadBlockFn   = tpursuit_create_road_block;
     gRealDriverForceEBrakeStopFn = realdriver_force_ebrake_stop;

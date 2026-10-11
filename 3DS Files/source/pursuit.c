@@ -375,6 +375,11 @@ static void release_chopper(tPursuit *p)
     p->pChopper = NULL;
 }
 
+void tpursuit_release_chopper(tPursuit *p)
+{
+    release_chopper(p);
+}
+
 void tpursuit_release_all_cops(tPursuit *p)
 {
     int32_t i;

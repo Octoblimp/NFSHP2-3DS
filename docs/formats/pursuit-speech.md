@@ -31,12 +31,12 @@ Retail has these in pursuit.obj. The port has them in
 | AITicketSpeech | `0x0022b840` |
 | SuperInitiates | `0x0022b908` |
 | Speech::ConvertCarType (table `0x0031c1f0`) | `0x002232f8` |
+| the change of target, tPlayerCop::ChangeChaseTarget's | `0x0022cb30` |
 
 Not ported:
 
 - **`0x0022b990`**, the chased car's heading as a direction_t. Nothing
   calls it.
-- **ChangeChaseTarget's speech** (`0x0022cb30`). It is Be A Cop's (12m).
 
 ## The chased car
 
@@ -163,6 +163,21 @@ Every roll is bRandom on bDefaultSeed. The rolls happen in retail's order
 and only where retail rolls: a test that fails first skips the roll after
 it.
 
+## The change of target
+
+`0x0022cb30` (`tpursuit_change_chase_target`) is Be A Cop's, when the
+player's horn picks another car for a chase it already has (`cops.md`,
+"Be A Cop's player cop"):
+
+1. The chase's pChasedCar becomes the car.
+2. A chase with a helicopter tells it to follow nothing
+   (FollowThisCar(NULL)).
+3. The speaker is the cop manager's BeACopId in Be A Cop, else
+   GetCopSpeaker's.
+4. With the car's exact description and paint, the speaker begins the
+   pursuit: the specific id (repeat 0), or for a car the cops cannot tell
+   the general id (repeat 1).
+
 ## The filler speech
 
 When the player's chase has been quiet a while, the cops and the
@@ -241,17 +256,25 @@ The script covers:
 - GetExactDescription for types -2 to 70, with each usage and language;
 - each method's branches: the rolls at each boundary, the landmarks, the
   speakers, the states, Be A Cop, the demos and the supervisor's timer;
+- the change of target with and without a helicopter, in and out of Be A
+  Cop, for a car the cops can and cannot tell;
 - 3000 random steps.
 
-Result: 258792 ops, 47809 lines, 0 differ.
+Result: 261198 ops, 48555 lines, 0 differ.
 
-The mutation pass makes 281 mutations. Some are generated:
+The mutation pass makes 289 mutations. Some are generated:
 
 - every table entry;
 - every case label dropped, and a neighbour added to each group.
 
 The rest are hand-written. They cover every test, constant, argument,
-raise, return and call order. All 281 are caught.
+raise, return and call order. 288 are caught. One is equivalent: in the
+change of target, reading the paint before the description, since
+neither call changes anything the other reads.
+
+Since 12m-1 the generated table mutations carry the table's rows down
+from its name, so a row that ConvertCarType's table shares with the
+reward table (RE-5's) is still one place to change.
 
 ### The filler speech's check
 

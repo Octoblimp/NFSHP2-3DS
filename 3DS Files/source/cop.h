@@ -264,8 +264,8 @@ void  taicop_do_caught_speeder_logic(tAICop *c);
 void  taicop_return_to_patrol(tAICop *c);
 float taicop_get_best_flank_side(tAICop *c, struct Car *ch);
 
-// tPlayerCop::Think (0x0022d5c8), Be A Cop's, 12m: a NULL seam that does
-// nothing.
+// tPlayerCop::Think (0x0022d5c8), Be A Cop's: main.c binds playercop.h's
+// (12m-1). NULL does nothing.
 extern void (*gPlayerCopThinkFn)(tPlayerCop *c);
 
 // The cops' cooperation zones. InitZonePermissionTable (0x0022f770)

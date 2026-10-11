@@ -13,7 +13,9 @@ guarding a place), with the manager's ResetAllDamage. Slice 12g-2 adds
 the radar traps', roadblocks' and patrols' logic, with the moves that put
 a cop on its spot and the tests for whom it chases, and two more of
 `coputil.obj`. The hot pursuit and caught speeder logics, DoSnapshot and
-the pursuits are the later slices.
+the pursuits are the later slices. Slice 12m-1 adds tPlayerCop's Think,
+ChangeChaseTarget and SelectCarToChase, Be A Cop's player cop, in
+`playercop.c` ("Be A Cop's player cop").
 
 | function | address | port |
 |----------|---------|------|
@@ -49,7 +51,10 @@ the pursuits are the later slices.
 | tAICop::DoLimboLogic | `0x00230570` | `taicop_do_limbo_logic` |
 | tAICop::DoDisabledLogic | `0x002305c8` | `taicop_do_disabled_logic` |
 | tAICop::DoGuardLocationLogic | `0x00230bf0` | `taicop_do_guard_location_logic` |
-| tPlayerCop::Think | `0x0022d5c8` | the seam `gPlayerCopThinkFn`, in the table |
+| tPlayerCop::Think | `0x0022d5c8` | `tplayercop_think`, through the seam `gPlayerCopThinkFn` |
+| tPlayerCop::ChangeChaseTarget | `0x0022d700` | `tplayercop_change_chase_target` |
+| tPlayerCop::SelectCarToChase | `0x0022d898` | `tplayercop_select_car_to_chase` |
+| tCopManager::BeACopToggleSirenAndLights | `0x002289b8` | `copmanager_be_a_cop_toggle_siren_and_lights` |
 | ResetAllDamage | `0x00228750` | `copmanager_reset_all_damage` |
 | Car::GetNumWheelsOnGround | `0x001cad80` | `num_wheels_on_ground`, static in `cop.c` |
 | tAICop::Teleport | `0x0022de70` | `taicop_teleport` |
@@ -249,8 +254,9 @@ and y.
 ## Think
 
 The manager's Think (`cop-manager.md`) calls each cop's Think through its
-table, slot 24, once a frame. tPlayerCop's is Be A Cop's (12m), so its
-entry calls `gPlayerCopThinkFn` when that is bound.
+table, slot 24, once a frame. tPlayerCop's is Be A Cop's, so its entry
+calls `gPlayerCopThinkFn`, which main.c binds to `playercop.c`'s (12m-1,
+"Be A Cop's player cop").
 
 **tAICop::Think:**
 
@@ -630,6 +636,93 @@ GetZoneFromSubState gives a pursuit sub-state's zone: pursuit follow
 4; follow offset 3, or 5 when `side` is not below 0; flank, bump and
 get ahead 1, or 2; block 0; the rest 6.
 
+## Be A Cop's player cop
+
+In Be A Cop the player's own car is a cop, a tPlayerCop
+(`nPlayerCopIndex`). Its three methods and the manager's horn handler
+are in `playercop.{c,h}`, apart from `cop.c` because they reach the
+speech and the samples, which `cop_test.c` does not link.
+
+**The horn.** RealDriver calls tCopManager::BeACopToggleSirenAndLights
+(`0x002289b8`, `gCopManagerBeACopToggleSirenAndLightsFn`) when the horn
+is pressed in a cop car (its type's UsageType is 1) in Be A Cop. While
+the race is at RACE_STAGE_RACING that calls the player cop's
+ChangeChaseTarget. Retail passes NULL on when there is no player cop;
+the port does nothing.
+
+**ChangeChaseTarget** (`0x0022d700`) does nothing without the car's
+player, or with a NIS playing. Otherwise it picks a car
+(SelectCarToChase), then reads the cop's pursuit:
+
+| the pick | the pursuit | what happens |
+|---|---|---|
+| a car | none | tCopManager::RequestPursuit asks for one on it |
+| a car | of another car | the pursuit turns to it (`pursuit-speech.md`, "The change of target") |
+| a car | of the same car | `BeACopRequestFailed` plays (1.0, 0, 0) |
+| none | none | the lights go from off to 1, and from anything else to off |
+| none | any | nothing |
+
+Retail reads and writes the lights at Car+2056 as a word, so the port
+writes CopLights with the three bytes after it cleared, and reads all
+four.
+
+**SelectCarToChase** (`0x0022d898`) scores each car before the World's
+CopCarPos. The cop's own car, a blinking car and a finished one (its
+RacingCar's FinishReason not 0) score -1. Otherwise, with d the distance
+in x and y:
+
+- within 20 m in z, closer than 175 m and ahead (Car::IsCarInFront within
+  10000 BAM): 185 - d;
+- else closer than 20 m: 185 - d;
+- else -1.
+
+Then the last pick's score becomes 0 and the one before's 5, each only if
+it scored above -1. So pressing again moves on to the next car, and the
+old picks come back only when nothing else is in range. The best score
+above -1 wins, the first of equals. The last pick moves back a place with
+its timer, the new pick is held for 5 s, and the car is returned. With no
+score above -1 nothing changes and the answer is NULL.
+
+**Think** (`0x0022d5c8`):
+
+1. With the car's player and no NIS playing, both picks' timers count
+   down by WorldTimeElapsed. One at 0 or under is set to 0, and its pick
+   to -1.
+2. With a pursuit the siren is SIREN_MODE_01 and the lights 2. With none,
+   but any of the manager's CarPullovers up to CopCarPos active, the siren
+   is off and the lights 2. Else they stay as they are.
+3. A pursuit's helicopter that has fired 4 salvos or more
+   (TotalSalvos) is let go (`pursuit.md`'s `tpursuit_release_chopper`).
+
+**The check.** `python tools/playercop_check.py` runs the four in mipsemu
+against `playercop.c` in `tools/src/playercop_test.c`. NIS, IsBlinking,
+IsCarInFront, RequestPursuit, the change of target, the sample, its play
+and the helicopter's release are logged stubs. The cars, the World, the
+manager, the cops and the pursuits are memory both sides read. The script
+covers:
+
+- the scores at each range and the floats either side of 20 and 175 on
+  the x axis;
+- each skip, the old picks' scores, and the ties;
+- the timers at and across 0, with and without the player and a NIS;
+- each row of ChangeChaseTarget's table, with the lights' word;
+- the toggle in each race stage, with and without a player cop;
+- random runs.
+
+Result: 14414 lines, 0 differ. The mutation pass makes 60 mutations; 58
+are caught and 2 are equivalent:
+
+- the 185 can change, since a car that scores is closer than 175 m and
+  beats the old picks' 0 and 5 either way;
+- the old picks' order tells only when both are one car, which then
+  scores above -1 either way and loses to any other.
+
+**In Azahar.** A SkipFE Be A Cop race on track 12 with the player in car
+33 (CORVETTECOP, `DefaultPlayer1CarType 33` in the config) runs at 30
+fps. The first horn press (3DS X) opens a pursuit on a racer, and the
+chase marker shows over it. The clock stays at its start until 12m-2
+ports BeACopThink.
+
 ## Seams
 
 Not ported yet, so NULL, and each aborts where retail would call it:
@@ -639,8 +732,8 @@ CarDamage's wreck (`gCarDamageWreckFn`) and repair
 (`gCarDamageRepairAllFn`), which no car reaches while CarDamage isn't
 built.
 
-Not ported yet, and doing nothing while NULL: tPlayerCop's Think
-(`gPlayerCopThinkFn`), 12m. tCopManager::RequestPursuit
+tPlayerCop's Think (`gPlayerCopThinkFn`) does nothing while NULL; main.c
+binds `playercop.c`'s since 12m-1. tCopManager::RequestPursuit
 (`gCopManagerRequestPursuitFn`, 12h) grants nothing while NULL, so a
 search finds no chase. The hot pursuit and caught speeder logics (12g-3)
 are now called straight from Think, but no cop reaches them before 12h.
