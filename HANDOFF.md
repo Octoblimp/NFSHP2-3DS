@@ -19646,3 +19646,51 @@ Picked up from Session 64's steps:
 - TASKS.md: task 39 (the armed helicopter: missiles, and barrels with or
   without spike belts, on its own maps) and task 40 (the radar detection
   meter under the rear-view mirror, 12n). Next: RE-2.
+
+## Session 70, continued -- RE-2a, what a race leaves in Fred
+
+- `fredend.{c,h}`: FrontendDatabase's end of a race from retail
+  (0x00186e08 .. 0x001878b0). That is TransientStatsElement::Construct
+  and TransientStats' Construct and GetDriver, GetOptionsSetFromRace,
+  FigureOutBonusPoints, AwardPointsToPlayer, CheckForAbortion,
+  RaceWasAborted, TheRaceIsLeaving, TheRaceIsOver, TheRaceWasQuit and
+  TheRaceWasRestarted. It also has the rewards (0x0024ab90 ..
+  0x0024b914): the tasks' CheckForCompletion, GetTaskRewardList,
+  GetPointsRewardList, CheckForTaskAndPointRewards,
+  TaskRewardsIsCarUnlocked, PointsRewardsIsCarUnlocked and
+  IsCarUnlocked. fred.h names TaskRewardStates (+0x106b8) and
+  PointsRewardStates (+0x106e0), and the 100-byte row's Be A Cop time
+  and lap times.
+- `tools/fredend_check.py` with `tools/src/fredend_test.c`: 29034 ops,
+  57323 lines, 0 differ. 165 mutations, 164 caught; `over-p0` is
+  equivalent, because a player's number is only 0 or 1. Two survivors
+  were the script's fault and are fixed. `rows()` left `pCurrentRace`
+  on race 1, so the best-lap order test read boundary 4. The -0.0
+  speed limit and two knockout fields were also missing.
+- Retail's quirks, kept:
+  - TheRaceIsOver tests `Fred.GameType` for Be A Cop but this
+    database's NumPlayerCars.
+  - The display options always go into Fred.
+  - The task check works out the visible damage and drops it; MinDamage
+    only asks for no collision (the player's word at +2540).
+  - An AI row's top speed loses bRandom(1.0) of 5% on bDefaultSeed,
+    capped by `min.s` at the type's SpeedLimiter.
+- main.c binds:
+  - gFEDCheckForAbortionFn, gFEDTheRaceIsOverFn (which logs "race over:
+    rows, task reward, points reward, points");
+  - gFEDTheRaceWasQuitFn, gFEDTheRaceWasRestartedFn, gRaceIsLeavingFn;
+  - gTransientStatsGetDriverFn, gSetAudioDataFromSoundFn (the
+    jukebox's) and gIsCarUnlockedFn.
+  The high scores and race events stay NULL.
+- Azahar, on AC, with a test-only hook that finished the player after
+  600 frames (removed, rebuilt clean): "race over: 1 rows, task reward
+  -1, points reward -1". The Task Rewards screen is gone: Race Results,
+  Best Lap Times, Best Total Times, the End Game Menu. Speed was 100%,
+  30 fps.
+- The "random text" the user saw is more than Task Rewards. Race Results
+  and Best Lap/Total Times show EA's layout placeholders ("WWWWWWWW",
+  "blablabla", "Track Name goes here (This is extended)") until their
+  classes are ported. RE-2b (Race Results, plus the two reward screens
+  from RE-6) and RE-3 (the best times) must land before the user's next
+  build.
+- docs/formats/race-over.md. Next: RE-2b.

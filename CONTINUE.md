@@ -3,8 +3,12 @@
 **Now (Session 70, 2026-10-10): the end of the race, RE-1 to RE-6,
 below in "First", is the user's ask: "I do need the end of races to be
 coded in".** RE-1 is done (the list of screens, the classes' base, the
-callback and the End Game Menu; `docs/formats/end-game.md`); RE-2 is
-next. 14-10c and 14-10d come after RE-6. Two asks were added to
+callback and the End Game Menu; `docs/formats/end-game.md`), and so is
+RE-2a (what Fred keeps of the race and the rewards;
+`docs/formats/race-over.md`). RE-2b is next, then RE-3: until both land,
+Race Results, Best Lap Times and Best Total Times show EA's layout
+placeholders ("WWWWWWWW", "blablabla"), which is the "random text" the
+user saw. 14-10c and 14-10d come after RE-6. Two asks were added to
 TASKS.md the same day, with no order given: task 39, the armed
 helicopter's missiles and barrels (12k-6), and task 40, the radar
 detection meter under the rear-view mirror (12n). The user's device log of
@@ -223,18 +227,35 @@ The slices:
   --check-port` flags Events Unlocked and Be The Cop Results 1P/2P
   because it reads the demo's ELF; retail registers all three
   (0x001e2018, 0x001e20c8, 0x001e20f4).
-- **RE-2:** RaceResultsScreen (0x001dffe8, Scroll 0x001e0838) and
-  ShowPointsResults (0x001e0430).
-- **RE-3:** BestLapTimes, BestTotalTimes and the Lap Times screens
-  (0x001e0bd0, 0x001e10f0), with what records the times.
+- **RE-2a, done (Session 70):** FrontendDatabase's end of a race
+  (0x00186e08 .. 0x001878b0): TransientStats and its rows,
+  GetOptionsSetFromRace, the bonus and the points, CheckForAbortion,
+  TheRaceIsOver, TheRaceWasQuit, TheRaceWasRestarted and
+  TheRaceIsLeaving. Also the rewards (0x0024ab90 .. 0x0024b914): the
+  tasks' CheckForCompletion, the two reward lists,
+  CheckForTaskAndPointRewards and IsCarUnlocked. `fredend.c`,
+  `tools/fredend_check.py` (0 differ, 164 of 165 mutations caught, one
+  equivalent), `docs/formats/race-over.md`. main.c binds the FED seams,
+  `gTransientStatsGetDriverFn`, `gRaceIsLeavingFn`, `gIsCarUnlockedFn`
+  and SetAudioDataFromSound. The high scores (MaybeRecordHighScore) are
+  RE-3's and the race events step 16's; both stay NULL.
+- **RE-2b, next:** RaceResultsScreen (0x001dffe8, Scroll 0x001e0838,
+  tSlideshowStats 0x001df410, 0x001dfdb8, 0x001dc5d8, SprintfAndHash
+  0x001dc4d0) and ShowPointsResults (0x001e0430). The Task Rewards and
+  Points Rewards screens (0x001de6a8, 0x001de568) come with it, from
+  RE-6, because an earned reward now puts them on the list.
+- **RE-3:** BestLapTimes (0x001ddc10), BestTotalTimes (0x001ddfd0) and
+  the Lap Times screens (0x001e0bd0, 0x001e10f0), with what records the
+  times: MaybeRecordHighScore (0x00186af0) and its helpers (0x00186938,
+  0x001869d0, 0x00186a20, 0x00186a50), and SetRecordTimesToBeat.
 - **RE-4:** the post-race camera: DemoCameraCoordinator (0x0019a440 ..
   0x0019abd8), PostRaceCameraCoordinator (0x0019b280 .. 0x0019b4ac),
   Player::BeginDemoCameras (0x00176868) and the demo-camera seams. With
   no replay, it follows the live cars.
 - **RE-5:** 14-10c, the race's speech (RaceFinishedSpeech and the
   rest, below under 14-10).
-- **RE-6:** the career's screens: Tourney Standings, the rewards and Be
-  The Cop Results, with step 16's event tree.
+- **RE-6:** the career's screens: Tourney Standings, Events Unlocked,
+  the Reward menu and Be The Cop Results, with step 16's event tree.
 
 ## Step 12, the cops and cop mode (Session 56)
 
@@ -5330,8 +5351,8 @@ count. It is its own slice when it goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** the end of the race, RE-2 (see "First"; RE-1 is done),
-  then the rest of RE-3 to RE-6, then step 14's 14-10c. 14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5, 14-6, 14-7, 14-8a,
+- **Next:** the end of the race, RE-2b (see "First"; RE-1 and RE-2a
+  are done), then RE-3 to RE-6, then step 14's 14-10c. 14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5, 14-6, 14-7, 14-8a,
   14-8b, 14-8c, 14-8d, 14-9, 14-10a and 14-10b are done. Of step 12,
   12a to 12k-2, the light flares, 12k-3's planners, 12k-3a, 12k-3b,
   12k-4a, 12k-4b, 12k-7, 12l-1 and 12l-2 are done. See

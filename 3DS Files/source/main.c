@@ -116,6 +116,7 @@
 #include "flailer.h"
 #include "frameprof.h"
 #include "fred.h"
+#include "fredend.h"
 #include "fredrace.h"
 #include "frontres.h"
 #include "gameflow.h"
@@ -173,6 +174,7 @@
 #include "race.h"
 #include "racecoord.h"
 #include "raceinit.h"
+#include "racerun.h"
 #include "raceupdate.h"
 #include "raceparams.h"
 #include "rcpost.h"
@@ -4387,6 +4389,54 @@ static int32_t fedIsMultiTrack(void)
     return fred_is_multi_track(&Fred);
 }
 
+// The end of the race on Fred (fredend.c): what it keeps of the race, the
+// points and the rewards earned, when the race is over, quit, restarted
+// or left; the rows the post-race camera picks its player by.
+static void fedTheRaceIsOver(Race* r)
+{
+    const TransientStats* ts = &Fred.TransientStatsTable;
+
+    fred_the_race_is_over(&Fred, r);
+    logLine("race over: %d rows, task reward %d, points reward %d, "
+            "points %d", (int)ts->NumStats, (int)ts->TaskRewardEarned,
+            (int)ts->PointsRewardEarned,
+            (int)Fred.FrontendPlayers[0].AccumulatedPoints);
+}
+
+static void fedCheckForAbortion(void)
+{
+    fred_check_for_abortion(&Fred);
+}
+
+static void fedTheRaceWasQuit(void)
+{
+    fred_the_race_was_quit(&Fred);
+}
+
+static void fedTheRaceWasRestarted(void)
+{
+    fred_the_race_was_restarted(&Fred);
+}
+
+static void fedTheRaceIsLeaving(Race* r)
+{
+    (void)r;
+    fred_the_race_is_leaving(&Fred);
+}
+
+static const TransientStatsElement* fedTransientStatsGetDriver(int32_t n)
+{
+    return transient_stats_get_driver(&Fred.TransientStatsTable, n);
+}
+
+// SetAudioDataFromSound (0x001eef60), the jukebox's: the race's audio
+// options back into Fred's.
+static void fedAudioFromSound(uint8_t* ao, int32_t tunes)
+{
+    jb_audio_from_sound(&g_jukebox, ao, tunes,
+                        sound_get_audio_mode(&gSoundModule));
+}
+
 // ChangeGameFlow (0x001680d8) for RCSTATE_NONE: Quit Race's unloading, and
 // NEXT_RACE's.
 static void raceChangeGameFlow(int32_t desired, int32_t pending)
@@ -4659,6 +4709,18 @@ int main(int argc, char** argv)
     gSetAutosaveCompletionCallbackFn = endGameAutosaveNow;
     gFEDIsThereAnotherRaceFn = fedIsThereAnotherRace;
     gFEDIsMultiTrackFn = fedIsMultiTrack;
+    // Fred's end of the race (fredend.c): TransientStats, the points, the
+    // task and points rewards the End Game screens read, and which cars
+    // they unlock. The high scores (RE-3) and the race events (step 16)
+    // stay NULL.
+    gFEDCheckForAbortionFn = fedCheckForAbortion;
+    gFEDTheRaceIsOverFn = fedTheRaceIsOver;
+    gFEDTheRaceWasQuitFn = fedTheRaceWasQuit;
+    gFEDTheRaceWasRestartedFn = fedTheRaceWasRestarted;
+    gRaceIsLeavingFn = fedTheRaceIsLeaving;
+    gTransientStatsGetDriverFn = fedTransientStatsGetDriver;
+    gSetAudioDataFromSoundFn = fedAudioFromSound;
+    gIsCarUnlockedFn = nfs_is_car_unlocked;
     gChangeGameFlowFn = raceChangeGameFlow;
     gSoundMuteFn = raceSoundMute;
     gSoundMuteReplayFn = sndMuteReplay;

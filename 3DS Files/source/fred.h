@@ -76,8 +76,9 @@ typedef struct HighScoreTable {
 } HighScoreTable;                                        // 64000
 
 // TransientStatsElement, 100 bytes in retail (the demo's 48 ends at
-// AverageSpeed). Retail's constructor sets the two Timers and the eleven
-// at 52, so 52 .. 96 are lap times; the words at 48 and 96 are new.
+// AverageSpeed): a car's row of the race's results, fredend.c's
+// TransientStatsElement::Construct (0x00186e08). Retail added the Be A
+// Cop time at 48, the lap times and their count, NumLapsCompleted.
 typedef struct TransientStatsElement {
     int32_t FinishPosition;                      //  0
     int32_t UniqueDriveNumber;                   //  4
@@ -91,9 +92,9 @@ typedef struct TransientStatsElement {
     int32_t HandlingMode;                        // 36
     float   TopSpeed;                            // 40
     float   AverageSpeed;                        // 44
-    int32_t New48;                               // 48
-    Timer   LapTimes[11];                        // 52
-    int32_t New96;                               // 96
+    float   BeACopTime;                          // 48  the first player's
+    Timer   LapTimes[11];                        // 52  [1 .. NumLapTimes]
+    int32_t NumLapTimes;                         // 96
 } TransientStatsElement;                         // 100
 
 typedef struct TransientStats {
@@ -128,7 +129,8 @@ typedef struct FrontendDatabase {
     TransientStats TransientStatsTable;          //    908
     HighScoreTable ChallengeHighScores;          //   1720
     uint8_t  HighScoreNameTable[1536];           //  65720
-    uint8_t  RewardStates[112];                  //  67256  task, points
+    int32_t  TaskRewardStates[10];               //  67256  NFSTasks'
+    int32_t  PointsRewardStates[18];             //  67296  the points'
     int32_t  bRaceWasAborted;                    //  67368
     int32_t  GameType;                           //  67372  GameTypes
     int32_t  nCurrentEvent;                      //  67376
@@ -145,6 +147,8 @@ typedef char frontenddatabase_layout_check[
      && offsetof(FrontendDatabase, TransientStatsTable) == 908
      && offsetof(FrontendDatabase, ChallengeHighScores) == 1720
      && offsetof(FrontendDatabase, HighScoreNameTable) == 0x100b8
+     && offsetof(FrontendDatabase, TaskRewardStates) == 0x106b8
+     && offsetof(FrontendDatabase, PointsRewardStates) == 0x106e0
      && offsetof(FrontendDatabase, bRaceWasAborted) == 0x10728
      && offsetof(FrontendDatabase, GameType) == 0x1072c
      && offsetof(FrontendDatabase, NumPlayerCars) == 0x10734
