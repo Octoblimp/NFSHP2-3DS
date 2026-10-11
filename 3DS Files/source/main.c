@@ -175,6 +175,7 @@
 #include "race.h"
 #include "racecoord.h"
 #include "raceinit.h"
+#include "raceovermsg.h"
 #include "racerun.h"
 #include "raceupdate.h"
 #include "raceparams.h"
@@ -1755,6 +1756,17 @@ static void fredAudioDefaults(uint8_t* ao)
 static const char* fredTranslate(int32_t id)
 {
     static char text[64];
+    if (!g_boot.ui || !g_boot.ui->hasLang) return NULL;
+    if (langtab_copy(&g_boot.ui->lang, id, text, sizeof(text)) == 0)
+        return NULL;
+    return text;
+}
+
+// GetTranslatedString for the race-over overlay (raceovermsg.c), whose
+// strings run past fredTranslate's 64 bytes (German's 59017 is 73).
+static const char* raceOverTranslate(int32_t id)
+{
+    static char text[256];
     if (!g_boot.ui || !g_boot.ui->hasLang) return NULL;
     if (langtab_copy(&g_boot.ui->lang, id, text, sizeof(text)) == 0)
         return NULL;
@@ -4828,6 +4840,11 @@ int main(int argc, char** argv)
     gHudStartSpeedAnimationFn = player_hud_start_speed_animation;
     gHudStartGrowAnimationFn = player_hud_start_grow_animation;
     gPlayerHudStartWrongWayFn = player_hud_start_wrong_way;
+    // The race-over overlay's message (raceovermsg.c), which SetHudFeatures
+    // fills in when RACE_OVER comes on. The knockout speech waits for
+    // 14-10c.
+    gPlayerFillInRaceOverMessagesFn = player_fill_in_race_over_messages;
+    gRaceOverTranslateFn = raceOverTranslate;
     gPlayerClearHudAnimationsFn = player_clear_hud_animations;
     gHudAnimatorDeleteFn = hudanim_delete;
     // The race's bonus scores (hudscore.c): UpdateHud runs UpdateScoring

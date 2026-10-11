@@ -275,7 +275,8 @@ Retail's oddities are kept, among them:
   - InitializeFlailerTachometer (`0x001434a0`)
   - TrackMap's constructor (`0x001babb8`) behind `bMalloc(176)`, and its
     deleting destructor (`0x001badc8`)
-  - FillInRaceOverMessages (`0x00181558`)
+  - FillInRaceOverMessages (`0x00181558`), since ported by RE-2c
+    ([race-over-overlay.md](race-over-overlay.md)) and bound in main.c
   - RaceFinishedSpeech (`0x00206ab8`)
   - HudStartWrongWay (`0x0017c888`)
   - NISOverlayManager::SetVisible (`0x00182a48`)

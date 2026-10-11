@@ -95,4 +95,10 @@ void timer_print_to_string_hms(char *buf, int32_t flags, int32_t h,
 void timer_print_to_string(const Timer *t, char *buf, int32_t flags,
                            int32_t language);
 
+// Timer::PrintToString(char *, float, int), 0x001a3ca0. The time rounded by
+// RoundSeconds(f) into a Timer of its own by SetTime, then printed by the
+// one above. The race-over overlay's times go through it with f = 0.01.
+void timer_print_to_string_rounded(const Timer *t, char *buf, float f,
+                                   int32_t flags, int32_t language);
+
 #endif

@@ -1410,7 +1410,7 @@ frame numbers still count from where they did.
 
 `bmenu.c`'s menus still recolour the demo's way.
 
-### `RenderTextIntoGroup` (`0x00144b38`)
+### `RenderTextIntoGroup` (`0x00144ba0`)
 
 This is the popup's word wrap. It takes the group's text objects in file
 order, and cuts each line at the last space, tab or `@`. Two details

@@ -150,3 +150,12 @@ void timer_print_to_string(const Timer *t, char *buf, int32_t flags,
         flags |= TIMER_PRINT_MINUS;
     timer_print_to_string_hms(buf, flags, h, m, s, ms / 10, language);
 }
+
+void timer_print_to_string_rounded(const Timer *t, char *buf, float f,
+                                   int32_t flags, int32_t language)
+{
+    Timer r;
+
+    timer_set_time(&r, timer_round_seconds(t, f));
+    timer_print_to_string(&r, buf, flags, language);
+}

@@ -7,7 +7,9 @@ callback and the End Game Menu; `docs/formats/end-game.md`), and so is
 RE-2a (what Fred keeps of the race and the rewards;
 `docs/formats/race-over.md`), and RE-2b (Race Results with its stats
 slideshow and points tally, and the Points and Task Rewards screens;
-`docs/formats/race-results.md`). RE-3 is next: until it lands, Best Lap
+`docs/formats/race-results.md`), and RE-2c (the race-over overlay's
+message, `docs/formats/race-over-overlay.md`). RE-3 is next: until it
+lands, Best Lap
 Times and Best Total Times show EA's layout placeholders ("WWWWWWWW",
 "blablabla"), the rest of the "random text" the user saw. 14-10c and
 14-10d come after RE-6. Two asks were added to
@@ -253,6 +255,15 @@ The slices:
   `docs/formats/race-results.md`. main.c binds the three classes'
   constructors and RenderTextIntoGroup. The race event's rewards stay
   NULL until step 16, the two speeches until 14-10c (RE-5).
+- **RE-2c, done (Session 70):** the race-over overlay's message,
+  which had read "You finished" twice (the layout's placeholder):
+  FillInRaceOverMessages (0x00181558) with its two format helpers
+  (0x00181498, 0x00181500), and FEFlailer's RenderTextIntoGroup
+  (0x00144ba0) with WriteTextIntoChunk and isspace. `raceovermsg.c`,
+  `flailerwrap.c`, `timer_print_to_string_rounded` in `timer.c`,
+  `tools/raceover_check.py` (0 differ; 64 of 66 mutations caught, 2
+  equivalent), `docs/formats/race-over-overlay.md`. The knockout
+  speech seam stays NULL until 14-10c (RE-5).
 - **RE-3, next:** BestLapTimes (0x001ddc10), BestTotalTimes (0x001ddfd0) and
   the Lap Times screens (0x001e0bd0, 0x001e10f0), with what records the
   times: MaybeRecordHighScore (0x00186af0) and its helpers (0x00186938,
@@ -5360,8 +5371,8 @@ count. It is its own slice when it goes in.
   both screens with its animations, and the minimap on the bottom one.
   Tasks 1-25 and 32-35 are closed: 29 of 37. The open ones are 26-31,
   36 and 37.
-- **Next:** the end of the race, RE-3 (see "First"; RE-1, RE-2a and
-  RE-2b are done), then RE-4 to RE-6, then step 14's 14-10c. 14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5, 14-6, 14-7, 14-8a,
+- **Next:** the end of the race, RE-3 (see "First"; RE-1, RE-2a,
+  RE-2b and RE-2c are done), then RE-4 to RE-6, then step 14's 14-10c. 14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5, 14-6, 14-7, 14-8a,
   14-8b, 14-8c, 14-8d, 14-9, 14-10a and 14-10b are done. Of step 12,
   12a to 12k-2, the light flares, 12k-3's planners, 12k-3a, 12k-3b,
   12k-4a, 12k-4b, 12k-7, 12l-1 and 12l-2 are done. See

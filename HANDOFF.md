@@ -19746,3 +19746,37 @@ Picked up from Session 64's steps:
     place 0 projects one (31:24.54 over 8 laps).
 - docs/formats/race-results.md, linked from end-game.md and
   race-over.md. Next: RE-3, the best times.
+
+## Session 70, continued -- RE-2c, the race-over overlay's message
+
+- The overlay read "You finished" twice: FillInRaceOverMessages was a
+  NULL seam, so the layout's placeholder text (LanguageID 320001)
+  stayed up.
+- `raceovermsg.{c,h}`: FillInRaceOverMessages (0x00181558),
+  FormatFinishPositionForRaceOverOverlay (0x00181498) and
+  FormatTimeForRaceOverOverlay (0x00181500). The message comes from the
+  RaceType and the car's FinishReason. The place is put in from the
+  table at 0x002fc028, the time rounded to the hundredth.
+- `flailerwrap.{c,h}`: FEFlailer's RenderTextIntoGroup (0x00144ba0),
+  WriteTextIntoChunk and isspace, the word wrap on the HUD's Flailer
+  chunks (bpopup.c has the BUI copy).
+- `timer.c`: `timer_print_to_string_rounded`, PrintToString(char *,
+  float, int) at 0x001a3ca0.
+- main.c binds `gPlayerFillInRaceOverMessagesFn` and a translate with
+  its own 256-byte buffer: fredTranslate's 64 bytes would cut German's
+  59017 (73 characters), and its one buffer would be overwritten by the
+  place's word. The format is copied out before that call.
+  `gMaybeDoKnockoutRaceOverSpeechFn` stays NULL until 14-10c.
+- `tools/raceover_check.py` with `tools/src/raceover_test.c`: 18562
+  ops, 40226 lines, 0 differ. 66 mutations, 64 caught. The two
+  equivalent ones: retail's translate never answers NULL, and the place's
+  sign only matters outside 0 to 8. The model zeroes the stack under its
+  frame, so retail's no-message cases (its stack's leftovers) read as the
+  port's "".
+- Azahar, on AC, with the test-only finish-at-600-frames hook (removed,
+  rebuilt clean): the overlay reads "You finished in 1st place!" on one
+  line, then Race Results follows. Speed was 100%, 30 fps.
+- Fixed in passing: boot-flow.md had RenderTextIntoGroup at 0x00144b38;
+  it is 0x00144ba0.
+- docs/formats/race-over-overlay.md, linked from hud-features.md.
+  Next: RE-3, the best times.
