@@ -244,9 +244,13 @@ int32_t GetJoystickType(JoystickPort port)
     return joyType;
 }
 
+// The event in retail's numbering, which the model's stub sees: retail
+// has REPLAY_ERASE_DEMO at 110, so from STEER (the demo's 110) on its
+// numbers are one above joyeventid.h's.
 int32_t GetJoystickButtonChar(JoystickPort port, JoyEvent ev)
 {
-    printf("  buttonchar %d %d\n", (int)port, (int)ev);
+    printf("  buttonchar %d %d\n", (int)port,
+           (int)(ev >= JOY_EVENT_STEER ? ev + 1 : ev));
     return joyChar;
 }
 

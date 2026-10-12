@@ -108,8 +108,13 @@ typedef struct {
     float      tlx, tly;       // the box, in the screen's 640x480 space
     float      brx, bry;
     float      scale;          // the colour's, RenderCharacter's last float
+    int32_t    helpLayout;     // the joyhid layout its button icons name
     char       text[UIR_STRIP_TEXT];
 } UITextStrip;
+
+// uirender_queue_text_rect's layout for the keys the live one has (the
+// race's while it runs, the menus' otherwise).
+#define UIR_HELP_LAYOUT_LIVE (-1)
 
 typedef struct {
     UIBundle  bundles[UIR_MAX_BUNDLES];
@@ -138,6 +143,11 @@ typedef struct {
     // uirender_queue_text_rect().
     UITextStrip strips[UIR_MAX_STRIPS];
     int         numStrips;
+
+    // The port's sheet of the 3DS's buttons (helpglyph.h), made from
+    // data/buttons3ds.bin on first use: 0 not yet, 1 made, -1 failed.
+    C3D_Tex   iconTex;
+    int       iconState;
 
     float     targetW, targetH;   // the C3D render target, e.g. 400x240
     float     scrollTime;         // seconds, for UV-scrolling textures
@@ -315,9 +325,15 @@ void uirender_hide_object(UIRenderer* r, uint32_t nameHash);
 // the object is visible or not, as the PS2's strip is. False with nothing
 // queued when the queue is full, the object is not text, or no screen of
 // `ui` holds it.
+//
+// The port's own: its button icons are the keys of joyhid layout
+// `helpLayout` (helpglyph.h), or UIR_HELP_LAYOUT_LIVE's, and the text is
+// kept as helpglyph_rewrite has it there -- the pre-race Blurb names the
+// keys of the race to come while the menus' are live.
 bool uirender_queue_text_rect(UIRenderer* r, const BUI* ui, uint32_t index,
                               float tlx, float tly, float brx, float bry,
-                              const char* text, float scale);
+                              const char* text, float scale,
+                              int32_t helpLayout);
 // Empties the queue: once a frame, before the current screen's RENDER.
 void uirender_clear_strips(UIRenderer* r);
 

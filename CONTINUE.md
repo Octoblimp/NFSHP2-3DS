@@ -68,7 +68,18 @@ cop's HUD (hudcop.c, hudrender.c, hudscore.c), the setup screens
   since the IsBeingPursued seam. The icons go green to blue at a call,
   as retail's code has them. The cop buttons are X target, L roadblock,
   R helicopter (ce58fac). Not seen: an arrest, which the gas-only
-  script cannot make. Left of TASKS 43: the Blurb's PS2 glyphs.
+  script cannot make. TASKS 43 is done (3DS button icons).
+
+**Now (Session 83, 2026-10-12): TASKS 43 is done. Every help
+character draws the 3DS key that does its job (`helpglyph.c`, the
+port's own icon sheet `data/buttons3ds.bin`), and the cop's Blurb
+reads X target, R helicopter, L roadblock, D-pad Down boost. Its
+target was the boost's glyph: retail's JoyEvent numbers run one
+above the demo's from 110 (TASKS 49 has the joystick tables, which
+are still the demo's). New: TASKS 48 (tHelpMenu, the frontend's
+dead Circle "help"). Next: TASKS 40 (12n, the radar meter), then
+49, then 39 (12k-6, after step 14b). TASKS 47 and 46 wait on the
+user.**
 
 **Now (Session 82, 2026-10-12): step 14 is done (14-10d, 3ac6572)
 and so is task 38 (BUSTED! animates and is whole; no change, see

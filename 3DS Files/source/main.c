@@ -2955,7 +2955,12 @@ static float flailerTextHeight(struct FlailerTextChunk* t)
 }
 
 // RenderTextIntoRectangle's inner (0x00144ed0): the strip queued for the
-// frame's layers (uirender_queue_text_rect).
+// frame's layers (uirender_queue_text_rect). Its only users are the
+// pre-race screens' -- the Blurb and Be A Cop's two-player pages -- which
+// tell the race's controls while the menus' keys are live, so with a race
+// coordinator the button icons are the race's: the cop's in Be A Cop,
+// whose one-player Blurb is the cop's (pre_race_blurb_text), as
+// joyhidRaceLayout has them once the race runs.
 static void flailerTextIntoRectangle(struct FlailerTextChunk* t,
                                      const char* str, float tlx,
                                      float tly, float brx, float bry,
@@ -2963,9 +2968,13 @@ static void flailerTextIntoRectangle(struct FlailerTextChunk* t,
 {
     BUI*     ui  = NULL;
     uint32_t idx = 0;
+    int32_t  layout = UIR_HELP_LAYOUT_LIVE;
     if (!flailer_object_index(&t->Object, &ui, &idx)) return;
+    if (pRaceCoordinator != NULL)
+        layout = RaceParametersBeACop ? JOYHID_LAYOUT_COP
+                                      : JOYHID_LAYOUT_RACE;
     (void)uirender_queue_text_rect(g_boot.ui, ui, idx, tlx, tly, brx, bry,
-                                   str, scale);
+                                   str, scale, layout);
 }
 
 static bool flailerTextureSize(struct FlailerBitmapChunk* b, int32_t* w,

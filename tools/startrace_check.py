@@ -1600,8 +1600,10 @@ MUTATIONS = [
     M("bh-plug", "        if (IsJoystickPluggedIn(0))" + NL
       + "            PreRaceBlurbButtonChar",
       "        if (1)" + NL + "            PreRaceBlurbButtonChar"),
-    M("bh-nitro", "GetJoystickButtonChar(0, JOY_EVENT_NITRO_BOOST);",
-      "GetJoystickButtonChar(0, JOY_EVENT_REQUEST_ROADBLOCK);"),
+    M("bh-horn", "GetJoystickButtonChar(0, JOY_EVENT_HONK_HORN);",
+      "GetJoystickButtonChar(0, JOY_EVENT_NITRO_BOOST);"),
+    M("bh-horn-reset", "GetJoystickButtonChar(0, JOY_EVENT_HONK_HORN);",
+      "GetJoystickButtonChar(0, JOY_EVENT_RESET_CAR);"),
     M("bh-player", "fmt = pre_race_blurb_text(0);", "fmt = pre_race_blurb_text(1);"),
     M("bh-char", "(int)PreRaceBlurbButtonChar);", "(int)PreRaceBlurbButtonChar + 1);"),
     M("bh-char0", "int32_t PreRaceBlurbButtonChar = 0x89;",

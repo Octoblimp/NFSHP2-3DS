@@ -7,9 +7,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "buttons3ds_bin.h"
 #include "epoly.h"
 #include "georender.h"
+#include "helpglyph.h"
 #include "hudtach.h"
+#include "joyhid.h"
 
 // RenderHelpCharacter (retail 0x00141dd8) hashes this name and calls
 // FindFont.
@@ -153,6 +156,7 @@ void uirender_free(UIRenderer* r)
 {
     for (int i = 0; i < r->numTextures; i++)
         if (r->textures[i].valid) C3D_TexDelete(&r->textures[i].tex);
+    if (r->iconState > 0) C3D_TexDelete(&r->iconTex);
     for (int i = 0; i < r->numBundles; i++) {
         if (r->bundles[i].hasUI) bui_close(&r->bundles[i].ui);
         free(r->bundles[i].data);
@@ -276,6 +280,74 @@ static UITexture* font_sheet(UIRenderer* r, UIFont* f)
     if (f->sheet < 0) return NULL;
     UITexture* t = &r->textures[f->sheet];
     return t->valid ? t : NULL;
+}
+
+// The port's sheet of the 3DS's buttons, helpglyph.h's: data/buttons3ds.bin,
+// RGBA rows from the top, tiled into GPU_RGBA8's (a, b, g, r) words as
+// texpack.c's tile_padded lays a disc texture.
+static C3D_Tex* icon_sheet(UIRenderer* r)
+{
+    const uint32_t n = HELPGLYPH_SHEET;
+
+    if (r->iconState == 0) {
+        r->iconState = -1;
+        if (buttons3ds_bin_size == n * n * 4
+            && C3D_TexInit(&r->iconTex, n, n, GPU_RGBA8)) {
+            uint32_t* dst = (uint32_t*)r->iconTex.data;
+            for (uint32_t y = 0; y < n; y++) {
+                for (uint32_t x = 0; x < n; x++) {
+                    const uint8_t* s = buttons3ds_bin + (y * n + x) * 4;
+                    dst[texpack_tiled_index(x, y, n)] =
+                        (uint32_t)s[3] | ((uint32_t)s[2] << 8)
+                        | ((uint32_t)s[1] << 16) | ((uint32_t)s[0] << 24);
+                }
+            }
+            C3D_TexFlush(&r->iconTex);
+            C3D_TexSetFilter(&r->iconTex, GPU_LINEAR, GPU_LINEAR);
+            C3D_TexSetWrap(&r->iconTex, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
+            r->iconState = 1;
+        }
+    }
+    return r->iconState > 0 ? &r->iconTex : NULL;
+}
+
+// The joyhid layout live now, whose keys the menus' and the HUD's button
+// icons name: main.c's answer, as joyhid_read asks it.
+static int32_t live_help_layout(void)
+{
+    return gJoyHidRaceLayoutFn ? gJoyHidRaceLayoutFn() : JOYHID_LAYOUT_MENU;
+}
+
+// RenderHelpCharacter's glyph (retail 0x00141dd8) for help character `c`,
+// and the sheet it is in, NULL when there is none: the 3DS key that does
+// its job in joyhid layout `layout`, from the port's sheet, or the
+// BUTTONSOUT glyph of the help character helpglyph_map leaves -- `c`
+// itself for the D-pad, START and SELECT. The port's cells are
+// BUTTONSOUT's size and advance, 26 x 28 and 26.
+static C3D_Tex* help_glyph(UIRenderer* r, unsigned char c, int32_t layout,
+                           BGlyph* out)
+{
+    int32_t m = helpglyph_map(c, layout);
+
+    if (m >= HELPGLYPH_ICON) {
+        int32_t  i = m - HELPGLYPH_ICON;
+        C3D_Tex* t = icon_sheet(r);
+        if (!t) return NULL;
+        memset(out, 0, sizeof *out);
+        out->id      = c;
+        out->posX    = (float)((i % HELPGLYPH_COLS) * HELPGLYPH_CELL_W);
+        out->posY    = (float)((i / HELPGLYPH_COLS) * HELPGLYPH_CELL_H);
+        out->width   = (float)HELPGLYPH_CELL_W;
+        out->height  = (float)HELPGLYPH_CELL_H;
+        out->advance = (float)HELPGLYPH_CELL_W;
+        return t;
+    }
+
+    UIFont*    hf = find_font(r, HELP_FONT_HASH);
+    UITexture* t  = hf ? font_sheet(r, hf) : NULL;
+    if (!t || !bfont_glyph(&hf->font, kHelpGlyph[m - UIR_HELP_FIRST], out))
+        return NULL;
+    return &t->tex;
 }
 
 // ---------------------------------------------------------------------------
@@ -645,22 +717,22 @@ static float measure(UIFont* f, const char* s, size_t len, float scaleX,
 
 // `color` is a finished C2D colour, the view alpha already in it: the
 // screen path passes tint_color(o->color, v->alpha) with `gs` set, and the
-// port's own wrapped text passes a plain colour of its own without.
-static void draw_glyph(UIRenderer* r, UIFont* f, const BGlyph* g, float x,
-                       float y, float w, float h, uint32_t color,
-                       const UIView* v, bool gs)
+// port's own wrapped text passes a plain colour of its own without. `tex`
+// is the glyph's sheet.
+static void draw_glyph(C3D_Tex* tex, const BGlyph* g, float x, float y,
+                       float w, float h, uint32_t color, const UIView* v,
+                       bool gs)
 {
-    UITexture* t = font_sheet(r, f);
-    if (!t || w <= 0.0f || h <= 0.0f) return;
+    if (!tex || w <= 0.0f || h <= 0.0f) return;
 
     Tex3DS_SubTexture st;
-    subtex_from_pixels(&st, (float)t->tex.width, (float)t->tex.height,
+    subtex_from_pixels(&st, (float)tex->width, (float)tex->height,
                        g->posX, g->posY, g->width, g->height);
 
     C2D_ImageTint tint;
     C2D_PlainImageTint(&tint, color, 1.0f);
 
-    C2D_Image img = { &t->tex, &st };
+    C2D_Image img = { tex, &st };
     C2D_DrawParams p;
     memset(&p, 0, sizeof(p));
     p.pos.x = v->originX + x * v->scaleX;
@@ -675,28 +747,33 @@ static void draw_glyph(UIRenderer* r, UIFont* f, const BGlyph* g, float x,
 // 0x00141b9c) and its height times ScaleY once, with no mOffset. That is a
 // shipped bug the screens were laid out with, so it stays. Fixed-width text
 // and the button icons go through here; proportional text does not.
-static void draw_character(UIRenderer* r, UIFont* f, const BGlyph* g,
-                           float x, float y, const BUIObject* o,
-                           uint32_t color, const UIView* v)
+static void draw_character(C3D_Tex* tex, const BGlyph* g, float x, float y,
+                           const BUIObject* o, uint32_t color,
+                           const UIView* v)
 {
-    draw_glyph(r, f, g, x, y, g->width * o->scaleX * o->scaleX,
+    draw_glyph(tex, g, x, y, g->width * o->scaleX * o->scaleX,
                g->height * o->scaleY, color, v, true);
 }
 
-// RenderHelpCharacter (retail 0x00141dd8): the BUTTONSOUT glyph for help
-// character `c` at the pen, through RenderCharacter. Returns the glyph's
-// advance *unscaled*, which the callers add to a scaled pen; 0 when the
-// font or the glyph is missing.
+// A font's sheet, for draw_glyph.
+static C3D_Tex* font_tex(UIRenderer* r, UIFont* f)
+{
+    UITexture* t = font_sheet(r, f);
+    return t ? &t->tex : NULL;
+}
+
+// RenderHelpCharacter (retail 0x00141dd8): the glyph for help character
+// `c` at the pen, through RenderCharacter -- the key of joyhid layout
+// `layout`, help_glyph's. Returns the glyph's advance *unscaled*, which the
+// callers add to a scaled pen; 0 when the sheet or the glyph is missing.
 static float draw_help_character(UIRenderer* r, unsigned char c, float x,
                                  float y, const BUIObject* o, uint32_t color,
-                                 const UIView* v)
+                                 const UIView* v, int32_t layout)
 {
-    UIFont* hf = find_font(r, HELP_FONT_HASH);
-    BGlyph  hg;
-    if (!hf || !font_sheet(r, hf)) return 0.0f;
-    if (!bfont_glyph(&hf->font, kHelpGlyph[c - UIR_HELP_FIRST], &hg))
-        return 0.0f;
-    draw_character(r, hf, &hg, x, y, o, color, v);
+    BGlyph   hg;
+    C3D_Tex* t = help_glyph(r, c, layout, &hg);
+    if (!t) return 0.0f;
+    draw_character(t, &hg, x, y, o, color, v);
     return hg.advance;
 }
 
@@ -738,7 +815,8 @@ static void draw_text(UIRenderer* r, const BUIObject* o, const UIView* v)
             // characters.
             if (!bfont_glyph(&f->font, ch, &g)) continue;
             float inset = (f->fixedCell - g.advance) * 0.5f;
-            draw_character(r, f, &g, penX + inset, o->y, o, color, v);
+            draw_character(font_tex(r, f), &g, penX + inset, o->y, o, color,
+                           v);
             penX += f->fixedCell * o->scaleX;
             continue;
         }
@@ -746,7 +824,8 @@ static void draw_text(UIRenderer* r, const BUIObject* o, const UIView* v)
         // The button icons are tested before the glyph, so one draws even
         // where the text's own font has no glyph for its code.
         if (is_help_char(ch)) {
-            penX += draw_help_character(r, ch, penX, o->y, o, color, v);
+            penX += draw_help_character(r, ch, penX, o->y, o, color, v,
+                                        live_help_layout());
             continue;
         }
         if (!bfont_glyph(&f->font, ch, &g)) continue;
@@ -763,8 +842,9 @@ static void draw_text(UIRenderer* r, const BUIObject* o, const UIView* v)
         }
 
         // The proportional path draws the glyph itself, at ScaleX once.
-        draw_glyph(r, f, &g, penX + kern, o->y, g.width * o->scaleX,
-                   g.height * o->scaleY, color, v, true);
+        draw_glyph(font_tex(r, f), &g, penX + kern, o->y,
+                   g.width * o->scaleX, g.height * o->scaleY, color, v,
+                   true);
         penX += o->scaleX * (g.advance + kern);
     }
 }
@@ -898,7 +978,8 @@ static void draw_text_rect(UIRenderer* r, const UITextStrip* s,
 
     while (c != 0) {
         if (is_help_char(c)) {
-            x += draw_help_character(r, c, x, y, o, color, v);
+            x += draw_help_character(r, c, x, y, o, color, v,
+                                     s->helpLayout);
         } else {
             BGlyph g;
             bool   has = bfont_glyph(&f->font, c, &g);
@@ -939,7 +1020,8 @@ static void draw_text_rect(UIRenderer* r, const UITextStrip* s,
 
 bool uirender_queue_text_rect(UIRenderer* r, const BUI* ui, uint32_t index,
                               float tlx, float tly, float brx, float bry,
-                              const char* text, float scale)
+                              const char* text, float scale,
+                              int32_t helpLayout)
 {
     BUIObject o;
     uint32_t  s;
@@ -961,7 +1043,10 @@ bool uirender_queue_text_rect(UIRenderer* r, const BUI* ui, uint32_t index,
     st->brx    = brx;
     st->bry    = bry;
     st->scale  = scale;
+    st->helpLayout = helpLayout == UIR_HELP_LAYOUT_LIVE ? live_help_layout()
+                                                        : helpLayout;
     snprintf(st->text, sizeof st->text, "%s", text);
+    (void)helpglyph_rewrite(st->text, st->helpLayout);
     return true;
 }
 
@@ -992,18 +1077,18 @@ static UIFont* wrap_font(UIRenderer* r, const UIWrapStyle* st)
     return NULL;
 }
 
-// One character's glyph, from the run's own font or -- for a button icon --
-// from BUTTONSOUT. Same test as draw_text(); see IsHelpCharacter.
+// One character's glyph and its sheet (NULL when the font has none), from
+// the run's own font or -- for a button icon -- help_glyph's, in the live
+// layout: the bottom screen's help line names the keys the menu up hears.
+// Same test as draw_text(); see IsHelpCharacter.
 static bool wrap_glyph(UIRenderer* r, UIFont* f, unsigned char ch,
-                       UIFont** outFont, BGlyph* out)
+                       C3D_Tex** outTex, BGlyph* out)
 {
     if (is_help_char(ch)) {
-        UIFont* hf = find_font(r, HELP_FONT_HASH);
-        if (!hf) return false;
-        *outFont = hf;
-        return bfont_glyph(&hf->font, kHelpGlyph[ch - UIR_HELP_FIRST], out);
+        *outTex = help_glyph(r, ch, live_help_layout(), out);
+        return *outTex != NULL;
     }
-    *outFont = f;
+    *outTex = font_tex(r, f);
     return bfont_glyph(&f->font, ch, out);
 }
 
@@ -1030,7 +1115,7 @@ static UIWrapLine wrap_next(UIRenderer* r, UIFont* f, const char* s,
 
     for (size_t i = 0; i < len; i++) {
         unsigned char ch = (unsigned char)s[i];
-        UIFont*       gf = f;
+        C3D_Tex*      gt;
         BGlyph        g;
         float         adv = 0.0f;
 
@@ -1038,11 +1123,12 @@ static UIWrapLine wrap_next(UIRenderer* r, UIFont* f, const char* s,
             ln.draw = i; ln.next = i + 1; ln.width = w * scale;
             return ln;
         }
-        if (wrap_glyph(r, f, ch, &gf, &g)) {
-            if (KERNING_ENABLED && prev >= 0 && gf == f)
+        if (wrap_glyph(r, f, ch, &gt, &g)) {
+            bool own = !is_help_char(ch);
+            if (KERNING_ENABLED && prev >= 0 && own)
                 adv += bfont_kerning(&f->font, prev, ch);
             adv += g.advance;
-            prev = (gf == f) ? (int)ch : -1;
+            prev = own ? (int)ch : -1;
         } else {
             prev = -1;
         }
@@ -1113,16 +1199,17 @@ static float wrap_run(UIRenderer* r, const char* text, size_t len,
             int   prev = -1;
             for (size_t i = 0; i < ln.draw; i++) {
                 unsigned char ch = (unsigned char)text[pos + i];
-                UIFont*       gf = f;
+                C3D_Tex*      gt;
                 BGlyph        g;
-                if (!wrap_glyph(r, f, ch, &gf, &g)) { prev = -1; continue; }
-                if (KERNING_ENABLED && prev >= 0 && gf == f)
+                bool          own = !is_help_char(ch);
+                if (!wrap_glyph(r, f, ch, &gt, &g)) { prev = -1; continue; }
+                if (KERNING_ENABLED && prev >= 0 && own)
                     penX += bfont_kerning(&f->font, prev, ch) * scale;
-                draw_glyph(r, gf, &g, penX, top,
+                draw_glyph(gt, &g, penX, top,
                            g.width * scale, g.height * scale, color, &v,
                            false);
                 penX += g.advance * scale;
-                prev = (gf == f) ? (int)ch : -1;
+                prev = own ? (int)ch : -1;
             }
         }
         top += lineH;

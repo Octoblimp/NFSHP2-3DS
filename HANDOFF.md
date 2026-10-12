@@ -20802,3 +20802,44 @@ it up from here.
 - **The build.** Clean, with no test code, in `3DS Files`.
 - **Next.** TASKS 43's Blurb glyphs, TASKS 39 (12k-6), TASKS 40
   (12n). TASKS 47 and 46 wait on the user.
+
+## Session 83 -- TASKS 43, the 3DS's buttons in the game's text
+
+- **The icons.** The game names its buttons with help characters
+  (0x80..0x9d), which retail draws from BUTTONSOUT, the DualShock 2's
+  buttons. `helpglyph.c` maps each to the 3DS key that does the same
+  job in joyhid's layout (the race's, the cop's or the menus'), and
+  `uirender.c` draws A, B, X, Y, L, R, ZL, ZR, the Circle Pad and the
+  C-Stick from the port's own sheet (`tools/buttons3ds_make.py` draws
+  `3DS Files/data/buttons3ds.bin`; nothing of the disc's). The D-pad,
+  START and SELECT keep BUTTONSOUT's glyphs; R3, the boost, is D-pad
+  Down's. In the cop's car the Blurb's "Triangle + L2/R2" become R and
+  L. Text placed into a box takes the layout of where it is shown
+  (main.c's flailerTextIntoRectangle). `tools/helpglyph_check.py` holds
+  the map to joyhid.c's own buttons and checks the sheet: 6
+  mutations, all caught.
+- **Retail's BUTTONSOUT is not the demo's.** 29 glyphs in 26 x 28
+  cells (the demo's picture in `out/buttonsout_glyphs.png` misled me;
+  retail's is `out/buttonsout_retail_glyphs.png`). Its D-pad arms
+  point to the centre, so D-pad Down is the "house". The icons are
+  drawn 26 x 23 and set 3 rows down retail's 28-row cell, where
+  retail's buttons sit.
+- **The Blurb's target.** Retail passes JoyEvent 126 to
+  GetJoystickButtonChar, the horn in retail's numbering: retail has
+  REPLAY_ERASE_DEMO at 110, so every event from STEER on is one above
+  the demo's. The port had read 126 as the demo's nitro (startrace.c
+  now asks for JOY_EVENT_HONK_HORN). The other uses of events 110 and
+  up are by name in demo-matched code.
+- **Found: the joystick tables are the demo's** (TASKS 49). Retail's
+  ScannerConfigTable is 230 rows of 36 bytes at 0x002dc500, with a
+  second glyph for the combos, D-pad steering rows for the pad
+  configurations, retail's stick glyphs, and two configurations gone.
+- **Found: tHelpMenu** (TASKS 48). The frontend's bottom-left Circle
+  and "help" is a BUTTONSOUT text object whose key opens nothing in
+  the port.
+- **On Azahar** (AC, 100%): the cop route from the frontend, the
+  Blurb as shown to the user (`out/azahar_t43icons2/zoom_blurb.png`),
+  the race at 30 FPS.
+- **Next.** TASKS 40 (12n, the radar meter): retail's
+  GetRadarDetectorIntensity (0x002274a8) into copmgr.c, checked in
+  copmanager_check, bound in main.c. Then TASKS 49, then 39.

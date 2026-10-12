@@ -2435,7 +2435,7 @@ phases.
         per push. The results screens take the same path.
         (`docs/formats/joystick.md`)
 
-43. [ ] **The cop's buttons on the 3DS.** Asked for on 2026-10-11. In
+43. [x] **The cop's buttons on the 3DS.** Asked for on 2026-10-11. In
         Be A Cop, in the cop's car:
         - [x] X, the horn, targets and untargets speeders in range, as
           in retail: `HONK_HORN` goes to `BeACopToggleSirenAndLights`,
@@ -2449,12 +2449,24 @@ phases.
           mutations are all caught. This replaced the 2026-10-08 plan of
           the calls on the D-Pad, and then the user's first mapping
           (L target, R boost, ZL heli, ZR roadblock).
-        - [ ] The Pre Race Blurb's cop lines (970016, 970001) show the
-          PS2's glyphs: L2 for the helicopter, R2 for the roadblock, R3
-          (which BUTTONSOUT lacks, so nothing) for the boost, and %c
-          (`GetJoystickButtonChar(0, 126)`) for the target. The whole UI
-          draws BUTTONSOUT's PS2 glyphs, so 3DS icons (R, L, X, D-pad
-          Down) need glyphs of their own.
+        - [x] Every help character (0x80..0x9d) draws the 3DS key that
+          does its job (`helpglyph.c`): A, B, X, Y, L, R, ZL, ZR, the
+          Circle Pad and the C-Stick come from the port's own sheet
+          (`tools/buttons3ds_make.py`, `data/buttons3ds.bin`, retail
+          BUTTONSOUT's 26 x 28 cells); the D-pad, START and SELECT keep
+          BUTTONSOUT's, and R3 (the boost) is D-pad Down's. Which key
+          a face button is follows joyhid's layout: the race's, the
+          cop's (X target; the Blurb's "Triangle + L2/R2" become R and
+          L) or the menus'. `helpglyph_check`: the map held to
+          joyhid.c's own buttons, 6 mutations, all caught.
+        - [x] The Blurb's target was the boost's glyph: retail passes
+          JoyEvent 126, the horn in retail's numbering, which has
+          REPLAY_ERASE_DEMO at 110; the port read it as the demo's 126,
+          the nitro. On Azahar the lines read X target, R helicopter,
+          L roadblock, D-pad Down boost (shown to the user).
+        - The frontend's "Help" mark is a BUTTONSOUT text object
+          ('k', the PS2's Circle), not a help character, and the
+          port's Circle opens nothing: tHelpMenu is TASKS 48.
 
         The user asked about a spike strip button, as the PC version
         had one. PS2 retail has none: Be A Cop has only
@@ -2532,6 +2544,33 @@ phases.
           under 22 FPS. In those frames the CPU's ~19 ms and the GPU's
           ~32 ms run one after the other (50.8 ms a frame): TASKS 46's
           "GpuSends 1" is meant to overlap them.
+
+48. [ ] **The help menu (tHelpMenu).** Found on 2026-10-12 with TASKS
+        43. The frontend shows a PS2 Circle and "help" bottom left;
+        retail's Circle (MENU_HELP) summons tHelpMenu over the screen
+        (`FlailerScreenList::JoyHandler`, 0x0016cab0, then 0x0016ca40).
+        The port has no tHelpMenu and nothing sends BJOY_MENU_HELP, so
+        the mark is dead. Retail: the constructor 0x001e3b88, Summon
+        0x001e3c50 and 0x001e3dd8, SplitHelp 0x001e3c98, Reset
+        0x001e3db8, Dismiss 0x001e3fa0, Tick 0x001e4028, IsActive
+        0x001e4170, SetHelpOverride 0x0016d448 (logs only today), and
+        the event tree's SyncHelpMenu. The 3DS key needs choosing (B is
+        back and A select; X is free outside car select), and the 'k'
+        text then draws that key's icon.
+
+49. [ ] **The joystick tables are the demo's.** Found on 2026-10-12.
+        `scannertab.c` and `joyeventid.h` come from NFSHP2.ELF;
+        retail's (SLES_507.31: ScannerConfigTable 0x002dc500, 230 rows
+        of 36 bytes, the count at gp-23824; EventNameTable 0x002fa2d0,
+        130 entries) differ: REPLAY_ERASE_DEMO at 110 moves every event
+        from STEER on up one; a second glyph at +28 for the combos
+        ("TRIANGLE + R2" is R2 and Triangle); retail's stick and D-pad
+        glyphs (148..154); a D-pad STEER row for the pad configurations
+        10..13; configurations 24 and 34 gone; the nitro's name
+        "TRIANGLE + R1". FindScannerConfig (0x00155138) also differs.
+        Regenerate both files from retail, then check every literal
+        event number taken from a retail-only function (the Blurb's
+        was one).
 
 ### The retail frontend
 

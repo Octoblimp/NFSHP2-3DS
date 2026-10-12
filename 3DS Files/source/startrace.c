@@ -574,9 +574,9 @@ void pre_race_blurb_destroy(PreRaceBlurb *b, int32_t flags)
         bFree(b);
 }
 
-// RENDER prints the text, its %c the nitro button's character, into 512
-// bytes (bSPrintf has no bound; the port's stops at the end), and wraps
-// it into the box. A NULL text is printed as nothing, where retail hands
+// RENDER prints the text, its %c the horn's button character (the cop's
+// target), into 512 bytes (bSPrintf has no bound; the port's stops at the
+// end), and wraps it into the box. A NULL text is printed as nothing, where retail hands
 // bSPrintf the NULL.
 void pre_race_blurb_handle_event(PreRaceBlurb *b, BScreenMessage msg,
                                  BScreenCallbackData *data)
@@ -587,9 +587,12 @@ void pre_race_blurb_handle_event(PreRaceBlurb *b, BScreenMessage msg,
         char buf[512];
         const char *fmt;
 
+        // Retail passes 126, which is the horn: retail's JoyEvent has
+        // REPLAY_ERASE_DEMO at 110, so from there on its numbers are one
+        // above the demo's, which this port's joyeventid.h holds.
         if (IsJoystickPluggedIn(0))
             PreRaceBlurbButtonChar =
-                GetJoystickButtonChar(0, JOY_EVENT_NITRO_BOOST);
+                GetJoystickButtonChar(0, JOY_EVENT_HONK_HORN);
         fmt = pre_race_blurb_text(0);
         snprintf(buf, sizeof buf, fmt != NULL ? fmt : "",
                  (int)PreRaceBlurbButtonChar);
