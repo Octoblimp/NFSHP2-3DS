@@ -1583,7 +1583,8 @@ static bool draw_screen_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
 bool georender_draw_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
                          uint8_t blend, float depth)
 {
-    return draw_screen_quad(v, gt, &s_screen, blend, true, depth, false);
+    return draw_screen_quad(v, gt, &s_screen, blend, !gt->pass.noAlphaTest,
+                            depth, false);
 }
 
 bool georender_draw_hud_quad(const GeoRenderVertex v[4], const GeoTexture* gt,

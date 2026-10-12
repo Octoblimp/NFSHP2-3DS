@@ -26,6 +26,11 @@ extern u32 __ctru_linear_heap, __ctru_linear_heap_size;
 // given, and its constants, marked changed, so the next draw sends them.
 void C3Di_DirtyUniforms(GPU_SHADER_TYPE type);
 
+// And C3D_FrameSplit's split without its send: false when nothing was
+// drawn since the last; otherwise the list, finished with the framebuffer's
+// flush when it drew, and its size in words. The buffer goes on after it.
+bool C3Di_SplitFrame(u32 **pBuf, u32 *pSize);
+
 const char *volatile HangwatchTrail[HANGWATCH_TRAIL];
 volatile uint32_t    HangwatchMarks;
 
@@ -634,4 +639,34 @@ void hangwatch_gpu_frame_end(void)
     if (s_timing) s_log("%s; %.1f ms in all", s_line, s_total);
     s_timing = false;
     s_nextMs = now_ms() + 10000;
+}
+
+// ------------------------------------------------------------ the sends
+
+static bool s_sendsOn;     // this frame goes to the GPU in parts
+
+void hangwatch_gpu_sends_begin(bool on)
+{
+    s_sendsOn = on && !s_timing;
+}
+
+void hangwatch_gpu_send(void)
+{
+    u32 *list, words;
+
+    if (!s_sendsOn || !C3Di_SplitFrame(&list, &words)) return;
+    // The flush after the split, as time_stage has it: the split writes
+    // the list's FINALIZE. All the heap, for the vertices written since.
+    GSPGPU_FlushDataCache((const void *)__ctru_linear_heap,
+                          __ctru_linear_heap_size);
+    // Into the queue, and the queue run: the GPU starts on it now, or once
+    // the last part is done.
+    GX_ProcessCommandList(list, words * 4, 0);
+    gxCmdQueueRun(queue());
+}
+
+void hangwatch_gpu_sends_end(void)
+{
+    hangwatch_gpu_send();
+    s_sendsOn = false;
 }

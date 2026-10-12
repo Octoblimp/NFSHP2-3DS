@@ -71,6 +71,12 @@ extern int32_t TunePreRaceSequence;         // gp-23108, 0
 // race (logwriter.h).
 extern int32_t ConfigDebugLog;              // 0
 
+// The port's own too: "GpuSends 1" has a race's frame go to the GPU in
+// parts as it is drawn (hangwatch_gpu_sends_begin) rather than whole at
+// C3D_FrameEnd. Off by default until a run has shown it draws the same
+// frames and never stops the GPU (2026-10-12).
+extern int32_t ConfigGpuSends;              // 0
+
 // SkipFE as the image reads it, `lw -23220(gp)`: gameflow's skipFE
 // through gPlayerCamSkipFE, 0 while that is unset.
 int32_t config_skip_fe(void);

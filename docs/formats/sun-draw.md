@@ -221,9 +221,10 @@ It also does the following:
   ApplyAlphaSorting is set, it goes on the alpha sort by V0's z instead.
   The sun's textures are order 7, the last list.
 
-The packet writes no TEST_1 or ZBUF. The main target's TEST_1 stays in
-force, which is alpha GREATER 0x30 and Z GEQUAL
-(`docs/formats/track-render.md`). Whether the Z writes are on when the
+The packet writes no TEST_1 or ZBUF. The TEST_1 in force is the register
+block that the texture's mode picks (`docs/formats/track-render.md`).
+Every sun texture is semitransparent, which is modes 1 and 3: alpha
+GEQUAL 0, which every pixel passes, and Z GEQUAL. Whether the Z writes are on when the
 sun's list draws is the eView retail pass's; the port's quads write none.
 
 ## The Z buffer
@@ -277,7 +278,9 @@ strip:
 - with the poly's blend: ALPHA for (Cs - Cd) * As + Cd, ADD for
   Cs * As + Cd, and SUBTRACT for Cd - Cs * As. There is no blend when the
   texture is not semitransparent;
-- with the main target's alpha test, GREATER 0x60 (0x30 doubled);
+- with the alpha test of the texture's pass: none for the sun's, which
+  are semitransparent, and GREATER 0x60 (0x30 doubled) for a texture
+  that is not;
 - with no depth write, and the depth test that the poly's Z asks for.
 
 **The quads' Z.** `depth_of_gs_z` runs the range above backwards, from a
@@ -334,17 +337,16 @@ count is 0, and all four layers draw with alpha 0.
 back to stop 1 and looks up. There the whole rect is sky, the count is 1,
 and the layers draw at 128, 64, 89 and 40.
 
-The alpha test decides what shows at those values:
-
-- Layer 1 (CENTER at 0.5) passes only where its texture's alpha is over
-  0x60, which gives the halo a hard edge.
-- Layer 3 (MAJORRAYS at 0.32) never passes. The highest alpha in the sun
-  textures is 0x7f, and 0x7f × 40 >> 7 is 39, which is not over 0x30.
-
-The PS2 does both of these the same way: the textures' alpha never goes
-past 0x7f, so the doubled upload clamps nothing. Retail's TRACKB12 has the
-same layers with the sun at (-3900, 650, 1300) (`sky-sun.md`), and its
-walk in Azahar is still to come.
+Every layer blends in full, faint texels and all, since the sun's
+textures are semitransparent and their register block's alpha test passes
+every pixel. Until 2026-10-12 the port cut them at the opaque textures'
+GREATER 0x60. That gave layer 1 (CENTER at 0.5) a hard, stepped edge
+where its alpha crossed 0x60, and hid layer 3 (MAJORRAYS at 0.32) whole:
+the highest alpha in the sun textures is 0x7f, and 0x7f x 40 >> 7 is 39,
+under 0x30. A capture of a race on track 31 in Azahar (`capture.h`)
+showed the four quads drawn with the test on. The textures' alpha never goes past 0x7f,
+so the doubled upload clamps nothing. Retail's TRACKB12 has the same
+layers with the sun at (-3900, 650, 1300) (`sky-sun.md`).
 
 The demo's TRACKB12 sun (version 2, at -16384, 800, 6000):
 

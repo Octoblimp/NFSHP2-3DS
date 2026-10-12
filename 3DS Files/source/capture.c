@@ -28,6 +28,7 @@ static bool     s_offscreen;
 static int      s_nextId;
 static char*    s_legend;
 static size_t   s_legendLen;
+static size_t   s_legendCap;
 static int      s_legendDropped;
 
 void capture_race(bool racing)
@@ -84,33 +85,37 @@ static void put32(uint8_t* p, uint32_t v)
 }
 
 // A buffer's 400 by 240 words as a 24-bit BMP, each word's bits 23 to 16
-// red, 15 to 8 green and 7 to 0 blue, `shift` to the right first.
+// red, 15 to 8 green and 7 to 0 blue, `shift` to the right first. A row
+// at a time: in a race the heap may not have the whole picture's 288 KB.
 static bool write_bmp(const char* path, const uint32_t* buf, int shift)
 {
     const size_t row  = CAP_W * 3;
     const size_t size = 54 + row * CAP_H;
-    uint8_t*     out  = (uint8_t*)malloc(size);
+    uint8_t      head[54];
+    uint8_t      line[CAP_W * 3];
     FILE*        f;
     bool         ok;
     int          x, y;
 
-    if (out == NULL || buf == NULL) {
-        free(out);
+    if (buf == NULL) {
         return false;
     }
-    memset(out, 0, 54);
-    out[0] = 'B';
-    out[1] = 'M';
-    put32(out + 2, (uint32_t)size);
-    put32(out + 10, 54);
-    put32(out + 14, 40);
-    put32(out + 18, CAP_W);
-    put32(out + 22, CAP_H);
-    put16(out + 26, 1);
-    put16(out + 28, 24);
-    put32(out + 34, (uint32_t)(row * CAP_H));
-    for (y = 0; y < CAP_H; y++) {
-        uint8_t* p = out + 54 + row * (size_t)(CAP_H - 1 - y);
+    memset(head, 0, sizeof head);
+    head[0] = 'B';
+    head[1] = 'M';
+    put32(head + 2, (uint32_t)size);
+    put32(head + 10, 54);
+    put32(head + 14, 40);
+    put32(head + 18, CAP_W);
+    put32(head + 22, CAP_H);
+    put16(head + 26, 1);
+    put16(head + 28, 24);
+    put32(head + 34, (uint32_t)(row * CAP_H));
+    f  = fopen(path, "wb");
+    ok = f != NULL && fwrite(head, 1, sizeof head, f) == sizeof head;
+    // The BMP's rows go from the bottom up.
+    for (y = CAP_H - 1; ok && y >= 0; y--) {
+        uint8_t* p = line;
 
         for (x = 0; x < CAP_W; x++) {
             uint32_t w = buf[tiled_index(x, y)] >> shift;
@@ -119,13 +124,11 @@ static bool write_bmp(const char* path, const uint32_t* buf, int shift)
             *p++ = (uint8_t)(w >> 8);
             *p++ = (uint8_t)(w >> 16);
         }
+        ok = fwrite(line, 1, row, f) == row;
     }
-    f  = fopen(path, "wb");
-    ok = f != NULL && fwrite(out, 1, size, f) == size;
     if (f != NULL) {
         ok = fclose(f) == 0 && ok;
     }
-    free(out);
     return ok;
 }
 
@@ -170,7 +173,13 @@ bool capture_read(C3D_RenderTarget* top)
                        (const uint32_t*)top->frameBuf.depthBuf, 0) && ok;
         hangwatch_log("capture: the frame %s", ok ? "written" : "NOT written");
         free(s_legend);
-        s_legend        = (char*)malloc(CAP_LEGEND);
+        // As much of the legend as the heap has room for.
+        s_legendCap = CAP_LEGEND;
+        s_legend    = (char*)malloc(s_legendCap);
+        while (s_legend == NULL && s_legendCap > 16 * 1024) {
+            s_legendCap /= 2;
+            s_legend = (char*)malloc(s_legendCap);
+        }
         s_legendLen     = 0;
         s_legendDropped = 0;
         s_nextId        = 0;
@@ -230,19 +239,19 @@ void capture_note(const char* fmt, ...)
     if (!s_ids || s_legend == NULL) {
         return;
     }
-    if (CAP_LEGEND - s_legendLen < 256) {
+    if (s_legendCap - s_legendLen < 256) {
         s_legendDropped++;
         return;
     }
     va_start(ap, fmt);
-    n = vsnprintf(s_legend + s_legendLen, CAP_LEGEND - s_legendLen - 1, fmt,
+    n = vsnprintf(s_legend + s_legendLen, s_legendCap - s_legendLen - 1, fmt,
                   ap);
     va_end(ap);
     if (n < 0) {
         return;
     }
-    if ((size_t)n > CAP_LEGEND - s_legendLen - 2) {
-        n = (int)(CAP_LEGEND - s_legendLen - 2);
+    if ((size_t)n > s_legendCap - s_legendLen - 2) {
+        n = (int)(s_legendCap - s_legendLen - 2);
     }
     s_legendLen += (size_t)n;
     s_legend[s_legendLen++] = '\n';

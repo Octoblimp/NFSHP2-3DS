@@ -6660,6 +6660,7 @@ int main(int argc, char** argv)
             frameMark("C3D_FrameBegin: the GPU's last frame");
             C3D_FrameBegin(0);
             hangwatch_gpu_begin();
+            hangwatch_gpu_sends_begin(g_track.attached && ConfigGpuSends);
             uint32_t drawTick = bGetTicker();
             // The GPU is done with the last frame: what the frontend's view
             // let go of since can be freed, and the slideshow's pictures.
@@ -6686,6 +6687,9 @@ int main(int argc, char** argv)
                 FRAMEPROF_STAMP(FRAMEPROF_ENVMAP);
                 trackview_draw_mirror(&g_track);
                 FRAMEPROF_STAMP(FRAMEPROF_MIRROR);
+                // The envmap's faces and the mirror to the GPU, while the
+                // view is built (hangwatch.h's sends).
+                hangwatch_gpu_send();
                 C3D_RenderTargetClear(top, C3D_CLEAR_ALL,
                                       __builtin_bswap32(sky), 0);
                 C3D_FrameDrawOn(top);
@@ -6704,6 +6708,9 @@ int main(int argc, char** argv)
             C2D_Flush();
             hangwatch_gpu_stage("the top screen's HUD");
             FRAMEPROF_STAMP(FRAMEPROF_HUD);
+            // The top screen to the GPU, and nothing left for
+            // C2D_TargetClear's split, which flushes nothing.
+            hangwatch_gpu_send();
             C2D_TargetClear(g_bot, BOT_BACK);
             C2D_SceneBegin(g_bot);
             // In a race the bottom screen is the HUD's other half
@@ -6754,6 +6761,7 @@ int main(int argc, char** argv)
             C2D_Flush();
             hangwatch_gpu_stage("the bottom screen");
             FRAMEPROF_STAMP(FRAMEPROF_BOTTOM);
+            hangwatch_gpu_sends_end();
             C3D_FrameEnd(0);
             hangwatch_gpu_frame_end();
             // eDisplayFrame's end (0x00113fd0), its packets sent: FrameEffects,

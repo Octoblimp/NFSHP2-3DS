@@ -343,7 +343,9 @@ void georender_set_fog(const GeoFog* fog, uint32_t colour);
 // drawn as a strip in the order given -- ePoly::Render's, for
 // trackview.c's render_epoly. The texture modulates the vertex colour on
 // the GS's scale, where 0x80 is 1.0; `blend` is a GeoBlend; the alpha test
-// is the main target's. With a `depth` of 0 or more, the Z-buffer's, the
+// is the register block's that the texture's mode picks: GREATER 0x60
+// unless `gt`'s pass has none, as a semitransparent texture's (the sun's)
+// does. With a `depth` of 0 or more, the Z-buffer's, the
 // quad draws where that is GEQUAL to the buffer's; with -1, everywhere.
 // It never writes the depth. The vertices go into a ring on
 // the linear heap, which georender_quads_rewind starts again once the GPU

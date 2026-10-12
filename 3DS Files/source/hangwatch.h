@@ -83,4 +83,35 @@ void hangwatch_log(const char *fmt, ...);
 // its last commands and the screens' transfers timed, and its line logged.
 void hangwatch_gpu_frame_end(void);
 
+// ------------------------------------------------------------ the sends
+//
+// A race's frame goes to the GPU in parts (TASKS 46). citro3d hands the
+// GPU a frame's commands at C3D_FrameEnd, all at once, and C3D_FrameBegin
+// waits for them, so the GPU sat idle while the CPU built the draw: on
+// the New 3DS XL 12 to 19 ms of CPU and 21 to 40 of GPU a frame, one
+// after the other (2026-10-05 logs). Each hangwatch_gpu_send hands it
+// what was drawn since the last, so it draws that while the CPU builds the
+// rest. The picture is the same: the parts run in order, and the GPU
+// keeps its registers from one to the next.
+//
+// Once a part is sent the GX queue runs, and whatever is added to it next
+// goes to the GPU at once. C3D_FrameEnd adds its last list before it
+// flushes the data cache, and C2D_TargetClear splits the frame with no
+// flush at all: either would hand the GPU words still in the New 3DS's L2
+// (04aa510). So a send goes right before each, citro2d flushed first, and
+// they find nothing left to split.
+
+// After hangwatch_gpu_begin: whether this frame is sent in parts. Never in
+// a timing frame, which splits the frame its own way.
+void hangwatch_gpu_sends_begin(bool on);
+
+// The commands drawn since the last send split off, the linear heap
+// flushed, as C3D_FrameEnd flushes it, and the list run. Nothing when the
+// frame is not sent in parts or nothing was drawn.
+void hangwatch_gpu_send(void);
+
+// Right before C3D_FrameEnd: the rest sent, and no more sends until the
+// next hangwatch_gpu_sends_begin.
+void hangwatch_gpu_sends_end(void);
+
 #endif

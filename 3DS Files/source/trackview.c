@@ -3599,6 +3599,7 @@ void trackview_draw(TrackView* v)
     scenery_stuff_scenery(&v->cull, view);
     georender_run_end();
     hangwatch_gpu_stage("the models");
+    hangwatch_gpu_send();
     FRAMEPROF_STAMP(FRAMEPROF_MODELS);
 
     // Then StuffSun (0x00112ecc), after DrawNisObjects, which has nothing
