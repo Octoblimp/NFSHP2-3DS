@@ -29,6 +29,9 @@
 # -Presses are single presses, "key:seconds" apart, the first -PressAfter
 # seconds into RACING, with a shot after each. The watch starts after the
 # last.
+#
+# -ShotFrom N takes a shot every 10 seconds for the watch's first N, and
+# every -ShotSeconds after: a burst where the race reaches a place.
 
 param(
     [int]$WatchSeconds = 30,      # after the race start, before the last shot
@@ -38,6 +41,7 @@ param(
     [string]$OutDir = "",
     [int[]]$HoldKeys = @(),
     [double]$ShotSeconds = 5,     # between the shots while racing
+    [double]$ShotFrom = 0,        # the watch's seconds before -ShotSeconds
     [string]$Presses = "",
     [double]$PressAfter = 6
 )
@@ -209,15 +213,17 @@ if ($Presses -ne "") {
 }
 
 $end = (Get-Date).AddSeconds($WatchSeconds)
+$burst = (Get-Date).AddSeconds($ShotFrom)
 $n = 1
-$nextShot = (Get-Date).AddSeconds($ShotSeconds)
+function NextShot { if ((Get-Date) -lt $burst) { 10 } else { $ShotSeconds } }
+$nextShot = (Get-Date).AddSeconds((NextShot))
 while ((Get-Date) -lt $end -and (Alive)) {
     foreach ($k in $HoldKeys) { [Hp2Race]::KeyDown($hwnd, $k) }
     Start-Sleep -Milliseconds 150
     if ((Get-Date) -ge $nextShot) {
         $n++
         Shot ("race-{0}" -f $n)
-        $nextShot = (Get-Date).AddSeconds($ShotSeconds)
+        $nextShot = (Get-Date).AddSeconds((NextShot))
     }
 }
 foreach ($k in $HoldKeys) { [Hp2Race]::KeyUp($hwnd, $k) }
