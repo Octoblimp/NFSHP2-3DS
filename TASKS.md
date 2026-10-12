@@ -2407,26 +2407,25 @@ phases.
         results screens all scroll with the Circle Pad.
 
 43. [ ] **The cop's buttons on the 3DS.** Asked for on 2026-10-11. In
-        Be A Cop, with the Circle Pad driving:
-        - L targets and untargets speeders in range. In retail this is
-          the horn: `HONK_HORN` goes to `BeACopToggleSirenAndLights`,
+        Be A Cop, in the cop's car:
+        - [x] X, the horn, targets and untargets speeders in range, as
+          in retail: `HONK_HORN` goes to `BeACopToggleSirenAndLights`,
           which calls `tPlayerCop::ChangeChaseTarget` (`playercop.c`).
-          It is Circle on the PS2 and X in the port's race layout.
-        - R fires the speed boost (`JOY_EVENT_NITRO_BOOST`, R3; D-pad
-          Down now).
-        - ZL calls helicopter backup (L2,
-          `JOY_EVENT_REQUEST_HELICOPTER`).
-        - ZR calls a roadblock (R2, `JOY_EVENT_REQUEST_ROADBLOCK`).
-
-        This replaces the 2026-10-08 plan of the cop's calls on the
-        D-Pad (`joyhid_cop_keys`, which has D-pad Left and Right make
-        the Y + ZL and Y + ZR combos). Map these in the joystick layer
-        for the cop only. L, R, ZL and ZR now carry look back (L1), the
-        e-brake (R1) and the gear shifts (L2, R2), so ask the user where
-        those go in Be A Cop, or whether the D-pad steers again. Then
-        make the Pre Race Blurb's cop lines (970016, 970001) show the
-        L, R, ZL and ZR icons in place of the PS2's R3, L2 and R2
-        glyphs, and its %c (`GetJoystickButtonChar(0, 126)`) show R.
+          The user first asked for L, then kept it on X.
+        - [x] L calls a roadblock and R the helicopter
+          (`joyhid_cop_keys`, retail's TRIANGLE + R2 and TRIANGLE + L2).
+          L and R are dropped there, so the cop has no look back or
+          e-brake. The D-pad steers again, D-pad Down is still the
+          nitro, and ZL and ZR still shift. joyhid_check passes, and 13
+          mutations are all caught. This replaced the 2026-10-08 plan of
+          the calls on the D-Pad, and then the user's first mapping
+          (L target, R boost, ZL heli, ZR roadblock).
+        - [ ] The Pre Race Blurb's cop lines (970016, 970001) show the
+          PS2's glyphs: L2 for the helicopter, R2 for the roadblock, R3
+          (which BUTTONSOUT lacks, so nothing) for the boost, and %c
+          (`GetJoystickButtonChar(0, 126)`) for the target. The whole UI
+          draws BUTTONSOUT's PS2 glyphs, so 3DS icons (R, L, X, D-pad
+          Down) need glyphs of their own.
 
         The user asked about a spike strip button, as the PC version
         had one. PS2 retail has none: Be A Cop has only

@@ -221,9 +221,9 @@ and leaves port 1 empty, which reads as nothing plugged in.
 | B | Square | brake |
 | X | Triangle; Circle racing | menu back; horn while racing |
 | Y | Circle; Triangle racing | menu help; camera (on release), combo modifier while racing |
-| L, R | L1, R1 | look back, e-brake |
+| L, R | L1, R1 | look back, e-brake; in Be A Cop, the roadblock and the helicopter |
 | ZL, ZR | L2, R2 | shift down, up; with Y (X in a menu) held, zone / pursuit calls |
-| D-pad | D-pad | digital steer, HUD (Up); menus; in Be A Cop, Left and Right call the helicopter and the roadblock |
+| D-pad | D-pad | digital steer, HUD (Up); menus |
 | D-pad Down | Down and R3 | nitro |
 | START, SELECT | START, SELECT | |
 | Circle Pad | left stick | steering; menu analog |
@@ -248,18 +248,21 @@ or a diagonal falls short of) onto 0..255, Y inverted -- the DualShock's Y
 is 0 at the top. ZL, ZR and the C-Stick are the New 3DS's; an Old 3DS reads
 them as released and centred.
 
-**Be A Cop's D-pad (12m-3).** The user's plan of 2026-10-08: in Be A Cop
-the D-pad calls the cop's help and only the Circle Pad steers. Retail's
-two calls are combos, `REQUEST_HELICOPTER` TRIANGLE + L2 and
-`REQUEST_ROADBLOCK` TRIANGLE + R2 (rows 178 and 180 in configuration 30),
-so the race layout's Y + ZL and Y + ZR make them too. `gJoyHidRaceLayoutFn`
-answers `JOYHID_LAYOUT_COP` in a Be A Cop race when player 1's car is the
-player cop's, and `joyhid_cop_keys` then rewrites the keys before the map:
+**Be A Cop's L and R.** The user's mapping of 2026-10-11, which replaced
+12m-3's D-pad calls: in Be A Cop, in the cop's car, L calls a roadblock
+and R the helicopter. X, the horn, stays the cop's target: in retail
+`HONK_HORN` goes to `BeACopToggleSirenAndLights`, which changes the chase
+target. The nitro stays on D-pad Down. Retail's two calls are combos,
+`REQUEST_HELICOPTER` TRIANGLE + L2 and `REQUEST_ROADBLOCK` TRIANGLE + R2
+(rows 178 and 180 in configuration 30), so the race layout's Y + ZL and
+Y + ZR make them too. `gJoyHidRaceLayoutFn` answers `JOYHID_LAYOUT_COP` in
+a Be A Cop race when player 1's car is the player cop's, and
+`joyhid_cop_keys` then rewrites the keys before the map:
 
-- D-pad Left and Right are dropped, so they steer nothing.
-- A new press of Left sends Y (Triangle) for one reading, then Y + ZL (the
-  helicopter), then Y alone, so L2 lets go behind Triangle's veto and
-  shifts nothing. Right does the same with ZR (the roadblock). Pressing
+- L and R are dropped, so the cop has no look back or e-brake.
+- A new press of L sends Y (Triangle) for one reading, then Y + ZR (the
+  roadblock), then Y alone, so R2 lets go behind Triangle's veto and
+  shifts nothing. R does the same with ZL (the helicopter). Pressing
   both at once calls the helicopter.
 - Triangle lets go on the next reading, which raises `CAMERA_POV_CHANGE`.
   The request's handler (`playerinput.c`) has just set
@@ -269,17 +272,19 @@ player cop's, and `joyhid_cop_keys` then rewrites the keys before the map:
   calls once. A key held into the cop layout calls nothing, since the
   keys held in the other layouts are noted too.
 
-Up still cycles the HUD and Down is still the nitro (R3).
+The D-pad steers as in any race, Up still cycles the HUD and Down is
+still the nitro (R3).
 
 `joyhid_check.py` presses each key and stick through `joyhid_build`, the
 ring, the scanners and the tables, and checks that each raises the event
 above -- including that X + ZL is the zone freeze and not a downshift,
 and that in the race layout X honks and Y + ZL is the zone freeze. In the
-cop layout, D-pad Left and Right each raise their request on the second
-frame and only there, with the camera change on the fourth and no steer,
-gear change or horn. The checks cover both keys at once, a press during a
-call, a key held over from the race layout, a second press, and Up and
-Down. Eight mutations of `joyhid_cop_keys` are all caught.
+cop layout, L and R each raise their request on the second frame and
+only there, with the camera change on the fourth and no look back,
+e-brake, gear change or horn. The checks cover both keys at once, a
+press during a call, a key held over from the race layout, a second
+press, the D-pad's steer, X's horn, and Up and Down. Thirteen mutations
+of `joyhid_cop_keys` are all caught.
 
 `main.c` installs the map and calls `InitJoystick` at boot, and runs
 `ReadJoystickData` and `GenerateJoyEvents` once a frame after the HID scan,

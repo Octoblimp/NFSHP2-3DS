@@ -19,14 +19,14 @@
 //        combo modifier. The user asked for the horn on X (2026-10-09);
 //        the menus, the pause screen and the rest keep the layout above.
 //     L / R      L1 / R1   look back / e-brake
+//     -- in a Be A Cop race, in the cop's car, L calls the roadblock and
+//        R the helicopter, retail's TRIANGLE + R2 and TRIANGLE + L2 (the
+//        user's mapping of 2026-10-11), so the cop has no look back or
+//        e-brake; see joyhid_cop_keys. X, the horn, targets a speeder.
 //     ZL / ZR    L2 / R2   shift down / up; with X (Y racing) held, zone
 //                          and pursuit
 //     D-pad      D-pad     menus, digital steer; Up cycles the HUD
 //     D-pad Down also R3   nitro -- nothing in a menu reads R3
-//     -- in a Be A Cop race, in the cop's car, D-pad Left and Right stop
-//        steering (the Circle Pad steers) and call the helicopter and the
-//        roadblock, retail's TRIANGLE + L2 and TRIANGLE + R2 (12m-3, the
-//        user's plan of 2026-10-08); see joyhid_cop_keys.
 //     START      START
 //     SELECT     SELECT
 //     Circle Pad left stick   steering, menu analog
@@ -78,30 +78,30 @@ typedef struct JoyHidState {
 // The layouts gJoyHidRaceLayoutFn answers.
 #define JOYHID_LAYOUT_MENU 0    // the map above
 #define JOYHID_LAYOUT_RACE 1    // X and Y swapped: X the horn
-#define JOYHID_LAYOUT_COP  2    // the race's, and the D-pad's cop calls
+#define JOYHID_LAYOUT_COP  2    // the race's, and L and R's cop calls
 
 // The layout, asked once a reading; NULL is always MENU. main.c's answers
 // RACE while the race coordinator is in RACE_IN_PROGRESS, and COP then in
 // a Be A Cop race when player 1's car is the player cop's.
 extern int32_t (*gJoyHidRaceLayoutFn)(void);
 
-// Be A Cop's D-pad, kept from one reading to the next.
+// Be A Cop's L and R, kept from one reading to the next.
 typedef struct JoyHidCop {
-    uint32_t last;      // D-pad Left and Right as held at the last reading
+    uint32_t last;      // L and R as held at the last reading
     uint32_t combo;     // JOYHID_ZL or JOYHID_ZR, while a call runs
     int32_t  step;      // 0 idle, else the call's next reading, 1 to 3
 } JoyHidCop;
 
-// One reading's keys, with `on` for the COP layout. A new press of D-pad
-// Left calls the helicopter and one of Right the roadblock, over three
-// readings: Y (the race layout's Triangle); Y and ZL or ZR, the combo;
-// Y alone, so the trigger lets go behind Triangle's veto and shifts
-// nothing. Triangle lets go on the reading after, which raises the camera
-// change; the request's handler holds that off for a second, as it does
-// for the combo pressed by hand. D-pad Left and Right are dropped, so they
-// do not steer, and a press during a call is not kept. With `on` 0 the
-// keys pass unchanged and only what is held is noted, so a key held into
-// the COP layout calls nothing.
+// One reading's keys, with `on` for the COP layout. A new press of L
+// calls the roadblock and one of R the helicopter, over three readings:
+// Y (the race layout's Triangle); Y and ZR or ZL, the combo; Y alone, so
+// the trigger lets go behind Triangle's veto and shifts nothing. Triangle
+// lets go on the reading after, which raises the camera change; the
+// request's handler holds that off for a second, as it does for the
+// combo pressed by hand. L and R are dropped, so they neither look back
+// nor pull the e-brake, and a press during a call is not kept. With `on`
+// 0 the keys pass unchanged and only what is held is noted, so a key held
+// into the COP layout calls nothing.
 uint32_t joyhid_cop_keys(JoyHidCop *c, uint32_t keys, int32_t on);
 
 // The DualShock 2 buffer for one reading.

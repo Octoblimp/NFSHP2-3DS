@@ -1091,8 +1091,8 @@ static void sndCarSoundMute(void* c, void* sound, int on)
 
 // joyhid's race layout, X the horn: only while the race runs, so every
 // menu -- the pause screen's included -- keeps X as "back". In Be A Cop,
-// in the player cop's car, the D-pad calls the helicopter and the
-// roadblock as well (12m-3).
+// in the player cop's car, L calls the roadblock and R the helicopter
+// as well (the user's mapping of 2026-10-11).
 static int32_t joyhidRaceLayout(void)
 {
     const struct Player *p = PlayerPlayersByNumber[0];

@@ -65,18 +65,18 @@ static uint8_t axis(int32_t v)
 
 uint32_t joyhid_cop_keys(JoyHidCop *c, uint32_t keys, int32_t on)
 {
-    uint32_t pad = keys & (JOYHID_DLEFT | JOYHID_DRIGHT);
-    uint32_t pressed = pad & ~c->last;
+    uint32_t lr = keys & (JOYHID_L | JOYHID_R);
+    uint32_t pressed = lr & ~c->last;
 
-    c->last = pad;
+    c->last = lr;
     if (!on) {
         c->step = 0;
         return keys;
     }
-    keys &= ~(JOYHID_DLEFT | JOYHID_DRIGHT);
+    keys &= ~(JOYHID_L | JOYHID_R);
     if (c->step == 0 && pressed != 0) {
-        // Both at once: Left, the helicopter.
-        c->combo = (pressed & JOYHID_DLEFT) != 0 ? JOYHID_ZL : JOYHID_ZR;
+        // Both at once: R, the helicopter.
+        c->combo = (pressed & JOYHID_R) != 0 ? JOYHID_ZL : JOYHID_ZR;
         c->step = 1;
     }
     if (c->step != 0) {

@@ -6,8 +6,8 @@
 // Where joystick_check.py holds the joystick layer to the image, this holds
 // the map to its own promise: that A is the throttle and the menus' select,
 // that X held turns ZL into the zone freeze rather than a downshift, and so
-// on down the list, for configuration 30. The Be A Cop layout's D-pad
-// (joyhid_cop_keys) goes through the same path, as joyhid_read sends it.
+// on down the list, for configuration 30. The Be A Cop layout's L and R
+// (joyhid_cop_keys) go through the same path, as joyhid_read sends them.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -171,9 +171,9 @@ static void press(const char *what, uint32_t keys, JoyEvent ev, int lo, int hi)
     release();
 }
 
-// A Be A Cop call from the D-pad key `key`, held well past the call:
-// `ev` on the second frame only, never a steer, never `shift`, and the
-// camera change on the fourth, Y's release.
+// A Be A Cop call from the shoulder `key`, held well past the call:
+// `ev` on the second frame only, never a look back or an e-brake, never
+// `shift`, and the camera change on the fourth, Y's release.
 static void cop_call(const char *what, uint32_t key, JoyEvent ev,
                      JoyEvent shift)
 {
@@ -192,14 +192,16 @@ static void cop_call(const char *what, uint32_t key, JoyEvent ev,
             expect(what, JOY_EVENT_CAMERA_POV_CHANGE, 1, 1);
         else
             expect_not(what, JOY_EVENT_CAMERA_POV_CHANGE);
-        expect_not(what, JOY_EVENT_STEER);
+        expect_not(what, JOY_EVENT_CAMERA_LOOKBACK);
+        expect_not(what, JOY_EVENT_EBRAKE_ANALOG);
         expect_not(what, shift);
         expect_not(what, JOY_EVENT_HONK_HORN);
     }
     pad.keys = 0;
     frame();
     expect_not(what, ev);
-    expect_not(what, JOY_EVENT_STEER);
+    expect_not(what, JOY_EVENT_CAMERA_LOOKBACK);
+    expect_not(what, JOY_EVENT_EBRAKE_ANALOG);
     release();
 }
 
@@ -334,16 +336,16 @@ int main(void)
     press("Left", JOYHID_DLEFT, JOY_EVENT_STEER, 0, 0);
     press("Right", JOYHID_DRIGHT, JOY_EVENT_STEER, 255, 255);
 
-    // Be A Cop: D-pad Left calls the helicopter and Right the roadblock,
-    // Y then Y + ZL or ZR then Y, and Y's release after; neither steers
-    // nor shifts, and a held key calls once.
-    cop_call("cop Left", JOYHID_DLEFT, JOY_EVENT_REQUEST_HELICOPTER,
-             JOY_EVENT_SHIFTDOWN);
-    cop_call("cop Right", JOYHID_DRIGHT, JOY_EVENT_REQUEST_ROADBLOCK,
+    // Be A Cop: L calls the roadblock and R the helicopter, Y then Y + ZR
+    // or ZL then Y, and Y's release after; neither looks back, pulls the
+    // e-brake or shifts, and a held key calls once.
+    cop_call("cop L", JOYHID_L, JOY_EVENT_REQUEST_ROADBLOCK,
              JOY_EVENT_SHIFTUP);
+    cop_call("cop R", JOYHID_R, JOY_EVENT_REQUEST_HELICOPTER,
+             JOY_EVENT_SHIFTDOWN);
     // Both at once: the helicopter.
     pad.race = JOYHID_LAYOUT_COP;
-    pad.keys = JOYHID_DLEFT | JOYHID_DRIGHT;
+    pad.keys = JOYHID_L | JOYHID_R;
     frame();
     frame();
     expect("cop both", JOY_EVENT_REQUEST_HELICOPTER, 1, 1);
@@ -351,40 +353,59 @@ int main(void)
     release();
     // A press during a call is not kept.
     pad.race = JOYHID_LAYOUT_COP;
-    pad.keys = JOYHID_DLEFT;
+    pad.keys = JOYHID_R;
     frame();
-    pad.keys = JOYHID_DLEFT | JOYHID_DRIGHT;
+    pad.keys = JOYHID_R | JOYHID_L;
     for (i = 0; i < 8; i++) {
         frame();
-        expect_not("cop Right in a call", JOY_EVENT_REQUEST_ROADBLOCK);
+        expect_not("cop L in a call", JOY_EVENT_REQUEST_ROADBLOCK);
     }
     release();
     // Held from the race layout into the cop's: no call.
     pad.race = JOYHID_LAYOUT_RACE;
-    pad.keys = JOYHID_DLEFT;
+    pad.keys = JOYHID_R;
     frame();
-    expect("race Left", JOY_EVENT_STEER, 0, 0);
+    expect("race R", JOY_EVENT_EBRAKE_ANALOG, 250, 255);
     pad.race = JOYHID_LAYOUT_COP;
     for (i = 0; i < 6; i++) {
         frame();
-        expect_not("cop Left held over", JOY_EVENT_REQUEST_HELICOPTER);
-        expect_not("cop Left held over", JOY_EVENT_CAMERA_POV_CHANGE);
+        expect_not("cop R held over", JOY_EVENT_REQUEST_HELICOPTER);
+        expect_not("cop R held over", JOY_EVENT_CAMERA_POV_CHANGE);
     }
     release();
     // A call, its key let go and pressed again: a second call.
     pad.race = JOYHID_LAYOUT_COP;
-    pad.keys = JOYHID_DRIGHT;
+    pad.keys = JOYHID_L;
     frame();
     frame();
-    expect("cop Right first", JOY_EVENT_REQUEST_ROADBLOCK, 1, 1);
+    expect("cop L first", JOY_EVENT_REQUEST_ROADBLOCK, 1, 1);
     frame();
     frame();
     pad.keys = 0;
     frame();
+    pad.keys = JOYHID_L;
+    frame();
+    frame();
+    expect("cop L again", JOY_EVENT_REQUEST_ROADBLOCK, 1, 1);
+    release();
+    // The D-pad steers in the cop's car too.
+    pad.race = JOYHID_LAYOUT_COP;
+    pad.keys = JOYHID_DLEFT;
+    frame();
+    expect("cop Left", JOY_EVENT_STEER, 0, 0);
+    expect_not("cop Left", JOY_EVENT_REQUEST_HELICOPTER);
+    release();
+    pad.race = JOYHID_LAYOUT_COP;
     pad.keys = JOYHID_DRIGHT;
     frame();
+    expect("cop Right", JOY_EVENT_STEER, 255, 255);
+    expect_not("cop Right", JOY_EVENT_REQUEST_ROADBLOCK);
+    release();
+    // X is the horn, the cop's target.
+    pad.race = JOYHID_LAYOUT_COP;
+    pad.keys = JOYHID_X;
     frame();
-    expect("cop Right again", JOY_EVENT_REQUEST_ROADBLOCK, 1, 1);
+    expect("cop X", JOY_EVENT_HONK_HORN, 1, 1);
     release();
     // D-pad Up and Down keep the HUD and the nitro.
     pad.race = JOYHID_LAYOUT_COP;
