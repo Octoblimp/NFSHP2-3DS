@@ -12,6 +12,7 @@
 #include "c3dwrap.h"
 #include "geofold_shbin.h"
 #include "geosolid_shbin.h"
+#include "geosolidunif.h"
 #include "hangwatch.h"
 
 // --------------------------------------------------------------- the shader
@@ -42,13 +43,14 @@ static C3D_Tex         s_noFogTex;
 static bool            s_atOn;
 static int             s_atRef;
 
-static int s_uProjection = -1;
-static int s_uModelView  = -1;
-static int s_uLightVec   = -1;
+// geosolid.v.pica's uniforms: what set_model makes for a model, and the
+// light's colour and the ambient, over 255 (geosolidunif.h).
+static int s_uMvp        = -1;
+static int s_uFogModel   = -1;
+static int s_uLightModel = -1;
 static int s_uLightClr   = -1;
 static int s_uAmbient    = -1;
 static int s_uUvScale    = -1;
-static int s_uFogRow     = -1;
 
 static C3D_Mtx s_projection;
 static C3D_Mtx s_modelView;
@@ -115,8 +117,8 @@ void georender_run_end(void)
 // geolit.v.pica, the lit strips' and the environment passes': the second
 // DVLE of geosolid's shbin (Makefile).
 static shaderProgram_s s_litProgram;
-static int s_lProjection = -1;
-static int s_lModelView  = -1;
+static int s_lMvp        = -1;
+static int s_lFogModel   = -1;
 static int s_lUvScale    = -1;
 static int s_lLightDir   = -1;
 static int s_lDifClr     = -1;
@@ -128,7 +130,6 @@ static int s_lEnvCol     = -1;
 static int s_lFresnel    = -1;
 static int s_lEnvPass    = -1;
 static int s_lGlossEnv   = -1;
-static int s_lFogRow     = -1;
 
 // The environment map: the cube, each face as a 2D texture of its own, a
 // target over each, and the faces that have been cleared or drawn, a bit
@@ -164,7 +165,11 @@ static bool              s_mirrorDrawn;
 
 static void free_envmap(void);
 static void free_mirror(void);
-static void set_fog_row(int id, const C3D_Mtx* projection);
+static void fog_row(const C3D_Mtx* projection, float row[4]);
+static void set_model(int mvp, int fogModel, int light,
+                      const C3D_Mtx* projection, const C3D_Mtx* modelView,
+                      const float fog[4], const float lightVec[3]);
+static void set_unlit(void);
 
 // The screen quads' ring, and the top screen's pixels as clip space.
 static GeoRenderVertex* s_quads;
@@ -201,8 +206,8 @@ bool georender_init(void)
     shaderProgramSetVsh(&s_litProgram, &s_dvlb->DVLE[1]);
 #define LIT_UNIFORM(name) \
     shaderInstanceGetUniformLocation(s_litProgram.vertexShader, name)
-    s_lProjection = LIT_UNIFORM("projection");
-    s_lModelView  = LIT_UNIFORM("modelView");
+    s_lMvp        = LIT_UNIFORM("mvp");
+    s_lFogModel   = LIT_UNIFORM("fogModel");
     s_lUvScale    = LIT_UNIFORM("uvScale");
     s_lLightDir   = LIT_UNIFORM("lightDir");
     s_lDifClr     = LIT_UNIFORM("difClr");
@@ -214,7 +219,6 @@ bool georender_init(void)
     s_lFresnel    = LIT_UNIFORM("fresnel");
     s_lEnvPass    = LIT_UNIFORM("envPass");
     s_lGlossEnv   = LIT_UNIFORM("glossEnv");
-    s_lFogRow     = LIT_UNIFORM("fogRow");
 #undef LIT_UNIFORM
 
     s_foldDvlb = DVLB_ParseFile((u32*)geofold_shbin, geofold_shbin_size);
@@ -227,20 +231,18 @@ bool georender_init(void)
     AttrInfo_AddLoader(&s_foldAttr, 0, GPU_FLOAT, 2);   // the map's point
     AttrInfo_AddLoader(&s_foldAttr, 1, GPU_FLOAT, 3);   // the cube's
 
-    s_uProjection = shaderInstanceGetUniformLocation(s_program.vertexShader,
-                                                     "projection");
-    s_uModelView  = shaderInstanceGetUniformLocation(s_program.vertexShader,
-                                                     "modelView");
-    s_uLightVec   = shaderInstanceGetUniformLocation(s_program.vertexShader,
-                                                     "lightVec");
+    s_uMvp        = shaderInstanceGetUniformLocation(s_program.vertexShader,
+                                                     "mvp");
+    s_uFogModel   = shaderInstanceGetUniformLocation(s_program.vertexShader,
+                                                     "fogModel");
+    s_uLightModel = shaderInstanceGetUniformLocation(s_program.vertexShader,
+                                                     "lightModel");
     s_uLightClr   = shaderInstanceGetUniformLocation(s_program.vertexShader,
                                                      "lightClr");
     s_uAmbient    = shaderInstanceGetUniformLocation(s_program.vertexShader,
                                                      "ambientClr");
     s_uUvScale    = shaderInstanceGetUniformLocation(s_program.vertexShader,
                                                      "uvScale");
-    s_uFogRow     = shaderInstanceGetUniformLocation(s_program.vertexShader,
-                                                     "fogRow");
 
     // The order here is the shader's v0..v3 and the order of the fields in
     // GeoRenderVertex; the two have to agree and there is nothing that
@@ -664,25 +666,31 @@ static void bind_mesh(const GeoMesh* mesh)
 {
     if (!s_run.bound
         || memcmp(&s_run.projection, &s_projection, sizeof s_projection)) {
+        float lightClr[4], ambientClr[4];
+
         C3D_BindProgram(&s_program);
         C3D_SetAttrInfo(&s_attr);
-        c3d_unif_mtx(s_uProjection, &s_projection);
-        c3d_unif_set(s_uLightVec,
-                     s_lightVec[0], s_lightVec[1], s_lightVec[2], 0.0f);
-        c3d_unif_set(s_uLightClr,
-                     s_lightClr[0], s_lightClr[1], s_lightClr[2], 1.0f);
-        c3d_unif_set(s_uAmbient, s_ambient, s_ambient, s_ambient, 1.0f);
-        set_fog_row(s_uFogRow, &s_projection);
+        geosolid_colours(s_lightClr[0], s_lightClr[1], s_lightClr[2],
+                         s_ambient, lightClr, ambientClr);
+        c3d_unif_vec(s_uLightClr, lightClr);
+        c3d_unif_vec(s_uAmbient,  ambientClr);
         s_run.bound      = s_run.on;
         s_run.lit        = false;
         s_run.strip      = false;
+        // The model's products are of the projection, the light and the
+        // fog's planes too, any of which may be why this is here.
+        s_run.mvSet      = false;
         s_run.projection = s_projection;
     }
 
     bind_buffer(mesh->vbo);
     if (!s_run.mvSet
         || memcmp(&s_run.modelView, &s_modelView, sizeof s_modelView)) {
-        c3d_unif_mtx(s_uModelView, &s_modelView);
+        float fog[4];
+
+        fog_row(&s_projection, fog);
+        set_model(s_uMvp, s_uFogModel, s_uLightModel, &s_projection,
+                  &s_modelView, fog, s_lightVec);
         s_run.mvSet     = s_run.on;
         s_run.modelView = s_modelView;
     }
@@ -949,13 +957,78 @@ static float fog_s(float u)
 // For a projection whose w is the view's depth d: u = (far - d) / (far -
 // near), so s is d by a, plus b, and the row is w's row by a, plus b in
 // w, the view-space position's being 1.
-static void set_fog_row(int id, const C3D_Mtx* projection)
+static void fog_row(const C3D_Mtx* projection, float row[4])
 {
     float a = (fog_s(0.0f) - fog_s(1.0f)) / (s_fogFar - s_fogNear);
     float b = fog_s(0.0f) - a * s_fogFar;
     const C3D_FVec* w = &projection->r[3];
 
-    c3d_unif_set(id, a * w->x, a * w->y, a * w->z, a * w->w + b);
+    row[0] = a * w->x;
+    row[1] = a * w->y;
+    row[2] = a * w->z;
+    row[3] = a * w->w + b;
+}
+
+// A model drawn through `projection` and `modelView`, with the fog's
+// view-space row `fog` and the light towards `lightVec` in view space
+// (NULL for none): geosolid_model's products, into the uniforms `mvp`,
+// `fogModel` and `light`, any of which may be -1 (TASKS 46). They are made
+// again only when what they are made of changes, since the strips set
+// them for each draw; each uniform is still handed over every time, as a
+// program's constants may have taken its register since (c3dwrap.c).
+static void set_model(int mvp, int fogModel, int light,
+                      const C3D_Mtx* projection, const C3D_Mtx* modelView,
+                      const float fog[4], const float lightVec[3])
+{
+    static struct {
+        bool          valid;
+        float         p[4][4], mv[4][4], fog[4], light[3];
+        GeoSolidModel out;
+    } c;
+    float p[4][4], mv[4][4], l[3] = { 0.0f, 0.0f, 0.0f };
+    int   i;
+
+    for (i = 0; i < 4; i++) {
+        p[i][0]  = projection->r[i].x;
+        p[i][1]  = projection->r[i].y;
+        p[i][2]  = projection->r[i].z;
+        p[i][3]  = projection->r[i].w;
+        mv[i][0] = modelView->r[i].x;
+        mv[i][1] = modelView->r[i].y;
+        mv[i][2] = modelView->r[i].z;
+        mv[i][3] = modelView->r[i].w;
+    }
+    if (lightVec != NULL) {
+        memcpy(l, lightVec, sizeof l);
+    }
+    if (!c.valid || memcmp(c.p, p, sizeof p) || memcmp(c.mv, mv, sizeof mv)
+        || memcmp(c.fog, fog, sizeof c.fog)
+        || memcmp(c.light, l, sizeof l)) {
+        geosolid_model((const float(*)[4])p, (const float(*)[4])mv, fog, l,
+                       &c.out);
+        memcpy(c.p, p, sizeof p);
+        memcpy(c.mv, mv, sizeof mv);
+        memcpy(c.fog, fog, sizeof c.fog);
+        memcpy(c.light, l, sizeof l);
+        c.valid = true;
+    }
+    if (mvp >= 0) {
+        for (i = 0; i < 4; i++) {
+            c3d_unif_vec(mvp + i, c.out.mvp[i]);
+        }
+    }
+    c3d_unif_vec(fogModel, c.out.fog);
+    c3d_unif_vec(light, c.out.light);
+}
+
+// The vertex colour and nothing else: no light, and an ambient of one.
+static void set_unlit(void)
+{
+    float lightClr[4], ambientClr[4];
+
+    geosolid_colours(0.0f, 0.0f, 0.0f, 1.0f, lightClr, ambientClr);
+    c3d_unif_vec(s_uLightClr, lightClr);
+    c3d_unif_vec(s_uAmbient,  ambientClr);
 }
 
 // Every row of the texture is the same, so a texel's byte is its column's
@@ -1128,7 +1201,8 @@ void georender_set_zwrite(bool on)
 // cache again (step 13b-5).
 static void bind_lit(const GeoMesh* mesh, const GeoLighting* L)
 {
-    int i;
+    float fog[4];
+    int   i;
 
     s_run.bound = false;
     s_run.mvSet = false;
@@ -1141,8 +1215,11 @@ static void bind_lit(const GeoMesh* mesh, const GeoLighting* L)
     }
     bind_buffer(mesh->vbo);
 
-    c3d_unif_mtx(s_lProjection, &s_projection);
-    c3d_unif_mtx(s_lModelView,  &s_modelView);
+    // geosolid's products, the light's direction left out: the lighter's
+    // lights are its own, in the model's space already.
+    fog_row(&s_projection, fog);
+    set_model(s_lMvp, s_lFogModel, -1, &s_projection, &s_modelView, fog,
+              s_lightVec);
     for (i = 0; i < 3; i++) {
         c3d_unif_vec(s_lLightDir + i, L->lightDir[i]);
         c3d_unif_vec(s_lDifClr + i,   L->difClr[i]);
@@ -1153,7 +1230,6 @@ static void bind_lit(const GeoMesh* mesh, const GeoLighting* L)
     c3d_unif_vec(s_lEye,       L->eye);
     c3d_unif_vec(s_lPowParams, L->powParams);
     c3d_unif_vec(s_lFresnel,   L->fresnel);
-    set_fog_row(s_lFogRow, &s_projection);
     c3d_unif_bool(s_lEnvPass,  false);
     c3d_unif_bool(s_lGlossEnv, false);
     if (!s_run.culled) {
@@ -1506,6 +1582,8 @@ static bool draw_screen_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
     GeoRenderVertex* dst;
     C3D_BufInfo*     buf;
     C3D_TexEnv*      env;
+    // The fog's row: a constant, the near plane's unless `depth` says.
+    float            fog[4] = { 0.0f, 0.0f, 0.0f, fog_s(1.0f) };
 
     if (!s_ready || !s_quads || s_numQuads >= GEO_QUAD_RING || !gt
         || !gt->tex) {
@@ -1523,12 +1601,7 @@ static bool draw_screen_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
     BufInfo_Init(buf);
     BufInfo_Add(buf, s_quads, sizeof(GeoRenderVertex), 4, 0x3210);
 
-    // The vertex colour and nothing else: no light, and an ambient of one.
-    c3d_unif_mtx(s_uProjection, screen);
-    c3d_unif_mtx(s_uModelView,  &s_identity);
-    c3d_unif_set(s_uLightVec, 0.0f, 0.0f, 1.0f, 0.0f);
-    c3d_unif_set(s_uLightClr, 0.0f, 0.0f, 0.0f, 1.0f);
-    c3d_unif_set(s_uAmbient,  1.0f, 1.0f, 1.0f, 1.0f);
+    set_unlit();
     c3d_unif_set(s_uUvScale, gt->uvScale[0], gt->uvScale[1], 0.0f, 1.0f);
 
     // Every fragment at `depth`: the Z-buffer's map with a scale of 0 and
@@ -1540,10 +1613,10 @@ static bool draw_screen_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
                   / (s_fogNear + depth * (s_fogFar - s_fogNear));
 
         C3D_DepthMap(true, 0.0f, depth);
-        c3d_unif_set(s_uFogRow, 0.0f, 0.0f, 0.0f, fog_s(u));
-    } else {
-        c3d_unif_set(s_uFogRow, 0.0f, 0.0f, 0.0f, fog_s(1.0f));
+        fog[3] = fog_s(u);
     }
+    set_model(s_uMvp, s_uFogModel, s_uLightModel, screen, &s_identity, fog,
+              NULL);
 
     // The GS's modulate is Ct * Cv >> 7, so a vertex colour of 0x80 is 1.0
     // and 0xff nearly 2. The shader hands the colour over 255, so the
@@ -1663,9 +1736,7 @@ static void bind_strips(void)
     bind_buffer(s_strips);
 
     // The vertex colour and nothing else, as the screen quads have it.
-    c3d_unif_set(s_uLightVec, 0.0f, 0.0f, 1.0f, 0.0f);
-    c3d_unif_set(s_uLightClr, 0.0f, 0.0f, 0.0f, 1.0f);
-    c3d_unif_set(s_uAmbient,  1.0f, 1.0f, 1.0f, 1.0f);
+    set_unlit();
 
     // The colour and its alpha are the GS's, 0x80 for 1.0, so the
     // combiner doubles both, as it does for the screen quads.
@@ -1685,6 +1756,7 @@ static void bind_strips(void)
 bool georender_draw_strip(const GeoRenderVertex* v, int n, const GeoTexture* gt)
 {
     GeoRenderVertex* dst;
+    float            fog[4];
 
     if (!s_ready || !s_strips || n < 3 || !gt || !gt->tex
         || s_numStripVerts + n > GEO_STRIP_RING) {
@@ -1696,10 +1768,10 @@ bool georender_draw_strip(const GeoRenderVertex* v, int n, const GeoTexture* gt)
     if (!s_run.strip) {
         bind_strips();
     }
-    c3d_unif_mtx(s_uProjection, &s_projection);
-    c3d_unif_mtx(s_uModelView,  &s_modelView);
+    fog_row(&s_projection, fog);
+    set_model(s_uMvp, s_uFogModel, s_uLightModel, &s_projection,
+              &s_modelView, fog, NULL);
     c3d_unif_set(s_uUvScale, gt->uvScale[0], gt->uvScale[1], 0.0f, 1.0f);
-    set_fog_row(s_uFogRow, &s_projection);
     if (!s_run.on || s_run.tex != gt->tex) {
         C3D_TexBind(0, gt->tex);
         s_run.tex = s_run.on ? gt->tex : NULL;
@@ -1729,6 +1801,7 @@ bool georender_draw_sprites(const GeoRenderVertex* v, int n,
     GeoRenderVertex* dst;
     C3D_BufInfo*     buf;
     C3D_TexEnv*      env;
+    float            fog[4] = { 0.0f, 0.0f, 0.0f, fog_s(1.0f) };
     int              first = s_numSprites * 6;
     int              i;
 
@@ -1755,13 +1828,10 @@ bool georender_draw_sprites(const GeoRenderVertex* v, int n,
     BufInfo_Add(buf, s_sprites, sizeof(GeoRenderVertex), 4, 0x3210);
 
     // The vertex colour and nothing else, as the screen quads have it.
-    c3d_unif_mtx(s_uProjection, &s_spriteScreen);
-    c3d_unif_mtx(s_uModelView,  &s_identity);
-    c3d_unif_set(s_uLightVec, 0.0f, 0.0f, 1.0f, 0.0f);
-    c3d_unif_set(s_uLightClr, 0.0f, 0.0f, 0.0f, 1.0f);
-    c3d_unif_set(s_uAmbient,  1.0f, 1.0f, 1.0f, 1.0f);
+    set_unlit();
+    set_model(s_uMvp, s_uFogModel, s_uLightModel, &s_spriteScreen,
+              &s_identity, fog, NULL);
     c3d_unif_set(s_uUvScale, gt->uvScale[0], gt->uvScale[1], 0.0f, 1.0f);
-    c3d_unif_set(s_uFogRow, 0.0f, 0.0f, 0.0f, fog_s(1.0f));
     // No fog: unit 1 keeps all of the colour for the draw.
     if (s_fog != NULL && s_noFogTex.data) {
         C3D_TexBind(1, &s_noFogTex);

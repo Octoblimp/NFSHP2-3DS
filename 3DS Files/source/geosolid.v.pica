@@ -7,18 +7,32 @@
 ; is the same place in the pipeline and the reason this is a vertex shader
 ; rather than anything in the fragment combiner.
 ;
-; The light is a single directional one in *view* space, so a solid that
-; turns relights itself without the caller having to re-transform anything.
-; Normals arrive as raw signed bytes on a radius-127 sphere rather than unit
-; length -- that is how the format quantises them -- so they are scaled by
-; 1/127 here. Doing it on the CPU instead would mean widening the normal to
-; three floats in the vertex buffer, which costs nine bytes a vertex against
-; one shader instruction.
+; The light is a single directional one in view space. Normals arrive as raw
+; signed bytes on a radius-127 sphere rather than unit length -- that is how
+; the format quantises them.
+;
+; Everything that is the same for a whole model is worked out once for it on
+; the CPU (georender.c's set_model, geosolidunif.c), so that each vertex
+; costs 17 instructions where it cost 31 (TASKS 46: the GPU's time follows
+; the vertices drawn, 2026-10-10's device log). The model-view and the
+; projection are one matrix; the fog's row and the light's direction are
+; carried into the model's own space, the light with the normal's 1/127; and
+; the colour's 1/255 is in the light's colour and the ambient. A lit view of
+; a model gives the same colour to the last bit of float that it did when
+; the light was turned into view space here, give or take the rounding of a
+; product taken in a different order. tools/geosolid_check.py runs this
+; shader and the one it replaced on the same vertices and compares them.
 
-; Uniforms the caller sets. The two matrices are separate rather than
-; pre-multiplied because the lighting needs the view-space position.
-.fvec projection[4], modelView[4]
-.fvec lightVec, lightClr, ambientClr
+; Uniforms the caller sets. mvp and fogModel are geolit.v.pica's too, so the
+; two passes over one strip give it the same depth to the bit: its
+; environment pass meets the solid's depth with GEQUAL.
+.fvec mvp[4]
+.fvec fogModel
+
+; The light, in the model's space and over 127, and its colour and the
+; ambient over 255; the ambient's w is 1/255, the colour's 0, so the alpha
+; comes out as the vertex's over 255.
+.fvec lightModel, lightClr, ambientClr
 
 ; ST scale for the texture bound to the current draw. The PICA200 takes
 ; power-of-two textures only and texpack_upload() pads to one, putting the
@@ -30,25 +44,13 @@
 ; a different size.
 .fvec uvScale
 
-; The fog's distance: the view-space position dotted with this is the s at
-; which texture unit 1 reads the fog's fraction (see georender_set_fog).
-; It is the projection's w row scaled and offset, so the distance is the
-; view's depth as the W-buffer had it, and the texcoord's interpolation is
-; perspective-correct, as the W-buffer's was. A screen quad's is a
-; constant, in w.
-.fvec fogRow
-
 .constf consts(0.0, 1.0, -1.0, 0.5)
 .alias  zeros consts.xxxx
 .alias  ones  consts.yyyy
 
-; 1/127 for the normal and 1/255 for the colour. Neither byte attribute is
-; normalised by the PICA on its way in -- an attribute declared GPU_BYTE or
-; GPU_UNSIGNED_BYTE arrives as the plain integer value -- so both scales are
-; the shader's job. Leaving the colour unscaled is not subtle: every channel
-; comes through at up to 255 and the whole model saturates to white.
-.constf normScale(0.00787402, 0.0, 0.0, 0.0)
-.constf colScale(0.00392157, 0.0, 0.0, 0.0)
+; The fog's t, in the middle of its rows, which are all alike, and the z and
+; w that nothing reads.
+.constf fogTail(0.0, 0.5, 0.0, 0.0)
 
 .in inpos  v0
 .in intex  v1
@@ -71,24 +73,19 @@
 
 .entry vmain
 .proc vmain
-    ; Position: model -> view -> clip.
+    ; Position: model -> clip, in one matrix.
     mov r0.xyz, inpos
     mov r0.w,   ones
 
-    dp4 r1.x, modelView[0], r0
-    dp4 r1.y, modelView[1], r0
-    dp4 r1.z, modelView[2], r0
-    mov r1.w, ones
+    dp4 outpos.x, mvp[0], r0
+    dp4 outpos.y, mvp[1], r0
+    dp4 outpos.z, mvp[2], r0
+    dp4 outpos.w, mvp[3], r0
 
-    dp4 outpos.x, projection[0], r1
-    dp4 outpos.y, projection[1], r1
-    dp4 outpos.z, projection[2], r1
-    dp4 outpos.w, projection[3], r1
-
-    ; The fog's s, and a t in the middle of its rows, which are all alike.
-    dp4 outfog.x, fogRow, r1
-    mov outfog.y, consts.w
-    mov outfog.zw, zeros
+    ; The fog's s: the view-space position dotted with the fog's row is the
+    ; model-space one dotted with fogModel (see georender_set_fog).
+    dp4 outfog.x,   fogModel, r0
+    mov outfog.yzw, fogTail
 
     ; ST. S needs only the pad scale; T needs the scale and then a flip.
     ;
@@ -109,35 +106,19 @@
     add outtex.y, ones, -r7.y
     mov outtex.zw, zeros
 
-    ; The normal is rotated by the model-view's upper 3x3 -- dp3, not dp4,
-    ; so the translation column cannot move a direction.
-    mul r0.xyz, normScale.xxx, innrm
-    mov r0.w,   zeros
-    dp3 r2.x, modelView[0], r0
-    dp3 r2.y, modelView[1], r0
-    dp3 r2.z, modelView[2], r0
-    mov r2.w, zeros
-
-    ; Lambert, clamped at zero. lightVec points *towards* the light, so the
-    ; dot is taken directly rather than against its negation.
+    ; Lambert, clamped at zero: the raw normal dotted with the light carried
+    ; into its space, which is the view-space normal dotted with the view's
+    ; light. lightModel points *towards* the light.
     ;
-    ; The uniform goes in src1 throughout this block: the PICA200 allows at
-    ; most one uniform read per instruction and only in the first source
-    ; slot, so `dp3 r3, r2, lightVec` is rejected by the assembler while the
-    ; same operands the other way round are fine.
-    dp3 r3, lightVec, r2
+    ; The uniform goes in src1 throughout: the PICA200 allows at most one
+    ; uniform read per instruction and only in the first source slot.
+    dp3 r3, lightModel, innrm
     max r3, zeros, r3
 
-    ; colour = vertex colour * (ambient + N.L * light), alpha untouched.
-    ; Spelled out as mul-then-add rather than one mad, because mad reads two
-    ; of its three sources from the wide slots and picasso will not take a
-    ; uniform in either of the ones left over.
-    mul r5.xyz, lightClr,   r3
-    add r4.xyz, ambientClr, r5
-    mul r6, colScale.xxxx, inclr
-    mul r4.xyz, r4, r6
-    mov r4.w,   r6.w
-
-    mov outclr, r4
+    ; colour = vertex colour * (ambient + N.L * light), all over 255 already;
+    ; the alpha is the vertex's by the ambient's w.
+    mul r5, lightClr,   r3
+    add r4, ambientClr, r5
+    mul outclr, r4, inclr
     end
 .end

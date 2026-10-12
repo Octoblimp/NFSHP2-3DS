@@ -1,0 +1,148 @@
+; tools/geosolid_check.py's reference: geosolid.v.pica as it was before
+; TASKS 46 (commit 9e044f3), with the model-view and the projection apart
+; and the light in view space. The checker runs it and the new one on the
+; same vertices. Nothing builds it into the game.
+;
+; Vertex shader for eSolid geometry -- see docs/formats/solid-geometry.md.
+;
+; One strip's vertices arrive as the decoder hands them over: position and ST
+; verbatim out of the VU1 packet, the RGBA5551 colour widened to four bytes,
+; and the signed-byte normal. The PS2 did its lighting on VU1 before the
+; packet ever reached the GS; here the PICA200's vertex stage does it, which
+; is the same place in the pipeline and the reason this is a vertex shader
+; rather than anything in the fragment combiner.
+;
+; The light is a single directional one in *view* space, so a solid that
+; turns relights itself without the caller having to re-transform anything.
+; Normals arrive as raw signed bytes on a radius-127 sphere rather than unit
+; length -- that is how the format quantises them -- so they are scaled by
+; 1/127 here. Doing it on the CPU instead would mean widening the normal to
+; three floats in the vertex buffer, which costs nine bytes a vertex against
+; one shader instruction.
+
+; Uniforms the caller sets. The two matrices are separate rather than
+; pre-multiplied because the lighting needs the view-space position.
+.fvec projection[4], modelView[4]
+.fvec lightVec, lightClr, ambientClr
+
+; ST scale for the texture bound to the current draw. The PICA200 takes
+; power-of-two textures only and texpack_upload() pads to one, putting the
+; image in the top-left corner, so a 512x320 skin lives in a 512x512
+; allocation and its ST of 1.0 has to land at 320/512. The scale is per
+; texture, not per vertex, so it is a uniform the draw sets once per batch
+; rather than nine more bytes baked into every vertex -- and baking it in
+; would be wrong anyway, because the same mesh can be bound to a texture of
+; a different size.
+.fvec uvScale
+
+; The fog's distance: the view-space position dotted with this is the s at
+; which texture unit 1 reads the fog's fraction (see georender_set_fog).
+; It is the projection's w row scaled and offset, so the distance is the
+; view's depth as the W-buffer had it, and the texcoord's interpolation is
+; perspective-correct, as the W-buffer's was. A screen quad's is a
+; constant, in w.
+.fvec fogRow
+
+.constf consts(0.0, 1.0, -1.0, 0.5)
+.alias  zeros consts.xxxx
+.alias  ones  consts.yyyy
+
+; 1/127 for the normal and 1/255 for the colour. Neither byte attribute is
+; normalised by the PICA on its way in -- an attribute declared GPU_BYTE or
+; GPU_UNSIGNED_BYTE arrives as the plain integer value -- so both scales are
+; the shader's job. Leaving the colour unscaled is not subtle: every channel
+; comes through at up to 255 and the whole model saturates to white.
+.constf normScale(0.00787402, 0.0, 0.0, 0.0)
+.constf colScale(0.00392157, 0.0, 0.0, 0.0)
+
+.in inpos  v0
+.in intex  v1
+.in inclr  v2
+.in innrm  v3
+
+.out outpos position
+.out outtex texcoord0
+.out outclr color
+.out outfog texcoord1
+
+; Each output register is written whole, every component exactly once,
+; even the z and w the texcoords do not use: the PICA freezes on a
+; component of an enabled output written twice or never (3dbrew's
+; GPU/Pitfalls). The hardware enables an output register whole, in
+; GPUREG_SH_OUTMAP_MASK, so all four count. Azahar draws either way; a
+; New 3DS XL stopped at the first draw through this shader, one triangle
+; with no texture and no depth test (2026-10-05). citro2d's shader and
+; NFSU2-3DS's, which run on the device, write all four of each.
+
+.entry vmain
+.proc vmain
+    ; Position: model -> view -> clip.
+    mov r0.xyz, inpos
+    mov r0.w,   ones
+
+    dp4 r1.x, modelView[0], r0
+    dp4 r1.y, modelView[1], r0
+    dp4 r1.z, modelView[2], r0
+    mov r1.w, ones
+
+    dp4 outpos.x, projection[0], r1
+    dp4 outpos.y, projection[1], r1
+    dp4 outpos.z, projection[2], r1
+    dp4 outpos.w, projection[3], r1
+
+    ; The fog's s, and a t in the middle of its rows, which are all alike.
+    dp4 outfog.x, fogRow, r1
+    mov outfog.y, consts.w
+    mov outfog.zw, zeros
+
+    ; ST. S needs only the pad scale; T needs the scale and then a flip.
+    ;
+    ; The format's T counts down from the *top* row of the image, the way the
+    ; GS addressed a texture. citro2d -- and so the allocation texpack_upload
+    ; builds -- puts the first row in memory at v = 1 and counts down from
+    ; there; uirender.c's subtex_from_pixels does `1 - y / texH` for exactly
+    ; this reason, over the same upload path, verified on hardware. So
+    ; v = 1 - T * scale, and the scale comes first because the image sits at
+    ; the top of the padded allocation, not the bottom.
+    ;
+    ; Without the flip a car still draws, with the atlas mirrored top to
+    ; bottom -- the grille lands on the sill and the wheel hub in the middle
+    ; of a door -- which reads as "the UVs are wrong" rather than as an axis
+    ; convention, and is worth recognising on sight.
+    mul r7, uvScale, intex
+    mov outtex.x, r7.x
+    add outtex.y, ones, -r7.y
+    mov outtex.zw, zeros
+
+    ; The normal is rotated by the model-view's upper 3x3 -- dp3, not dp4,
+    ; so the translation column cannot move a direction.
+    mul r0.xyz, normScale.xxx, innrm
+    mov r0.w,   zeros
+    dp3 r2.x, modelView[0], r0
+    dp3 r2.y, modelView[1], r0
+    dp3 r2.z, modelView[2], r0
+    mov r2.w, zeros
+
+    ; Lambert, clamped at zero. lightVec points *towards* the light, so the
+    ; dot is taken directly rather than against its negation.
+    ;
+    ; The uniform goes in src1 throughout this block: the PICA200 allows at
+    ; most one uniform read per instruction and only in the first source
+    ; slot, so `dp3 r3, r2, lightVec` is rejected by the assembler while the
+    ; same operands the other way round are fine.
+    dp3 r3, lightVec, r2
+    max r3, zeros, r3
+
+    ; colour = vertex colour * (ambient + N.L * light), alpha untouched.
+    ; Spelled out as mul-then-add rather than one mad, because mad reads two
+    ; of its three sources from the wide slots and picasso will not take a
+    ; uniform in either of the ones left over.
+    mul r5.xyz, lightClr,   r3
+    add r4.xyz, ambientClr, r5
+    mul r6, colScale.xxxx, inclr
+    mul r4.xyz, r4, r6
+    mov r4.w,   r6.w
+
+    mov outclr, r4
+    end
+.end

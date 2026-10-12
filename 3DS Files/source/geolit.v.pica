@@ -19,7 +19,10 @@
 ; its specular, times 1 + (c - 255) CBVMix / 255 for the vertex colour c,
 ; clamped to 0..255, where 128 is 1.0 as the GS counts it.
 
-.fvec projection[4], modelView[4]
+; geosolid.v.pica's model-to-clip matrix and fog row, in the model's space
+; (georender.c's set_model).
+.fvec mvp[4]
+.fvec fogModel
 .fvec uvScale
 
 ; The light context and the material, as georender_draw_lit packs them.
@@ -31,7 +34,6 @@
 .fvec powParams         ; p, the fast log2 of the maximum, 0.1, CBVMix / 255
 .fvec envCol[3]         ; EnvMapMatrix's columns, x and z negated
 .fvec fresnel           ; FresnelMid / 128, FresnelHalf / 128, 128 / 255
-.fvec fogRow            ; the fog's distance, as geosolid.v.pica has it
 
 ; The environment pass instead of the strip's own, and in it the lit colour
 ; under the frame's alpha (a gloss map's strip) rather than grey under the
@@ -63,21 +65,16 @@
 ; two. picasso wants each proc's name its own, so this one is vlit.
 .entry vlit
 .proc vlit
-    ; Position, as geosolid.v.pica does it, so the two passes meet the
-    ; depth buffer at the same depth.
+    ; Position, as geosolid.v.pica does it, with the same uniforms, so the
+    ; two passes meet the depth buffer at the same depth.
     mov r0.xyz, inpos
     mov r0.w,   ones
 
-    dp4 r1.x, modelView[0], r0
-    dp4 r1.y, modelView[1], r0
-    dp4 r1.z, modelView[2], r0
-    mov r1.w, ones
-
-    dp4 outpos.x, projection[0], r1
-    dp4 outpos.y, projection[1], r1
-    dp4 outpos.z, projection[2], r1
-    dp4 outpos.w, projection[3], r1
-    dp4 outfog.x, fogRow, r1
+    dp4 outpos.x, mvp[0], r0
+    dp4 outpos.y, mvp[1], r0
+    dp4 outpos.z, mvp[2], r0
+    dp4 outpos.w, mvp[3], r0
+    dp4 outfog.x, fogModel, r0
     mov outfog.y, consts.w
     mov outfog.zw, zeros
     mov outtex.w, zeros
