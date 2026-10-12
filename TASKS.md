@@ -2406,6 +2406,35 @@ phases.
         check on Azahar that the frontend, the pause menu and the
         results screens all scroll with the Circle Pad.
 
+43. [ ] **The cop's buttons on the 3DS.** Asked for on 2026-10-11. In
+        Be A Cop, with the Circle Pad driving:
+        - L targets and untargets speeders in range. In retail this is
+          the horn: `HONK_HORN` goes to `BeACopToggleSirenAndLights`,
+          which calls `tPlayerCop::ChangeChaseTarget` (`playercop.c`).
+          It is Circle on the PS2 and X in the port's race layout.
+        - R fires the speed boost (`JOY_EVENT_NITRO_BOOST`, R3; D-pad
+          Down now).
+        - ZL calls helicopter backup (L2,
+          `JOY_EVENT_REQUEST_HELICOPTER`).
+        - ZR calls a roadblock (R2, `JOY_EVENT_REQUEST_ROADBLOCK`).
+
+        This replaces the 2026-10-08 plan of the cop's calls on the
+        D-Pad (`joyhid_cop_keys`, which has D-pad Left and Right make
+        the Y + ZL and Y + ZR combos). Map these in the joystick layer
+        for the cop only. L, R, ZL and ZR now carry look back (L1), the
+        e-brake (R1) and the gear shifts (L2, R2), so ask the user where
+        those go in Be A Cop, or whether the D-pad steers again. Then
+        make the Pre Race Blurb's cop lines (970016, 970001) show the
+        L, R, ZL and ZR icons in place of the PS2's R3, L2 and R2
+        glyphs, and its %c (`GetJoystickButtonChar(0, 126)`) show R.
+
+        The user asked about a spike strip button, as the PC version
+        had one. PS2 retail has none: Be A Cop has only
+        BeACopRequestChopper, BeACopRequestRoadBlock and
+        BeACopToggleSirenAndLights. Spike strips come laid by
+        roadblocks (`CalculateRoadBlockAndSpikeBeltParameters`, the
+        roadblock's 0x10 bit).
+
 ### The retail frontend
 
 Asked for on 2026-09-28. The user sent seven PCSX2 photos of the retail
