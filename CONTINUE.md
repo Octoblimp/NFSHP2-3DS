@@ -75,7 +75,10 @@ glare). TASKS 46 has three lossless cuts in (the shader b293a76, the
 sends 9e044f3 opt-in, the clusters bb70171; `docs/formats/draw-cuts.md`,
 "TASKS 46") and waits for the device's timing at the fog and the
 desert, and the user's word on the envmap a face a frame. Then step 14
-(full audio) and task 38 (BUSTED!). The user's build is bb70171.**
+(full audio) and task 38 (BUSTED!). The user's build is bb70171.
+First, TASKS 47: the brief artifact on the bridge before the finish
+line the user saw on their 3DS, both laps; their logs come on
+2026-10-13.**
 
 **Then (Session 80, 2026-10-12): TASKS 45, the slight polygon artifacts
 (the sun's glare has a hard, stepped edge), then TASKS 46, a smooth 30

@@ -20766,5 +20766,9 @@ it up from here.
   (`nfshp2_gputiming.txt` on the card and `DebugLog 1`), once as it is
   and once with `ClusterCull 0`, and whether the envmap may draw a face
   a frame (the cars' reflections would lag a few frames).
-- **Next.** TASKS 46's device numbers, then step 14 (full audio), task
-  38 (BUSTED!) and TASKS 43's Blurb glyphs.
+- **After the session.** The user played bb70171 on their 3DS: on the
+  bridge right before the finish line an artifact showed briefly, on
+  both laps of two. Logs on 2026-10-13. TASKS 47.
+- **Next.** TASKS 47 with the user's logs, TASKS 46's device numbers,
+  then step 14 (full audio), task 38 (BUSTED!) and TASKS 43's Blurb
+  glyphs.

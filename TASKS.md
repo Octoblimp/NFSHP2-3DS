@@ -2480,6 +2480,19 @@ phases.
         and the desert, and the user's word on the envmap a face a
         frame. (`docs/formats/draw-cuts.md`, "TASKS 46")
 
+47. [ ] **A brief artifact on the bridge before the finish line.**
+        Reported on 2026-10-12, after the user played build bb70171 on
+        their 3DS: "the bridge right before the finish line on my
+        track ... had an artifact, I had two laps, showed both times.
+        It was brief." The user brings the logs on 2026-10-13. The
+        track is not named yet (two laps is a Quick Race's count). Ask
+        which track and what it looked like (a flash, a gap, a
+        stretched or missing triangle). The clusters (bb70171) are new
+        that night and decide what is drawn near the screen's edges,
+        so a run with "ClusterCull 0" over the same bridge tells
+        whether they made it or it was there before; then a capture
+        there, as TASKS 45 had.
+
 ### The retail frontend
 
 Asked for on 2026-09-28. The user sent seven PCSX2 photos of the retail
