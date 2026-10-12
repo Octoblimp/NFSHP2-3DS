@@ -10,8 +10,10 @@
 #include "georender.h"
 #include "capture.h"
 #include "c3dwrap.h"
+#include "configitems.h"
 #include "geofold_shbin.h"
 #include "geosolid_shbin.h"
+#include "geocull.h"
 #include "geosolidunif.h"
 #include "hangwatch.h"
 
@@ -166,6 +168,10 @@ static bool              s_mirrorDrawn;
 static void free_envmap(void);
 static void free_mirror(void);
 static void fog_row(const C3D_Mtx* projection, float row[4]);
+// The view's side planes in the space of the model set_model set last,
+// which every mesh draws in: the batches' clusters are tested against them
+// (geocull.h).
+static GeoCullPlanes s_cull;
 static void set_model(int mvp, int fogModel, int light,
                       const C3D_Mtx* projection, const C3D_Mtx* modelView,
                       const float fog[4], const float lightVec[3]);
@@ -445,6 +451,8 @@ bool georender_bake(const GeoSolid* solid, GeoMesh* out)
     int            i;
     int            at      = 0;
     size_t         vbytes;
+    size_t         ibytes;
+    int            numClusters = 0;
     uint32_t       size;
 
     memset(out, 0, sizeof *out);
@@ -575,17 +583,35 @@ bool georender_bake(const GeoSolid* solid, GeoMesh* out)
         }
     }
 
-    // The vertices, then the indices from the next 16 bytes, in one block.
+    // The vertices, then the indices from the next 16 bytes, then the
+    // batches' boxes, in one block.
+    for (i = 0; i < out->numBatches; i++) {
+        out->batch[i].cluster = numClusters;
+        numClusters += geocull_count(out->batch[i].count);
+    }
     vbytes   = ((size_t)set.n * sizeof(GeoRenderVertex) + 15u) & ~(size_t)15u;
+    ibytes   = ((size_t)at * sizeof *idx + 3u) & ~(size_t)3u;
     out->vbo = set.n > 0 ? (GeoRenderVertex*)linearAlloc(
-                               vbytes + (size_t)at * sizeof *idx)
+                               vbytes + ibytes
+                               + (size_t)numClusters * sizeof(GeoCluster))
                          : NULL;
     if (out->vbo) {
+        GeoCluster* clusters = (GeoCluster*)((uint8_t*)out->vbo + vbytes
+                                             + ibytes);
+
         memcpy(out->vbo, set.vert, (size_t)set.n * sizeof *set.vert);
         out->ibo = (uint16_t*)((uint8_t*)out->vbo + vbytes);
         memcpy(out->ibo, idx, (size_t)at * sizeof *idx);
         out->numVerts   = set.n;
         out->numIndices = at;
+        for (i = 0; i < out->numBatches; i++) {
+            const GeoBatch* b = &out->batch[i];
+
+            geocull_build(set.vert[0].pos,
+                          (int)(sizeof(GeoRenderVertex) / sizeof(float)),
+                          idx + b->first, b->count, clusters + b->cluster);
+        }
+        out->clusters = numClusters > 0 ? clusters : NULL;
     }
 
     free(order);
@@ -838,14 +864,63 @@ static void set_combiner(const GeoTexture* gt, int uvScale, bool gs,
     }
 }
 
+// A mesh's batch, less what the view cannot show (geocull.h): whole when
+// its box is inside the view, not at all when it is outside, and otherwise
+// each run of its clusters that are not outside as a draw. Whether anything
+// was drawn: citro3d sends the buffers with a draw, and until one has gone
+// bind_buffer cannot move them by their one register.
+static bool draw_shown(const GeoMesh* mesh, const GeoBatch* b,
+                       const C3D_Tex* tex, const char* what)
+{
+    const GeoCluster* k;
+    bool              drawn = false;
+    int               start = -1;
+    int               n, i;
+
+    if (mesh->clusters == NULL || !ConfigClusterCull) {
+        draw_prims(GPU_TRIANGLES, b->first, b->count, mesh->ibo, tex, what);
+        return true;
+    }
+    k = mesh->clusters + b->cluster;
+    switch (geocull_box(&s_cull, k)) {
+    case GEOCULL_OUT:
+        return false;
+    case GEOCULL_IN:
+        draw_prims(GPU_TRIANGLES, b->first, b->count, mesh->ibo, tex, what);
+        return true;
+    }
+    n = geocull_count(b->count) - 1;
+    for (i = 0; i <= n; i++) {
+        int first, end;
+
+        if (i < n && geocull_box(&s_cull, &k[1 + i]) != GEOCULL_OUT) {
+            if (start < 0) {
+                start = i;
+            }
+            continue;
+        }
+        if (start < 0) {
+            continue;
+        }
+        first = start * GEO_CLUSTER_INDICES;
+        end   = i * GEO_CLUSTER_INDICES < b->count
+              ? i * GEO_CLUSTER_INDICES : b->count;
+        draw_prims(GPU_TRIANGLES, b->first + first, end - first, mesh->ibo,
+                   tex, what);
+        drawn = true;
+        start = -1;
+    }
+    return drawn;
+}
+
 // One batch: its combiner and the draw.
 static void draw_batch(const GeoMesh* mesh, const GeoBatch* b,
                        const GeoTexture* gt, bool gs)
 {
     set_combiner(gt, s_uUvScale, gs, s_run.on);
-    draw_prims(GPU_TRIANGLES, b->first, b->count, mesh->ibo,
-               gt ? gt->tex : NULL, "batch");
-    s_run.bufSet = s_run.on;
+    if (draw_shown(mesh, b, gt ? gt->tex : NULL, "batch")) {
+        s_run.bufSet = s_run.on;
+    }
 }
 
 static const GeoTexture* batch_texture(const GeoBatch* b,
@@ -1006,6 +1081,7 @@ static void set_model(int mvp, int fogModel, int light,
         || memcmp(c.light, l, sizeof l)) {
         geosolid_model((const float(*)[4])p, (const float(*)[4])mv, fog, l,
                        &c.out);
+        geocull_planes((const float(*)[4])c.out.mvp, &s_cull);
         memcpy(c.p, p, sizeof p);
         memcpy(c.mv, mv, sizeof mv);
         memcpy(c.fog, fog, sizeof c.fog);
@@ -1247,6 +1323,7 @@ void georender_draw_lit(const GeoMesh* mesh, const GeoTexture* textures,
     C3D_TexEnv*          env;
     const C3D_Tex*       sphere;
     GeoPass              pass;
+    bool                 drawn;
 
     if (!s_ready || !mesh->vbo || bi < 0 || bi >= mesh->numBatches
         || mesh->batch[bi].count <= 0) {
@@ -1266,9 +1343,9 @@ void georender_draw_lit(const GeoMesh* mesh, const GeoTexture* textures,
             s_run.pass    = pass;
         }
         set_combiner(gt, s_lUvScale, true, s_run.on);
-        draw_prims(GPU_TRIANGLES, b->first, b->count, mesh->ibo,
-                   gt ? gt->tex : NULL, "lit");
-        s_run.bufSet = s_run.on;
+        if (draw_shown(mesh, b, gt ? gt->tex : NULL, "lit")) {
+            s_run.bufSet = s_run.on;
+        }
     } else {
         georender_draw_mask(mesh, textures, numTextures, (uint64_t)1 << bi);
     }
@@ -1308,13 +1385,15 @@ void georender_draw_lit(const GeoMesh* mesh, const GeoTexture* textures,
     }
     C3D_DepthTest(true, GPU_GEQUAL, GPU_WRITE_COLOR);
     alpha_test(false, 0);
-    draw_prims(GPU_TRIANGLES, b->first, b->count, mesh->ibo, sphere,
-               "env pass");
+    // The strip's own clusters again: the same matrix, so the same ones.
+    drawn = draw_shown(mesh, b, sphere, "env pass");
     // Its combiner, texture and pass are no batch's.
     s_run.combiner = -1;
     s_run.tex      = NULL;
     s_run.passSet  = false;
-    s_run.bufSet   = s_run.on;
+    if (drawn) {
+        s_run.bufSet = s_run.on;
+    }
 }
 
 // --------------------------------------------------- the environment map

@@ -77,6 +77,10 @@ extern int32_t ConfigDebugLog;              // 0
 // frames and never stops the GPU (2026-10-12).
 extern int32_t ConfigGpuSends;              // 0
 
+// The port's own: "ClusterCull 0" draws every batch whole, as before the
+// clusters (geocull.h), for a timing run to compare (2026-10-12).
+extern int32_t ConfigClusterCull;           // 1
+
 // SkipFE as the image reads it, `lw -23220(gp)`: gameflow's skipFE
 // through gPlayerCamSkipFE, 0 while that is unset.
 int32_t config_skip_fe(void);

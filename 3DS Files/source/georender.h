@@ -22,6 +22,7 @@
 
 #include <citro3d.h>
 
+#include "geocull.h"
 #include "geometry.h"
 
 // One vertex as the PICA reads it. 28 bytes.
@@ -36,8 +37,8 @@
 //
 // Both byte fields reach the shader as the plain integer value, 0..255 and
 // -128..127 -- the PICA does not normalise an integer attribute -- so the
-// shader scales the colour by 1/255 and the normal by 1/127. See
-// geosolid.v.pica. The colour is what the VIF's V4-5 unpack gave VU1, each
+// colour is scaled by 1/255 and the normal by 1/127, in the uniforms the
+// CPU makes for geosolid.v.pica (geosolidunif.c). The colour is what the VIF's V4-5 unpack gave VU1, each
 // five bits shifted up three, so 0..248, and the alpha 255 or 0 for the
 // unpack's 0x80 or 0.
 typedef struct {
@@ -60,6 +61,7 @@ typedef struct {
     int      texture;           // index into the solid's texture table, or -1
     uint16_t flags;             // eStripEntry's: 0x80 lit, 0x100 env mapped
     int8_t   lightMaterial;     // the solid's LightMaterialTable index, or -1
+    int      cluster;           // its boxes in the mesh's clusters (geocull.h)
 } GeoBatch;
 
 #define GEO_MAX_BATCHES 64
@@ -117,6 +119,9 @@ typedef struct {
     int              skippedStrips;     // strips geometry.c could not decode
     float            aabbMin[3];
     float            aabbMax[3];
+    // Each batch's boxes, geocull_count(count) from its `cluster`, in vbo's
+    // block after the indices; NULL draws every batch whole.
+    const GeoCluster* clusters;
 } GeoMesh;
 
 // Loads the shader and describes the vertex layout. Call once, after
@@ -126,7 +131,7 @@ void georender_exit(void);
 
 // Decodes every strip of `solid` into one indexed mesh on the linear heap:
 // each distinct vertex once, 28 bytes, then three 16-bit indices a
-// triangle. This is the expensive call -- it replays every VIF packet in
+// triangle, then the batches' boxes (geocull.h). This is the expensive call -- it replays every VIF packet in
 // the solid -- so it belongs at load time, not in a frame.
 //
 // The disc's largest solid, 911TURBO_A (4,138 triangles), is 4,255

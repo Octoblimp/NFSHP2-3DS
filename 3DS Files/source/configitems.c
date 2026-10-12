@@ -39,6 +39,7 @@ int32_t MaximumNumAICars = 7;               // gp-23112
 int32_t TunePreRaceSequence;                // gp-23108
 int32_t ConfigDebugLog;                     // the port's own
 int32_t ConfigGpuSends;                     // the port's own
+int32_t ConfigClusterCull = 1;              // the port's own
 
 int32_t config_skip_fe(void)
 {
@@ -84,6 +85,7 @@ static const ConfigItem kConfigItems[] = {
     { "TunePreRaceSequence",        &TunePreRaceSequence,        0 },
     { "DebugLog",                   &ConfigDebugLog,             0 },
     { "GpuSends",                   &ConfigGpuSends,             0 },
+    { "ClusterCull",                &ConfigClusterCull,          0 },
 };
 
 static void config_log(ConfigItemsLogFn log, const char *fmt,
