@@ -79,6 +79,26 @@ void worldobject_destruct(WorldObject *o, int32_t flags)
         bSlotFree(WorldObjectSlotPool, o);
 }
 
+uint32_t worldobject_get_name_hash(WorldObject *o)
+{
+    return ((eModel *)o->pModel)->NameHash;
+}
+
+// The image clears only the model's NameHash and Solid on its stack, as
+// the constructor does; Init writes the rest it reads.
+int32_t worldobject_does_art_exist(uint32_t name_hash)
+{
+    eModel  m;
+    int32_t r;
+
+    m.NameHash = 0;
+    m.Solid = NULL;
+    model_init(&m, name_hash);
+    r = m.Solid != NULL;
+    model_destroy(&m, 2);
+    return r;
+}
+
 void init_world_objects(void)
 {
     WorldObjectSlotPool = bNewSlotPool((int)sizeof(WorldObject), 128,

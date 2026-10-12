@@ -77,6 +77,16 @@ static inline uint32_t bchunk_hash(const char* s)
     return h;
 }
 
+// bStringHash(const char *, int), retail 0x002534e8: the same hash carried
+// on from `seed`, so bchunk_hash_from(b, bchunk_hash(a)) is the hash of a
+// and b joined. Smokeable names its pieces' models this way.
+static inline uint32_t bchunk_hash_from(const char* s, uint32_t seed)
+{
+    uint32_t h = seed;
+    while (*s) h = h * 33u + (uint32_t)(unsigned char)*s++;
+    return h;
+}
+
 // Reads a little-endian word out of a payload. The PS2 is little-endian and
 // so is the ARM11, so these exist for alignment safety, not byte order: chunk
 // payloads are 16-byte aligned but their inner records are not all 4-aligned.

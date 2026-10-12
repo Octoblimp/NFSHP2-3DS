@@ -250,6 +250,15 @@ gears on the right stick), is not in retail.
 pressure mode, so the port reads as type 121 and takes configuration 30,
 and leaves port 1 empty, which reads as nothing plugged in.
 
+**SkipFE.** A race in progress pauses for a port that has no controller
+(`player_update_non_game_state`). Retail's SkipFE comes from a joylog,
+whose replay carries the type-changed event. The port's SkipFE switch
+(R held at boot) instead goes straight into a race already in progress,
+with no frontend frames for the 32 reads. So `main.c` calls
+`GenerateJoyEvents` until port 0 is plugged in (at most 64 times) before
+`StartSkipFEGame`. Without that, the SkipFE race opened the pause menu on
+its first frame.
+
 | 3DS | DualShock 2 | In a race (configuration 30) |
 |-----|-------------|------------------------------|
 | A | Cross | throttle; menu select |

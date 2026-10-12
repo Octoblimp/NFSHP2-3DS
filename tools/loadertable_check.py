@@ -85,7 +85,12 @@ record after the loader and nothing after the unloader. NisInfo's two
 first, and the table must be its two records after the loader and empty
 after the unloader. SoundScape's two (slot 21) are called on a chunk of
 one empty reverb area, the unloader's loaded first, and there must be
-one area after the loader and none after the unloader. An unported slot
+one area after the loader and none after the unloader. Smokeables' two
+(slot 27) are called on a chunk of one SmokeableInfo whose first child is
+itself, or of two spawners, the unloader's loaded first: the list must
+hold just the record, its child found and its emitter lists empty, after
+the loader and nothing after the unloader, and the spawners must be the
+chunk's two, then none. An unported slot
 must also hand the chunk it takes to gUnportedLoaderFn, once, with its
 slot and table.
 
@@ -150,7 +155,8 @@ SOURCES = [HARNESS, STUBS, BCL, ESC, EMC] + ["3DS Files/source/" + f for f in (
     "cartypeinfo.c", "langtab.c", "drivetrain.c", "engine.c", "wheel.c",
     "suspension.c", "steering.c", "rigidbody.c", "table.c", "elight.c",
     "helisheet.c", "copmgr.c", "cop.c", "copmanager.c", "timer.c",
-    "epositionmarker.c", "nisinfo.c", "soundscape.c", "eventtree.c")]
+    "epositionmarker.c", "nisinfo.c", "soundscape.c", "eventtree.c",
+    "smokeableinfo.c")]
 
 HARNESS_TIMEOUT = 600
 EXTRACTED = ROOT / "extracted"
@@ -269,7 +275,7 @@ CLAIMS = {
 }
 TAKER = {t: k for k, ts in CLAIMS.items() for t in ts}
 PORTED = {0, 1, 2, 4, 5, 6, 8, 9, 11, 13, 14, 16, 18, 19, 21, 22, 23,
-          24, 25, 26, 29}
+          24, 25, 26, 28, 29}
 
 # Retail's: the demo's without PhysPredict, slot 20, and HeliSheet (23) a
 # container. The rest of the guards are the demo's.
@@ -622,6 +628,11 @@ def scenario_matrix(sc, files, tables):
                     # A size-0 sound scape loads as an empty one, so the
                     # slot gets an area and the count is checked.
                     mode = 6
+                elif t in (0x00034026, 0x00034027):
+                    # A size-0 info chunk's count wraps, so the slot gets
+                    # one record, or two spawners, and the list or the
+                    # spawners are checked.
+                    mode = 7
                 elif slot in tables.ported:
                     # Scenery's unloader unlinks what its loader linked,
                     # and TexturePack's destroys the pack its header names,

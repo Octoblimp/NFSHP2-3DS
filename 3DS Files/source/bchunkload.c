@@ -19,6 +19,7 @@
 #include "nisinfo.h"
 #include "polyhedra.h"
 #include "scenery.h"
+#include "smokeable.h"
 #include "soundscape.h"
 #include "sun.h"
 #include "texturepack.h"
@@ -112,6 +113,16 @@ static int UnloaderCharacterInfo(uint8_t *c)
     return unloader_character_info(c);
 }
 
+static int LoaderSmokeables(uint8_t *c)
+{
+    return smokeable_loader(c);
+}
+
+static int UnloaderSmokeables(uint8_t *c)
+{
+    return smokeable_unloader(c);
+}
+
 // ---------------------------------------------------- the unported slots
 
 // A slot whose object is not ported: the image's guard, and the chunk to
@@ -151,7 +162,6 @@ UNPORTED(LoaderFlailerChunk, UnloaderFlailerChunk, 10, 0x80010200u)
 UNPORTED(LoaderAnimations, UnloaderAnimations, 12, 0x80034008u)
 UNPORTED(LoaderBodyDamage, UnloaderBodyDamage, 17, 0x00034030u)
 UNPORTED(LoaderLanguage, UnloaderLanguage, 26, 0x00039000u)
-UNPORTED(LoaderSmokeables, UnloaderSmokeables, 27, 0x00034026u, 0x00034027u)
 UNPORTED(LoaderDemoModeReplay, UnloaderDemoModeReplay, 29,
          0x00039100u, 0x00039101u, 0x00039102u)
 

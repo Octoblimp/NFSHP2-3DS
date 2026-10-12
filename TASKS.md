@@ -2357,7 +2357,9 @@ phases.
         (`0x001beb90`) and DroppedSpikes (`0x001bee88`) -- with the
         MunitionEffectsHandler (`0x001bf980` .. `0x001bfad0`) behind the
         seam `gMunitionEffectsDoTimestepFn`. They need the Smokeable base
-        (step 14b) first. Check the result against the video's frames:
+        (step 14b), which is done (Session 85, `smokeable.c`; slot 216 is
+        the OnLifetimeEnd they override). Check the result against the
+        video's frames:
         the missiles' look, their trail and what a hit does to the car.
         - The user's note, 2026-10-10: only one helicopter fires
           missiles, the armed one, and only on certain tracks. It also

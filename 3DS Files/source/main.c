@@ -206,6 +206,7 @@
 #include "resource.h"
 #include "sinit.h"
 #include "shake.h"
+#include "smokeable.h"
 #include "spikestrip.h"
 #include "startrace.h"
 #include "terraintype.h"
@@ -5229,6 +5230,20 @@ static int32_t copmanager_is_being_pursued_seam(tCopManager* m, Car* c)
     return copmanager_is_being_pursued(m, c) != NULL;
 }
 
+// The roadblock's barrels are smokeables of "CS_RoadBlock_Barrel"'s info,
+// found again for each delete (barricade.h).
+static void barricade_delete_barrel_seam(int16_t id)
+{
+    smokeable_delete(id,
+                     find_smokeable_info(bchunk_hash("CS_RoadBlock_Barrel")));
+}
+
+// A fading barrel blinks: the smokeable's byte at 1123.
+static void barricade_mark_body_fading_seam(CollisionBody* body)
+{
+    smokeable_set_blinking((Smokeable*)(void*)body, 1);
+}
+
 int main(int argc, char** argv)
 {
     (void)argc; (void)argv;
@@ -5263,6 +5278,7 @@ int main(int argc, char** argv)
     cardriver_install_vtables();
     realdriver_install_vtable();
     collisionbody_install_vtables();
+    smokeable_install_vtables();
     carcollisionbody_install_vtable();
     aiaction_install_vtables();
     aiactions_install_vtables();
@@ -6116,6 +6132,23 @@ int main(int argc, char** argv)
     gSpikeStripBlinkBlinkPoofFn    = tspikestrip_blink_blink_poof;
     gInitWorldObjectsFn            = init_world_objects;
     gCloseWorldObjectsFn           = close_world_objects;
+    // The smokeables (14b): the track's cones, signs, fences and barrels.
+    // Each waits as a virgin in the scenery until a car touches it, then
+    // turns into a body that flies, breaks and settles; one far away or
+    // long asleep goes back. The roadblock's barrels are spawned ones
+    // (smokeable.h, barricade.h).
+    gInitSmokeablesFn             = init_smokeables;
+    gCloseSmokeablesFn            = close_smokeables;
+    gSpawnSmokeablesFn            = spawn_smokeables;
+    gClearSmokeablesFn            = clear_smokeables;
+    gConvertToSmokeableFn         = smokeable_convert_body;
+    gSmokeableBreakFn             = smokeable_break;
+    gDeleteFarAwaySmokeableCollisionBodiesFn =
+        delete_far_away_smokeable_collision_bodies;
+    gFindSmokeableInfoFn          = find_smokeable_info;
+    gSmokeableSpawnFn             = smokeable_spawn;
+    gBarricadeDeleteBarrelFn      = barricade_delete_barrel_seam;
+    gBarricadeMarkBodyFadingFn    = barricade_mark_body_fading_seam;
     // The race's cop drivers each get a car, in limbo -- unseen, parked,
     // not colliding -- until a radar trap or a roadblock calls it out
     // (copmgr.h).
@@ -6382,6 +6415,13 @@ int main(int argc, char** argv)
     gFredGameFlowStateFn  = fredFlowState;
     gFredChangeGameFlowFn = fredChangeFlow;
     if (g_flow.skipFE) {
+        // Retail's SkipFE comes from a joylog, whose replay carries the
+        // type-changed event. The port's (R held) races with no frontend
+        // frames before it, and a race in progress pauses for a port with
+        // no controller (player_update_non_game_state); so the type
+        // detection's reads, 32 in retail, are made here.
+        for (int i = 0; i < 64 && !IsJoystickPluggedIn(0); i++)
+            GenerateJoyEvents();
         fred_start_skip_fe_game(&Fred);
         logRaceStart();
     } else {

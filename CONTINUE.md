@@ -70,6 +70,19 @@ cop's HUD (hudcop.c, hudrender.c, hudscore.c), the setup screens
   R helicopter (ce58fac). Not seen: an arrest, which the gas-only
   script cannot make. TASKS 43 is done (3DS button icons).
 
+**Now (Session 85, 2026-10-12): step 14b is done. The smokeables are
+retail's (`smokeable.c`, `smokeableinfo.c`; `docs/formats/smokeable.md`):
+the two chunks load, a virgin stands in for each spawner, a car's touch
+converts it, and it wakes, breaks, sleeps and comes back as retail's
+does. The roadblock's barrels spawn and delete through it. smokeable_check
+runs retail's image: 0 differ; 276 mutations, all caught or equivalent.
+The track's cones and signs show again: they had been hidden since the
+chunk slot was unported. Also fixed: a SkipFE race paused on its first
+frame. The 32-read type detection had no frames before the race, so
+`main.c` now primes it. Next: TASKS 39 (12k-6, the helicopter's
+munitions), then the user's profile save and load with a save prompt
+after each race. TASKS 47 and 46 wait on the user.**
+
 **Now (Session 84, 2026-10-12): TASKS 49 is done. The joystick is
 retail's: its tables and event numbers (`gen_scanner_tables.py` from
 SLES_507.31), the 32-read type detection, the frame's own pad read, and
@@ -5537,7 +5550,7 @@ each class shows what it reaches.
 | 13 | ~~The two-screen HUD, to the split decided below~~ done as 8m: 8m-1 to 8m-6c | 10 |
 | 13b | New 3DS mode in full and a steady 30 FPS race (task 28), right after step 13: the real clock and the pacing, a frame profiler, New 3DS mode checked part by part, then only the optimizations the New 3DS needs. Set by the user on 2026-10-03 | 4 |
 | 14 | The car and world sounds and the speech, and the ChopperSound (12k-5) | 12 (14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5, 14-6, 14-7, 14-8a, 14-8b, 14-8c and 14-8d done) |
-| 14b | The smokeables: FindSmokeableInfo, the spawner (`0x0021ed28`) and delete (`0x0021ef88`), Smokeable's Break and DeleteFarAway, and their collision. The roadblock's barrels wait for it (12i-2), and the helicopter's munitions (12k-6) come after it | 1-2 |
+| 14b | ~~The smokeables: FindSmokeableInfo, the spawner (`0x0021ed28`) and delete (`0x0021ef88`), Smokeable's Break and DeleteFarAway, and their collision~~ done (Session 85, `docs/formats/smokeable.md`). The roadblock's barrels use it; the helicopter's munitions (12k-6) come next | 1 |
 | 15 | **A whole race with the AI and the cops.** Steps 10-14 add about 15-23 slices | |
 | 16 | The full frontend from retail: the 44 screens still plain or unregistered (`screen_registry.py --check-port`), the event tree (the career), the tourneys and the car selector | 6-10 |
 | 17 | Save data on the SD card in the memory card's place: Phils Load Save, the autosave, the boot autoload and the options (task 29) | 2-3 |

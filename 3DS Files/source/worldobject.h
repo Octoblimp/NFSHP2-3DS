@@ -61,6 +61,15 @@ WorldObject *worldobject_construct(WorldObject *o, uint32_t name_hash,
 // to WorldObjectSlotPool (__dl__11WorldObject, 0x001cdd38).
 void worldobject_destruct(WorldObject *o, int32_t flags);
 
+// GetNameHash, 0x001cd8a0: the model's NameHash.
+uint32_t worldobject_get_name_hash(WorldObject *o);
+
+// DoesArtExist(unsigned int), 0x001cd8d0, static. An eModel on the stack,
+// its NameHash and Solid cleared, through Init with the name: whether it
+// found a solid. The model is then destroyed with 2, which takes it off
+// ModelList and frees nothing. Smokeable asks it of its pieces' names.
+int32_t worldobject_does_art_exist(uint32_t name_hash);
+
 // InitWorldObjects, 0x001cd918: WorldObjectSlotPool, 128 objects of 96
 // bytes in pool 16. The list is not touched.
 void init_world_objects(void);

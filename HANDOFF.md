@@ -20919,3 +20919,48 @@ it up from here.
   makes the two pools and a VirginSmokeable for each spawner whose
   info it finds.
 - **Next.** Step 14b, the smokeables, then TASKS 39 (12k-6).
+
+## Session 85 -- step 14b, the smokeables
+
+- **The objects.** `smokeable.c` is Smokeable.obj (0x0021ec80 ..
+  0x002220e8), and `smokeableinfo.c` is the infos' loader, unloader and
+  FindSmokeableInfo. bchunkload.c's slot 27 is ported, so chunks 0x34026
+  (the infos) and 0x34027 (the spawners) load. Three tables are installed
+  at boot: Smokeable's, its PhysicsSystem's and VirginSmokeable's.
+  `worldobject.c` gains GetNameHash and DoesArtExist, and `bchunk.h`
+  gains `bchunk_hash_from` (bStringHash with a seed), which Break uses
+  to name the pieces.
+- **Bound in main.c.**
+  - The flow's seams: Init, Close, Spawn and Clear.
+  - The collision's: ConvertToSmokeable, Break and DeleteFarAway.
+  - The barricade's: FindSmokeableInfo and Spawn, plus two wrappers that
+    delete a barrel (by `CS_RoadBlock_Barrel`) and blink a body.
+- **Seen in Azahar.** The track's cones and signs show again. Their
+  scenery instances had kept ExcludeFlags 0x10, which only a virgin's
+  init clears. The race holds 30 FPS at 100% speed.
+- **The checker.** `tools/smokeable_check.py` runs retail's image, and
+  `tools/src/smokeable_test.c` runs the port. 384 ops, 1238 lines, 0
+  differ; 276 mutations, all caught or equivalent (five equivalents,
+  each with its reason).
+  - `vtlife` swaps a smokeable's table for a copy whose OnLifetimeEnd
+    (slot 216) logs.
+  - Two vtable slots that retail leaves unnamed are named in
+    `retail_names()`.
+  - `timers|S8` catches timers-spawner.
+  - `loadertable_check` drives the slot too.
+  - collisionbody, loadertable (demo and retail), pursuit, trackflow
+    and world all still match.
+- **Fixed: the SkipFE race paused at once.** Since TASKS 49 a type takes
+  32 reads, and the SkipFE boot (R held) goes straight into a race in
+  progress. player_update_non_game_state then found port 0 unplugged
+  (type 0xff) and paused. Retail's SkipFE comes from a joylog, which
+  carries the type event. The port's SkipFE branch now calls
+  GenerateJoyEvents until port 0 is plugged in (at most 64 times). The
+  log has "joystick: port 0 type 121" before the race, and there is no
+  pause. A frontend race was never affected: the menus give it the
+  frames.
+- **Next.** TASKS 39 (12k-6), the helicopter's munitions: Munition,
+  Rocket, DroppedBomb, SmokeBomb and DroppedSpikes all derive from
+  Smokeable. After that, the user's profile save and load, and a
+  save / don't-save prompt after each race or event (under
+  sdmc:/NFSHP2/SAVES).

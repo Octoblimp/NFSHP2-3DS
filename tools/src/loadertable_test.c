@@ -30,6 +30,7 @@
 #include "nisinfo.h"
 #include "esolid.h"
 #include "racefinish.h"
+#include "smokeable.h"
 #include "soundscape.h"
 #include "sun.h"
 #include "texturepack.h"
@@ -814,7 +815,8 @@ static int unported_slot(int k)
     return !(k == 0 || k == 1 || k == 2 || k == 4 || k == 5 || k == 6
              || k == 8 || k == 9 || k == 11 || k == 13 || k == 14 || k == 16
              || k == 15 || k == 18 || k == 19 || k == 20 || k == 21
-             || k == 22 || k == 23 || k == 24 || k == 25 || k == 28);
+             || k == 22 || k == 23 || k == 24 || k == 25 || k == 27
+             || k == 28);
 }
 
 // --------------------------------------------------------------- dumps
@@ -1108,7 +1110,12 @@ static uint8_t *chunk_ptr(int32_t idx)
 // first for the unloader, and the table after the call must be its two
 // records (the loader) or empty (the unloader); 6 is a sound-scape chunk
 // of one empty reverb area, loaded first for the unloader, and the areas
-// after the call must number one (the loader) or none (the unloader).
+// after the call must number one (the loader) or none (the unloader); 7 is
+// a smokeable chunk, loaded first for the unloader: one SmokeableInfo
+// whose first child is itself, and the list after the call must hold just
+// it, its child found and its emitter lists empty (the loader), or nothing
+// (the unloader); or two spawners, and the spawners after the call must
+// be the chunk's two (the loader) or none (the unloader).
 static void matrix(int table, int slot, uint32_t type, int mode)
 {
     static uint8_t raw[512];
@@ -1142,6 +1149,20 @@ static void matrix(int table, int slot, uint32_t type, int mode)
         memcpy(c, w, sizeof w);
         if (table)
             (void)loader_sound_scape(c);
+    } else if (mode == 7) {
+        uint32_t w[2] = { type, 16 };
+
+        if (type == 0x00034026u) {
+            SmokeableInfo *si = (SmokeableInfo *)(void *)(c + 16);
+
+            memset(c, 0, 16 + sizeof(SmokeableInfo));
+            w[1] = 8 + (uint32_t)sizeof(SmokeableInfo);
+            si->NameHash = 0x5eed0001u;
+            si->ChildNameHashes[0] = 0x5eed0001u;
+        }
+        memcpy(c, w, sizeof w);
+        if (table)
+            (void)smokeable_loader(c);
     } else if (mode == 2) {
         uint32_t w[4] = { 0x80034000u, 60, 0x00034001u, 52 };
 
@@ -1181,6 +1202,36 @@ static void matrix(int table, int slot, uint32_t type, int mode)
         if (SoundScapeNumReverbAreas != (table ? 0 : 1))
             printf("  soundscape wrong\n");
         SoundScapeNumReverbAreas = 0;
+    }
+    if (mode == 7 && type == 0x00034026u) {
+        SmokeableInfo *si = (SmokeableInfo *)(void *)(c + 16);
+        bNode *h = &SmokeableInfoList;
+        int ok = table ? h->next == h && h->prev == h
+                       : h->next == &si->Node && h->prev == &si->Node
+                         && si->Node.next == h && si->Node.prev == h
+                         && si->pChildren[0] == si
+                         && si->pChildren[1] == NULL
+                         && si->AnchorEmitterList.next
+                                == &si->AnchorEmitterList
+                         && si->DynamicEmitterList.prev
+                                == &si->DynamicEmitterList;
+
+        if (!ok)
+            printf("  smokeables wrong\n");
+        h->next = h;
+        h->prev = h;
+    }
+    if (mode == 7 && type == 0x00034027u) {
+        int ok = table ? pSmokeableSpawners == NULL
+                         && NumSmokeableSpawners == 0
+                       : pSmokeableSpawners
+                             == (SmokeableSpawner *)(void *)(c + 8)
+                         && NumSmokeableSpawners == 2;
+
+        if (!ok)
+            printf("  spawners wrong\n");
+        pSmokeableSpawners = NULL;
+        NumSmokeableSpawners = 0;
     }
     if (unported_slot(slot) && r) {
         if (seam_rec.set != 1 || seam_rec.slot != slot
