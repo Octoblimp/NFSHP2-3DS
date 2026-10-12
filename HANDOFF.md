@@ -20627,3 +20627,45 @@ it up from here.
   `0x001e3320`, RENDER's text into `0xaefe36d8`/`0xcccf9a75`, SELECT on
   to the next start-race screen). Then 12m-5, a Be A Cop race from the
   frontend.
+
+## Session 79 -- 12m-4, the Pre Race Blurb (done)
+
+- **Ported** (f3767e9). startrace.c has retail's Pre Race Blurb
+  (`0x001e3270` to `0x001e3640`) and the two-player You're The Cop
+  screen (`0x001e36f0` to `0x001e38b8`): the objective text by game,
+  the joystick picker (`0x001e3320`, with the pad, wheel and
+  TransmissionType branches), RENDER's text into its box, and SELECT
+  on to the next start-race screen. Both are rows in `kScreens[]`.
+- **The box.** flailerwrap.c's outer RenderTextIntoRectangle calls
+  `gFlailerTextIntoRectangleFn`, which main.c points at
+  `uirender_queue_text_rect`: a per-frame queue of strips drawn in the
+  text object's layer. main.c now sends RENDER (19) to every menu
+  screen each frame, as retail does; all the screens ignore it except
+  the Blurb.
+- **Checked.** startrace_check: 7315 ops, 24078 lines, 0 differ; 278
+  mutations, 274 caught, 4 equivalent. The model stubs the joystick
+  calls and RenderTextIntoRectangle (its string prints with the bytes
+  outside ASCII as `\xNN`). `docs/formats/start-race-screens.md` has
+  the sections.
+- **On Azahar.** A SkipFE race skips the fly-by, as retail's does, so
+  the Blurb only shows in a race from the frontend. A throwaway build
+  let a SkipFE cop race run its fly-by: the Blurb showed "You're The
+  Cop" over the briefing wrapped in its box with the button icons
+  inline. The fly-by ended on its own into the pre-race close-up, and
+  A skipped it into the race. racecoord.c went back from a byte copy
+  and the build was clean again.
+- **The button glyphs.** The cop text's speed boost is `\x8f` (R3).
+  BUTTONSOUT has 'a' to 'o' only, so it draws nothing, on the PS2 too.
+- **The cop's buttons.** The user's 3DS mapping for Be A Cop: L
+  targets and untargets speeders (in retail the horn, `HONK_HORN` to
+  `BeACopToggleSirenAndLights` to `tPlayerCop::ChangeChaseTarget`), R
+  the speed boost, ZL the helicopter, ZR the roadblock. That is TASKS
+  43. L, R, ZL and ZR now do look back, the e-brake and the shifts, so
+  the user was asked where those go; not mapped yet.
+- **Spike strips.** The user asked for a spike strip button, as the
+  PC version had. PS2 retail has none: Be A Cop calls only
+  BeACopRequestChopper, BeACopRequestRoadBlock and
+  BeACopToggleSirenAndLights. Spikes come with roadblocks
+  (`CalculateRoadBlockAndSpikeBeltParameters`, the roadblock's 0x10
+  bit). Told the user.
+- **Next.** 12m-5, a Be A Cop race from the frontend on Azahar.
