@@ -2316,7 +2316,7 @@ phases.
           two-player cars) are where the second player would come in,
           driven by the other console's packets.
         - Not started. It comes after the single-player race is whole.
-38. [ ] **BUSTED! is flat and static.** The user's Azahar shot of
+38. [x] **BUSTED! is flat and static.** The user's Azahar shot of
         2026-10-09: in the bust NIS, BUSTED! sits squashed, its top cut
         off, and never animates. Retail scales it from 5 down to ScaleX
         and fades it in from alpha 0 to 128 over a quarter second
@@ -2326,6 +2326,27 @@ phases.
         frozen), and how ScaleY reaches the quad. The bottom screen was
         blank during the NIS too; check that against retail. The user
         agreed it comes after step 14, the full audio.
+        - Done in Session 82 with no change to the code. Two throwaway
+          builds forced a ticket at 20 s of world time on track 12
+          (`copmanager_create_pullover` from raceFrame). The overlay's
+          Update runs each frame from player_render_hud, and
+          WorldTimeElapsed is live there (0.033 s a frame). The scale
+          goes 5 to 2 and the alpha 0 to 128, and the text's ScaleX and
+          ScaleY follow. With the tracks slowed to 8 s, Azahar's shots
+          show it: BUSTED! comes in huge and clear, then shrinks and
+          darkens to its place, whole and in proportion
+          (`out/busted_zoom_slowed.png`; `out/azahar_t38c`). The squash
+          and the cut top were the text drawing that 58f28ab replaced
+          (2026-10-11): proportional text at ScaleX once.
+        - BUSTED!'s letters sit unevenly ("BU ST ED!"). That is
+          retail's: Render (0x001425dc..0x00142854) draws the glyph at
+          pen + kerning x ScaleX and moves the pen by ScaleX x (advance
+          + kerning x ScaleX), so font a2d444f6's +1 (B U) and +3 (S T)
+          pairs open up at scale 2. uirender.c does the same.
+        - The bottom screen stays dark through the NIS: the NIS's HUD
+          features (0a240000) have none of the bottom screen's items,
+          as retail hides its whole HUD then. Left as it is; asked the
+          user.
 39. [ ] **The helicopter's missiles.** Asked for on 2026-10-10, with a
         video of retail for reference: "NFS HP2 for PS2 dodging
         missiles" (https://www.youtube.com/watch?v=VAsYHOw5pyc, 2:18).
@@ -2492,6 +2513,25 @@ phases.
         so a run with "ClusterCull 0" over the same bridge tells
         whether they made it or it was there before; then a capture
         there, as TASKS 45 had.
+        - The user's log came on 2026-10-12 (`3DS Files/nfshp2_debug.txt`,
+          config "DebugLog 1", so the clusters were on). Two Quick
+          Races: track 44 (Alpine, 2 laps) and then track 21. On track
+          44 the laps end at about frames 13,649 and 26,918, at the same
+          place. In the 20 s before each, the sun's glare is drawn (its
+          4 quads, TASKS 45's change) and the police helicopter is over
+          the player on the bridge, about 4 m above the deck (plan 4),
+          with its dust on. The log is once a second, so a brief
+          artifact itself does not show.
+        - Azahar, track 44, gas only, no cops: the bridge drew cleanly
+          in every shot. A run with four cops stuck on a fence before
+          the bridge. The cull's planes are made again at every change
+          of matrix, so they cannot go stale. Still to ask the user
+          what it looked like; the helicopter (its searchlight sheet
+          and dust) is the first suspect.
+        - The same log: track 44 spends about a quarter of the race
+          under 22 FPS. In those frames the CPU's ~19 ms and the GPU's
+          ~32 ms run one after the other (50.8 ms a frame): TASKS 46's
+          "GpuSends 1" is meant to overlap them.
 
 ### The retail frontend
 

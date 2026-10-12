@@ -70,6 +70,14 @@ cop's HUD (hudcop.c, hudrender.c, hudscore.c), the setup screens
   R helicopter (ce58fac). Not seen: an arrest, which the gas-only
   script cannot make. Left of TASKS 43: the Blurb's PS2 glyphs.
 
+**Now (Session 82, 2026-10-12): step 14 is done (14-10d, 3ac6572)
+and so is task 38 (BUSTED! animates and is whole; no change, see
+TASKS.md 38). Next: TASKS 43's Blurb glyphs, TASKS 39 (12k-6, the
+helicopter's missiles), TASKS 40 (12n, the radar meter). TASKS 47 has
+the user's log read (track 44; the helicopter over the bridge both
+laps) and waits on what the artifact looked like; TASKS 46 waits on
+the device's timing.**
+
 **Now (Session 81, 2026-10-12): TASKS 45 is done (9e044f3, the sun's
 glare). TASKS 46 has three lossless cuts in (the shader b293a76, the
 sends 9e044f3 opt-in, the clusters bb70171; `docs/formats/draw-cuts.md`,

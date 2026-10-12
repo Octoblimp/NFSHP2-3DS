@@ -20772,3 +20772,33 @@ it up from here.
 - **Next.** TASKS 47 with the user's logs, TASKS 46's device numbers,
   then step 14 (full audio), task 38 (BUSTED!) and TASKS 43's Blurb
   glyphs.
+
+## Session 82 -- step 14's end, and task 38
+
+- **The user's device log** (`3DS Files/nfshp2_debug.txt`, TASKS 47).
+  Two Quick Races: track 44, 2 laps, and track 21. On both laps of
+  track 44 the police helicopter is over the bridge before the
+  finish, about 4 m above the deck with its dust on, and the sun's
+  glare is drawn. A gas-only Azahar run with no cops crossed the
+  bridge cleanly, and the cull's planes cannot go stale. Waiting on
+  what the artifact looked like. Track 44 is under 22 FPS for about a
+  quarter of the race, the CPU and the GPU one after the other.
+- **`run_azahar_race.ps1 -ShotFrom N`** (b7aa233): a shot every 10 s
+  for the watch's first N seconds, then every -ShotSeconds.
+- **14-10d, and with it step 14** (3ac6572). The car selector speaks
+  the car's name (events 211 and 146) in its orbit view. It now
+  registers its eleven joystick events as retail's constructor does
+  (0x00195210), one player's on both pads; the uncalled `bcarsel_joy`
+  is gone. In the frontend, with no race coordinator, joyhid swaps B
+  and Y (JOYHID_LAYOUT_FE), so Y is Square, the orbit view, as the
+  menus' own Y is. carsel_check: 4 new mutations, all caught;
+  joyhid_test has the frontend layout's cases.
+- **Task 38, BUSTED!** Done with no change (TASKS.md 38). Forced
+  tickets on Azahar show the overlay's zoom and fade working, and the
+  text whole; 58f28ab's text drawing had fixed the squash. The uneven
+  letter gaps are retail's double-scaled kerning. Slowed shots:
+  `out/busted_zoom_slowed.png`.
+- **The card.** Azahar's nfshp2_config.txt is "DebugLog 1" again.
+- **The build.** Clean, with no test code, in `3DS Files`.
+- **Next.** TASKS 43's Blurb glyphs, TASKS 39 (12k-6), TASKS 40
+  (12n). TASKS 47 and 46 wait on the user.
