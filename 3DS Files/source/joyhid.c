@@ -55,6 +55,19 @@ static const struct {
 
 int32_t (*gJoyHidRaceLayoutFn)(void);
 
+// `keys` with keys `a` and `b` read as each other.
+static uint32_t swapKeys(uint32_t keys, uint32_t a, uint32_t b)
+{
+    uint32_t ab = keys & (a | b);
+
+    keys &= ~(a | b);
+    if (ab & a)
+        keys |= b;
+    if (ab & b)
+        keys |= a;
+    return keys;
+}
+
 // -JOYHID_STICK_FULL .. +JOYHID_STICK_FULL onto 0 .. 255, 128 the centre.
 static uint8_t axis(int32_t v)
 {
@@ -117,15 +130,12 @@ void joyhid_build(const JoyHidState *s, uint8_t buf[32])
     size_t i;
 
     // The race layout: X reads as Y (Circle, the horn) and Y as X.
-    if (s->race) {
-        uint32_t xy = keys & (JOYHID_X | JOYHID_Y);
-
-        keys &= ~(JOYHID_X | JOYHID_Y);
-        if (xy & JOYHID_X)
-            keys |= JOYHID_Y;
-        if (xy & JOYHID_Y)
-            keys |= JOYHID_X;
-    }
+    if (s->race == JOYHID_LAYOUT_RACE || s->race == JOYHID_LAYOUT_COP)
+        keys = swapKeys(keys, JOYHID_X, JOYHID_Y);
+    // The frontend's: Y reads as B (Square, as the menus' own Y is) and B
+    // as Y, so car select's orbit view is Y's and B only the menus' back.
+    if (s->race == JOYHID_LAYOUT_FE)
+        keys = swapKeys(keys, JOYHID_B, JOYHID_Y);
 
     memset(buf, 0, 32);
     buf[1] = 0x79;

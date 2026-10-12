@@ -18,6 +18,9 @@
 //        car's lights and siren), and Y is Triangle, the camera and the
 //        combo modifier. The user asked for the horn on X (2026-10-09);
 //        the menus, the pause screen and the rest keep the layout above.
+//     -- in the frontend, with no race, B and Y swap: Y is Square, car
+//        select's orbit view, as main.c's own menu keys have Y as Square
+//        and B as back.
 //     L / R      L1 / R1   look back / e-brake
 //     -- in a Be A Cop race, in the cop's car, L calls the roadblock and
 //        R the helicopter, retail's TRIANGLE + R2 and TRIANGLE + L2 (the
@@ -33,11 +36,12 @@
 //     C-Stick    right stick  alternate throttle (up) and brake (down)
 //
 // A and B are throttle and brake because they sit next to each other, as
-// Cross and Square do; the price is that "back" in the frontend is X, the
-// Triangle, and not B. The twelve pressure bytes read 255 for a held button
-// and 0 otherwise -- the 3DS's buttons are digital. ZL, ZR and the C-Stick
-// exist only on a New 3DS; an Old 3DS reads them as never pressed and
-// centred, which leaves the D-pad's digital steer and automatic gears.
+// Cross and Square do; the price is that the scanners' "back" is X, the
+// Triangle, and not B (main.c's frontend keys take B as back). The twelve
+// pressure bytes read 255 for a held button and 0 otherwise -- the 3DS's
+// buttons are digital. ZL, ZR and the C-Stick exist only on a New 3DS; an
+// Old 3DS reads them as never pressed and centred, which leaves the
+// D-pad's digital steer and automatic gears.
 //
 // See docs/formats/joystick.md.
 
@@ -72,17 +76,20 @@ typedef struct JoyHidState {
     uint32_t keys;      // hidKeysHeld()
     int32_t  cx, cy;    // the Circle Pad, +y up
     int32_t  sx, sy;    // the C-Stick, +y up; 0 on an Old 3DS
-    int32_t  race;      // a JOYHID_LAYOUT_*; any but MENU swaps X and Y
+    int32_t  race;      // a JOYHID_LAYOUT_*
 } JoyHidState;
 
 // The layouts gJoyHidRaceLayoutFn answers.
 #define JOYHID_LAYOUT_MENU 0    // the map above
 #define JOYHID_LAYOUT_RACE 1    // X and Y swapped: X the horn
 #define JOYHID_LAYOUT_COP  2    // the race's, and L and R's cop calls
+#define JOYHID_LAYOUT_FE   3    // B and Y swapped: Y Square, car select's
+                                // orbit view (bcarsel.c), as kBinds has Y
 
 // The layout, asked once a reading; NULL is always MENU. main.c's answers
 // RACE while the race coordinator is in RACE_IN_PROGRESS, and COP then in
-// a Be A Cop race when player 1's car is the player cop's.
+// a Be A Cop race when player 1's car is the player cop's; FE when there
+// is no race coordinator.
 extern int32_t (*gJoyHidRaceLayoutFn)(void);
 
 // Be A Cop's L and R, kept from one reading to the next.

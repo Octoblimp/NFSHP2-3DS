@@ -98,6 +98,7 @@ static const JoyEvent watched[] = {
     JOY_EVENT_SHIFTUP, JOY_EVENT_SHIFTDOWN, JOY_EVENT_HONK_HORN,
     JOY_EVENT_NITRO_BOOST, JOY_EVENT_CYCLE_HUD,
     JOY_EVENT_REQUEST_HELICOPTER, JOY_EVENT_REQUEST_ROADBLOCK,
+    JOY_EVENT_CARSEL_CHANGE_MODE, JOY_EVENT_CARSEL_ORBIT_LEFTRIGHT,
 };
 #define NWATCHED ((int)(sizeof(watched) / sizeof(watched[0])))
 
@@ -316,6 +317,39 @@ int main(void)
     frame();
     expect("race Y+ZL", JOY_EVENT_ZONE_FREEZE, 1, 1);
     expect_not("race Y+ZL", JOY_EVENT_SHIFTDOWN);
+    release();
+
+    // The frontend layout: B and Y swap, so Y is Square, car select's
+    // orbit view, and B Circle; X stays Triangle.
+    pad.race = JOYHID_LAYOUT_FE;
+    pad.keys = JOYHID_Y;
+    frame();
+    expect("fe Y", JOY_EVENT_CARSEL_CHANGE_MODE, 1, 1);
+    expect("fe Y", JOY_EVENT_MENU_SQUARE, 1, 1);
+    expect_not("fe Y", JOY_EVENT_MENU_HELP);
+    release();
+    pad.race = JOYHID_LAYOUT_FE;
+    pad.keys = JOYHID_B;
+    frame();
+    expect("fe B", JOY_EVENT_MENU_HELP, 1, 1);
+    expect_not("fe B", JOY_EVENT_CARSEL_CHANGE_MODE);
+    release();
+    pad.race = JOYHID_LAYOUT_FE;
+    pad.keys = JOYHID_X;
+    frame();
+    expect("fe X", JOY_EVENT_MENU_BACK, 1, 1);
+    expect_not("fe X", JOY_EVENT_HONK_HORN);
+    release();
+    // The menu layout's B is still Square.
+    pad.keys = JOYHID_B;
+    frame();
+    expect("menu B", JOY_EVENT_CARSEL_CHANGE_MODE, 1, 1);
+    release();
+    // The Circle Pad turns the car.
+    pad.race = JOYHID_LAYOUT_FE;
+    pad.cx = JOYHID_STICK_FULL;
+    frame();
+    expect("fe pad right", JOY_EVENT_CARSEL_ORBIT_LEFTRIGHT, 250, 255);
     release();
 
     // The D-pad.

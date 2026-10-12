@@ -313,11 +313,6 @@ void bcarsel_init(BCarSel* m, const BCarSelHooks* hooks);
 void bcarsel_screen_callback(BGameFlow* gf, BScreenMessage msg,
                              BScreenCallbackData* data);
 
-// A JoyEvent from pad `port`, as AddJoyHandler would have delivered it to
-// every selector registered for it. `pressed` is the button's state, or
-// the stick's byte for the analog events.
-void bcarsel_joy(int port, int32_t event, uint8_t pressed);
-
 // 0x00194898 (Fred's 0x00183ec0): each player's first car loading before
 // car select is entered. And InitSelectCarScreen / CloseSelectCarScreen,
 // at the frontend's load and unload; Close also unloads the preload.

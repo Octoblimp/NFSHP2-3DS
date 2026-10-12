@@ -481,6 +481,9 @@ def s_cop(s):
     s.msg(DISMISS, param=4)
     s.tick(2)
     s.msg(UNACTIVATE, SCREEN_1P, 0)
+    # Gone, the selector hears nothing.
+    s.joy(0, 33, 1)
+    s.joy(1, 35, 1)
     # The preload, and in again over it.
     s.add("preload", "preload")
     s.msg(ACTIVATE, SCREEN_1P, 1)
@@ -1369,6 +1372,8 @@ class Model(fc.Model):
             h = self.joys.get((v(1), v(2)))
             if h:
                 e.call(h[0], v(1), v(2), v(3), h[1], limit=10000000)
+            else:
+                self.emit("  joy none")
         elif o == "preload":
             e.call(F_PRELOAD, limit=200000000)
         elif o == "close":
@@ -1685,6 +1690,13 @@ MUTATIONS = [
       + "            c->mover.DesiredHorizSpeed =" + NL),
     M("joy-lr-vert", "c->mover.DesiredHorizSpeed = ((float)pressed",
       "c->mover.DesiredVertSpeed = ((float)pressed"),
+    M("joy-1p-port1", "int32_t last  = c->twoPlayer ? c->port : 1;",
+      "int32_t last  = c->twoPlayer ? c->port : 0;"),
+    M("joy-2p-port", "int32_t first = c->twoPlayer ? c->port : 0;",
+      "int32_t first = c->twoPlayer ? 0 : 0;"),
+    M("joy-last-event", "ev <= BCARSEL_JOY_ORBIT_INOUT; ev++) {",
+      "ev < BCARSEL_JOY_ORBIT_INOUT; ev++) {"),
+    M("joy-remove", "    selJoyHandlers(c, 0);" + NL, ""),
     M("can-orbit-help", "if (h->helpMenuActive && h->helpMenuActive(h->user)) return 0;",
       "if (h->helpMenuActive && !h->helpMenuActive(h->user)) return 0;"),
     M("can-orbit-mode", "    if (c->mode != c->chooseMode) return 0;" + NL, ""),

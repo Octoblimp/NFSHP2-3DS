@@ -1098,9 +1098,10 @@ static int32_t joyhidRaceLayout(void)
     const struct Player *p = PlayerPlayersByNumber[0];
     const tCop *cop;
 
-    if (pRaceCoordinator == NULL
-        || racecoordinator_get_current_state(pRaceCoordinator)
-           != RCSTATE_RACE_IN_PROGRESS)
+    if (pRaceCoordinator == NULL)
+        return JOYHID_LAYOUT_FE;
+    if (racecoordinator_get_current_state(pRaceCoordinator)
+        != RCSTATE_RACE_IN_PROGRESS)
         return JOYHID_LAYOUT_MENU;
     cop = copmanager_get_player_cop(pCopManager);
     if (RaceParametersBeACop && cop != NULL && p != NULL
@@ -3492,6 +3493,23 @@ static int32_t hookCarSelLanguage(void* user)
 {
     (void)user;
     return g_flow.currLanguage;
+}
+
+// EnterOrbitMode's line about the car (0x001967a0): a cop's is event 211
+// with Speech::ConvertCarType's number; the rest's is 146 with whether the
+// car is a high-performance one, then the number.
+static void hookCarSelSpeakCar(void* user, int32_t carType, int cop, int hp)
+{
+    int32_t name = speech_convert_car_type(carType);
+    int32_t got;
+
+    (void)user;
+    if (cop)
+        got = spch_add_event_v(211, 1, name);
+    else
+        got = spch_add_event_v(146, 2, hp ? 1 : 0, name);
+    logLine("carsel speech: car %ld, event %d, name %ld, queued %ld",
+            (long)carType, cop ? 211 : 146, (long)name, (long)got);
 }
 
 // IsCarAnEventReward and FindEventThatCarIsARewardFor (eventtree.c), as
@@ -6312,6 +6330,7 @@ int main(int argc, char** argv)
     carselHooks.loaderBeginLoading = hookCarSelLoaderBeginLoading;
     carselHooks.renderTextIntoRectangle = hookCarSelRenderText;
     carselHooks.formatUnlockBlurb  = hookCarSelFormatUnlockBlurb;
+    carselHooks.speakCar           = hookCarSelSpeakCar;
     carselHooks.speechFade         = hookCarSelSpeechFade;
     carselHooks.soundEnabled       = hookCarSelSoundEnabled;
     carselHooks.language           = hookCarSelLanguage;

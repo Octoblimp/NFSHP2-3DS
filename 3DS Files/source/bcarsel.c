@@ -18,6 +18,7 @@
 #include "emodel.h"
 #include "flailer.h"
 #include "fredrace.h"
+#include "joyevent.h"
 #include "realtime.h"
 #include "scenerycull.h"
 #include "texturepack.h"
@@ -1469,6 +1470,31 @@ static void selTick(CarSelector* c)
 }
 
 // The constructor (0x001950d0).
+// JoyHandlerBridge (0x00198e28): the object is the selector.
+static void selJoyBridge(JoystickPort port, JoyEvent ev, uint8_t value,
+                         void* obj)
+{
+    (void)port;
+    selJoy((CarSelector*)obj, ev, value);
+}
+
+// The constructor's eleven events (0x00195210) and the destructor's
+// (0x001959dc): one player's selector takes both pads', two players' each
+// their own.
+static void selJoyHandlers(CarSelector* c, int add)
+{
+    int32_t first = c->twoPlayer ? c->port : 0;
+    int32_t last  = c->twoPlayer ? c->port : 1;
+
+    for (int32_t port = first; port <= last; port++) {
+        for (int32_t ev = BCARSEL_JOY_CHANGE_MODE;
+             ev <= BCARSEL_JOY_ORBIT_INOUT; ev++) {
+            if (add) AddJoyHandler(port, ev, selJoyBridge, c);
+            else RemoveJoyHandler(port, ev);
+        }
+    }
+}
+
 static void selInit(CarSelector* c, const BCarSelHooks* h, int32_t port,
                     int twoPlayer, int32_t playerNum, uint32_t screen,
                     const VisibleCarSet* set, int32_t points)
@@ -1498,6 +1524,7 @@ static void selInit(CarSelector* c, const BCarSelHooks* h, int32_t port,
     c->thumbs.duration         = 1.0f;
     c->thumbs.flags            = 1;
     unlockInit(&c->unlock, screen);
+    selJoyHandlers(c, 1);
     // The car and its reflection, in the player's view, with no ride yet.
     fecar_init(&c->car, NULL, playerNum);
     fecar_init(&c->reflection, NULL, playerNum);
@@ -1587,6 +1614,7 @@ static void selDestroy(CarSelector* c)
     fecar_delete(&c->car, 2);
     fecar_delete(&c->reflection, 2);
     if (c->cover.Solid) emodel_uninit(&c->cover);
+    selJoyHandlers(c, 0);
     if (h->stopSound) h->stopSound(h->user, 12);
     slideRestore(&c->unlock.slide);
     emodel_delete(&c->platform, 2);
@@ -1863,19 +1891,6 @@ void bcarsel_screen_callback(BGameFlow* gf, BScreenMessage msg,
             break;
         default:
             break;
-    }
-}
-
-void bcarsel_joy(int port, int32_t event, uint8_t pressed)
-{
-    int i;
-    if (!g_m || !g_m->screen) return;
-    for (i = 0; i < BCARSEL_MAX_SELECTORS; i++) {
-        CarSelector* c = g_m->screen->selectors[i];
-        if (!c) continue;
-        // One player listens to both pads; two, each to its own.
-        if (c->twoPlayer && c->port != port) continue;
-        selJoy(c, event, pressed);
     }
 }
 

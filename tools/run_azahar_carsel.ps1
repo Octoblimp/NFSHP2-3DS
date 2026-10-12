@@ -244,6 +244,13 @@ if ($atCarSel) {
     [Hp2Cap]::PressKey($hwnd, $VK_F)
     Start-Sleep -Milliseconds 2500
     Shot "carsel-first"
+    # SQUARE (Y) to orbit the car, which says its name (14-10d), and
+    # again back to the stats.
+    [Hp2Cap]::PressKey($hwnd, $VK_X)
+    Start-Sleep -Milliseconds 2500
+    Shot "carsel-orbit"
+    [Hp2Cap]::PressKey($hwnd, $VK_X)
+    Start-Sleep -Milliseconds 1500
     [Hp2Cap]::PressKey($hwnd, $VK_G)          # down, the next colour
     Start-Sleep -Milliseconds 900
     Shot "carsel-skin"

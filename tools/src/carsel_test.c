@@ -20,7 +20,8 @@
 //   ev|T|TREE|NUM          car T an event's reward (TREE -1: none)
 //   isl|T|V                CarLoader::IsLoaded's answer for car T
 //   msg|MSG|ITEM|PORT|PARAM|NOISE   SelectCarScreenCallback
-//   joy|PORT|EV|PRESSED    the JoyHandler, as AddJoyHandler delivers it
+//   joy|PORT|EV|PRESSED    the JoyHandler, as AddJoyHandler delivers it;
+//                          "joy none" when nothing is registered for it
 //   preload, close
 //   tex|MODE               GetTextureInfo's answer: 0 none, 1 a swatch, 2 one
 //                          with no image, 3 no palette size, 4 no palette
@@ -53,6 +54,7 @@
 #include "flailer.h"
 #include "fred.h"
 #include "fredrace.h"
+#include "joyevent.h"
 #include "nfsrewards.h"
 #include "realtime.h"
 #include "scenerycull.h"
@@ -423,6 +425,22 @@ static void h_stop_movie(void *u)
 {
     (void)u;
     printf("  stopmovie\n");
+}
+
+// AddJoyHandler and RemoveJoyHandler as the model keeps them: one handler
+// for each (port, event), the last registered.
+static struct { JoyHandler fn; void* obj; } joys[2][64];
+
+void AddJoyHandler(JoystickPort port, JoyEvent ev, JoyHandler fn, void* obj)
+{
+    joys[port][ev].fn  = fn;
+    joys[port][ev].obj = obj;
+}
+
+void RemoveJoyHandler(JoystickPort port, JoyEvent ev)
+{
+    joys[port][ev].fn  = NULL;
+    joys[port][ev].obj = NULL;
 }
 
 // ------------------------------------------------------------ the 3D seams
@@ -1121,9 +1139,13 @@ static void run(char *line)
         d.noise = inum(a[5]);
         bcarsel_screen_callback(NULL, (BScreenMessage)inum(a[1]), &d);
         printf("  data %d %d\n", (int)d.param, (int)d.noise);
-    } else if (!strcmp(a[0], "joy"))
-        bcarsel_joy(inum(a[1]), inum(a[2]), (uint8_t)num(a[3]));
-    else if (!strcmp(a[0], "tex")) texMode = inum(a[1]);
+    } else if (!strcmp(a[0], "joy")) {
+        int p = inum(a[1]), ev = inum(a[2]);
+        if (joys[p][ev].fn)
+            joys[p][ev].fn(p, ev, (uint8_t)num(a[3]), joys[p][ev].obj);
+        else
+            printf("  joy none\n");
+    } else if (!strcmp(a[0], "tex")) texMode = inum(a[1]);
     else if (!strcmp(a[0], "neb")) nebulaMode = inum(a[1]);
     else if (!strcmp(a[0], "solid")) solidNext = num(a[1]);
     else if (!strcmp(a[0], "blend"))
