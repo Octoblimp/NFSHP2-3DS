@@ -4,8 +4,12 @@
 
 Two random race crashes on the user's New 3DS XL were Process9 (the SD
 driver) reading ENGLISHDAT.PCK at 0x094B2400. The debug log is off now
-unless `DebugLog 1` is in nfshp2_config.txt. The user was copying all
-the NFSHP2 files to the card again; ask whether the crashes went on.
+unless `DebugLog 1` is in nfshp2_config.txt. After deleting and
+recopying the files the user heard French and English speech at once,
+then it crashed again (Session 78). The port opens one language's
+speech, so the card's FAT is the suspect (two files sharing clusters);
+the user was told to back up, run `chkdsk X: /f` or reformat FAT32 and
+copy afresh, and try H2testw. Ask how that went.
 HANDOFF.md, "Session 77 -- the device crashes and the debug log".
 
 ## Be A Cop, step 12m (the audit of Session 76)
@@ -40,7 +44,7 @@ cop's HUD (hudcop.c, hudrender.c, hudscore.c), the setup screens
   TheRaceParameters (the AI, the traffic, the clock, three roadblocks
   and three choppers, the objective), bound to main.c's hook
   (`docs/formats/race-start.md`).
-- **12m-3c (in progress)** Select Track (`TrackSelectScreenCallback`,
+- **12m-3c (done)** Select Track (`TrackSelectScreenCallback`,
   `0x001a0920`; its StartRace is `0x001a0790`). Car select goes on to
   it for every game type but the event games. Read HANDOFF.md's
   "Session 77, continued -- 12m-3c-1" first. The still camera
@@ -49,13 +53,15 @@ cop's HUD (hudcop.c, hudrender.c, hudscore.c), the setup screens
   - **12m-3c-1 (done)** `btracksel.c`: the logic, the 2D, the model and
     StartRace, with ACTIVATE's reply, `bmenu_set_active_item` and
     `tracksel_check.py` (0 differ; 171 mutations, 155 caught, 16
-    equivalent). On Azahar it works from car select. Y (SQUARE, the
-    track's speech) did not reach the screen in that run; check the run
-    script's key first.
-  - **12m-3c-2** The TSELECT.BIN slideshow: main.c's five pack hooks
-    are still NULL.
-- **12m-4** The Pre Race Blurb (`0x001e3270` on, startrace.c): the
-  objective screen before a Be A Cop race.
+    equivalent). On Azahar it works from car select. Y (SQUARE) works;
+    the run script's key was 0 (fixed in Session 78).
+  - **12m-3c-2 (done)** The TSELECT.BIN slideshow: main.c's five pack
+    hooks over `texturestream.h`, and `trackSelSyncPictures` puts the
+    shown pictures on the GPU (HANDOFF.md, "Session 78"). The white
+    specks on some pictures are the disc's.
+- **12m-4 (next)** The Pre Race Blurb (`0x001e3270` on, startrace.c):
+  the objective screen before a Be A Cop race. Session 78 disassembled
+  it to `0x001e36f0`; HANDOFF.md's "Session 78" lists the parts.
 - **12m-5** A Be A Cop race from the frontend in Azahar: the chase,
   the arrests, the clock, the end and the results. Fix what it shows.
   Seen in 12m-3's run: the cop HUD's three helicopter and three

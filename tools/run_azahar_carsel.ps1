@@ -97,6 +97,7 @@ public class Hp2Cap {
 [void][Hp2Cap]::SetProcessDPIAware()
 
 $VK_A = 65; $VK_S = 83; $VK_M = 77; $VK_N = 78; $VK_T = 84; $VK_G = 71; $VK_H = 72; $VK_F = 70
+$VK_X = 88   # the 3DS Y on Azahar's default map: SQUARE
 
 $debugLog  = Join-Path $env:APPDATA "Azahar\sdmc\nfshp2_debug.txt"
 . (Join-Path $PSScriptRoot "azahar_debuglog.ps1")   # DebugLog 1
@@ -201,7 +202,9 @@ if ($booted) {
         Start-Sleep -Milliseconds 1200
         [Hp2Cap]::PressKey($hwnd, $VK_A)      # A, Hot Pursuit
         if (Wait-ForLog "flow enter Cops On Mode Select" 10) {
-            Start-Sleep -Milliseconds 900
+            # A press before the menu has its first item is dropped.
+            [void](Wait-ForLog "screen Cops On Mode Select .* last HIGHLIGHT" 10)
+            Start-Sleep -Milliseconds 500
             [Hp2Cap]::PressKey($hwnd, $VK_G)  # down, You're The Cop
             Start-Sleep -Milliseconds 500
             [Hp2Cap]::PressKey($hwnd, $VK_A)  # A
@@ -263,6 +266,12 @@ if ($atCarSel) {
         Write-Host ("  on to Select Track: {0}" -f $onTrack)
         Start-Sleep -Milliseconds 1200
         Shot "selecttrack"
+        # The slideshow: four seconds of TRACKn, then two cross-fading to a
+        # TSELECT.BIN picture.
+        Start-Sleep -Milliseconds 4000
+        Shot "selecttrack-fade"
+        Start-Sleep -Milliseconds 2500
+        Shot "selecttrack-slide"
         # btracksel.c: the next track along the strip, its other time of
         # day, and SQUARE's spoken name.
         [Hp2Cap]::PressKey($hwnd, $VK_H)      # right, the next track

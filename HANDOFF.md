@@ -20583,3 +20583,47 @@ it up from here.
   main.c over `texturestream.h` (`packNew`, `packDelete`,
   `packUnloadAll`, `packHasTexture`, `packLoad`). Then 12m-4, the Pre
   Race Blurb, and 12m-5, a Be A Cop race from the frontend.
+
+## Session 78 -- 12m-3c-2, Select Track's slideshow (done)
+
+- **Ported.** main.c's five pack hooks are retail's TexturePack over
+  `texturestream.h`: `packNew` is `newStreamedPack("TrackSelect",
+  "FRONTEND\\TSELECT.BIN")`, `packDelete` `texturepack_destruct(p, 3)`,
+  and the rest `UnloadAllTexturesFromFile`, `GetTexture` and
+  `LoadTexturesFromFile`, serviced each frame as the race's packs are.
+- **The pictures on the GPU.** The port's renderer draws from bundles,
+  not from a pack's records, so `trackSelSyncPictures` runs as the frame
+  begins: it asks `btracksel_show_textures` for the two bitmaps'
+  textures, decodes a shown one the pack has loaded through texpack.c's
+  upload, and draws it in the hash's place with
+  `uirender_override_texture`. A picture neither shows is freed, and
+  `uirender_forget_texture` (new) gives its slot back, so 159 pictures
+  over time cannot fill uirender's 256. All TSELECT texels have alpha
+  0x7d, so they stay RGBA8, lossless.
+- **The specks.** Some pictures have single white pixels. They are the
+  disc's: the loaded bytes equal the file's (a temporary check, now
+  gone), `texpack_check.py` decodes all 159 the same as the C, and the
+  source pictures have them (39 of 159; `TRACK11C`'s are sky between
+  leaves at its right edge, where the first run showed them).
+- **Y fixed.** `run_azahar_carsel.ps1` sent key 0 for SQUARE because
+  `$VK_X` was undefined; with 88 the log has "last SQUARE". The script
+  also now waits for Cops On Mode Select's HIGHLIGHT before DOWN: one
+  run's early press was dropped and it started a quick race.
+- **Checked on Azahar.** build_cia.ps1 built clean (relocations OK,
+  shaders OK). `run_azahar_carsel.ps1 -Choose -RunSeconds 150` passed:
+  Select Track opens on FRONTB's `TRACK11`, cross-fades after four
+  seconds to `TRACK11C`, SQUARE goes to National Forest's `TRACK12B`
+  behind its locked box, and leaving the screen frees the picture
+  ("tracksel picture 55ca90d9 down"). tracksel_check: 3132 ops, 30026
+  lines, 0 differ.
+- **The device.** The user reported French and English speech playing
+  at once and then the crash again, after deleting and recopying the
+  files. The port opens one language's speech, so this looks like the
+  card's FAT (two files sharing clusters), which recopying cannot fix.
+  Told the user: back up, then `chkdsk X: /f` or a FAT32 reformat and a
+  fresh copy, and H2testw if it still fails.
+- **Next.** 12m-4, the Pre Race Blurb (`0x001e3270` to `0x001e36f0`,
+  disassembled: the objective text by game, the joystick picker
+  `0x001e3320`, RENDER's text into `0xaefe36d8`/`0xcccf9a75`, SELECT on
+  to the next start-race screen). Then 12m-5, a Be A Cop race from the
+  frontend.

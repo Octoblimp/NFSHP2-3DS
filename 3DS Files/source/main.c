@@ -207,6 +207,7 @@
 #include "startrace.h"
 #include "terraintype.h"
 #include "tiresound.h"
+#include "texpack.h"
 #include "texturepack.h"
 #include "texturestream.h"
 #include "topology.h"
@@ -3510,11 +3511,135 @@ static void hookCarSelClose(void* user)
 //
 // BTrackSelHooks, for btracksel.c: retail's SelectTrackScreen (12m-3c).
 // The language table, the speech's fade, the blurb's text and the race's
-// start are car select's. The slideshow's TexturePack (TSELECT.BIN) is
-// not loaded yet (12m-3c-2): with no pack, each track shows its own
-// TRACKn picture and nothing cross-fades.
+// start are car select's.
 
 static BTrackSel g_tracksel;
+
+// The slideshow's TexturePack (12m-3c-2), retail's: "TrackSelect", its
+// table read from FRONTEND\TSELECT.BIN and its 159 pictures streamed in one
+// at a time (texturestream.h).
+static TexturePack* g_trackSelPack;
+
+static void* hookTrackSelPackNew(void* user)
+{
+    (void)user;
+    g_trackSelPack = newStreamedPack("pTrackSelectTexturePack", "TrackSelect",
+                                     "FRONTEND\\TSELECT.BIN");
+    return g_trackSelPack;
+}
+
+static void hookTrackSelPackDelete(void* user, void* pack)
+{
+    (void)user;
+    texturepack_destruct((TexturePack*)pack, 3);
+    if (pack == g_trackSelPack) g_trackSelPack = NULL;
+}
+
+static void hookTrackSelPackUnloadAll(void* user, void* pack)
+{
+    (void)user;
+    if (pack) texturepack_unload_all_textures_from_file((TexturePack*)pack);
+}
+
+static int hookTrackSelPackHas(void* user, void* pack, uint32_t hash)
+{
+    (void)user;
+    return pack && texturepack_get_texture((TexturePack*)pack, hash) != NULL;
+}
+
+static void hookTrackSelPackLoad(void* user, void* pack, uint32_t hash,
+                                 void (*cb)(intptr_t param), intptr_t param)
+{
+    (void)user;
+    if (pack)
+        texturepack_load_textures_from_file((TexturePack*)pack, &hash, 1, cb,
+                                            param);
+}
+
+// The slideshow's pictures on the GPU, the port's. Retail's Flailer finds a
+// bitmap's texture through GetTextureInfo, which has a TSELECT.BIN record
+// once the pack has loaded it; the port's renderer draws from its bundles.
+// So a picture one of the slideshow's two bitmaps shows is decoded from the
+// pack's loaded record into a texture here and drawn in its place
+// (uirender_override_texture); one neither bitmap shows is freed, and its
+// slot given back. Run as the frame begins, when the GPU is done with the
+// last one.
+typedef struct {
+    uint32_t hash;
+    C3D_Tex  tex;
+} TrackSelPicture;
+
+static TrackSelPicture g_trackSelPictures[2];
+
+// The record's pixels and palette, one after the other in a block of their
+// own as texsrc_stage lays out a read, through texpack_upload.
+static bool trackSelUpload(TextureInfo* t, C3D_Tex* out)
+{
+    size_t   pixels  = (size_t)t->ImageSize;
+    size_t   palette = t->PaletteSize > 0 ? (size_t)t->PaletteSize : 0;
+    uint8_t* stage;
+    TexPack  tp;
+    TexInfo  ti;
+    bool     ok;
+
+    if (!t->ImageData || pixels == 0 || (palette && !t->PaletteData))
+        return false;
+    stage = (uint8_t*)malloc(pixels + palette);
+    if (!stage) return false;
+    memcpy(stage, t->ImageData, pixels);
+    if (palette) memcpy(stage + pixels, t->PaletteData, palette);
+    memset(&tp, 0, sizeof(tp));
+    tp.info     = (const uint8_t*)t;
+    tp.infoSize = TEXPACK_RECORD_SIZE;
+    tp.count    = 1;
+    tp.data     = stage;
+    tp.dataSize = (uint32_t)(pixels + palette);
+    ok = texpack_get(&tp, 0, &ti);
+    if (ok) {
+        ti.pixelOff = 0;
+        ti.clutOff  = (uint32_t)pixels;
+        ok = texpack_upload(&tp, &ti, 0, out);
+    }
+    free(stage);
+    return ok;
+}
+
+static void trackSelSyncPictures(UIRenderer* ui)
+{
+    uint32_t shown[2] = { 0, 0 };
+    int      i, j;
+
+    if (btracksel_active()) btracksel_show_textures(shown);
+    for (i = 0; i < 2; i++) {
+        TrackSelPicture* p = &g_trackSelPictures[i];
+        if (!p->hash || p->hash == shown[0] || p->hash == shown[1]) continue;
+        uirender_override_texture(ui, p->hash, NULL, 0, 0, false);
+        uirender_forget_texture(ui, p->hash);
+        C3D_TexDelete(&p->tex);
+        logLine("tracksel picture %08lx down", (unsigned long)p->hash);
+        p->hash = 0;
+    }
+    if (!g_trackSelPack) return;
+    for (j = 0; j < 2; j++) {
+        TrackSelPicture* spare = NULL;
+        TextureInfo*     t;
+
+        if (!shown[j]) continue;
+        for (i = 0; i < 2; i++) {
+            if (g_trackSelPictures[i].hash == shown[j]) break;
+            if (!g_trackSelPictures[i].hash && !spare)
+                spare = &g_trackSelPictures[i];
+        }
+        if (i < 2 || !spare) continue;
+        t = texturepack_get_loaded_texture(g_trackSelPack, shown[j]);
+        if (!t || !trackSelUpload(t, &spare->tex)) continue;
+        spare->hash = shown[j];
+        uirender_override_texture(ui, shown[j], &spare->tex, t->Width,
+                                  t->Height, false);
+        logLine("tracksel picture %08lx up, %s", (unsigned long)shown[j],
+                t->DebugName);
+    }
+}
 
 // SQUARE: SPCH_AddEventV(155, 1, Speech::ConvertTrackNumber(track)), the
 // track's name.
@@ -6139,6 +6264,11 @@ int main(int argc, char** argv)
     trackselHooks.renderTextIntoRectangle = hookCarSelRenderText;
     trackselHooks.setActiveMenuItem = hookTrackSelSetActive;
     trackselHooks.getActiveMenuItem = hookActiveMenuItem;
+    trackselHooks.packNew           = hookTrackSelPackNew;
+    trackselHooks.packDelete        = hookTrackSelPackDelete;
+    trackselHooks.packUnloadAll     = hookTrackSelPackUnloadAll;
+    trackselHooks.packHasTexture    = hookTrackSelPackHas;
+    trackselHooks.packLoad          = hookTrackSelPackLoad;
     trackselHooks.highlightInit     = hookTrackSelHighlightInit;
     trackselHooks.highlightSetItem  = hookTrackSelHighlightItem;
     trackselHooks.highlightAnimate  = hookTrackSelHighlightAnimate;
@@ -6456,8 +6586,9 @@ int main(int argc, char** argv)
             hangwatch_gpu_begin();
             uint32_t drawTick = bGetTicker();
             // The GPU is done with the last frame: what the frontend's view
-            // let go of since can be freed.
+            // let go of since can be freed, and the slideshow's pictures.
             trackview_frame_begun(&g_feView);
+            trackSelSyncPictures(&ui);
             frameprof_begin_draw(syncTick, gpuTick, drawTick);
             lastSync = C3D_FrameCounter(0);
             WaitBufferSwapTime = (int32_t)bGetFixTickerDifference(gpuTick,

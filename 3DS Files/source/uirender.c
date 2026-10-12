@@ -188,14 +188,22 @@ BUIScreen* uirender_screen_at(UIRenderer* r, uint32_t index, BUI** outUI)
 // screen full of one missing hash does not rescan every bundle every frame.
 static int find_texture(UIRenderer* r, uint32_t hash)
 {
-    for (int i = 0; i < r->numTextures; i++)
+    int index = -1;
+    for (int i = 0; i < r->numTextures; i++) {
+        if (r->textures[i].unused) {
+            if (index < 0) index = i;
+            continue;
+        }
         if (r->textures[i].hash == hash) return i;
-    if (r->numTextures >= UIR_MAX_TEXTURES) return -1;
+    }
+    if (index < 0) {
+        if (r->numTextures >= UIR_MAX_TEXTURES) return -1;
+        index = r->numTextures++;
+    }
 
-    UITexture* slot = &r->textures[r->numTextures];
+    UITexture* slot = &r->textures[index];
     memset(slot, 0, sizeof(*slot));
     slot->hash = hash;
-    int index = r->numTextures++;
 
     for (int i = 0; i < r->numBundles; i++) {
         const UIBundle* b = &r->bundles[i];
@@ -362,6 +370,18 @@ void uirender_override_texture(UIRenderer* r, uint32_t hash, C3D_Tex* tex,
     r->textures[idx].overrideW    = w;
     r->textures[idx].overrideH    = h;
     r->textures[idx].overrideFill = tex && fill;
+}
+
+void uirender_forget_texture(UIRenderer* r, uint32_t hash)
+{
+    for (int i = 0; i < r->numTextures; i++) {
+        UITexture* t = &r->textures[i];
+        if (t->unused || t->hash != hash) continue;
+        if (t->valid) return;
+        memset(t, 0, sizeof(*t));
+        t->unused = true;
+        return;
+    }
 }
 
 // The two movie targets. RenderFlailerBitmap (0x00143078) never draws either

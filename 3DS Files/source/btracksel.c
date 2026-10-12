@@ -1257,6 +1257,19 @@ int btracksel_active(void)
     return g_m && g_m->screen != NULL;
 }
 
+static uint32_t fadeTexture(const BTrackSelFade* f)
+{
+    struct FlailerObjectChunk* o = f->count > 0 ? f->el[0].obj : NULL;
+    return o && isBitmap(o) ? BITMAP(o)->TextureHash : 0;
+}
+
+void btracksel_show_textures(uint32_t out[2])
+{
+    const SelectTrackScreen* p = g_m ? g_m->screen : NULL;
+    out[0] = p ? fadeTexture(&p->show.front) : 0;
+    out[1] = p ? fadeTexture(&p->show.back) : 0;
+}
+
 void btracksel_init(BTrackSel* m, const BTrackSelHooks* hooks)
 {
     memset(m, 0, sizeof(*m));

@@ -18,11 +18,22 @@ select goes on to it, with Coastal Parklands, its stats, the times of
 day and the model; RIGHT shows National Forest locked with its blurb,
 DOWN moves the time of day, and BACK returns to car select.
 
-Not done yet (12m-3c-2): the TSELECT.BIN slideshow. main.c leaves the
-`packNew`, `packDelete`, `packUnloadAll`, `packHasTexture` and `packLoad`
-hooks NULL, so the slideshow shows nothing, and `eggActive` is NULL. In
-the 12m-3c-1 Azahar run Y (SQUARE, the track's speech) did not reach the
-screen: no `SQUARE` line in the log. Check the run script's key first.
+12m-3c-2 is done: the slideshow. main.c's `packNew`, `packDelete`,
+`packUnloadAll`, `packHasTexture` and `packLoad` hooks are retail's
+TexturePack over `texturestream.h`, and the pictures go to the GPU as
+"The port's pictures" below says. On Azahar the screen opens on FRONTB's
+`TRACK11`, and four seconds later it cross-fades over two seconds to a
+TSELECT.BIN picture (`TRACK11C`, the covered bridge, in the last run).
+Y (SQUARE) reaches the screen: the 12m-3c-1 run script sent key 0
+because `$VK_X` was undefined. `eggActive` is still NULL, as car
+select's is: the easter eggs are not ported.
+
+Some TSELECT.BIN pictures have single white pixels in them. 39 of the
+159 do, `TRACK13C` 76 of them; `TRACK11C`'s are sky between the leaves
+at its right edge. They are the disc's: the bytes the pack loads equal
+the file's, and `tools/texpack_check.py` decodes all 159 the same as
+the C. Under the screen's dark gradient they show as specks, so they do
+in retail too.
 
 The addresses are retail's (SLES_507.31). `gp` is `0x003358f0`.
 
@@ -88,8 +99,8 @@ The addresses are retail's (SLES_507.31). `gp` is `0x003358f0`.
   FRONTB's screen `0x15417b53` and GLOBALB's track table, and logs the
   stubs. `carsel_check.py` is the pattern.
 - **The split.** 12m-3c-1, done, is the logic, the 2D, the model and
-  StartRace, with the checker. 12m-3c-2 is the TSELECT.BIN slideshow on
-  the device.
+  StartRace, with the checker. 12m-3c-2, done, is the TSELECT.BIN
+  slideshow on the device.
 
 Be A Cop with one player cannot select laps, so SELECT goes straight to
 StartRace. That is the path 12m-5 needs.
@@ -404,6 +415,27 @@ at +12. `AddTrack` bMallocs 48 bytes and appends at the tail.
   - state = 0 and t0 = now;
   - `UnloadAllTexturesFromFile(pack)`;
   - `MaybeTriggerLoad`.
+
+### The port's pictures
+
+Retail's Flailer finds a bitmap's texture through `GetTextureInfo`, which
+has a TSELECT.BIN record once the pack has loaded it. The port's
+renderer draws from its bundles. So main.c's `trackSelSyncPictures`,
+run as each frame begins (the GPU is done with the last frame then):
+
+- asks `btracksel_show_textures` for the two bitmaps' textures;
+- frees a picture neither shows: `uirender_override_texture(.., NULL)`,
+  `uirender_forget_texture` (the slot goes back, so 159 pictures over
+  time do not fill uirender's 256), and `C3D_TexDelete`;
+- decodes a shown hash the pack has loaded (`GetLoadedTexture`) from
+  the record's `ImageData` and `PaletteData`, through texpack.c's
+  upload, and draws it in the hash's place
+  (`uirender_override_texture`).
+
+Every TSELECT.BIN texel has alpha `0x7d`, so texpack.c keeps the
+pictures RGBA8, lossless. The bitmaps carry an authored dark gradient,
+rgba `00000080`, `00000080`, `8080801e` and `8080803c` at the four
+corners.
 
 ## TODMenuManager
 

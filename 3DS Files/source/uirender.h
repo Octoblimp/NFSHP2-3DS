@@ -70,6 +70,9 @@ typedef struct {
     // reopen the pack every frame. See texpack_scroll().
     int8_t   scrollType;
     float    scrollS, scrollT, scrollStep;
+
+    // A slot uirender_forget_texture() gave back, for the next new hash.
+    bool     unused;
 } UITexture;
 
 typedef struct {
@@ -156,6 +159,12 @@ void uirender_set_time(UIRenderer* r, float seconds);
 // top screen rather than sit in the planes the PS2's TV layout put them in.
 void uirender_override_texture(UIRenderer* r, uint32_t hash, C3D_Tex* tex,
                                uint16_t w, uint16_t h, bool fill);
+
+// Gives back the slot of a hash no bundle has, and its override with it, so
+// a caller that draws many such hashes over time through overrides -- Select
+// Track's slideshow, 159 pictures -- does not fill the table. A hash a
+// bundle has keeps its slot.
+void uirender_forget_texture(UIRenderer* r, uint32_t hash);
 
 // Draws one screen: layers 0..28 in order, objects in file order within a
 // layer, which is what FlailerRenderManager's LayerRenderInfoTable does.

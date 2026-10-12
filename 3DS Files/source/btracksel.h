@@ -256,6 +256,11 @@ void btracksel_screen_callback(BGameFlow* gf, BScreenMessage msg,
 // Whether the screen is up.
 int btracksel_active(void);
 
+// The port's: the textures on the slideshow's two bitmaps, the front's and
+// then the back's, 0 for one the screen lacks or with the screen down.
+// main.c draws the TSELECT.BIN pictures among them from copies of its own.
+void btracksel_show_textures(uint32_t out[2]);
+
 // gp-19700, the model's angle, which persists from one visit to the next.
 extern float btracksel_model_angle;
 
