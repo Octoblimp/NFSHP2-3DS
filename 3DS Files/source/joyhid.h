@@ -104,6 +104,25 @@ typedef struct JoyHidCop {
 // into the COP layout calls nothing.
 uint32_t joyhid_cop_keys(JoyHidCop *c, uint32_t keys, int32_t on);
 
+// The Circle Pad in the menus (TASKS 42), kept from one reading to the
+// next: the D-pad direction it holds, or 0.
+typedef struct JoyHidMenuPad {
+    uint32_t held;      // JOYHID_DUP, DDOWN, DLEFT or DRIGHT, or 0
+} JoyHidMenuPad;
+
+// The stick reading past which the Circle Pad presses a D-pad direction
+// in the menus, and the one under which it lets go. The gap keeps a
+// stick resting near the edge from pressing over and over.
+#define JOYHID_MENU_PRESS   96
+#define JOYHID_MENU_RELEASE 48
+
+// One reading of the Circle Pad (+y up) as the menus' D-pad: the
+// direction newly pressed, or 0. The farther axis picks the direction
+// once the stick is past JOYHID_MENU_PRESS on it, and that direction is
+// held until its axis falls under JOYHID_MENU_RELEASE, so a push is one
+// press, as the D-pad's is, with no repeat while it is held.
+uint32_t joyhid_menu_pad(JoyHidMenuPad *p, int32_t cx, int32_t cy);
+
 // The DualShock 2 buffer for one reading.
 void joyhid_build(const JoyHidState *s, uint8_t buf[32]);
 

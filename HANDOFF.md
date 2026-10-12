@@ -20669,3 +20669,56 @@ it up from here.
   (`CalculateRoadBlockAndSpikeBeltParameters`, the roadblock's 0x10
   bit). Told the user.
 - **Next.** 12m-5, a Be A Cop race from the frontend on Azahar.
+
+## Session 80 -- 12m-5, a Be A Cop race from the frontend; the Circle Pad; the bottom screen
+
+- **The cop's buttons** (ce58fac). The user's final mapping: X (the
+  horn) targets, L calls the roadblock, R the helicopter. TASKS 43.
+- **The crash.** A Be A Cop race aborted at about 120 s: "tCopManager::
+  IsBeingPursued is not ported". `car_please_reset_me_later` (carrace.c)
+  asks it, so that a chased racer is not put back on the road. main.c
+  now points `gCopManagerIsBeingPursuedFn` at a seam that turns
+  `copmanager_is_being_pursued`'s pursuit into the int retail tests.
+- **The Circle Pad in the menus** (TASKS 42). `joyhid_menu_pad` turns
+  the stick into one D-pad press per push: past 96 on the farther axis,
+  held until that axis is under 48, no repeat. The main loop ORs it
+  into what `flowInput` hears, and nothing else: a race steers with the
+  stick and the viewers pan with it. joyhid_check walks it through 20
+  steps, and 11 mutations are all caught.
+- **The bottom screen** (TASKS 44), as the user asked: a band along the
+  top and the minimap under it. `UIR_TARGET_BOTTOM_OVER` objects draw
+  after the map (`uirender_draw_visible_bottom_over`): the score's
+  event lines, which fly up over it. `hudsplit_set_features` moves the
+  live split list 80 up when the race position shows, since the
+  position is on the top screen. The map's room is x 16 to 624 and y 150
+  to 472 of the 640x480, and the box is centred in it.
+- **The cop panel's names.** Its counts are the calls left (3, less one
+  per call), so hudrender.c's COLOUR_BTC_USED and _LEFT were the wrong
+  way round: now READY (green), COMING (blue) and SPENT (red), and
+  `used` is `left`. hudrender_check: 0 differ. Two of its btc mutations
+  named fields that were since renamed (New1560, New0) and had not run;
+  they do now, and all four btc mutations are caught.
+- **run_azahar_coprace.ps1** (new): the frontend to You're The Cop, the
+  car and track, the Blurb, the race with the horn and the calls, and
+  the screens after it. `-CirclePad` moves the menus with the arrow
+  keys. The game's debug log reaches the card up to 7 s late (the
+  logwriter's sectors), so Press-Until waits 8 s before pressing again;
+  shorter waits pressed twice and overshot. Run 4's game was restarted
+  by Azahar at 41 s, by none of the script's keys (F6 is Restart).
+- **On Azahar** (AC power, Speed 100%):
+  - The cop race: the Circle Pad took the mode select to item 2 in one
+    push; the car, the track, the Blurb, the fly-by and the race; the
+    panel at the bottom's top right, the map 161 by 161 at 80, 75;
+    helicopter and roadblock icons blue after R and L; the clock ran to
+    0, then Pursuit Results and PURSUIT OVER, whose Restart Pursuit
+    asks "restart the Pursuit?". No abort. 30 FPS. Verdict PASS.
+  - A Hot Pursuit quick race: the pause menu went 1, 2, 3, 2, 1 with the
+    stick and START resumed; the live split list at the top left, the
+    lap block at the right, mode 0's map 245 by 161. 30 FPS.
+  - Gas only, so no arrest: the chased car's damage lights filled, and
+    no bust came. That needs a player at the wheel.
+- **Not done.** The Blurb's PS2 glyphs (TASKS 43's last item).
+- **Asked for since.** TASKS 45, the slight polygon artifacts (the sun's
+  glare shows a hard stepped edge in these shots), and TASKS 46, a
+  smooth 30 FPS with many cars and fog.
+- **Next.** TASKS 45, then 46, then step 14 (full audio) and task 38.

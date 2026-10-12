@@ -1429,7 +1429,7 @@ static bool screen_drawn(const UIRenderer* r, const BUIScreen* screen,
                          int target)
 {
     return screen->visible
-           && (target != UIR_TARGET_BOTTOM || screen_placed(r, screen));
+           && (target == UIR_TARGET_TOP || screen_placed(r, screen));
 }
 
 // The strips queued for `layer`, after its objects: each where its screen
@@ -1557,5 +1557,19 @@ bool uirender_draw_visible_bottom(UIRenderer* r, float targetW,
     r->targetW = w;
     r->targetH = h;
     return any;
+}
+
+void uirender_draw_visible_bottom_over(UIRenderer* r, float targetW,
+                                       float targetH, float alpha)
+{
+    float w = r->targetW, h = r->targetH;
+
+    r->targetW = targetW;
+    r->targetH = targetH;
+    C2D_SetTintMode(C2D_TintMult);
+    draw_visible(r, alpha, UIR_TARGET_BOTTOM_OVER, 0, BUI_NUM_LAYERS);
+    end_gs_scale();
+    r->targetW = w;
+    r->targetH = h;
 }
 #endif  // __3DS__

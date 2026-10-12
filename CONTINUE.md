@@ -62,13 +62,19 @@ cop's HUD (hudcop.c, hudrender.c, hudscore.c), the setup screens
 - **12m-4 (done)** The Pre Race Blurb and the two-player You're The
   Cop screen (startrace.c, f3767e9; HANDOFF.md, "Session 79").
   startrace_check: 0 differ; 278 mutations, 274 caught, 4 equivalent.
-- **12m-5 (next)** A Be A Cop race from the frontend in Azahar: the chase,
-  the arrests, the clock, the end and the results. Fix what it shows.
-  Seen in 12m-3's run: the cop HUD's three helicopter and three
-  roadblock icons keep one colour after a call; check against retail.
-  The user's cop buttons (L target, R boost, ZL heli, ZR roadblock)
-  are TASKS 43, waiting on where look back, the e-brake and the
-  shifts go.
+- **12m-5 (done)** A Be A Cop race from the frontend in Azahar
+  (`tools/run_azahar_coprace.ps1`; HANDOFF.md, "Session 80"): the
+  chase, the calls, the clock, the end and the results, with no abort
+  since the IsBeingPursued seam. The icons go green to blue at a call,
+  as retail's code has them. The cop buttons are X target, L roadblock,
+  R helicopter (ce58fac). Not seen: an arrest, which the gas-only
+  script cannot make. Left of TASKS 43: the Blurb's PS2 glyphs.
+
+**Now (Session 80, 2026-10-12): TASKS 45, the slight polygon artifacts
+(the sun's glare has a hard, stepped edge), then TASKS 46, a smooth 30
+FPS with many cars and fog (the GPU plan of 2026-10-05), then step 14
+and task 38.** TASKS 42 (the Circle Pad in the menus) and 44 (the bottom
+screen laid out again) are done.
 
 **Now (Session 76, 2026-10-11): Be A Cop "100% working", the user's
 ask of 2026-10-11. TASKS 41 (the Starting Grid only once the race

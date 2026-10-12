@@ -5196,6 +5196,12 @@ static void pursuit_remove_cop_seam(tPursuit* p, tCop* c)
     tpursuit_remove_cop_from_pursuit(p, c);
 }
 
+// Car::PleaseResetMeLater tests IsBeingPursued's pursuit for nonzero.
+static int32_t copmanager_is_being_pursued_seam(tCopManager* m, Car* c)
+{
+    return copmanager_is_being_pursued(m, c) != NULL;
+}
+
 int main(int argc, char** argv)
 {
     (void)argc; (void)argv;
@@ -6045,6 +6051,8 @@ int main(int argc, char** argv)
     // A collision tells it of hits on the cars it is watching.
     gCopManagerMonitorImpactFn = copmgr_car_impact;
     gCopManagerGetCopByCarFn   = copmanager_get_cop_by_car;
+    // A chased racer in Be A Cop is not put back on the road (carrace.c).
+    gCopManagerIsBeingPursuedFn = copmanager_is_being_pursued_seam;
     // A hard enough hit on an AI cop's car disables it (cop.h).
     gAICopDisableMyCarFn       = cop_disable_my_car;
     // A cop leaving its chase, and a wreck's speaker change (pursuit.h).
@@ -6439,6 +6447,16 @@ int main(int argc, char** argv)
         MainLoopTiming.StartTime = bGetTicker();
         hidScanInput();
         u32 kDown = hidKeysDown();
+        // The Circle Pad moves through the menus as the D-pad does (TASKS
+        // 42). Only the flow's input hears it: a race steers with it, and
+        // the viewers pan with it.
+        u32 menuDown;
+        {
+            static JoyHidMenuPad menuPad;
+            circlePosition cp;
+            hidCircleRead(&cp);
+            menuDown = kDown | joyhid_menu_pad(&menuPad, cp.dx, cp.dy);
+        }
 
         // sound::Update (0x001af4c0): the regions' poll, then -- past its
         // 8 ms gate, which passes at any frame rate up to 125 -- the
@@ -6537,7 +6555,7 @@ int main(int argc, char** argv)
             // In the frontend the screens have the pad before the flow's
             // pass. A race's have it after the coordinator's queue and
             // the players' events, below.
-            if (!raceUp && flowInput(kDown)) redraw = 1;
+            if (!raceUp && flowInput(menuDown)) redraw = 1;
 
             // MainLoop: one pass of the flow per frame, by the real step.
             // bgf_frame is the flow's service and the menus' tick both.
@@ -6556,13 +6574,13 @@ int main(int argc, char** argv)
                 // resumes the race posts the unpause, and the players,
                 // still paused, let it go. Before the queue it would be
                 // racing again by the players' turn, and pause again.
-                if (flowInput(kDown)) redraw = 1;
+                if (flowInput(menuDown)) redraw = 1;
                 frameMark("race: the track's attach");
                 (void)raceAttachTrack();
             } else if (raceUp) {
                 // The coordinator went in the flow's pass (Quit Race's
                 // unloading): the pad is the screen's that is up.
-                if (flowInput(kDown)) redraw = 1;
+                if (flowInput(menuDown)) redraw = 1;
             } else if (g_flow.current == BGF_IN_FRONTEND) {
                 // MainLoop's UpdateCameraMovers, which raceFrame makes in
                 // a race; in the frontend the car select's camera is the
@@ -6690,10 +6708,13 @@ int main(int argc, char** argv)
             C2D_SceneBegin(g_bot);
             // In a race the bottom screen is the HUD's other half
             // (hudsplit.h), and the frontend's panel when the HUD is down.
+            if (PlayerNumPlayers == 1 && PlayerPlayersByIndex[0] != NULL)
+                hudsplit_set_features(
+                    PlayerPlayersByIndex[0]->CurrentHudFeatures);
             if (uirender_draw_visible_bottom(&ui, BOT_W, BOT_H, 1.0f)) {
                 // eDisplayFrame's RenderTrackMap for each player, after
-                // the Flailer layers: the minimap, made bigger in the
-                // bottom screen's free lower left (hudsplit_map_place).
+                // the Flailer layers: the minimap, made bigger under the
+                // bottom screen's top band (hudsplit_map_place).
                 if (g_track.loaded) {
                     float mapScale = 1.0f, mapDx = 0.0f, mapDy = 0.0f;
 
@@ -6713,6 +6734,8 @@ int main(int argc, char** argv)
                     C2D_Prepare();
                     C3D_DepthTest(false, GPU_GREATER, GPU_WRITE_COLOR);
                 }
+                // The score's event lines, over the map.
+                uirender_draw_visible_bottom_over(&ui, BOT_W, BOT_H, 1.0f);
             } else {
                 char        title[48];
                 const char* body = g_blurbShown;

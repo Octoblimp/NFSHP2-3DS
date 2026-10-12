@@ -88,6 +88,28 @@ uint32_t joyhid_cop_keys(JoyHidCop *c, uint32_t keys, int32_t on)
     return keys;
 }
 
+uint32_t joyhid_menu_pad(JoyHidMenuPad *p, int32_t cx, int32_t cy)
+{
+    int32_t  ax = cx < 0 ? -cx : cx;
+    int32_t  ay = cy < 0 ? -cy : cy;
+    uint32_t was = p->held;
+
+    if (p->held == JOYHID_DLEFT || p->held == JOYHID_DRIGHT) {
+        if (ax < JOYHID_MENU_RELEASE)
+            p->held = 0;
+    } else if (p->held != 0) {
+        if (ay < JOYHID_MENU_RELEASE)
+            p->held = 0;
+    }
+    if (p->held == 0) {
+        if (ax >= ay && ax > JOYHID_MENU_PRESS)
+            p->held = cx < 0 ? JOYHID_DLEFT : JOYHID_DRIGHT;
+        else if (ay > ax && ay > JOYHID_MENU_PRESS)
+            p->held = cy < 0 ? JOYHID_DDOWN : JOYHID_DUP;
+    }
+    return p->held != was ? p->held : 0;
+}
+
 void joyhid_build(const JoyHidState *s, uint8_t buf[32])
 {
     uint32_t buttons = 0xffff;   // active low

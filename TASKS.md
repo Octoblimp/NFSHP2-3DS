@@ -2390,7 +2390,7 @@ phases.
         packs are read in place first. On Azahar the Loading screen
         held at App 0 FPS, then the grid came up over the drawn fly-by
         at 30 FPS.
-42. [ ] **The Circle Pad in the menus.** Asked for on 2026-10-11 ("add
+42. [x] **The Circle Pad in the menus.** Asked for on 2026-10-11 ("add
         it later, I just want it known"): the Circle Pad should move
         through every menu as the D-Pad does, the frontend's screens,
         the pause menu, the end-of-race menus and the rest, so either
@@ -2405,6 +2405,14 @@ phases.
         the same way, keep its repeat no faster than the D-Pad's, and
         check on Azahar that the frontend, the pause menu and the
         results screens all scroll with the Circle Pad.
+        Done in Session 80, when the user asked again: every menu goes
+        through `flowInput`, so `joyhid_menu_pad` turns the stick into
+        one D-pad press per push (past 96, held until under 48, no
+        repeat), for `flowInput` only. joyhid_check passes, and 11
+        mutations are all caught. On Azahar the stick moved the
+        frontend's Cops On Mode Select and a race's pause menu one item
+        per push. The results screens take the same path.
+        (`docs/formats/joystick.md`)
 
 43. [ ] **The cop's buttons on the 3DS.** Asked for on 2026-10-11. In
         Be A Cop, in the cop's car:
@@ -2433,6 +2441,32 @@ phases.
         BeACopToggleSirenAndLights. Spike strips come laid by
         roadblocks (`CalculateRoadBlockAndSpikeBeltParameters`, the
         roadblock's 0x10 bit).
+
+44. [x] **The bottom screen laid out again.** Asked for on 2026-10-11:
+        "A bunch of black empty space. Maybe map in the middle, or
+        bottom middle, then you put everything else on top or on the
+        sides". Done in Session 80: a band along the top (the live
+        split list at the left, moved up when the race position shows,
+        the split times in the middle, the lap block, score or Be The
+        Cop's panel at the right), and the minimap under it, as big as
+        the room allows and centred. The score's event lines draw over
+        the map. Checked on Azahar in a Be A Cop race and a Hot Pursuit
+        quick race. (`docs/formats/hud-split.md`)
+
+45. [ ] **The slight polygon artifacts.** Asked for on 2026-10-12: "Can
+        you fix sometimes when there's slight polygon artifact". Seen in
+        Session 80's shots: facing the sun, its glare is a flat pale
+        blob with a hard, stepped edge, and a ray streak, where retail's
+        glare is soft (Coastal Parklands, and the quick race's track).
+        Find which layer or pass makes the edge and fix it, then look
+        for other artifacts the user may mean.
+
+46. [ ] **A smooth 30 FPS in busy scenes.** Asked for on 2026-10-12:
+        "optimize the game as much as possible so rendering where
+        there's a bunch of cars, fog etc. at once wont lag it? I want a
+        smooth 30 FPS". It follows the 2026-10-05 GPU plan (lossless
+        textures only, timing build first, then indexed meshes and
+        early depth) and the desert's lag near the end (2026-10-09).
 
 ### The retail frontend
 

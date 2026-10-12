@@ -27,9 +27,11 @@
 #define UIR_MAX_FONTS    16
 #define UIR_MAX_HIDDEN   8
 
-// The two screens an object can draw on. See UIPlacement.
-#define UIR_TARGET_TOP    0
-#define UIR_TARGET_BOTTOM 1
+// The two screens an object can draw on. See UIPlacement. BOTTOM_OVER is
+// the bottom screen too, drawn after the minimap, so it shows over it.
+#define UIR_TARGET_TOP         0
+#define UIR_TARGET_BOTTOM      1
+#define UIR_TARGET_BOTTOM_OVER 2
 
 // Where one object of one screen draws, or every object of one group:
 // the top screen or the bottom, moved by (dx, dy) in the screen's 640x480
@@ -333,4 +335,9 @@ void uirender_set_placements(UIRenderer* r, const UIPlacement* table, int n);
 // place and its 4:3 shape. Answers whether any such screen was visible.
 bool uirender_draw_visible_bottom(UIRenderer* r, float targetW,
                                   float targetH, float alpha);
+
+// The same for the objects placed on UIR_TARGET_BOTTOM_OVER, drawn after
+// whatever the caller put over the bottom screen's objects.
+void uirender_draw_visible_bottom_over(UIRenderer* r, float targetW,
+                                       float targetH, float alpha);
 #endif  // __3DS__

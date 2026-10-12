@@ -456,6 +456,52 @@ int main(void)
     expect("C-Stick down", JOY_EVENT_BRAKE_ANALOG_ALTERNATE, 250, 255);
     release();
 
+    // The Circle Pad as the menus' D-pad (TASKS 42).
+    {
+        static const struct {
+            const char *what;
+            int32_t     cx, cy;
+            uint32_t    want;
+        } steps[] = {
+            { "menu pad centred",          0,    0,    0 },
+            { "menu pad short of a press", 96,   0,    0 },
+            { "menu pad right",            97,   0,    JOYHID_DRIGHT },
+            { "menu pad right held",       156,  20,   0 },
+            { "menu pad eased off",        48,   0,    0 },
+            { "menu pad out from 48",      120,  0,    0 },
+            { "menu pad let go",           47,   0,    0 },
+            { "menu pad short up",         0,    90,   0 },
+            { "menu pad short up let go",  0,    0,    0 },
+            { "menu pad right again",      120,  0,    JOYHID_DRIGHT },
+            { "menu pad back to centre",   0,    0,    0 },
+            { "menu pad left",             -130, 10,   JOYHID_DLEFT },
+            { "menu pad left to up",       -40,  140,  JOYHID_DUP },
+            { "menu pad up held",          30,   60,   0 },
+            { "menu pad up eased to 48",   0,    48,   0 },
+            { "menu pad up out again",     0,    130,  0 },
+            { "menu pad up to right",      150,  47,   JOYHID_DRIGHT },
+            { "menu pad centre",           0,    0,    0 },
+            { "menu pad down",             0,    -100, JOYHID_DDOWN },
+            { "menu pad down held",        90,   -95,  0 },
+            { "menu pad centre again",     0,    0,    0 },
+            { "menu pad diagonal",         110,  110,  JOYHID_DRIGHT },
+            { "menu pad centre last",      0,    0,    0 },
+            { "menu pad steeper up",       100,  110,  JOYHID_DUP },
+        };
+        JoyHidMenuPad mp;
+
+        memset(&mp, 0, sizeof mp);
+        for (size_t i = 0; i < sizeof steps / sizeof steps[0]; i++) {
+            uint32_t got = joyhid_menu_pad(&mp, steps[i].cx, steps[i].cy);
+
+            if (got != steps[i].want) {
+                printf("FAIL %s: %#x, want %#x\n", steps[i].what,
+                       (unsigned)got, (unsigned)steps[i].want);
+                failures++;
+            }
+        }
+    }
+
     CloseJoystick();
     if (failures) {
         printf("%d failed\n", failures);

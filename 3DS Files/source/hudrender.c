@@ -106,9 +106,9 @@ static int32_t sTimerWarningSecond;
 #define COLOUR_LAP_COUNTDOWN 0x402aae01u
 #define COLOUR_TYRE_GRIP     0x80008000u
 #define COLOUR_TYRE_SLIP     0x80000080u
-#define COLOUR_BTC_USED      0xff005000u
-#define COLOUR_BTC_COMING    0xff500000u
-#define COLOUR_BTC_LEFT      0xff000050u
+#define COLOUR_BTC_READY     0xff005000u   // green: still to call
+#define COLOUR_BTC_COMING    0xff500000u   // blue: on its way
+#define COLOUR_BTC_SPENT     0xff000050u   // red: called and gone
 #define COLOUR_DAMAGE_ON     0xff000070u
 #define COLOUR_DAMAGE_OFF    0xff000020u
 #define COLOUR_TRACK_RACER   0xff0035acu
@@ -861,13 +861,13 @@ static int can_call_helicopter(const tCopManager *m)
 }
 
 // Be The Cop's panel, 0x00180478 to 0x001808b0: the time left, the
-// helicopters and roadblocks used, coming and left, the chased car's
+// helicopters and roadblocks left, coming and spent, the chased car's
 // damage and the tickets given.
 static void render_be_the_cop(struct Player *p, tCopManager *m)
 {
     const tCopManagerHead *h = copmanager_head(m);
     float secs = copmanager_float(m, COPMANAGER_BEACOP_TIME);
-    int32_t used, i, max, sum;
+    int32_t left, i, max, sum;
     tPursuit *pur;
     char buf[32];
 
@@ -875,13 +875,14 @@ static void render_be_the_cop(struct Player *p, tCopManager *m)
              (double)secs);
     set_string(p->pFlailerBeTheCopTime, buf);
 
-    // Retail's loops read past the three for a count over three; the
-    // port's stop at three.
-    used = copmanager_word(m, COPMANAGER_BEACOP_CHOPPERS);
-    for (i = 0; i < used && i < 3; i++)
-        set_bitmap_colour(p->pFlailerBeTheCopHelicopter[i], COLOUR_BTC_USED);
-    if (i < used)
-        i = used;
+    // The counts are the calls left: three at the start, one less for
+    // each call (pursuit.c, pursuitchopper.c). Retail's loops read past
+    // the three for a count over three; the port's stop at three.
+    left = copmanager_word(m, COPMANAGER_BEACOP_CHOPPERS);
+    for (i = 0; i < left && i < 3; i++)
+        set_bitmap_colour(p->pFlailerBeTheCopHelicopter[i], COLOUR_BTC_READY);
+    if (i < left)
+        i = left;
     if (!can_call_helicopter(m)) {
         if (i < 3)
             set_bitmap_colour(p->pFlailerBeTheCopHelicopter[i],
@@ -889,13 +890,13 @@ static void render_be_the_cop(struct Player *p, tCopManager *m)
         i++;
     }
     for (; i < 3; i++)
-        set_bitmap_colour(p->pFlailerBeTheCopHelicopter[i], COLOUR_BTC_LEFT);
+        set_bitmap_colour(p->pFlailerBeTheCopHelicopter[i], COLOUR_BTC_SPENT);
 
-    used = h->nBeACopNumRoadBlocks;
-    for (i = 0; i < used && i < 3; i++)
-        set_bitmap_colour(p->pFlailerBeTheCopRoadblock[i], COLOUR_BTC_USED);
-    if (i < used)
-        i = used;
+    left = h->nBeACopNumRoadBlocks;
+    for (i = 0; i < left && i < 3; i++)
+        set_bitmap_colour(p->pFlailerBeTheCopRoadblock[i], COLOUR_BTC_READY);
+    if (i < left)
+        i = left;
     pur = player_cop_pursuit(m);
     if (pur != NULL && pur->RoadBlockStateMachine.State != ERBS_NONE) {
         if (i < 3)
@@ -904,7 +905,7 @@ static void render_be_the_cop(struct Player *p, tCopManager *m)
         i++;
     }
     for (; i < 3; i++)
-        set_bitmap_colour(p->pFlailerBeTheCopRoadblock[i], COLOUR_BTC_LEFT);
+        set_bitmap_colour(p->pFlailerBeTheCopRoadblock[i], COLOUR_BTC_SPENT);
 
     if (p->MyCar != NULL) {
         float v = 0.0f;

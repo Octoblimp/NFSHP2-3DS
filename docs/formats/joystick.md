@@ -275,6 +275,38 @@ a Be A Cop race when player 1's car is the player cop's, and
 The D-pad steers as in any race, Up still cycles the HUD and Down is
 still the nitro (R3).
 
+**The Circle Pad in the menus.** TASKS 42, asked for on 2026-10-11: the
+Circle Pad moves through every menu as the D-pad does. The port's menus
+read the 3DS keys, not the joystick layer's events (`main.c`'s
+`flowInput`, for the frontend, the pause and the screens after a race),
+so nothing heard the stick's `MENU_ANALOG_*` rows. `joyhid_menu_pad`
+turns each reading of the Circle Pad into a D-pad press:
+
+- The farther axis picks the direction once the stick is past
+  `JOYHID_MENU_PRESS` (96) on it.
+- That direction is held until its axis falls under
+  `JOYHID_MENU_RELEASE` (48). The gap keeps a stick resting near the edge
+  from pressing over and over.
+- A push is one press, as the D-pad's is. Nothing repeats while it is
+  held.
+
+The main loop ORs the newly pressed direction into the frame's presses,
+but only for `flowInput`. A race steers with the stick and the viewers
+pan with it, so neither hears it. The pad's state is kept every frame, so
+a stick held from the race into the pause presses nothing until it goes
+back past the release and out again. `joyhid_check.py` walks the stick
+through presses, holds, the gap, a change of direction without passing
+the centre, and the diagonals. Eleven mutations of `joyhid_menu_pad` are
+all caught.
+
+On Azahar, whose Circle Pad is the arrow keys:
+
+- `run_azahar_coprace.ps1 -CirclePad`: one push down moved Cops On Mode
+  Select from item 1 to item 2 (You're The Cop), with no second step.
+- `run_azahar_quickrace.ps1 -Presses "77:5,40:5,40:5,38:5,38:5,77:5"`:
+  in a race's pause menu, down, down, up, up went through items 1, 2, 3,
+  2 and 1, and START resumed the race.
+
 `joyhid_check.py` presses each key and stick through `joyhid_build`, the
 ring, the scanners and the tables, and checks that each raises the event
 above -- including that X + ZL is the zone freeze and not a downshift,
