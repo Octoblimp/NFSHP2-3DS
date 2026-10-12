@@ -7,15 +7,17 @@ renderer (`3DS Files/source/uirender.c`) is written against -- same
 geometry, same justification, same fixed-width cells, same PS2 colour scale,
 including the two places where the engine does something surprising:
 
-  * `RenderCharacter` (0x0013f698) multiplies a glyph's width by `ScaleX`
-    *twice* while scaling its height once and advancing the pen once.
-  * `RenderStringFixedWidth` (0x0013fb78) centres each glyph in a cell of
+  * `RenderCharacter` (retail 0x00141a98) multiplies a glyph's width by
+    `ScaleX` *twice* while scaling its height once. Fixed-width text and the
+    button icons go through it; proportional text (`Render`, 0x001422f0)
+    draws its own quad at `ScaleX` once.
+  * `RenderStringFixedWidth` (0x00141f70) centres each glyph in a cell of
     `Font::FixedWidthCell` and adds the centring term *unscaled* to an
     already-scaled pen.
 
 Both are reproduced rather than corrected, because the screens were laid out
 with them on the screen. Pass --fix-scale to see what the pages look like
-without the first one.
+without the first one. No path adds a glyph's mOffset.
 
 Usage:
     python tools/flailer_render.py extracted/FRONTEND/FRONTB.BUN 0 -o out.png
@@ -37,10 +39,12 @@ import language_dump as ld                      # noqa: E402
 import texture_convert as tc                    # noqa: E402
 from bhash import bhash                         # noqa: E402
 
-# IsHelpCharacter (0x0013f9a8) is (u8)(c - 128) < 18; RenderHelpCharacter
-# maps each to a BUTTONSOUT glyph through the table at 0x002e8a10.
+# Retail's IsHelpCharacter (0x00141db0) is (u8)(c + 128) < 30 && c != 0x92;
+# RenderHelpCharacter maps each to a BUTTONSOUT glyph through the table at
+# 0x002f09c0, and BUTTONSOUT has only 'a' to 'o'.
 HELP_FIRST = 0x80
-HELP_GLYPH = "abdefgijhknolmcccc"
+HELP_GLYPH = "abdefgijhknolm3wpv\x92uqrtscx2yz1"
+KERN_LIMIT = 80.0       # Render drops a scaled kerning step past this
 HELP_FONT_HASH = 0xB85DE386             # bStringHash("BUTTONSOUT")
 
 # Font::FixedWidthCell = GetWidestCharacter(this, this string).
@@ -288,55 +292,52 @@ def render_screen(bundles, screen, lang, fix_scale=False, alpha=1.0):
                 pen -= width
             elif o["format_options"] & FMT_CENTER:
                 pen -= width * 0.5
-            if o["format_options"] & FMT_DARKBG:
-                canvas.rect(pen, o["top_left_y"], width,
-                            font.height * o["scale_y"], (0, 0, 0, 160))
+            # FMT_DARKBG's RenderDarkBackground (0x00142110) draws only
+            # with its texture at gp-22416 set, and nothing sets it.
 
             color = ps2_color(o["color"])
             sheet = find_texture(o["font_hash"])
-            prev = None
-            for ch in text:
+            sx, sy, y = o["scale_x"], o["scale_y"], o["top_left_y"]
+            # RenderCharacter's glyph width: ScaleX twice.
+            cw = 1.0 if fix_scale else sx
+            for i, ch in enumerate(text):
                 c = ord(ch)
-                if HELP_FIRST <= c < HELP_FIRST + len(HELP_GLYPH):
+                g = font.glyphs[font.by_id[c]] if c in font.by_id else None
+                if fixed:
+                    # RenderStringFixedWidth: no help characters.
+                    if g is None or not sheet:
+                        continue
+                    inset = (font.fixed_cell - g["advance"]) * 0.5
+                    draw_sprite(canvas, sheet, g["x"], g["y"], g["width"],
+                                g["height"], pen + inset, y,
+                                g["width"] * sx * cw, g["height"] * sy,
+                                [color] * 4, alpha)
+                    pen += font.fixed_cell * sx
+                    continue
+                if (HELP_FIRST <= c < HELP_FIRST + len(HELP_GLYPH)
+                        and c != 0x92):
                     hf = find_font(HELP_FONT_HASH)
                     hs = find_texture(HELP_FONT_HASH)
                     gid = ord(HELP_GLYPH[c - HELP_FIRST])
                     if hf and hs and gid in hf.by_id:
-                        g = hf.glyphs[hf.by_id[gid]]
-                        draw_sprite(canvas, hs, g["x"], g["y"], g["width"],
-                                    g["height"], pen,
-                                    o["top_left_y"] + g["offset"] * o["scale_y"],
-                                    g["width"] * o["scale_x"],
-                                    g["height"] * o["scale_y"],
+                        hg = hf.glyphs[hf.by_id[gid]]
+                        draw_sprite(canvas, hs, hg["x"], hg["y"],
+                                    hg["width"], hg["height"], pen, y,
+                                    hg["width"] * sx * cw, hg["height"] * sy,
                                     [color] * 4, alpha)
-                        pen += g["advance"] * o["scale_x"]
-                    prev = None
+                        pen += hg["advance"]          # unscaled
                     continue
-                if c not in font.by_id or not sheet:
-                    prev = None
+                if g is None or not sheet:
                     continue
-                g = font.glyphs[font.by_id[c]]
-                if fixed:
-                    inset = (font.fixed_cell - g["advance"]) * 0.5
-                    draw_sprite(canvas, sheet, g["x"], g["y"], g["width"],
-                                g["height"], pen + inset,
-                                o["top_left_y"] + g["offset"] * o["scale_y"],
-                                g["width"] * o["scale_x"],
-                                g["height"] * o["scale_y"], [color] * 4, alpha)
-                    pen += font.fixed_cell * o["scale_x"]
-                    prev = None
-                    continue
-                if prev is not None:
-                    pen += font.kerning(prev, c) * o["scale_x"]
-                gw = g["width"] * o["scale_x"]
-                if not fix_scale:
-                    gw *= o["scale_x"]       # the 0x0013f794 double multiply
+                kern = 0.0
+                if i > 0:
+                    kern = font.kerning(ord(text[i - 1]), c) * sx
+                    if abs(kern) > KERN_LIMIT:
+                        kern = 0.0
                 draw_sprite(canvas, sheet, g["x"], g["y"], g["width"],
-                            g["height"], pen,
-                            o["top_left_y"] + g["offset"] * o["scale_y"],
-                            gw, g["height"] * o["scale_y"], [color] * 4, alpha)
-                pen += g["advance"] * o["scale_x"]
-                prev = c
+                            g["height"], pen + kern, y, g["width"] * sx,
+                            g["height"] * sy, [color] * 4, alpha)
+                pen += sx * (g["advance"] + kern)
     return canvas, missing
 
 
@@ -380,7 +381,8 @@ def main():
                     help="another bundle to resolve hashes against (repeatable)")
     ap.add_argument("--language", help=r"LANGUAGES\FE_*.BIN")
     ap.add_argument("--fix-scale", action="store_true",
-                    help="drop the engine's duplicate ScaleX on glyph width")
+                    help="drop RenderCharacter's duplicate ScaleX on glyph "
+                         "width (fixed-width text and button icons)")
     ap.add_argument("--menu-item", type=int, default=None,
                     metavar="N",
                     help="highlight MENUITEM_N as the menu system would")

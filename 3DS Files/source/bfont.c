@@ -69,22 +69,28 @@ float bfont_kerning(const BFont* f, int prev, int ch)
 {
     if (!f->kerning) return 0.0f;
 
+    // Font::GetKerning (0x00140098) takes the glyph being drawn and the
+    // byte before it: the run hangs off the *following* glyph and each
+    // pair's mGlyph names the character that precedes it. FONT_A's 'o'
+    // lists T, Y, F, V and W, its '.' lists T, P, V, Y and r. The compare
+    // is the low byte of mGlyph (lbu) against (u8)prev, and the count is
+    // read signed (lh, blez).
     BGlyph g;
-    if (!bfont_glyph(f, prev, &g)) return 0.0f;
-    if (g.kernPairs == 0) return 0.0f;
-    if ((size_t)g.kernFirst + g.kernPairs > f->numKerning) return 0.0f;
+    if (!bfont_glyph(f, ch, &g)) return 0.0f;
+    int pairs = (int16_t)g.kernPairs;
+    if (pairs <= 0) return 0.0f;
 
     // mKerningTable holds a pair *index*, not a byte offset: the runs are
     // laid out in glyph order and each glyph's mKerningTable is the running
     // total of the pairs before it. Verified on all 11 fonts on disc.
     // (FONT_EVENTNUMBERS and FONT_POSITION declare pairs in the header that
     // no glyph claims -- reserved space, which per-glyph counts step over.)
-    //
-    // tTTKerningPair is { u32 mGlyph; f32 mXOffset; } and mGlyph is the
-    // *following* character, so a run hangs off the glyph that precedes it.
+    // Retail does not bound the run; the check is the port's.
+    if ((size_t)g.kernFirst + (size_t)pairs > f->numKerning) return 0.0f;
+
     const uint8_t* k = f->kerning + (size_t)g.kernFirst * KERN_SIZE;
-    for (uint32_t i = 0; i < g.kernPairs; i++) {
-        if ((int)bchunk_u32(k + (size_t)i * KERN_SIZE) == ch)
+    for (int i = 0; i < pairs; i++) {
+        if (k[(size_t)i * KERN_SIZE] == (uint8_t)prev)
             return bchunk_f32(k + (size_t)i * KERN_SIZE + 4);
     }
     return 0.0f;
@@ -92,15 +98,13 @@ float bfont_kerning(const BFont* f, int prev, int ch)
 
 float bfont_measure(const BFont* f, const char* s, size_t len)
 {
+    // GetScaledWidth (0x00140d30) and GetStringWidth (0x00144e28) sum the
+    // advances of the characters that have a glyph. No kerning: the pen
+    // moves by it but the measure does not.
     float total = 0.0f;
-    int   prev  = -1;
     for (size_t i = 0; i < len && s[i]; i++) {
-        int ch = (unsigned char)s[i];
         BGlyph g;
-        if (!bfont_glyph(f, ch, &g)) { prev = -1; continue; }
-        if (prev >= 0) total += bfont_kerning(f, prev, ch);
-        total += g.advance;
-        prev = ch;
+        if (bfont_glyph(f, (unsigned char)s[i], &g)) total += g.advance;
     }
     return total;
 }

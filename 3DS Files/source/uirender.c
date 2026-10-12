@@ -2,6 +2,7 @@
 
 #ifdef __3DS__
 #include <malloc.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,14 +11,24 @@
 #include "georender.h"
 #include "hudtach.h"
 
-// RenderHelpCharacter (0x0013f9b8) hashes this name and calls FindFont.
+// RenderHelpCharacter (retail 0x00141dd8) hashes this name and calls
+// FindFont.
 #define HELP_FONT_HASH 0xb85de386u   // bStringHash("BUTTONSOUT")
 
-// The 18-byte table at 0x002e8a10: help character 0x80+i draws this glyph.
+// The 30-byte table at retail 0x002f09c0: help character 0x80+i draws this
+// glyph of BUTTONSOUT. BUTTONSOUT has only 'a' to 'o', so 0x8e and up find
+// no glyph and draw nothing, and 0x92 is not a help character at all.
 static const uint8_t kHelpGlyph[UIR_HELP_COUNT] = {
-    'a', 'b', 'd', 'e', 'f', 'g', 'i', 'j', 'h',
-    'k', 'n', 'o', 'l', 'm', 'c', 'c', 'c', 'c',
+    'a', 'b', 'd', 'e', 'f', 'g', 'i', 'j', 'h', 'k',
+    'n', 'o', 'l', 'm', '3', 'w', 'p', 'v', 0x92, 'u',
+    'q', 'r', 't', 's', 'c', 'x', '2', 'y', 'z', '1',
 };
+
+// IsHelpCharacter (retail 0x00141db0): (u8)(c + 128) < 30 && c != 0x92.
+static bool is_help_char(unsigned char c)
+{
+    return (unsigned char)(c - UIR_HELP_FIRST) < UIR_HELP_COUNT && c != 0x92;
+}
 
 // Font::FixedWidthCell is GetWidestCharacter(this, "1234567890:- ") -- the
 // widest mAdvance among those characters (Font::Font, 0x0013dd60).
@@ -25,7 +36,8 @@ static const char kFixedWidthSet[] = "1234567890:- ";
 
 // gp-relative globals the renderer reads. All are initialised data and
 // nothing on this disc writes any of them, so they are constants here.
-//   KerningEnabled           1
+//   KerningEnabled           1  -- the demo's; retail's Render kerns
+//                                  without reading it
 //   RenderFixedWidthStrings  1
 //   TranslationEnable        1
 //   ColonCrapola             0  -- so ':' and '.' get a fixed cell like every
@@ -33,6 +45,10 @@ static const char kFixedWidthSet[] = "1234567890:- ";
 //                                  behind that flag is dead code.
 #define KERNING_ENABLED 1
 #define COLON_CRAPOLA   0
+
+// Render (retail 0x0014261c) drops a kerning step bigger than this, after
+// ScaleX.
+#define KERN_LIMIT 80.0f
 
 // ---------------------------------------------------------------------------
 // Bundles
@@ -608,14 +624,14 @@ static const char* object_text(UIRenderer* r, const BUIObject* o,
     return o->string;
 }
 
-// GetScaledWidth (0x0013e8b0): sum the advances, then scale once.
+// GetScaledWidth (retail 0x00140d30): sum the advances, then scale once.
 static float measure(UIFont* f, const char* s, size_t len, float scaleX,
                      bool fixedWidth)
 {
     if (!fixedWidth) return bfont_measure(&f->font, s, len) * scaleX;
 
-    // GetFixedWidthStringWidth (0x0013faa8): one cell per character that has
-    // a glyph. ColonCrapola would give ':' and '.' their own advance instead,
+    // GetFixedWidthStringWidth (retail 0x00141ec8): one cell per character
+    // that has a glyph. ColonCrapola would give ':' and '.' their own advance instead,
     // but it is 0 in this build and nothing ever writes it.
     float total = 0.0f;
     for (size_t i = 0; i < len; i++) {
@@ -654,6 +670,37 @@ static void draw_glyph(UIRenderer* r, UIFont* f, const BGlyph* g, float x,
     draw_image(img, &p, &tint, gs);
 }
 
+// RenderCharacter (retail 0x00141a98): the glyph's sheet rectangle at the
+// pen, its width times ScaleX *twice* (mul.s at 0x00141b58 and again at
+// 0x00141b9c) and its height times ScaleY once, with no mOffset. That is a
+// shipped bug the screens were laid out with, so it stays. Fixed-width text
+// and the button icons go through here; proportional text does not.
+static void draw_character(UIRenderer* r, UIFont* f, const BGlyph* g,
+                           float x, float y, const BUIObject* o,
+                           uint32_t color, const UIView* v)
+{
+    draw_glyph(r, f, g, x, y, g->width * o->scaleX * o->scaleX,
+               g->height * o->scaleY, color, v, true);
+}
+
+// RenderHelpCharacter (retail 0x00141dd8): the BUTTONSOUT glyph for help
+// character `c` at the pen, through RenderCharacter. Returns the glyph's
+// advance *unscaled*, which the callers add to a scaled pen; 0 when the
+// font or the glyph is missing.
+static float draw_help_character(UIRenderer* r, unsigned char c, float x,
+                                 float y, const BUIObject* o, uint32_t color,
+                                 const UIView* v)
+{
+    UIFont* hf = find_font(r, HELP_FONT_HASH);
+    BGlyph  hg;
+    if (!hf || !font_sheet(r, hf)) return 0.0f;
+    if (!bfont_glyph(&hf->font, kHelpGlyph[c - UIR_HELP_FIRST], &hg))
+        return 0.0f;
+    draw_character(r, hf, &hg, x, y, o, color, v);
+    return hg.advance;
+}
+
+// Render__16FlailerTextChunk (retail 0x001422f0).
 static void draw_text(UIRenderer* r, const BUIObject* o, const UIView* v)
 {
     UIFont* f = find_font(r, o->fontHash);
@@ -663,76 +710,62 @@ static void draw_text(UIRenderer* r, const BUIObject* o, const UIView* v)
     const char* s   = object_text(r, o, &len);
     if (!s || len == 0) return;
 
-    bool  fixed = (o->format & BUI_FMT_FIXEDWIDTH) != 0;
-    float width = measure(f, s, len, o->scaleX, fixed);
+    bool     fixed = (o->format & BUI_FMT_FIXEDWIDTH) != 0;
+    float    width = measure(f, s, len, o->scaleX, fixed);
+    uint32_t color = tint_color(o->color, v->alpha);
 
-    // Render__16FlailerTextChunk (0x0013ff40): right subtracts the whole
-    // width, centre subtracts half. Declaration order says otherwise and
-    // would right-align every centred label in the game.
+    // Right subtracts the whole width, centre subtracts half. Declaration
+    // order says otherwise and would right-align every centred label in the
+    // game. RenderStringFixedWidth (0x00141f70) does the same with its own
+    // width.
     float penX = o->x;
     if (o->format & BUI_FMT_RIGHT)       penX -= width;
     else if (o->format & BUI_FMT_CENTER) penX -= width * 0.5f;
 
-    if (o->format & BUI_FMT_DARKBG) {
-        // RenderDarkBackground (0x0013fd80) puts a plain dark quad behind the
-        // run. Only 32 objects use it and all of them are left-justified.
-        C2D_DrawRectSolid(v->originX + penX * v->scaleX,
-                          v->originY + o->y * v->scaleY, 0.0f,
-                          width * v->scaleX,
-                          f->font.height * o->scaleY * v->scaleY,
-                          C2D_Color32(0, 0, 0, (uint8_t)(160.0f * v->alpha)));
-    }
+    // BUI_FMT_DARKBG calls RenderDarkBackground (0x00142110), which draws
+    // only when its texture at gp-22416 is set, and nothing on the disc
+    // sets it. (Only the debug ScreenPrintf screen has the flag.)
 
-    int prev = -1;
     for (size_t i = 0; i < len; i++) {
         unsigned char ch = (unsigned char)s[i];
-
-        // 0x80..0x91 are button icons drawn from BUTTONSOUT, not text:
-        // IsHelpCharacter (0x0013f9a8) is exactly (u8)(c - 128) < 18.
-        if ((unsigned)(ch - UIR_HELP_FIRST) < UIR_HELP_COUNT) {
-            UIFont* hf = find_font(r, HELP_FONT_HASH);
-            BGlyph  hg;
-            if (hf && bfont_glyph(&hf->font, kHelpGlyph[ch - UIR_HELP_FIRST],
-                                  &hg)) {
-                draw_glyph(r, hf, &hg, penX, o->y + hg.offset * o->scaleY,
-                           hg.width * o->scaleX, hg.height * o->scaleY,
-                           tint_color(o->color, v->alpha), v, true);
-                penX += hg.advance * o->scaleX;
-            }
-            prev = -1;
-            continue;
-        }
-
-        BGlyph g;
-        if (!bfont_glyph(&f->font, ch, &g)) { prev = -1; continue; }
+        BGlyph        g;
 
         if (fixed) {
-            // RenderStringFixedWidth (0x0013fb78) centres each glyph in a
-            // cell of FixedWidthCell and advances by ScaleX * the cell. The
-            // centring term is *not* scaled -- the engine adds it to an
-            // already-scaled pen -- so this leaves it unscaled too.
+            // RenderStringFixedWidth centres each glyph in a cell of
+            // FixedWidthCell and advances by ScaleX * the cell. The centring
+            // term is *not* scaled -- the engine adds it to an already-
+            // scaled pen -- so this leaves it unscaled too. It has no help
+            // characters.
+            if (!bfont_glyph(&f->font, ch, &g)) continue;
             float inset = (f->fixedCell - g.advance) * 0.5f;
-            draw_glyph(r, f, &g, penX + inset, o->y + g.offset * o->scaleY,
-                       g.width * o->scaleX, g.height * o->scaleY,
-                       tint_color(o->color, v->alpha), v, true);
+            draw_character(r, f, &g, penX + inset, o->y, o, color, v);
             penX += f->fixedCell * o->scaleX;
-            prev = -1;
             continue;
         }
 
-        if (KERNING_ENABLED && prev >= 0)
-            penX += bfont_kerning(&f->font, prev, ch) * o->scaleX;
+        // The button icons are tested before the glyph, so one draws even
+        // where the text's own font has no glyph for its code.
+        if (is_help_char(ch)) {
+            penX += draw_help_character(r, ch, penX, o->y, o, color, v);
+            continue;
+        }
+        if (!bfont_glyph(&f->font, ch, &g)) continue;
 
-        // RenderCharacter (0x0013f698) multiplies the glyph's width by ScaleX
-        // *twice* -- mul.s at 0x0013f750 and again at 0x0013f794 -- while the
-        // height is scaled once and the pen advances once. That is a shipped
-        // bug, and the screens were laid out with it on screen, so it is
-        // reproduced here rather than quietly corrected.
-        draw_glyph(r, f, &g, penX, o->y + g.offset * o->scaleY,
-                   g.width * o->scaleX * o->scaleX, g.height * o->scaleY,
-                   tint_color(o->color, v->alpha), v, true);
-        penX += g.advance * o->scaleX;
-        prev = ch;
+        // GetKerning against the byte before, whatever it was: a button
+        // icon or a character with no glyph still counts as the previous
+        // one. Retail scales it, drops it past KERN_LIMIT, then scales the
+        // sum of advance and kerning again for the pen.
+        float kern = 0.0f;
+        if (i > 0) {
+            kern = bfont_kerning(&f->font, (unsigned char)s[i - 1], ch)
+                   * o->scaleX;
+            if (fabsf(kern) > KERN_LIMIT) kern = 0.0f;
+        }
+
+        // The proportional path draws the glyph itself, at ScaleX once.
+        draw_glyph(r, f, &g, penX + kern, o->y, g.width * o->scaleX,
+                   g.height * o->scaleY, color, v, true);
+        penX += o->scaleX * (g.advance + kern);
     }
 }
 
@@ -763,7 +796,7 @@ static UIFont* wrap_font(UIRenderer* r, const UIWrapStyle* st)
 static bool wrap_glyph(UIRenderer* r, UIFont* f, unsigned char ch,
                        UIFont** outFont, BGlyph* out)
 {
-    if ((unsigned)(ch - UIR_HELP_FIRST) < UIR_HELP_COUNT) {
+    if (is_help_char(ch)) {
         UIFont* hf = find_font(r, HELP_FONT_HASH);
         if (!hf) return false;
         *outFont = hf;
@@ -884,7 +917,7 @@ static float wrap_run(UIRenderer* r, const char* text, size_t len,
                 if (!wrap_glyph(r, f, ch, &gf, &g)) { prev = -1; continue; }
                 if (KERNING_ENABLED && prev >= 0 && gf == f)
                     penX += bfont_kerning(&f->font, prev, ch) * scale;
-                draw_glyph(r, gf, &g, penX, top + g.offset * scale,
+                draw_glyph(r, gf, &g, penX, top,
                            g.width * scale, g.height * scale, color, &v,
                            false);
                 penX += g.advance * scale;

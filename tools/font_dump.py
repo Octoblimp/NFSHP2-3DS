@@ -57,34 +57,34 @@ class Font(object):
                     advance=adv, offset=voff, first=first)
 
     def kerning(self, prev, ch):
-        """mXOffset to add before drawing `ch` when it follows `prev`."""
-        i = self.by_id.get(prev)
+        """mXOffset to add before drawing `ch` when it follows `prev`.
+
+        Font::GetKerning (0x00140098): the pairs are `ch`'s own, and each
+        pair's mGlyph names the character before it, matched on its low
+        byte against (u8)prev. The count is read signed."""
+        i = self.by_id.get(ch)
         if i is None:
             return 0.0
         g = self.glyphs[i]
-        if not g["pairs"] or g["first"] + g["pairs"] > self.num_kerning:
+        pairs = g["pairs"] - 0x10000 if g["pairs"] & 0x8000 else g["pairs"]
+        if pairs <= 0 or g["first"] + pairs > self.num_kerning:
             return 0.0
         base = self.kern_off + g["first"] * KERN_SIZE
-        for k in range(g["pairs"]):
+        for k in range(pairs):
             who, amount = struct.unpack_from("<If", self.chunk,
                                              base + k * KERN_SIZE)
-            if who == ch:
+            if who & 0xFF == prev & 0xFF:
                 return amount
         return 0.0
 
     def measure(self, text):
-        """Font::GetScaledWidth()'s sum, before the object's ScaleX."""
+        """Font::GetScaledWidth()'s sum, before the object's ScaleX: the
+        advances of the characters with a glyph, no kerning."""
         total = 0.0
-        prev = None
         for ch in text:
-            c = ord(ch)
-            if c not in self.by_id:
-                prev = None
-                continue
-            if prev is not None:
-                total += self.kerning(prev, c)
-            total += self.glyphs[self.by_id[c]]["advance"]
-            prev = c
+            i = self.by_id.get(ord(ch))
+            if i is not None:
+                total += self.glyphs[i]["advance"]
         return total
 
     def accounts_for_chunk(self):

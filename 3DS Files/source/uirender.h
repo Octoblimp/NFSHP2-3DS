@@ -42,11 +42,12 @@ typedef struct {
     float    dx, dy;
 } UIPlacement;
 
-// The button icons embedded in UI strings. IsHelpCharacter (0x0013f9a8) is
-// literally `(u8)(c - 128) < 18`, and RenderHelpCharacter maps each to a
-// glyph of the BUTTONSOUT font through an 18-byte table at 0x002e8a10.
+// The button icons embedded in UI strings. Retail's IsHelpCharacter
+// (0x00141db0) is `(u8)(c + 128) < 30 && c != 0x92`, and RenderHelpCharacter
+// maps each to a glyph of the BUTTONSOUT font through a 30-byte table at
+// 0x002f09c0. (The demo's was 18 wide.)
 #define UIR_HELP_FIRST 0x80
-#define UIR_HELP_COUNT 18
+#define UIR_HELP_COUNT 30
 
 #ifdef __3DS__
 #include <citro2d.h>

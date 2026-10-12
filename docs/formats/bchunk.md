@@ -181,7 +181,12 @@ before it -- `FONT_A`'s first four glyphs read 0, 1, 18, 25 against counts of
 1, 17, 7, 16. Verified on all 11 chunks.
 
 `tTTKerningPair` is `{u32 mGlyph; f32 mXOffset;}` and `mGlyph` is the
-*following* character, so a run hangs off the glyph that precedes it.
+*preceding* character, so a run hangs off the glyph it is drawn before.
+Font::GetKerning (retail `0x00140098`) walks the pairs of the glyph being
+drawn and matches each `mGlyph`'s low byte against the previous byte of the
+string. The data agrees: `FONT_A`'s `o` lists `T`, `Y`, `F`, `V` and `W`,
+and its `.` lists `T`, `P`, `V`, `Y` and `r`. (The port read it the other
+way round until Session 78.)
 
 Two fonts declare pairs that no glyph claims: `FONT_EVENTNUMBERS` (10 glyphs,
 50 pairs) and `FONT_POSITION` (9 glyphs, 84 pairs) have `mNumKerningPairs`

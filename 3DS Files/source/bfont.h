@@ -52,9 +52,11 @@ bool bfont_parse(BFont* f, const uint8_t* payload, uint32_t size);
 bool bfont_glyph(const BFont* f, int ch, BGlyph* out);
 
 // Kerning adjustment to apply before drawing `ch` when it follows `prev`,
-// in font pixels. 0 when the pair is not listed.
+// in font pixels. 0 when the pair is not listed. Font::GetKerning: the
+// pairs are `ch`'s and match the low byte of `prev`.
 float bfont_kerning(const BFont* f, int prev, int ch);
 
-// Width of a NUL-terminated string in font pixels, kerning included, before
-// the object's ScaleX is applied. This is Font::GetScaledWidth()'s sum.
+// Width of a NUL-terminated string in font pixels, before the object's
+// ScaleX is applied: the advances of the characters with a glyph, no
+// kerning. This is Font::GetScaledWidth()'s sum.
 float bfont_measure(const BFont* f, const char* s, size_t len);
