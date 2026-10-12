@@ -61,6 +61,15 @@ BIGRACE_POSITION's font is 106 high. Moved down by 360, the block ends
 7 above the bottom edge, as it started 7 below the top. The grow
 (BIGRACE_POSITION_2) moves with it.
 
+**The EA TRAX box** (GLOBALB's CHYRON, `54987eb2`, all ten objects in
+group `f94a6e1e`) sits at y 369 to 461 on the left: where the race
+position now goes. It draws over the position's digits, which show
+through its strips. So while the HUD screen is up and BIGRACE_POSITION
+is visible, `hudsplit_update` (once a frame, before the top screen)
+lifts the box by 100, to end above the position's block at y 367.
+Otherwise it stays in its place: in the menus, and in a race with no
+position shown.
+
 **The live split list** sits under LIVE_SPLIT_POSITION_A when the race
 position shows, and at LIVE_SPLIT_POSITION_B otherwise
 (`show_live_split`). It keeps that place on the bottom screen.

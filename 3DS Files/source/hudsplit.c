@@ -13,13 +13,24 @@
 // started 7 below the top.
 #define POSITION_DY 360.0f
 
+// GLOBALB's EA TRAX box (songmon.h), all ten objects in one group. It
+// sits at the bottom left, y 369 to 461, where the race position now is,
+// and draws over it with the digits showing through. While the position
+// is up the box is lifted to end above the position's block (y 367).
+#define CHYRON_SCREEN 0x54987eb2u   // bStringHash("CHYRON")
+#define CHYRON_GROUP  0xf94a6e1eu
+#define CHYRON_LIFT   (-100.0f)
+
+// BIGRACE_POSITION.
+#define POSITION_OBJECT 0x004e27a0u
+
 #define TOP    UIR_TARGET_TOP
 #define BOTTOM UIR_TARGET_BOTTOM
 
 // By name, or by group with a name of 0. The first entry that matches
 // wins, so the names in group 457755c9, which also holds the gauges, come
-// first.
-static const UIPlacement kSplit[] = {
+// first. The box's entry is last; hudsplit_update moves it.
+static UIPlacement kSplit[] = {
     // The race position: BIGRACE_POSITION, _POSITION_2 (the grow),
     // _EXTENSION and _TOTAL.
     { HUDSPLIT_SCREEN, 0x004e27a0u, 0, TOP, 0.0f, POSITION_DY },
@@ -50,12 +61,33 @@ static const UIPlacement kSplit[] = {
     // Be The Cop's panel: the helicopters, the cop cars, the damage
     // lights, the busts and the time left.
     { HUDSPLIT_SCREEN, 0, 0x068e2c75u, BOTTOM, 0.0f, 0.0f },
+
+    // The EA TRAX box, on the top screen where it is; see CHYRON_LIFT.
+    { CHYRON_SCREEN, 0, CHYRON_GROUP, TOP, 0.0f, 0.0f },
 };
+
+#define CHYRON_ENTRY ((int)(sizeof kSplit / sizeof kSplit[0]) - 1)
 
 void hudsplit_install(UIRenderer* r)
 {
     uirender_set_placements(r, kSplit,
                             (int)(sizeof kSplit / sizeof kSplit[0]));
+}
+
+void hudsplit_update(UIRenderer* r)
+{
+    BUI*       ui = NULL;
+    BUIScreen* s  = uirender_find_screen(r, HUDSPLIT_SCREEN, &ui);
+    BUIObject  o;
+    bool       up = false;
+
+    if (s != NULL && s->visible) {
+        int32_t i = bui_find_object(ui, s, POSITION_OBJECT, BUI_TYPE_TEXT);
+
+        up = i >= 0 && bui_object(ui, (uint32_t)i, &o)
+             && o.visible == BUI_VISIBLE;
+    }
+    kSplit[CHYRON_ENTRY].dy = up ? CHYRON_LIFT : 0.0f;
 }
 
 // The minimap's room, in the 640x480. Above it, the live split list's

@@ -6642,6 +6642,7 @@ int main(int argc, char** argv)
                 C2D_TargetClear(top, clear);
             }
             C2D_SceneBegin(top);
+            hudsplit_update(&ui);
             if (!g_track.attached && (bcarsel_active() || btracksel_active()))
                 drawCarSelTop(&ui);
             else
