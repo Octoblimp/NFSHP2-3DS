@@ -1071,9 +1071,14 @@ pursuit.obj, on a 10 KB manager. Its slices:
     (gSpeechPulloverEventFn), 0x00207648 (gSpeechBeACopArrestFn),
     PlayBustedSpeech, and Speech's conversions 0x00223328,
     0x00223358 .. 0x002233b8 and 0x00223480 into speechconv.
-  - **14-10d:** bcarsel's speakCar (ConvertCarType; event 211 for a
-    cop, 146 otherwise) and its call of ConvertTrackNumber (0x002233d8,
-    ported in RE-5 as `speech_convert_track_number`).
+  - **14-10d, done (3ac6572, Session 82):** bcarsel's speakCar
+    (ConvertCarType; event 211 for a cop, 146 otherwise) bound in
+    main.c; Select Track's ConvertTrackNumber was already bound. The
+    selector now registers its eleven joystick events as retail's
+    constructor does (0x00195210): one player on both pads, two players
+    each on their own. In the frontend joyhid swaps B and Y
+    (JOYHID_LAYOUT_FE), so Y is Square, the orbit view. Step 14 is
+    done.
 
   After step 14:
   - **12m** Be A Cop. The user's controls (2026-10-08): in Be A Cop
