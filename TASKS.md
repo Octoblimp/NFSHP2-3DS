@@ -2453,13 +2453,18 @@ phases.
         the map. Checked on Azahar in a Be A Cop race and a Hot Pursuit
         quick race. (`docs/formats/hud-split.md`)
 
-45. [ ] **The slight polygon artifacts.** Asked for on 2026-10-12: "Can
+45. [x] **The slight polygon artifacts.** Asked for on 2026-10-12: "Can
         you fix sometimes when there's slight polygon artifact". Seen in
         Session 80's shots: facing the sun, its glare is a flat pale
         blob with a hard, stepped edge, and a ray streak, where retail's
         glare is soft (Coastal Parklands, and the quick race's track).
         Find which layer or pass makes the edge and fix it, then look
-        for other artifacts the user may mean.
+        for other artifacts the user may mean. Done in Session 81
+        (9e044f3): the sun's quads were drawn with the opaque
+        textures' alpha test, GREATER 0x60; retail gives the
+        semitransparent textures GEQUAL 0, and the quad now takes its
+        test from the texture's pass. The halo and rays fade into the
+        sky. (`docs/formats/sun-draw.md`)
 
 46. [ ] **A smooth 30 FPS in busy scenes.** Asked for on 2026-10-12:
         "optimize the game as much as possible so rendering where
@@ -2467,6 +2472,13 @@ phases.
         smooth 30 FPS". It follows the 2026-10-05 GPU plan (lossless
         textures only, timing build first, then indexed meshes and
         early depth) and the desert's lag near the end (2026-10-09).
+        Session 81, lossless each: the solid shader in 17 instructions
+        where it took 31 (b293a76), the frame to the GPU in parts,
+        opt-in with "GpuSends 1" (9e044f3), and the clusters no view
+        can show left unsent (bb70171), which halve the envmap's and
+        the mirror's triangles. Left: the device's timing at the fog
+        and the desert, and the user's word on the envmap a face a
+        frame. (`docs/formats/draw-cuts.md`, "TASKS 46")
 
 ### The retail frontend
 

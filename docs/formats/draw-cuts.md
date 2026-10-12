@@ -478,3 +478,68 @@ From the same profile, with eight cars in view:
   a time. It would keep its own mask of the registers ever sent, for
   `C3Di_DirtyUniforms` after the HOME menu.
 - **The world, 5 ms, and the cull, 3.6.**
+
+## TASKS 46: the shader, the sends and the clusters (Session 81)
+
+The user's ask of 2026-10-12: "a smooth 30 FPS" where many cars and the
+fog are on the screen at once. The device's GPU is the bottleneck, at
+about 32 ms a frame against the CPU's 20, so each of these lightens the
+GPU and changes no pixel.
+
+- **The solid shader in 17 instructions** (b293a76), where it took 31.
+  The model-view and the projection go as one matrix, and the fog's row
+  and the light's direction are carried into the model's space, once a
+  model on the CPU (`geosolidunif.c`), with the 1/127 and 1/255 scales
+  folded in. geolit takes the same `mvp` and `fogModel`, so the car's
+  environment pass meets the solid pass's depth to the bit.
+  `tools/geosolid_check.py` runs both shaders and the old one through a
+  PICA interpreter of its own on 48 scenes: colour, texture
+  coordinates and fog equal, the position as accurate on the PICA's
+  16-bit mantissas as before. 14 of 14 mutations caught.
+- **The frame to the GPU in parts** (9e044f3), opt-in.
+  `hangwatch_gpu_send` hands the GPU what was drawn so far after the
+  mirror, the models and the top screen's HUD, so it draws while the
+  CPU builds the rest, rather than idling until `C3D_FrameEnd`.
+  Azahar draws the same frames with it. "GpuSends 1" in
+  nfshp2_config.txt turns it on; it stays off until a device run has
+  shown it never stops the GPU.
+- **The clusters** (bb70171). Each batch of a baked mesh keeps a box
+  round it and one round each 32 of its triangles, in their order,
+  after its indices in the same linear block (`geocull.c`). A batch
+  goes whole when its box is inside the view's four side planes, not
+  at all when it is beyond one, and otherwise as one draw for each run
+  of its clusters that are not beyond one. The planes are rows of the
+  matrix the shader is handed, made with it in `set_model`. A box is
+  beyond a plane only by more than the PICA's 24-bit rounding could
+  make up (2e-4 of the terms, about four times the worst of seven roundings),
+  so what is left out is what the GPU would have clipped whole.
+  `tools/geocull_check.py` runs every vertex of 36 scenes' strips
+  through geosolid.v.pica on the PICA's floats: 0 faults, 8 of 8
+  mutations caught. "ClusterCull 0" draws every batch whole, for a
+  timing run to compare.
+
+Azahar's track 12, a frame:
+
+| Pass       | Triangles before | After  | Draws before | After |
+|------------|------------------|--------|--------------|-------|
+| The envmap | 36,000           | 18,500 | 567          | 335   |
+| The mirror | 15,000           | 6,400  | 247          | 157   |
+| The view   | 3 to 15% fewer   |        | fewer        |       |
+
+A quick race from the title then ran at 29.9 FPS, 33.5 ms a frame,
+the worst 35.4, with the draw's CPU at 14.5 ms (the envmap 2.7, the
+mirror 2.2, the models 2.7, the cars 2.5). Azahar's GPU times mean
+nothing; the device's timing lines are what will say how much of the
+32 ms these took.
+
+### What is left
+
+- **The device's numbers** at the laggy places: the fog, the desert's
+  end with the chopper. A timing run (`sdmc:/nfshp2_gputiming.txt`,
+  `DebugLog 1`) with and without `ClusterCull 0` and `GpuSends 1`.
+- **The envmap a face a frame.** Its six faces are a third of a light
+  frame's GPU. Drawing one face a frame would cut most of that, but the
+  cars' reflections would lag the world by a few frames: a change to the
+  look, so the user decides.
+- **Early depth and RGB8.** The timing frame's probes (2fc77fc) still
+  wait for a device run.

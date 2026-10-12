@@ -70,7 +70,14 @@ cop's HUD (hudcop.c, hudrender.c, hudscore.c), the setup screens
   R helicopter (ce58fac). Not seen: an arrest, which the gas-only
   script cannot make. Left of TASKS 43: the Blurb's PS2 glyphs.
 
-**Now (Session 80, 2026-10-12): TASKS 45, the slight polygon artifacts
+**Now (Session 81, 2026-10-12): TASKS 45 is done (9e044f3, the sun's
+glare). TASKS 46 has three lossless cuts in (the shader b293a76, the
+sends 9e044f3 opt-in, the clusters bb70171; `docs/formats/draw-cuts.md`,
+"TASKS 46") and waits for the device's timing at the fog and the
+desert, and the user's word on the envmap a face a frame. Then step 14
+(full audio) and task 38 (BUSTED!). The user's build is bb70171.**
+
+**Then (Session 80, 2026-10-12): TASKS 45, the slight polygon artifacts
 (the sun's glare has a hard, stepped edge), then TASKS 46, a smooth 30
 FPS with many cars and fog (the GPU plan of 2026-10-05), then step 14
 and task 38.** TASKS 42 (the Circle Pad in the menus) and 44 (the bottom

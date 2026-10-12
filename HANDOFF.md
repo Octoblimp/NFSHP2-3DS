@@ -20722,3 +20722,49 @@ it up from here.
   glare shows a hard stepped edge in these shots), and TASKS 46, a
   smooth 30 FPS with many cars and fog.
 - **Next.** TASKS 45, then 46, then step 14 (full audio) and task 38.
+
+## Session 81 -- TASKS 45 and 46: the sun's glare and the GPU's load
+
+- **The sun's glare** (9e044f3, TASKS 45, done). A capture of a race on
+  track 31 showed its four quads drawn with the alpha test on, GREATER
+  0x60: `georender_draw_quad` always took the opaque textures' test.
+  Retail picks each texture's register block by its mode, and the
+  semitransparent ones (all the sun's) get GEQUAL 0, which passes every
+  pixel. The quad now takes its test from the texture's pass, and the
+  halo and rays fade into the sky. sun-draw.md is corrected.
+- **The frame to the GPU in parts** (9e044f3, TASKS 46, opt-in).
+  `hangwatch_gpu_send` hands the GPU what was drawn so far at four
+  points of the frame, so it draws while the CPU builds the rest.
+  "GpuSends 1" turns it on. Azahar draws the same frames with it; off
+  by default until the device has run it.
+- **The solid shader in 17 instructions** where it took 31 (b293a76).
+  `tools/geosolid_check.py` has a PICA interpreter of its own and
+  compares the new shaders with the old on 48 scenes; 14 of 14
+  mutations caught.
+- **The clusters** (bb70171). Each batch has a box and one per 32
+  triangles; what is wholly beyond one of the view's side planes, by
+  more than the PICA's rounding, is not sent (`geocull.c`). On
+  track 12 the envmap's triangles went from 36k a frame to 18.5k and
+  the mirror's from 15k to 6.4k. `tools/geocull_check.py`: 0 faults, 8
+  of 8 mutations caught. "ClusterCull 0" turns it off.
+- **On Azahar** (AC power, Speed 100%):
+  - Track 12 by SkipFE, gas only, with the cull: every frame whole, the
+    same scenes as the shader's run (`out/cull_vs_shader.png`, the
+    shader's run on top, the cull's under it), 29-30 FPS after the
+    start's 20.
+  - A Quick Race from the title, with the card's config "DebugLog 1"
+    again: PASS. `frame: 29.9 fps, 33.5 ms, worst 35.4`; the draw 14.5
+    ms (the envmap 2.7, the mirror 2.2, the models 2.7, the cars 2.5).
+    Shots in `out/azahar_46family`.
+- **The card.** Azahar's nfshp2_config.txt is "DebugLog 1" again (the
+  session's runs had SkipFE, track 12 and GpuSends 1 in it).
+- **With the user.** The build bb70171, `3DS Files/NFSHP2-3DS.3dsx` and
+  `.cia`, to play tonight. For play, the card needs no
+  nfshp2_gputiming.txt (the timing frames hitch every 10 s) and no
+  DebugLog line.
+- **To ask.** A timing run at the fog and the desert's end
+  (`nfshp2_gputiming.txt` on the card and `DebugLog 1`), once as it is
+  and once with `ClusterCull 0`, and whether the envmap may draw a face
+  a frame (the cars' reflections would lag a few frames).
+- **Next.** TASKS 46's device numbers, then step 14 (full audio), task
+  38 (BUSTED!) and TASKS 43's Blurb glyphs.
