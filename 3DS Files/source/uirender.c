@@ -769,6 +769,207 @@ static void draw_text(UIRenderer* r, const BUIObject* o, const UIView* v)
     }
 }
 
+// ---------------------------------------------------------------------------
+// Text laid into a box -- RenderTextIntoRectangle (retail 0x00144ed0)
+// ---------------------------------------------------------------------------
+
+// The word-wrap's isspace (0x00144a68) without its NUL: the callers here
+// stop at the NUL themselves, where retail's space skip runs past it.
+static bool rect_space(unsigned char c)
+{
+    return c == ' ' || c == '\t';
+}
+
+// GetNextWord (0x00144e70) into GetStringWidth (0x00144e28): the advances
+// of the glyphs from `p` to the next space, tab or NUL, summed, times
+// ScaleX. A character with no glyph adds nothing. Retail copies the word
+// into 256 bytes first with no bound; this stops at 255.
+static float rect_word_width(UIFont* f, const char* p, float scaleX)
+{
+    float sum = 0.0f;
+    for (int n = 0; n < 255 && p[n] && !rect_space((unsigned char)p[n]);
+         n++) {
+        BGlyph g;
+        if (bfont_glyph(&f->font, (unsigned char)p[n], &g)) sum += g.advance;
+    }
+    return sum * scaleX;
+}
+
+// RenderCharacter (0x00141a98) with RenderTextIntoRectangle's box: the
+// glyph's quad at the pen, its width times ScaleX twice and its height
+// times ScaleY, as draw_character(). MaybeClipPoly (0x00141808) then drops
+// the quad when it is wholly left of, right of, above or below the box,
+// and otherwise cuts it to the box -- left, right, top, bottom, in that
+// order -- moving the sheet rectangle in step.
+static void draw_clipped_character(UIRenderer* r, UIFont* f, const BGlyph* g,
+                                   float x, float y, float w, float h,
+                                   uint32_t color, const UIView* v,
+                                   const UITextStrip* s)
+{
+    UITexture* t = font_sheet(r, f);
+    if (!t || w <= 0.0f || h <= 0.0f) return;
+
+    float x0 = x, x1 = x + w, y0 = y, y1 = y + h;
+    float u0 = g->posX, u1 = g->posX + g->width;
+    float v0 = g->posY, v1 = g->posY + g->height;
+    if (x1 < s->tlx || s->brx <= x0 || y1 < s->tly || s->bry <= y0) return;
+    if (x0 < s->tlx) {
+        float k = (s->tlx - x0) / (x1 - x0);
+        u0 += k * (u1 - u0);
+        x0 = s->tlx;
+    }
+    if (s->brx <= x1) {
+        float k = (x1 - s->brx) / (x1 - x0);
+        u1 -= k * (u1 - u0);
+        x1 = s->brx;
+    }
+    if (y0 < s->tly) {
+        float k = (s->tly - y0) / (y1 - y0);
+        v0 += k * (v1 - v0);
+        y0 = s->tly;
+    }
+    if (s->bry <= y1) {
+        float k = (y1 - s->bry) / (y1 - y0);
+        v1 -= k * (v1 - v0);
+        y1 = s->bry;
+    }
+    if (x1 <= x0 || y1 <= y0) return;
+
+    Tex3DS_SubTexture st;
+    subtex_from_pixels(&st, (float)t->tex.width, (float)t->tex.height, u0,
+                       v0, u1 - u0, v1 - v0);
+
+    C2D_ImageTint tint;
+    C2D_PlainImageTint(&tint, color, 1.0f);
+
+    C2D_Image img = { &t->tex, &st };
+    C2D_DrawParams p;
+    memset(&p, 0, sizeof(p));
+    p.pos.x = v->originX + x0 * v->scaleX;
+    p.pos.y = v->originY + y0 * v->scaleY;
+    p.pos.w = (x1 - x0) * v->scaleX;
+    p.pos.h = (y1 - y0) * v->scaleY;
+    draw_image(img, &p, &tint, true);
+}
+
+// RenderCharacter's colour: each byte of the text's times the scale,
+// truncated.
+static uint32_t scale_color(uint32_t rgba, float scale)
+{
+    uint32_t out = 0;
+    if (scale == 1.0f) return rgba;
+    for (int i = 0; i < 32; i += 8) {
+        float b = (float)((rgba >> i) & 0xff) * scale;
+        int   n = (int)b;
+        if (n < 0)   n = 0;
+        if (n > 255) n = 255;
+        out |= (uint32_t)n << i;
+    }
+    return out;
+}
+
+// The inner's walk over one queued strip:
+//   - the pen starts at the text object's top left;
+//   - a button icon draws through RenderHelpCharacter, whose box is the
+//     whole screen, and moves the pen by its unscaled advance;
+//   - a glyph kerns against the byte before it in the string, whatever it
+//     was, scaled and with no limit, and moves the pen by
+//     (int)(ScaleX * (advance + kerning)) before anything is decided;
+//   - after a space or a tab, the next word's width decides: past the box's
+//     right edge, measured from the object's left, the line breaks;
+//   - '@' always breaks it;
+//   - a line break moves the pen to the left and down (int)(font height);
+//   - a character that broke the line or has no glyph is not drawn, and the
+//     spaces and tabs after it are skipped.
+static void draw_text_rect(UIRenderer* r, const UITextStrip* s,
+                           const BUIObject* o, const UIView* v)
+{
+    UIFont* f = find_font(r, o->fontHash);
+    // GetTextureInfo NULL: no strip at all.
+    if (!f || !font_sheet(r, f)) return;
+
+    const char* str   = s->text;
+    const char* p     = str;
+    float       x0    = o->x, x = o->x, y = o->y, sx = o->scaleX;
+    float       width = s->brx - o->x;
+    float       lineH = (float)(int)f->font.height;
+    uint32_t    color = tint_color(scale_color(o->color, s->scale), v->alpha);
+    unsigned char c   = (unsigned char)*p++;
+
+    while (c != 0) {
+        if (is_help_char(c)) {
+            x += draw_help_character(r, c, x, y, o, color, v);
+        } else {
+            BGlyph g;
+            bool   has = bfont_glyph(&f->font, c, &g);
+            bool   brk = false;
+            float  px = 0.0f, py = 0.0f;
+
+            if (has) {
+                float kern = 0.0f;
+                if (p > str + 1)
+                    kern = bfont_kerning(&f->font, (unsigned char)p[-2], c)
+                           * sx;
+                px = x + kern;
+                py = y;
+                x += (float)(int)(sx * (g.advance + kern));
+            }
+            if (rect_space(c)
+                && width < rect_word_width(f, p, sx) + x - x0) {
+                x = x0;
+                y += lineH;
+                brk = true;
+            }
+            if (c == '@' && !brk) {
+                x = x0;
+                y += lineH;
+                brk = true;
+            }
+            if (!brk && has) {
+                draw_clipped_character(r, f, &g, px, py,
+                                       g.width * sx * sx,
+                                       g.height * o->scaleY, color, v, s);
+            } else {
+                while (rect_space((unsigned char)*p)) p++;
+            }
+        }
+        c = (unsigned char)*p++;
+    }
+}
+
+bool uirender_queue_text_rect(UIRenderer* r, const BUI* ui, uint32_t index,
+                              float tlx, float tly, float brx, float bry,
+                              const char* text, float scale)
+{
+    BUIObject o;
+    uint32_t  s;
+
+    if (!r || !ui || !text || r->numStrips >= UIR_MAX_STRIPS) return false;
+    if (!bui_object(ui, index, &o) || o.type != BUI_TYPE_TEXT) return false;
+    for (s = 0; s < ui->numScreens; s++) {
+        const BUIScreen* sc = &ui->screens[s];
+        if (index >= sc->first && index - sc->first < sc->count) break;
+    }
+    if (s == ui->numScreens) return false;
+
+    UITextStrip* st = &r->strips[r->numStrips++];
+    st->ui     = ui;
+    st->index  = index;
+    st->screen = s;
+    st->tlx    = tlx;
+    st->tly    = tly;
+    st->brx    = brx;
+    st->bry    = bry;
+    st->scale  = scale;
+    snprintf(st->text, sizeof st->text, "%s", text);
+    return true;
+}
+
+void uirender_clear_strips(UIRenderer* r)
+{
+    if (r) r->numStrips = 0;
+}
+
 // GetScaledWidth__16FlailerTextChunk (0x0013e8b0) and GetScaledHeight
 // (0x0013e858), which are what ScaleAboutCenter divides to find the centre
 // it scales about. Width is the same sum draw_text() lays down; height is
@@ -1231,6 +1432,29 @@ static bool screen_drawn(const UIRenderer* r, const BUIScreen* screen,
            && (target != UIR_TARGET_BOTTOM || screen_placed(r, screen));
 }
 
+// The strips queued for `layer`, after its objects: each where its screen
+// draws on `target`, moved by its text object's placement.
+static void draw_strips(UIRenderer* r, int layer, float alpha, int target)
+{
+    for (int i = 0; i < r->numStrips; i++) {
+        const UITextStrip* s      = &r->strips[i];
+        const BUIScreen*   screen = &s->ui->screens[s->screen];
+        BUIObject          o;
+
+        if (!bui_object(s->ui, s->index, &o) || o.z != layer) continue;
+        if (!screen_drawn(r, screen, target)) continue;
+        const UIPlacement* p =
+            screen_placed(r, screen) ? placement_of(r, screen, &o) : NULL;
+        if ((p ? p->target : UIR_TARGET_TOP) != target) continue;
+        UIView v = screen_view(r, screen, alpha);
+        if (p) {
+            v.originX += p->dx * v.scaleX;
+            v.originY += p->dy * v.scaleY;
+        }
+        draw_text_rect(r, s, &o, &v);
+    }
+}
+
 static void draw_visible(UIRenderer* r, float alpha, int target, int from,
                          int to)
 {
@@ -1279,6 +1503,7 @@ static void draw_visible(UIRenderer* r, float alpha, int target, int from,
                     draw_layer(r, ui, screen, layer, &v, target);
                 }
             }
+            draw_strips(r, layer, alpha, target);
             continue;
         }
         for (int k = head[layer]; k >= 0; k = s_layerItems[k].next) {
@@ -1289,6 +1514,7 @@ static void draw_visible(UIRenderer* r, float alpha, int target, int from,
             draw_object(r, ui, screen, it->index, layer, &v, target,
                         screen_placed(r, screen));
         }
+        draw_strips(r, layer, alpha, target);
     }
 }
 

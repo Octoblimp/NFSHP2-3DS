@@ -4,6 +4,9 @@
 //   isspace(int)                0x00144a68    44 bytes
 //   WriteTextIntoChunk          0x00144ae8   112 bytes
 //   RenderTextIntoGroup         0x00144ba0   644 bytes
+//   RenderTextIntoRectangle     0x001451e0   296 bytes  (the outer; the
+//                                                     inner, 0x00144ed0, is
+//                                                     the renderer's)
 //
 // bpopup.c has the same on the flow's BUI screens, for the frontend's
 // popups and the end of the race's screens. This one works on flailer.c's
@@ -14,6 +17,8 @@
 #define FLAILERWRAP_H
 
 #include <stdint.h>
+
+struct FlailerTextChunk;
 
 // `str` word-wrapped into the text objects of `group` on `screen`, one line
 // each in the order FindFlailerObjectByGroup finds them, up to 32:
@@ -28,5 +33,23 @@
 // no text objects, or the text ran out of objects.
 int32_t flailer_render_text_into_group(uint32_t screen, uint32_t group,
                                        const char *str);
+
+// FlailerRenderManager::RenderTextIntoRectangle (0x001451e0): `str` laid
+// into the box of bitmap `rect` from text object `text`'s top left, in
+// its font, colour and scale. The box is the bitmap's top left to it
+// plus (float)GetWidth and (float)GetHeight. The text object is given
+// `str` with SetString first, cut to its MaxChars, but the whole of `str`
+// is what is laid out. Nothing without the bitmap, the text object, or a
+// string (retail reads through the last two).
+void flailer_render_text_into_rectangle(uint32_t screen, uint32_t text,
+                                        uint32_t rect, const char *str,
+                                        float scale);
+
+// The inner (0x00144ed0), which builds the strip the renderer draws: the
+// port's queues it with uirender_queue_text_rect. NULL lays out nothing.
+extern void (*gFlailerTextIntoRectangleFn)(struct FlailerTextChunk *t,
+                                           const char *str, float tlx,
+                                           float tly, float brx, float bry,
+                                           float scale);
 
 #endif

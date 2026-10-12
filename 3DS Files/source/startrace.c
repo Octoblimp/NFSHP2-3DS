@@ -12,11 +12,15 @@
 #include "cartypeinfo.h"
 #include "characterinfo.h"
 #include "flailer.h"
+#include "flailerwrap.h"
 #include "fred.h"
 #include "fredrace.h"
+#include "joyevent.h"
+#include "joystick.h"
 #include "player.h"
 #include "race.h"
 #include "racecoord.h"
+#include "raceevent.h"
 #include "rcpost.h"
 #include "track.h"
 #include "world.h"
@@ -42,6 +46,9 @@ const char kPreRaceLetterboxScreen[] = "Pre Race Letterbox";
 
 tStartRaceScreenManager TheStartRaceScreenManager;
 PreRaceStats *PreRaceStatsInstance;
+PreRaceBlurb *PreRaceBlurbInstance;
+PreRace2PBeACop *PreRace2PBeACopInstance;
+int32_t PreRaceBlurbButtonChar = 0x89;
 
 const bVector4 PlayerTextColors[2] = {
     { 134.0f, 96.0f, 48.0f, 128.0f },
@@ -473,6 +480,166 @@ void pre_race_stats_handle_event(PreRaceStats *s, BScreenMessage msg,
     }
 }
 
+// --------------------------------------------------------------- the blurb
+
+// The joystick types the cop's controls tell apart: a wheel of type 22
+// and a pad of type 0x41. The 3DS's is 0, a pad of neither.
+#define JOYSTICK_TYPE_WHEEL_22  22
+#define JOYSTICK_TYPE_PAD_41    0x41
+
+// The frontend sound SELECT asks for when it steps to the next screen.
+#define STARTRACE_NOISE_NEXT    5
+
+// SELECT on the Blurb and on the 2P screen (0x001e3548, 0x001e3808):
+// nothing when START made it; otherwise the next screen, silently changed
+// to with the noise set to 5, or from the last the fly-by skipped.
+// Retail posts to pRaceCoordinator without testing it.
+static void start_race_step_to_next_screen(BScreenCallbackData *data)
+{
+    tStartRaceScreenManager *m = &TheStartRaceScreenManager;
+    const char *was;
+
+    if (data->param == JOY_EVENT_START)
+        return;
+    data->param = 0;
+    data->noise = 0;
+    was = m->Screens[m->CurrentScreen];
+    if (m->CurrentScreen < m->NumScreens - 1)
+        m->CurrentScreen++;
+    if (m->Screens[m->CurrentScreen] == was) {
+        racecoordinator_post_message(pRaceCoordinator, RC_SKIP, 0);
+    } else {
+        change_to_screen(m->Screens[m->CurrentScreen], 0);
+        data->noise = STARTRACE_NOISE_NEXT;
+    }
+}
+
+const char *pre_race_blurb_text(int32_t player)
+{
+    if (!TheRaceParameters.BeACop || TheRaceParameters.EventTreeRace)
+        return TheRaceParameters.sObjective;
+    if (TheRaceParameters.NumPlayerCars == 1) {
+        int32_t pad41, t;
+
+        if (!IsJoystickPluggedIn(0))
+            return get_translated_string(STARTRACE_LANG_INSERT_CONTROLLER);
+        if (IsJoystickTypeWheel(0))
+            return get_translated_string(
+                GetJoystickType(0) == JOYSTICK_TYPE_WHEEL_22
+                    ? STARTRACE_LANG_COP_WHEEL22 : STARTRACE_LANG_COP_WHEEL);
+        pad41 = GetJoystickType(0) == JOYSTICK_TYPE_PAD_41;
+        t = PlayerPlayersByNumber[player]->PlayerSettings.TransmissionType;
+        if (t >= 3 || t < 0)
+            return NULL;
+        if (t == 0)
+            return get_translated_string(pad41 ? STARTRACE_LANG_COP_PAD41_AUTO
+                                               : STARTRACE_LANG_COP_PAD_AUTO);
+        return get_translated_string(pad41 ? STARTRACE_LANG_COP_PAD41
+                                           : STARTRACE_LANG_COP_PAD);
+    }
+    if (TheRaceParameters.NumPlayerCars == 2) {
+        if (player == 0)
+            return get_translated_string(STARTRACE_LANG_2P_COP);
+        if (player == 1)
+            return get_translated_string(STARTRACE_LANG_2P_SPEEDER);
+    }
+    return NULL;
+}
+
+// The heading: "Event %d Objective:" with the event's number in an event,
+// the cop's own heading for the cop, "Objective:" otherwise.
+PreRaceBlurb *pre_race_blurb_construct(PreRaceBlurb *b, uint32_t screen)
+{
+    b->ScreenHash = screen;
+    if (TheRaceParameters.EventTreeRace)
+        flailer_printf(screen, STARTRACE_OBJ_HEADING,
+                       get_translated_string(STARTRACE_LANG_EVENT_OBJECTIVE),
+                       (int)TheRaceEvent.nNumber);
+    else if (TheRaceParameters.BeACop)
+        flailer_set_language_id(screen, STARTRACE_OBJ_HEADING,
+                                STARTRACE_LANG_YOURE_THE_COP);
+    else
+        flailer_set_language_id(screen, STARTRACE_OBJ_HEADING,
+                                STARTRACE_LANG_OBJECTIVE);
+    flailer_set_visibility(b->ScreenHash, STARTRACE_OBJ_NEXT,
+                           FLAILER_OBJECT_VISIBLE);
+    return b;
+}
+
+void pre_race_blurb_destroy(PreRaceBlurb *b, int32_t flags)
+{
+    flailer_set_visibility(b->ScreenHash, STARTRACE_OBJ_NEXT,
+                           FLAILER_OBJECT_INVISIBLE);
+    if (flags & 1)
+        bFree(b);
+}
+
+// RENDER prints the text, its %c the nitro button's character, into 512
+// bytes (bSPrintf has no bound; the port's stops at the end), and wraps
+// it into the box. A NULL text is printed as nothing, where retail hands
+// bSPrintf the NULL.
+void pre_race_blurb_handle_event(PreRaceBlurb *b, BScreenMessage msg,
+                                 BScreenCallbackData *data)
+{
+    if (msg == BMSG_MENUITEM_PAD_UP || msg == BMSG_MENUITEM_PAD_DOWN) {
+        data->noise = 0;
+    } else if (msg == BMSG_SCREEN_RENDER) {
+        char buf[512];
+        const char *fmt;
+
+        if (IsJoystickPluggedIn(0))
+            PreRaceBlurbButtonChar =
+                GetJoystickButtonChar(0, JOY_EVENT_NITRO_BOOST);
+        fmt = pre_race_blurb_text(0);
+        snprintf(buf, sizeof buf, fmt != NULL ? fmt : "",
+                 (int)PreRaceBlurbButtonChar);
+        flailer_render_text_into_rectangle(b->ScreenHash,
+                                           STARTRACE_OBJ_BLURB_TEXT,
+                                           STARTRACE_OBJ_BLURB_BOX, buf,
+                                           1.0f);
+    } else if (msg == BMSG_MENUITEM_SELECT) {
+        start_race_step_to_next_screen(data);
+    }
+}
+
+PreRace2PBeACop *pre_race_2p_be_a_cop_construct(PreRace2PBeACop *b,
+                                                uint32_t screen)
+{
+    b->ScreenHash = screen;
+    flailer_set_visibility(screen, STARTRACE_OBJ_NEXT,
+                           FLAILER_OBJECT_VISIBLE);
+    return b;
+}
+
+// NEXT is left as it is.
+void pre_race_2p_be_a_cop_destroy(PreRace2PBeACop *b, int32_t flags)
+{
+    if (flags & 1)
+        bFree(b);
+}
+
+// RENDER wraps each player's lines into their box as they are: no
+// printf.
+void pre_race_2p_be_a_cop_handle_event(PreRace2PBeACop *b,
+                                       BScreenMessage msg,
+                                       BScreenCallbackData *data)
+{
+    if (msg == BMSG_MENUITEM_PAD_UP || msg == BMSG_MENUITEM_PAD_DOWN) {
+        data->noise = 0;
+    } else if (msg == BMSG_SCREEN_RENDER) {
+        flailer_render_text_into_rectangle(b->ScreenHash,
+                                           STARTRACE_OBJ_2P_TEXT_1,
+                                           STARTRACE_OBJ_2P_BOX_1,
+                                           pre_race_blurb_text(0), 1.0f);
+        flailer_render_text_into_rectangle(b->ScreenHash,
+                                           STARTRACE_OBJ_2P_TEXT_2,
+                                           STARTRACE_OBJ_2P_BOX_2,
+                                           pre_race_blurb_text(1), 1.0f);
+    } else if (msg == BMSG_MENUITEM_SELECT) {
+        start_race_step_to_next_screen(data);
+    }
+}
+
 // ------------------------------------------------------------ the screens
 
 void pre_race_stats_callback(struct BGameFlow *gf, BScreenMessage msg,
@@ -490,6 +657,50 @@ void pre_race_stats_callback(struct BGameFlow *gf, BScreenMessage msg,
         PreRaceStatsInstance = NULL;
     } else {
         pre_race_stats_handle_event(PreRaceStatsInstance, msg, data);
+    }
+}
+
+// BACK on the blurb and the 2P screen is silent and goes nowhere.
+void pre_race_blurb_callback(struct BGameFlow *gf, BScreenMessage msg,
+                             BScreenCallbackData *data)
+{
+    (void)gf;
+    if (msg == BMSG_SCREEN_ACTIVATE) {
+        PreRaceBlurb *mem = (PreRaceBlurb *)bMalloc(sizeof(PreRaceBlurb),
+                                                    "PreRaceBlurb", 0, 16);
+
+        PreRaceBlurbInstance = pre_race_blurb_construct(mem, data->itemHash);
+    } else if (msg == BMSG_SCREEN_UNACTIVATE) {
+        if (PreRaceBlurbInstance != NULL)
+            pre_race_blurb_destroy(PreRaceBlurbInstance, 3);
+        PreRaceBlurbInstance = NULL;
+    } else if (msg == BMSG_SCREEN_BACK_BUTTON) {
+        data->noise = 0;
+        data->param = 0;
+    } else {
+        pre_race_blurb_handle_event(PreRaceBlurbInstance, msg, data);
+    }
+}
+
+void pre_race_2p_be_a_cop_callback(struct BGameFlow *gf, BScreenMessage msg,
+                                   BScreenCallbackData *data)
+{
+    (void)gf;
+    if (msg == BMSG_SCREEN_ACTIVATE) {
+        PreRace2PBeACop *mem = (PreRace2PBeACop *)bMalloc(
+            sizeof(PreRace2PBeACop), "PreRace2PBeACop", 0, 16);
+
+        PreRace2PBeACopInstance = pre_race_2p_be_a_cop_construct(
+            mem, data->itemHash);
+    } else if (msg == BMSG_SCREEN_UNACTIVATE) {
+        if (PreRace2PBeACopInstance != NULL)
+            pre_race_2p_be_a_cop_destroy(PreRace2PBeACopInstance, 3);
+        PreRace2PBeACopInstance = NULL;
+    } else if (msg == BMSG_SCREEN_BACK_BUTTON) {
+        data->noise = 0;
+        data->param = 0;
+    } else {
+        pre_race_2p_be_a_cop_handle_event(PreRace2PBeACopInstance, msg, data);
     }
 }
 

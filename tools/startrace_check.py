@@ -8,7 +8,9 @@ AddScreen, Enable and Disable, the three free functions on
 TheStartRaceScreenManager (0x0031a3e0), RaceKnockoutInfoShouldBeDisplayed,
 TournamentStandingsShouldBeDisplayed, PreRaceStats' BuildStats trio,
 GetStatsForRacePosition, constructor, destructor, HandleEvent and
-Callback, and PreRaceLetterboxCallback; and under them the track select's
+Callback, PreRaceLetterboxCallback, and the Blurb's and the 2P Be A Cop
+screen's constructors, destructors, HandleEvents and callbacks with the
+blurb's text (0x001e3320); and under them the track select's
 GetTheRightTrackLanguageID and 0x001dc5d8, SprintfAndHash with the real
 bStringHash, FrontendDatabase's UseTheRaceEvent and IsMultiTrack,
 RaceEvent's RacerIndexFromDriverNumber and GetKoState,
@@ -22,8 +24,10 @@ leave, run with FlailerScreenConfig's constructor stubbed. The harness
 RaceCoordinator::PostMessage, the four Flailer calls (FlailerPrintf
 formats its line), both GetTranslatedStrings, GetCarByDriverNumber,
 RaceEvent's GetRaceIndex, GetRaceCount and GetTournamentState, bMalloc and
-__builtin_delete. bSPrintf formats natively. bMalloc's block starts as
-0xcd bytes, so what the constructor leaves shows.
+__builtin_delete, the four joystick calls the blurb makes, and
+RenderTextIntoRectangle (its string with the bytes outside ASCII as
+\\xNN). bSPrintf formats natively. bMalloc's block starts as 0xcd bytes,
+so what the constructor leaves shows.
 
 **The script** asks the tests over every game type, event type and
 RaceParameters mix; enables the screens for each race kind, over a manager
@@ -33,7 +37,10 @@ AI with and without a character, positions off the grid and doubled, both
 track directions and a third, multi-track events whose race number runs
 past the count, and missing strings; sends the grid and the letterbox
 every message, BACK over each manager shape and SELECT from A and from
-START with and without a coordinator; then random races.
+START with and without a coordinator; asks the blurb's text over every
+race, pad, wheel and TransmissionType; sends the Blurb and the 2P screen
+every message and SELECT over each manager shape; then random blurbs and
+random races.
 
     python tools/startrace_check.py
     python tools/startrace_check.py --mutate [--only a,b]
@@ -85,6 +92,11 @@ F_GETPOS = 0x001e2d00
 F_CALLBACK, F_LETTERBOX = 0x001e31d8, 0x001e3968
 F_ENABLE, F_DISABLE, F_READY = 0x001e39b0, 0x001e39c0, 0x001e39d0
 F_TRACK_NAME = 0x001dc5d8
+F_PICK, F_BLURB, F_2P = 0x001e3320, 0x001e3640, 0x001e38b8
+
+RP_OBJECTIVE, RP_EVENT_TREE = RP + 84, RP + 600
+PLAYERS_BY_NUMBER = GP - 20936
+B_CHAR, B_INST, B_INST_2P = GP - 17376, GP - 17380, GP - 17372
 
 S_CHANGE = 0x0014cc78
 S_POST = 0x001496d8
@@ -98,10 +110,18 @@ S_SPRINTF = 0x00251398
 S_SCREEN_CONFIG = 0x0016ad88
 B_MALLOC, B_DELETE = 0x002577c0, 0x00114e98
 NOT_TRANSLATED = 0x002bc958
+S_PLUGGED, S_JOY_TYPE, S_WHEEL = 0x001542f0, 0x00154308, 0x0011d4f8
+S_BUTTON_CHAR = 0x00155270
+S_RTIR = 0x001451e0
 
 SCREEN_STATS = 0x89b2fc0f
 SCREEN_LETTERBOX = 0xa3e1bc36
+SCREEN_BLURB = 0x887b4d37
+SCREEN_2P = 0xb5ecd7a0
 LANG_RACE_OF = 0x3a983
+LANG_EVENT_OBJECTIVE = 0xf619
+# The cop's lines, 970001 .. 970020, which the stub gives a %c.
+LANG_COP_FIRST, LANG_COP_LAST = 970001, 970020
 
 MAX_TYPES = 64
 
@@ -112,6 +132,11 @@ def cx(v):
     return "%#x" % v if v else "0"
 
 
+def esc(s):
+    """Each character outside ' ' .. '~' as \\xNN, as the harness prints."""
+    return "".join(c if " " <= c <= "~" else "\\x%02x" % ord(c) for c in s)
+
+
 # ================================================================== script
 
 def stats(m, item=0, port=0, param=0x5a, noise=0x5b):
@@ -120,6 +145,18 @@ def stats(m, item=0, port=0, param=0x5a, noise=0x5b):
 
 def letter(m, item=0, port=0, param=0x5a, noise=0x5b):
     return "letter|%d|%#x|%d|%d|%d" % (m, item, port, param, noise)
+
+
+def blurb(m, item=0, port=0, param=0x5a, noise=0x5b):
+    return "blurb|%d|%#x|%d|%d|%d" % (m, item, port, param, noise)
+
+
+def twop(m, item=0, port=0, param=0x5a, noise=0x5b):
+    return "twop|%d|%#x|%d|%d|%d" % (m, item, port, param, noise)
+
+
+def joy(plugged, wheel, typ, char):
+    return "joy|%d|%d|%d|%d" % (plugged, wheel, typ, char)
 
 
 def drv(i, unique, start, typ, ride, char, elim=0):
@@ -284,7 +321,131 @@ def script():
             s += [letter(m, SCREEN_LETTERBOX, 0, param)]
     s += ["rc|0", letter(1), letter(17), letter(8), "rc|1"]
 
+    s += blurb_script()
+    s += random_blurbs(random.Random(0xb1b), 60)
     s += random_races(random.Random(0x5717), 120)
+    return s
+
+
+# Pad 0 as PLUGGED, WHEEL, TYPE and the nitro's character: out, out with
+# a wheel's answers, wheels of type 22 and others, pads of type 0x41 and
+# others, and characters past a byte and of 0.
+JOYS = ((0, 0, 0, 0x8a), (0, 1, 22, 0x8a), (1, 1, 22, 0x8b), (1, 1, 0, 0x8c),
+        (1, 1, 0x41, 0x8d), (1, 0, 0x41, 0x8e), (1, 0, 0, 0x41),
+        (1, 0, 22, 0), (1, 5, 21, 0x141))
+
+# Managers over the Blurb's SELECT: a next screen, the same screen next, a
+# NULL next, the last screen, and none.
+SELECT_MGRS = ("mgr|1|0|2|0|0|0", "mgr|2|0|2|1|0|0", "mgr|2|1|2|1|0|0",
+               "mgr|3|0|2|3|1|0", "mgr|3|1|2|3|1|0", "mgr|2|0|2|2|0|0",
+               "mgr|0|0|2|0|0|0", "mgr|4|2|0|2|0|1", "mgr|3|0|0|0|1|0",
+               "mgr|2|0|2|0|0|0", "mgr|4|3|1|2|3|4")
+
+MESSAGES = (0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 13, 14, 15, 16, 18, 19, 20)
+
+
+def blurb_script():
+    """The Blurb's text over every branch, its heading, both screens'
+    callbacks with every message, and SELECT over each manager shape."""
+    s = ["game|7", "evnum|7", "obj|Catch them: %c now", "trans|0|0",
+         "trans|1|1", "bdump"]
+    # The text: not the cop or an event's race, one player, two, others.
+    for cop, etr in ((0, 0), (0, 1), (1, 1), (1, 0), (5, 0), (1, 3)):
+        for cars in (0, 1, 2, 3, -1):
+            s += [rp(cars=cars, cop=cop), "etr|%d" % etr]
+            for j in JOYS:
+                s += [joy(*j), "pick|0", "pick|1"]
+                pad = cop and not etr and cars == 1 and j[0] and not j[1]
+                if not pad:
+                    s += ["pick|2", "pick|-1"]
+    # A pad: TransmissionType 0 automatic, 1 and 2 manual, the rest none.
+    s += [rp(cars=1, cop=1), "etr|0"]
+    for j in ((1, 0, 0, 0x8a), (1, 0, 0x41, 0x8a), (1, 0, 22, 0x8a)):
+        s += [joy(*j)]
+        for t0, t1 in ((0, 1), (1, 0), (2, 3), (3, 2), (-1, 0), (127, -128),
+                       (4, 2)):
+            s += ["trans|0|%d" % t0, "trans|1|%d" % t1, "pick|0", "pick|1"]
+    s += ["trans|0|0", "trans|1|1"]
+
+    # The heading: an event's with its number, the cop's, the plain one.
+    for etr, cop, num in ((1, 0, 7), (1, 1, 32), (0, 1, 3), (0, 0, 3),
+                          (2, 0, -1), (0, 7, 1)):
+        s += ["etr|%d" % etr, rp(cars=1, cop=cop), "evnum|%d" % num,
+              blurb(11, SCREEN_BLURB), "bdump", blurb(19, 0x1111),
+              blurb(12), "bdump"]
+
+    # Messages with it up: the cop on a pad.
+    s += ["etr|0", rp(cars=1, cop=1), joy(1, 0, 0, 0x8a),
+          blurb(11, SCREEN_BLURB)]
+    for m in MESSAGES:
+        s += [blurb(m, 0x1111)]
+    # RENDER over each pad: the character kept from the last one plugged.
+    for j in JOYS:
+        s += [joy(*j), blurb(19), "bdump"]
+    # Not the cop: the objective, its %c the character; and no text.
+    s += [rp(cars=1), joy(1, 0, 0, 0x8f), blurb(19), "obj|", blurb(19),
+          "obj|No button here", blurb(19), "obj|100%% at %c", blurb(19),
+          rp(cars=3, cop=1), blurb(19), rp(cars=1, cop=1), "trans|0|3",
+          blurb(19), "trans|0|0", "obj|Catch them: %c now"]
+    # SELECT from A and from START over each manager.
+    for mgr in SELECT_MGRS:
+        for param in (0, 7, 5):
+            s += [mgr, blurb(1, 0x2222, 0, param), "dump"]
+    s += ["rc|0", "mgr|1|0|2|0|0|0", blurb(1, 0, 0, 0), "rc|1"]
+    s += [blurb(17, 0x3333, 0, 9, 9), blurb(12), "bdump", blurb(12),
+          "bdump"]
+    # Up twice: the first is lost, as retail's is.
+    s += [blurb(11, 0xdeadbeef), blurb(11, SCREEN_BLURB), "bdump",
+          blurb(12), "bdump"]
+    # Down: the messages that do not read it.
+    s += [blurb(8), blurb(9), "mgr|2|0|2|1|0|0", blurb(1, 0, 0, 0),
+          blurb(17), blurb(0), "bdump"]
+
+    # The 2P screen.
+    s += [rp(cars=2, cop=1), twop(11, SCREEN_2P), "bdump"]
+    for m in MESSAGES:
+        s += [twop(m, 0x1111)]
+    for cars, cop, etr in ((2, 1, 0), (1, 1, 0), (3, 1, 0), (2, 0, 0),
+                           (2, 1, 1), (0, 1, 0)):
+        s += [rp(cars=cars, cop=cop), "etr|%d" % etr, twop(19)]
+    s += ["etr|0", rp(cars=2, cop=1)]
+    for mgr in SELECT_MGRS[:6]:
+        for param in (0, 7):
+            s += [mgr, twop(1, 0x2222, 0, param), "dump"]
+    s += [twop(17, 0x3333, 0, 9, 9), twop(12), "bdump", twop(12), "bdump",
+          twop(8), "mgr|2|0|2|1|0|0", twop(1, 0, 0, 0), twop(17), "bdump"]
+    # Up twice, the second on another screen's hash.
+    s += [twop(11, SCREEN_2P), twop(11, 0xdeadbeef), "bdump", twop(19),
+          twop(12), "bdump"]
+    # Both up at once.
+    s += [blurb(11, SCREEN_BLURB), twop(11, SCREEN_2P), "bdump", blurb(12),
+          "bdump", twop(12), "bdump"]
+
+    # Missing strings.
+    s += ["miss|0xf619", "miss|0xecd11", "miss|0xdbbab", "etr|1",
+          blurb(11, SCREEN_BLURB), blurb(12), "etr|0", rp(cars=1, cop=1),
+          joy(1, 0, 0, 0x8a), "trans|0|1", "pick|0", joy(0, 0, 0, 0),
+          "pick|0", "trans|0|0"]
+    return s
+
+
+def random_blurbs(rnd, n):
+    s = []
+    for _ in range(n):
+        s += [rp(rnd.randint(0, 2), 0, rnd.randint(0, 3), rnd.randint(0, 1),
+                 rnd.choice((0, 1, 1))),
+              "etr|%d" % rnd.choice((0, 0, 1)),
+              joy(rnd.randint(0, 1), rnd.randint(0, 1),
+                  rnd.choice((0, 22, 0x41, 7)), rnd.randint(0, 255)),
+              "trans|0|%d" % rnd.randint(-1, 3),
+              "trans|1|%d" % rnd.randint(-1, 3),
+              "evnum|%d" % rnd.randint(1, 32)]
+        scr, h = rnd.choice(((blurb, SCREEN_BLURB), (twop, SCREEN_2P)))
+        s += [scr(11, h), scr(19), "bdump"]
+        if rnd.random() < 0.5:
+            s += ["mgr|2|%d|2|3|0|0" % rnd.randint(0, 1),
+                  scr(1, 0, 0, rnd.choice((0, 7)))]
+        s += [scr(12)]
     return s
 
 
@@ -385,6 +546,14 @@ class Model(object):
             e.write(RP + 652 + 48 * i + 20, bytes(12))
         e.write(RACE_EVENT + 106, bytes(2))
         e.write(RACE_EVENT + 118, bytes(2))
+        e.write(RP_OBJECTIVE, bytes(512))
+        e.put32(RP_EVENT_TREE, 0)
+        e.write(RACE_EVENT + 104, bytes(2))
+        e.put32(PLAYERS_BY_NUMBER, self.players)
+        e.put32(PLAYERS_BY_NUMBER + 4, self.players + 64)
+        e.put32(B_INST, 0)
+        e.put32(B_INST_2P, 0)
+        self.joy = [0, 0, 0, 0]
 
         self.player_unique = []
         self.race_index = self.race_count = 0
@@ -402,7 +571,12 @@ class Model(object):
                                                   "race_count")),
                       (S_TOUR_STATE, self.tour_state),
                       (S_SPRINTF, self.sprintf),
-                      (B_MALLOC, self.malloc), (B_DELETE, self.delete)):
+                      (B_MALLOC, self.malloc), (B_DELETE, self.delete),
+                      (S_PLUGGED, self.joy_stub("plugged", 0)),
+                      (S_WHEEL, self.joy_stub("wheel", 1)),
+                      (S_JOY_TYPE, self.joy_stub("joytype", 2)),
+                      (S_BUTTON_CHAR, self.button_char),
+                      (S_RTIR, self.rtir)):
             e.stub(a, fn)
 
     def emit(self, s):
@@ -450,6 +624,9 @@ class Model(object):
                 k += 1
             elif conv == "s":
                 v = self.cstr(args[k] & M32)
+                k += 1
+            elif conv == "c":
+                v = chr(args[k] & 0xff)
                 k += 1
             elif conv == "%":
                 v = "%"
@@ -501,8 +678,12 @@ class Model(object):
         return len(text)
 
     def sprintf(self, em):
+        # A NULL format, the Blurb's when it has no text, prints nothing,
+        # as the port's "" does.
         r = em.reg
-        text = self.format(self.cstr(r[5] & M32), [r[6], r[7], r[8]])
+        f = r[5] & M32
+        text = self.format(self.cstr(f, 1024), [r[6], r[7], r[8]]) if f \
+            else ""
         raw = text.encode("latin-1") + b"\0"
         self.e.write(r[4] & M32, raw)
         return len(text)
@@ -514,6 +695,10 @@ class Model(object):
             return NOT_TRANSLATED
         if i == LANG_RACE_OF:
             return self.string("R%d/%d")
+        if i == LANG_EVENT_OBJECTIVE:
+            return self.string("E%d:")
+        if LANG_COP_FIRST <= i <= LANG_COP_LAST:
+            return self.string("T%x %%c." % i)
         return self.string("T%x" % (i & M32))
 
     def trs(self, em):
@@ -556,6 +741,26 @@ class Model(object):
         self.emit("  free %d" % (1 if a and a == self.last_malloc else 0))
         if a == self.last_malloc:
             self.last_malloc = 0
+        return 0
+
+    def joy_stub(self, name, k):
+        def stub(em):
+            self.emit("  %s %d" % (name, s32(em.reg[4])))
+            return self.joy[k] & M32
+        return stub
+
+    def button_char(self, em):
+        r = em.reg
+        self.emit("  buttonchar %d %d" % (s32(r[4]), s32(r[5])))
+        return self.joy[3] & M32
+
+    def rtir(self, em):
+        # RenderTextIntoRectangle(this, screen, text, rect, str, scale).
+        r = em.reg
+        a = r[8] & M32
+        self.emit("  rtir %08x %08x %08x [%s] %08x" % (
+            r[5] & M32, r[6] & M32, r[7] & M32,
+            esc(self.cstr(a, 1024)) if a else "NULL", em.fpr[12] & M32))
         return 0
 
     # ---- ops
@@ -605,6 +810,9 @@ class Model(object):
             return
         if o == "pset":
             self.put_name(RP + 652 + 48 * int(a[1]) + 20, a[2], 12)
+            return
+        if o == "obj":
+            self.put_name(RP_OBJECTIVE, a[1] if len(a) > 1 else "", 512)
             return
         n = [int(x, 0) for x in a[1:]]
         n = [0] + n
@@ -677,6 +885,29 @@ class Model(object):
             self.callback(F_LETTERBOX, n)
         elif o == "dump":
             self.dump()
+        elif o == "blurb":
+            self.callback(F_BLURB, n)
+        elif o == "twop":
+            self.callback(F_2P, n)
+        elif o == "etr":
+            e.put32(RP_EVENT_TREE, n[1] & M32)
+        elif o == "evnum":
+            e.write(RACE_EVENT + 104, struct.pack("<h", n[1]))
+        elif o == "joy":
+            self.joy = n[1:5]
+        elif o == "trans":
+            e.write(self.players + 64 * n[1] + 35, struct.pack("<b", n[2]))
+        elif o == "pick":
+            v = e.call(F_PICK, n[1], limit=200000) & M32
+            self.emit("  pick [%s]" % (esc(self.cstr(v, 1024)) if v
+                                       else "NULL"))
+        elif o == "bdump":
+            g = e.u32
+            line = "  bl %d" % s32(g(B_CHAR))
+            for inst in (B_INST, B_INST_2P):
+                b = g(inst)
+                line += " 1 %08x" % g(b) if b else " 0"
+            self.emit(line)
         else:
             raise ValueError(o)
 
@@ -1149,9 +1380,11 @@ MUTATIONS = [
       "STARTRACE_OBJ_PREVIOUS," + NL
       + "                               FLAILER_OBJECT_VISIBLE);"),
     M("c-next", "STARTRACE_OBJ_NEXT," + NL
-      + "                           FLAILER_OBJECT_VISIBLE);",
+      + "                           FLAILER_OBJECT_VISIBLE);" + NL
+      + "    return s;",
       "STARTRACE_OBJ_NEXT," + NL
-      + "                           FLAILER_OBJECT_INVISIBLE);"),
+      + "                           FLAILER_OBJECT_INVISIBLE);" + NL
+      + "    return s;"),
     M("c-ret", "    return s;" + NL + "}" + NL + NL
       + "void pre_race_stats_destroy",
       "    return NULL;" + NL + "}" + NL + NL + "void pre_race_stats_destroy"),
@@ -1161,10 +1394,14 @@ MUTATIONS = [
       "if (flags & 4)" + NL + "        bFree(s);"),
 
     # HandleEvent.
-    M("he-up", "if (msg == BMSG_MENUITEM_PAD_UP || msg == BMSG_MENUITEM_PAD_DOWN) {",
-      "if (msg == BMSG_MENUITEM_PAD_LEFT || msg == BMSG_MENUITEM_PAD_DOWN) {"),
-    M("he-down", "if (msg == BMSG_MENUITEM_PAD_UP || msg == BMSG_MENUITEM_PAD_DOWN) {",
-      "if (msg == BMSG_MENUITEM_PAD_UP || msg == BMSG_MENUITEM_PAD_RIGHT) {"),
+    M("he-up", "(void)s;" + NL
+      + "    if (msg == BMSG_MENUITEM_PAD_UP || msg == BMSG_MENUITEM_PAD_DOWN) {",
+      "(void)s;" + NL
+      + "    if (msg == BMSG_MENUITEM_PAD_LEFT || msg == BMSG_MENUITEM_PAD_DOWN) {"),
+    M("he-down", "(void)s;" + NL
+      + "    if (msg == BMSG_MENUITEM_PAD_UP || msg == BMSG_MENUITEM_PAD_DOWN) {",
+      "(void)s;" + NL
+      + "    if (msg == BMSG_MENUITEM_PAD_UP || msg == BMSG_MENUITEM_PAD_RIGHT) {"),
     M("he-noise", "        data->noise = 0;" + NL
       + "    } else if (msg == BMSG_SCREEN_BACK_BUTTON) {" + NL
       + "        const char *was;",
@@ -1179,20 +1416,26 @@ MUTATIONS = [
       "        was = m->Screens"),
     M("he-back-dec", "if (m->CurrentScreen > 0)", "if (m->CurrentScreen > 1)"),
     M("he-back-ge", "if (m->CurrentScreen > 0)", "if (m->CurrentScreen >= 0)"),
-    M("he-back-same", "if (m->Screens[m->CurrentScreen] == was)",
-      "if (m->Screens[m->CurrentScreen] != was)"),
+    M("he-back-same", "if (m->Screens[m->CurrentScreen] == was)" + NL
+      + "            data->noise = 0;",
+      "if (m->Screens[m->CurrentScreen] != was)" + NL
+      + "            data->noise = 0;"),
     M("he-back-noise", "            data->noise = 0;" + NL + "        else" + NL
       + "            change_to_screen(m->Screens[m->CurrentScreen], 0);",
       "            data->noise = 1;" + NL + "        else" + NL
       + "            change_to_screen(m->Screens[m->CurrentScreen], 0);"),
-    M("he-back-push", "change_to_screen(m->Screens[m->CurrentScreen], 0);",
-      "change_to_screen(m->Screens[m->CurrentScreen], 1);"),
+    M("he-back-push", "change_to_screen(m->Screens[m->CurrentScreen], 0);" + NL
+      + "    } else if (msg == BMSG_MENUITEM_SELECT) {",
+      "change_to_screen(m->Screens[m->CurrentScreen], 1);" + NL
+      + "    } else if (msg == BMSG_MENUITEM_SELECT) {"),
     M("he-sel-msg", "    } else if (msg == BMSG_MENUITEM_SELECT) {" + NL
       + "        if (data->param",
       "    } else if (msg == BMSG_SCREEN_START_BUTTON) {" + NL
       + "        if (data->param"),
-    M("he-sel-start", "if (data->param == JOY_EVENT_START)",
-      "if (data->param != JOY_EVENT_START)"),
+    M("he-sel-start", "if (data->param == JOY_EVENT_START)" + NL
+      + "            data->noise = 0;",
+      "if (data->param != JOY_EVENT_START)" + NL
+      + "            data->noise = 0;"),
     M("he-start-id", "#define JOY_EVENT_START 7", "#define JOY_EVENT_START 6"),
     M("he-sel-noise", "            data->noise = 0;" + NL + "        else" + NL
       + "            racecoordinator_post_message",
@@ -1208,16 +1451,20 @@ MUTATIONS = [
       + NL + "    }" + NL + "}"),
 
     # The grid's callback.
-    M("cb-act", "if (msg == BMSG_SCREEN_ACTIVATE) {",
-      "if (msg == BMSG_MENUITEM_ACTIVATE) {"),
+    M("cb-act", "if (msg == BMSG_SCREEN_ACTIVATE) {" + NL
+      + "        PreRaceStats *mem",
+      "if (msg == BMSG_MENUITEM_ACTIVATE) {" + NL
+      + "        PreRaceStats *mem"),
     M("cb-size", "bMalloc(sizeof(PreRaceStats),", "bMalloc(sizeof(PreRaceStats) + 16,"),
     M("cb-tag", '"PreRaceStats", 0, 16);', '"PreRaceStat", 0, 16);'),
     M("cb-flags", '"PreRaceStats", 0, 16);', '"PreRaceStats", 1, 16);'),
     M("cb-pool", '"PreRaceStats", 0, 16);', '"PreRaceStats", 0, 0);'),
     M("cb-hash", "pre_race_stats_construct(mem, data->itemHash);",
       "pre_race_stats_construct(mem, STARTRACE_SCREEN_STATS);"),
-    M("cb-unact", "} else if (msg == BMSG_SCREEN_UNACTIVATE) {",
-      "} else if (msg == BMSG_MENUITEM_UNACTIVATE) {"),
+    M("cb-unact", "} else if (msg == BMSG_SCREEN_UNACTIVATE) {" + NL
+      + "        if (PreRaceStatsInstance",
+      "} else if (msg == BMSG_MENUITEM_UNACTIVATE) {" + NL
+      + "        if (PreRaceStatsInstance"),
     M("cb-null", "if (PreRaceStatsInstance != NULL)" + NL
       + "            pre_race_stats_destroy(PreRaceStatsInstance, 3);",
       "if (PreRaceStatsInstance == NULL)" + NL
@@ -1242,13 +1489,19 @@ MUTATIONS = [
       "            racecoordinator_post_message(pRaceCoordinator, RC_SKIP + 1, 0);"
       + NL + "    } else if (msg == BMSG_SCREEN_BACK_BUTTON) {"),
     M("lb-back-msg", "    } else if (msg == BMSG_SCREEN_BACK_BUTTON) {" + NL
-      + "        data->noise = 0;" + NL + "        data->param = 0;",
+      + "        data->noise = 0;" + NL + "        data->param = 0;" + NL
+      + "    } else if (msg == BMSG_MENUITEM_PAD_UP",
       "    } else if (msg == BMSG_SCREEN_SELECT_BUTTON) {" + NL
-      + "        data->noise = 0;" + NL + "        data->param = 0;"),
-    M("lb-back-noise", "        data->noise = 0;" + NL + "        data->param = 0;",
-      "        data->noise = 1;" + NL + "        data->param = 0;"),
-    M("lb-back-param", "        data->noise = 0;" + NL + "        data->param = 0;",
-      "        data->noise = 0;"),
+      + "        data->noise = 0;" + NL + "        data->param = 0;" + NL
+      + "    } else if (msg == BMSG_MENUITEM_PAD_UP"),
+    M("lb-back-noise", "        data->noise = 0;" + NL + "        data->param = 0;"
+      + NL + "    } else if (msg == BMSG_MENUITEM_PAD_UP",
+      "        data->noise = 1;" + NL + "        data->param = 0;"
+      + NL + "    } else if (msg == BMSG_MENUITEM_PAD_UP"),
+    M("lb-back-param", "        data->noise = 0;" + NL + "        data->param = 0;"
+      + NL + "    } else if (msg == BMSG_MENUITEM_PAD_UP",
+      "        data->noise = 0;"
+      + NL + "    } else if (msg == BMSG_MENUITEM_PAD_UP"),
     M("lb-up", "    } else if (msg == BMSG_MENUITEM_PAD_UP" + NL,
       "    } else if (msg == BMSG_MENUITEM_PAD_LEFT" + NL),
     M("lb-down", "               || msg == BMSG_MENUITEM_PAD_DOWN) {",
@@ -1257,6 +1510,223 @@ MUTATIONS = [
       + "        data->noise = 0;",
       "               || msg == BMSG_MENUITEM_PAD_DOWN) {" + NL
       + "        data->noise = 1;"),
+
+    # The blurb's text.
+    M("bt-cop", "if (!TheRaceParameters.BeACop || TheRaceParameters.EventTreeRace)",
+      "if (TheRaceParameters.EventTreeRace)"),
+    M("bt-etr", "if (!TheRaceParameters.BeACop || TheRaceParameters.EventTreeRace)",
+      "if (!TheRaceParameters.BeACop)"),
+    M("bt-obj", "        return TheRaceParameters.sObjective;" + NL
+      + "    if (TheRaceParameters.NumPlayerCars == 1) {",
+      '        return "";' + NL
+      + "    if (TheRaceParameters.NumPlayerCars == 1) {"),
+    M("bt-1p", "if (TheRaceParameters.NumPlayerCars == 1) {",
+      "if (TheRaceParameters.NumPlayerCars >= 1) {"),
+    M("bt-plug", "if (!IsJoystickPluggedIn(0))", "if (!IsJoystickPluggedIn(1))"),
+    M("bt-plug-not", "if (!IsJoystickPluggedIn(0))", "if (IsJoystickPluggedIn(0))"),
+    M("bt-insert", "get_translated_string(STARTRACE_LANG_INSERT_CONTROLLER);",
+      "get_translated_string(STARTRACE_LANG_INSERT_CONTROLLER + 1);"),
+    M("bt-wheel", "if (IsJoystickTypeWheel(0))", "if (IsJoystickTypeWheel(0) == 1)"),
+    M("bt-wheel-port", "if (IsJoystickTypeWheel(0))", "if (IsJoystickTypeWheel(1))"),
+    M("bt-w22", "GetJoystickType(0) == JOYSTICK_TYPE_WHEEL_22",
+      "GetJoystickType(0) != JOYSTICK_TYPE_WHEEL_22"),
+    M("bt-w22-id", "#define JOYSTICK_TYPE_WHEEL_22  22",
+      "#define JOYSTICK_TYPE_WHEEL_22  23"),
+    M("bt-w22-str", "? STARTRACE_LANG_COP_WHEEL22 : STARTRACE_LANG_COP_WHEEL);",
+      "? STARTRACE_LANG_COP_WHEEL : STARTRACE_LANG_COP_WHEEL);"),
+    M("bt-w-str", "? STARTRACE_LANG_COP_WHEEL22 : STARTRACE_LANG_COP_WHEEL);",
+      "? STARTRACE_LANG_COP_WHEEL22 : STARTRACE_LANG_COP_WHEEL22);"),
+    M("bt-p41-id", "#define JOYSTICK_TYPE_PAD_41    0x41",
+      "#define JOYSTICK_TYPE_PAD_41    0x40"),
+    M("bt-p41", "pad41 = GetJoystickType(0) == JOYSTICK_TYPE_PAD_41;",
+      "pad41 = GetJoystickType(0) != JOYSTICK_TYPE_PAD_41;"),
+    M("bt-player", "PlayerPlayersByNumber[player]", "PlayerPlayersByNumber[0]"),
+    M("bt-t3", "if (t >= 3 || t < 0)", "if (t > 3 || t < 0)"),
+    M("bt-tneg", "if (t >= 3 || t < 0)", "if (t >= 3)"),
+    M("bt-t0", "if (t == 0)" + NL + "            return get_translated_string(pad41",
+      "if (t <= 1)" + NL + "            return get_translated_string(pad41"),
+    M("bt-auto41", "? STARTRACE_LANG_COP_PAD41_AUTO",
+      "? STARTRACE_LANG_COP_PAD41"),
+    M("bt-auto", ": STARTRACE_LANG_COP_PAD_AUTO);", ": STARTRACE_LANG_COP_PAD);"),
+    M("bt-man41", "return get_translated_string(pad41 ? STARTRACE_LANG_COP_PAD41" + NL,
+      "return get_translated_string(pad41 ? STARTRACE_LANG_COP_PAD" + NL),
+    M("bt-man", ": STARTRACE_LANG_COP_PAD);", ": STARTRACE_LANG_COP_PAD41);"),
+    M("bt-2p", "if (TheRaceParameters.NumPlayerCars == 2) {",
+      "if (TheRaceParameters.NumPlayerCars >= 2) {"),
+    M("bt-2p-0", "if (player == 0)", "if (player <= 0)"),
+    M("bt-2p-1", "if (player == 1)", "if (player >= 1)"),
+    M("bt-2p-swap", "return get_translated_string(STARTRACE_LANG_2P_COP);",
+      "return get_translated_string(STARTRACE_LANG_2P_SPEEDER);"),
+
+    # The Blurb's constructor and destructor.
+    M("bc-hash", "    b->ScreenHash = screen;" + NL
+      + "    if (TheRaceParameters.EventTreeRace)",
+      "    b->ScreenHash = 0;" + NL + "    if (TheRaceParameters.EventTreeRace)"),
+    M("bc-etr", "    if (TheRaceParameters.EventTreeRace)" + NL
+      + "        flailer_printf", "    if (0)" + NL + "        flailer_printf"),
+    M("bc-num", "(int)TheRaceEvent.nNumber);", "(int)TheRaceEvent.nNumber + 1);"),
+    M("bc-head", "STARTRACE_LANG_EVENT_OBJECTIVE),",
+      "STARTRACE_LANG_OBJECTIVE),"),
+    M("bc-cop", "    else if (TheRaceParameters.BeACop)" + NL
+      + "        flailer_set_language_id",
+      "    else if (0)" + NL + "        flailer_set_language_id"),
+    M("bc-cop-id", "STARTRACE_LANG_YOURE_THE_COP);", "STARTRACE_LANG_OBJECTIVE);"),
+    M("bc-plain-id", "                                STARTRACE_LANG_OBJECTIVE);",
+      "                                STARTRACE_LANG_OBJECTIVE + 1);"),
+    M("bc-next", "    flailer_set_visibility(b->ScreenHash, STARTRACE_OBJ_NEXT," + NL
+      + "                           FLAILER_OBJECT_VISIBLE);",
+      "    flailer_set_visibility(b->ScreenHash, STARTRACE_OBJ_NEXT," + NL
+      + "                           FLAILER_OBJECT_INVISIBLE);"),
+    M("bd-next", "                           FLAILER_OBJECT_INVISIBLE);" + NL
+      + "    if (flags & 1)",
+      "                           FLAILER_OBJECT_VISIBLE);" + NL
+      + "    if (flags & 1)"),
+    M("bd-free", "FLAILER_OBJECT_INVISIBLE);" + NL + "    if (flags & 1)",
+      "FLAILER_OBJECT_INVISIBLE);" + NL + "    if (flags & 4)"),
+
+    # The Blurb's HandleEvent.
+    M("bh-up", "    if (msg == BMSG_MENUITEM_PAD_UP || msg == BMSG_MENUITEM_PAD_DOWN) {"
+      + NL + "        data->noise = 0;" + NL
+      + "    } else if (msg == BMSG_SCREEN_RENDER) {" + NL
+      + "        char buf[512];",
+      "    if (msg == BMSG_MENUITEM_PAD_DOWN) {"
+      + NL + "        data->noise = 0;" + NL
+      + "    } else if (msg == BMSG_SCREEN_RENDER) {" + NL
+      + "        char buf[512];"),
+    M("bh-render", "    } else if (msg == BMSG_SCREEN_RENDER) {" + NL
+      + "        char buf[512];",
+      "    } else if (msg == BMSG_SCREEN_RENDER + 1) {" + NL
+      + "        char buf[512];"),
+    M("bh-plug", "        if (IsJoystickPluggedIn(0))" + NL
+      + "            PreRaceBlurbButtonChar",
+      "        if (1)" + NL + "            PreRaceBlurbButtonChar"),
+    M("bh-nitro", "GetJoystickButtonChar(0, JOY_EVENT_NITRO_BOOST);",
+      "GetJoystickButtonChar(0, JOY_EVENT_REQUEST_ROADBLOCK);"),
+    M("bh-player", "fmt = pre_race_blurb_text(0);", "fmt = pre_race_blurb_text(1);"),
+    M("bh-char", "(int)PreRaceBlurbButtonChar);", "(int)PreRaceBlurbButtonChar + 1);"),
+    M("bh-char0", "int32_t PreRaceBlurbButtonChar = 0x89;",
+      "int32_t PreRaceBlurbButtonChar = 0x88;"),
+    M("bh-text", "                                           STARTRACE_OBJ_BLURB_TEXT,",
+      "                                           STARTRACE_OBJ_BLURB_BOX,"),
+    M("bh-box", "                                           STARTRACE_OBJ_BLURB_BOX, buf,",
+      "                                           STARTRACE_OBJ_BLURB_TEXT, buf,"),
+    M("bh-scale", "STARTRACE_OBJ_BLURB_BOX, buf," + NL
+      + "                                           1.0f);",
+      "STARTRACE_OBJ_BLURB_BOX, buf," + NL
+      + "                                           0.5f);"),
+
+    # SELECT on both.
+    M("st-start", "    if (data->param == JOY_EVENT_START)" + NL + "        return;"
+      + NL + "    data->param = 0;",
+      "    if (data->param != JOY_EVENT_START)" + NL + "        return;"
+      + NL + "    data->param = 0;"),
+    M("st-param", "    data->param = 0;" + NL + "    data->noise = 0;" + NL
+      + "    was = m->Screens", "    data->noise = 0;" + NL
+      + "    was = m->Screens"),
+    M("st-noise0", "    data->param = 0;" + NL + "    data->noise = 0;" + NL
+      + "    was = m->Screens", "    data->param = 0;" + NL
+      + "    was = m->Screens"),
+    M("st-last", "if (m->CurrentScreen < m->NumScreens - 1)" + NL
+      + "        m->CurrentScreen++;" + NL
+      + "    if (m->Screens[m->CurrentScreen] == was) {",
+      "if (m->CurrentScreen <= m->NumScreens - 1)" + NL
+      + "        m->CurrentScreen++;" + NL
+      + "    if (m->Screens[m->CurrentScreen] == was) {"),
+    M("st-same", "    if (m->Screens[m->CurrentScreen] == was) {" + NL
+      + "        racecoordinator_post_message",
+      "    if (m->Screens[m->CurrentScreen] != was) {" + NL
+      + "        racecoordinator_post_message"),
+    M("st-skip", "        racecoordinator_post_message(pRaceCoordinator, RC_SKIP, 0);"
+      + NL + "    } else {",
+      "        racecoordinator_post_message(pRaceCoordinator, RC_SKIP, 1);"
+      + NL + "    } else {"),
+    M("st-push", "        change_to_screen(m->Screens[m->CurrentScreen], 0);" + NL
+      + "        data->noise = STARTRACE_NOISE_NEXT;",
+      "        change_to_screen(m->Screens[m->CurrentScreen], 1);" + NL
+      + "        data->noise = STARTRACE_NOISE_NEXT;"),
+    M("st-five", "#define STARTRACE_NOISE_NEXT    5", "#define STARTRACE_NOISE_NEXT    6"),
+    M("st-sel", "    } else if (msg == BMSG_MENUITEM_SELECT) {" + NL
+      + "        start_race_step_to_next_screen(data);" + NL
+      + "    }" + NL + "}" + NL + NL + "PreRace2PBeACop",
+      "    } else if (msg == BMSG_SCREEN_SELECT_BUTTON) {" + NL
+      + "        start_race_step_to_next_screen(data);" + NL
+      + "    }" + NL + "}" + NL + NL + "PreRace2PBeACop"),
+
+    # The 2P screen.
+    M("2c-next", "    flailer_set_visibility(screen, STARTRACE_OBJ_NEXT," + NL
+      + "                           FLAILER_OBJECT_VISIBLE);",
+      "    flailer_set_visibility(screen, STARTRACE_OBJ_NEXT," + NL
+      + "                           FLAILER_OBJECT_INVISIBLE);"),
+    M("2c-hash", "    b->ScreenHash = screen;" + NL
+      + "    flailer_set_visibility(screen",
+      "    b->ScreenHash = 0;" + NL + "    flailer_set_visibility(screen"),
+    M("2d-free", "{" + NL + "    if (flags & 1)" + NL + "        bFree(b);",
+      "{" + NL + "    if (flags & 4)" + NL + "        bFree(b);"),
+    M("2h-render", "    } else if (msg == BMSG_SCREEN_RENDER) {" + NL
+      + "        flailer_render_text_into_rectangle(b->ScreenHash," + NL
+      + "                                           STARTRACE_OBJ_2P_TEXT_1,",
+      "    } else if (msg == BMSG_SCREEN_RENDER + 1) {" + NL
+      + "        flailer_render_text_into_rectangle(b->ScreenHash," + NL
+      + "                                           STARTRACE_OBJ_2P_TEXT_1,"),
+    M("2h-up", "    if (msg == BMSG_MENUITEM_PAD_UP || msg == BMSG_MENUITEM_PAD_DOWN) {"
+      + NL + "        data->noise = 0;" + NL
+      + "    } else if (msg == BMSG_SCREEN_RENDER) {" + NL
+      + "        flailer_render_text_into_rectangle",
+      "    if (msg == BMSG_MENUITEM_PAD_UP) {"
+      + NL + "        data->noise = 0;" + NL
+      + "    } else if (msg == BMSG_SCREEN_RENDER) {" + NL
+      + "        flailer_render_text_into_rectangle"),
+    M("2h-p0", "pre_race_blurb_text(0), 1.0f);", "pre_race_blurb_text(1), 1.0f);"),
+    M("2h-p1", "pre_race_blurb_text(1), 1.0f);", "pre_race_blurb_text(0), 1.0f);"),
+    M("2h-box1", "STARTRACE_OBJ_2P_BOX_1,", "STARTRACE_OBJ_2P_BOX_2,"),
+    M("2h-text2", "STARTRACE_OBJ_2P_TEXT_2,", "STARTRACE_OBJ_2P_TEXT_1,"),
+    M("2h-scale", "pre_race_blurb_text(1), 1.0f);", "pre_race_blurb_text(1), 2.0f);"),
+    M("2h-sel", "    } else if (msg == BMSG_MENUITEM_SELECT) {" + NL
+      + "        start_race_step_to_next_screen(data);" + NL
+      + "    }" + NL + "}" + NL + NL + "// ---",
+      "    } else if (msg == BMSG_SCREEN_START_BUTTON) {" + NL
+      + "        start_race_step_to_next_screen(data);" + NL
+      + "    }" + NL + "}" + NL + NL + "// ---"),
+
+    # The two callbacks.
+    M("bcb-tag", '"PreRaceBlurb", 0, 16);', '"PreRaceBlurp", 0, 16);'),
+    M("bcb-pool", '"PreRaceBlurb", 0, 16);', '"PreRaceBlurb", 0, 0);'),
+    M("bcb-hash", "PreRaceBlurbInstance = pre_race_blurb_construct(mem, data->itemHash);",
+      "PreRaceBlurbInstance = pre_race_blurb_construct(mem, STARTRACE_SCREEN_BLURB);"),
+    M("bcb-del", "pre_race_blurb_destroy(PreRaceBlurbInstance, 3);",
+      "pre_race_blurb_destroy(PreRaceBlurbInstance, 2);"),
+    M("bcb-null", "if (PreRaceBlurbInstance != NULL)" + NL
+      + "            pre_race_blurb_destroy",
+      "if (PreRaceBlurbInstance == NULL)" + NL
+      + "            pre_race_blurb_destroy"),
+    M("bcb-clear", "        PreRaceBlurbInstance = NULL;" + NL, ""),
+    M("bcb-back", "            pre_race_blurb_destroy(PreRaceBlurbInstance, 3);" + NL
+      + "        PreRaceBlurbInstance = NULL;" + NL
+      + "    } else if (msg == BMSG_SCREEN_BACK_BUTTON) {" + NL
+      + "        data->noise = 0;",
+      "            pre_race_blurb_destroy(PreRaceBlurbInstance, 3);" + NL
+      + "        PreRaceBlurbInstance = NULL;" + NL
+      + "    } else if (msg == BMSG_SCREEN_BACK_BUTTON) {" + NL
+      + "        data->noise = 1;"),
+    M("bcb-else", "pre_race_blurb_handle_event(PreRaceBlurbInstance, msg, data);",
+      "(void)0;"),
+    M("2cb-tag", '"PreRace2PBeACop", 0, 16);', '"PreRace2PBeAcop", 0, 16);'),
+    M("2cb-hash", "mem, data->itemHash);" + NL + "    } else if (msg == BMSG_SCREEN_UNACTIVATE) {"
+      + NL + "        if (PreRace2PBeACopInstance",
+      "mem, STARTRACE_SCREEN_2P_BEACOP);" + NL
+      + "    } else if (msg == BMSG_SCREEN_UNACTIVATE) {"
+      + NL + "        if (PreRace2PBeACopInstance"),
+    M("2cb-del", "pre_race_2p_be_a_cop_destroy(PreRace2PBeACopInstance, 3);",
+      "pre_race_2p_be_a_cop_destroy(PreRace2PBeACopInstance, 2);"),
+    M("2cb-clear", "        PreRace2PBeACopInstance = NULL;" + NL, ""),
+    M("2cb-back", "        PreRace2PBeACopInstance = NULL;" + NL
+      + "    } else if (msg == BMSG_SCREEN_BACK_BUTTON) {" + NL
+      + "        data->noise = 0;" + NL + "        data->param = 0;",
+      "        PreRace2PBeACopInstance = NULL;" + NL
+      + "    } else if (msg == BMSG_SCREEN_BACK_BUTTON) {" + NL
+      + "        data->noise = 0;"),
+    M("2cb-else", "pre_race_2p_be_a_cop_handle_event(PreRace2PBeACopInstance, msg, data);",
+      "(void)0;"),
 ]
 
 EQUIVALENT = {

@@ -134,17 +134,15 @@ The table below lists the seams set in `main.c`:
 | `gChangeToScreenFn` | `bgf_change_to_screen` on the flow |
 | `gStartRaceTranslateFn`, `gStartRaceTranslateStringFn` | the car selector's string hooks |
 | `gRaceEventGetRaceCountFn`, `gRaceEventGetTournamentStateFn` | NULL: RaceEvent is not ported, and quick races do not read it |
+| `gFlailerTextIntoRectangleFn` | `flailerTextIntoRectangle`, which queues the strip with `uirender_queue_text_rect` |
 
-"Pre Race Stats" and "Pre Race Letterbox" are rows in `kScreens[]`. The
+"Pre Race Blurb", "Pre Race 2P Be A Cop", "Pre Race Stats" and "Pre Race
+Letterbox" are rows in `kScreens[]`. The
 race draws visible Flailer screens over its view, so the grid draws over
 the fly-by on the top screen. The cinema bars are a separate screen,
 `0x49c15518`, which the HUD shows in the fly-by and the pre-race
 (`playerhud.c`, `HUD_CINEMA_BARS`). The grid's dark backdrop (`0x62229da7`,
 y 89 to 391 of 480) covers exactly the part of the view between the bars.
-
-The Blurb (`0x001e3270` on) and the two-player You're The Cop screen
-(`0x001e36f0` on) are not ported, because no race the port can start shows
-them.
 
 On Azahar, a quick race from the frontend went through these stages:
 
@@ -161,14 +159,134 @@ the grid's backdrop along distant road lines. They are brighter than
 anything under the backdrop could be. Their cause is not known yet. Check
 for them on a device.
 
+## The Blurb and the 2P screen (12m-4)
+
+The Blurb is `PRERACE_BLURB`, hash `0x887b4d37`. It shows the race's
+objective, or the cop's controls in Be A Cop. The two-player Be A Cop
+screen is `0xb5ecd7a0`, with one box for each player. Each object is 4
+bytes: the screen's hash. Their instances are gp-17380 and gp-17372.
+
+**The callbacks** (`0x001e3640`, `0x001e38b8`) work like the grid's:
+
+- ACTIVATE allocates the 4 bytes, tagged "PreRaceBlurb" or
+  "PreRace2PBeACop", and constructs the object.
+- UNACTIVATE destroys it with flags 3.
+- BACK sets the noise and Param to 0 and goes nowhere.
+- Every other message goes to `HandleEvent`.
+
+**The constructors:**
+
+- The Blurb's heading (`0x6a77af98`) is set as follows. In an event-tree
+  race, it prints "Event %d Objective:" (63001) with
+  `TheRaceEvent.nNumber`. For the cop, it gets the LanguageID "You're The
+  Cop" (970000). Otherwise it gets "Objective:" (63000).
+- Both constructors show NEXT. Only the Blurb's destructor hides it
+  again.
+
+**The text** (`0x001e3320`, no symbol) is chosen like this:
+
+| Race | Text |
+|---|---|
+| not BeACop, or EventTreeRace | `RaceParameters.sObjective` |
+| one player, no pad | "Please insert a controller" (900011) |
+| one player, a wheel | 970020 for type 22, otherwise 970017 |
+| one player, a pad | by player's TransmissionType: 0 gives 970019 (type 0x41) or 970016; 1 and 2 give 970018 (type 0x41) or 970001; anything else gives NULL |
+| two players | player 0 gets 970010 (the cop), player 1 gets 970011 (the speeder) |
+| anything else | NULL |
+
+The 3DS pad is type 0, so a cop on one player reads 970016 or 970001.
+
+**HandleEvent** (`0x001e34a8`, `0x001e3750`) handles these messages:
+
+- **Up and down** make no sound.
+- **RENDER** (19) is handled differently by the two screens:
+  - The Blurb asks for the nitro button's character while pad 0 is
+    plugged in (`GetJoystickButtonChar(0, 126)`). The character is kept
+    at gp-17376, which starts at 0x89 in the image. The Blurb then
+    bSPrintfs the text with that character into 512 bytes, and lays the
+    result into its box: text `0xaefe36d8`, box `0xcccf9a75`, scale 1.
+  - The 2P screen lays player 0's text and player 1's text into their two
+    boxes as they are, with no printf.
+- **SELECT** (`0x001e3548`, the same on both) does nothing when its Param
+  is `JOY_EVENT_START`. Otherwise it zeroes Param and the noise, then
+  steps to the next screen if there is one. If the step lands on the
+  same screen, it posts RC_SKIP. If not, it changes to the next screen
+  without a push and sets the noise to 5. Retail posts to
+  `pRaceCoordinator` without checking it.
+
+These are the port's departures:
+
+- A NULL text reaches bSPrintf as its format in retail. The port prints
+  "" instead.
+- Retail's bSPrintf has no bound. The port's snprintf stops at 512.
+
+**RENDER in the port.** Retail's `RenderFlailerModels` sends RENDER to the
+current screen every frame. `main.c`'s `flowRender` now does the same
+for the flow's screen, right after `C2D_SceneBegin(top)`. The car and
+track selectors are skipped, because their RENDER hooks draw on their
+own. All the other callbacks that see RENDER ignore it: the grid, the
+letterbox, the pause menu, the gameflow switches and endgame.
+
+**SkipFE.** A race started with SkipFE goes straight to
+RCSTATE_RACE_IN_PROGRESS, as retail does. So the Blurb only shows in a
+race started from the frontend.
+
+### RenderTextIntoRectangle
+
+The outer (`0x001451e0`) is ported as `flailer_render_text_into_rectangle`
+in `flailerwrap.c`. It finds the box bitmap and the text object. The box
+runs from the bitmap's X, Y to that point plus its width and height. It
+sets the text's string, then hands it to the seam
+`gFlailerTextIntoRectangleFn`.
+
+`main.c` binds the seam to `uirender_queue_text_rect`. That function queues
+up to four strips a frame, and `uirender_clear_strips` empties the queue
+before each RENDER. `draw_visible` draws each strip after the objects of
+its text object's layer, as retail's `AddFlailerStrip` appends to
+`LayerRenderInfoTable[Z]`.
+
+The layout is the inner's (`0x00144ed0`):
+
+- The pen starts at the text object's top left.
+- A button icon is drawn through `RenderHelpCharacter`, and moves the pen
+  by its unscaled advance.
+- A glyph is kerned against the byte before it in the string, scaled by
+  ScaleX. The pen then moves by `(int)(ScaleX * (advance + kerning))`.
+- After a space or a tab, the line breaks if the next word would pass the
+  box's right edge. The edge is measured from the object's left.
+- '@' always breaks the line.
+- A line break moves the pen to the left and down by `(int)` of the font
+  height.
+- A character that broke the line, or has no glyph, is not drawn. The
+  spaces after it are skipped.
+
+Each glyph's quad is ScaleX² wide and ScaleY tall, as `RenderCharacter`
+draws it. `MaybeClipPoly` (`0x00141808`) drops a quad that lies wholly
+outside the box. Otherwise it trims the quad to the box, left, right,
+top and bottom in that order, and moves the UVs in step.
+
+On Azahar, a Be A Cop race from the frontend showed the Blurb as follows:
+
+- The heading read "You're The Cop", with the automatic pad's lines
+  (970016) wrapped inside the box and NEXT below.
+- An A press skipped the fly-by: the coordinator went from state 1 to 2.
+- When the fly-by ended without a press, PRERACE closed the screens.
+
+The cop lines show the PS2's glyphs (R3, L2, R2). The 3DS mapping is
+L, R, ZL and ZR, a later task.
+
 ## The check
 
 `tools/startrace_check.py` runs retail's own module in `retail_model`,
 beside the harness `tools/src/startrace_test.c`.
 
-- **Ops:** 4817, giving 18822 transcript lines, 0 differ.
-- **Mutations:** 197, from 193 caught (11 of them by a crash or a hang)
-  and 4 equivalent:
+- **Ops:** 7315, giving 24078 transcript lines, 0 differ. Since 12m-4
+  they include the Blurb's text over every branch (players, pads,
+  wheels, TransmissionTypes, missing strings), both screens' callbacks
+  with every message, and SELECT over each manager shape. The model
+  stubs the joystick calls and RenderTextIntoRectangle, which prints its
+  string with the bytes outside ASCII as `\xNN`.
+- **Mutations:** 278, from 274 caught and 4 equivalent:
   - `en-s0`: Enable always adds a screen, so `Screens[0]` is always
     rewritten.
   - `bd-ko`, `bd-pts` and `bk-pts`: the constructor's memset already

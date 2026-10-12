@@ -31,7 +31,18 @@
 //   getpos|P           GetStatsForRacePosition(P) on the grid up
 //   stats|MSG|ITEM|PORT|PARAM|NOISE   the grid's callback
 //   letter|MSG|ITEM|PORT|PARAM|NOISE  the letterbox's
+//   blurb|MSG|ITEM|PORT|PARAM|NOISE   the Blurb's
+//   twop|MSG|ITEM|PORT|PARAM|NOISE    the 2P Be A Cop screen's
 //   dump               the manager and the grid
+//   etr|V              TheRaceParameters.EventTreeRace
+//   obj|TEXT           TheRaceParameters.sObjective
+//   evnum|N            TheRaceEvent.nNumber
+//   joy|PLUGGED|WHEEL|TYPE|CHAR  what pad 0's IsJoystickPluggedIn,
+//                      IsJoystickTypeWheel, GetJoystickType and
+//                      GetJoystickButtonChar answer
+//   trans|P|T          player P's TransmissionType
+//   pick|P             the blurb's text for player P
+//   bdump              the button character and the two instances
 //
 // Every call out of startrace.c prints what it was asked, as the model's
 // stubs at retail's addresses do.
@@ -46,8 +57,11 @@
 #include "cartypeinfo.h"
 #include "characterinfo.h"
 #include "flailer.h"
+#include "flailerwrap.h"
 #include "fred.h"
 #include "fredrace.h"
+#include "joyevent.h"
+#include "joystick.h"
 #include "player.h"
 #include "race.h"
 #include "racecoord.h"
@@ -69,6 +83,7 @@ TrackInfo *CurrentTrackInfo;
 RaceEvent TheRaceEvent;
 int32_t (*gRaceEventGetRaceIndexFn)(void);
 void (*gChangeToScreenFn)(const char *name, int32_t push);
+struct Player *PlayerPlayersByNumber[2];
 
 static Race race;
 static RacingCar rcars[RACE_MAX_RACING_CARS];
@@ -89,6 +104,7 @@ static uint32_t missing[MAX_MISSING];
 static int numMissing;
 static int trsMode;
 static void *lastMalloc;
+static int32_t joyPlugged, joyWheel, joyType, joyChar;
 
 static int64_t num(const char *s)
 {
@@ -185,6 +201,55 @@ int32_t flailer_printf(uint32_t screen, uint32_t object, const char *fmt,
     return (int32_t)strlen(buf);
 }
 
+// A string with each byte outside ' ' .. '~' as \xNN.
+static void print_escaped(const char *s)
+{
+    for (; *s; s++) {
+        unsigned char c = (unsigned char)*s;
+
+        if (c < 0x20 || c > 0x7e)
+            printf("\\x%02x", c);
+        else
+            putchar(c);
+    }
+}
+
+void flailer_render_text_into_rectangle(uint32_t screen, uint32_t text,
+                                        uint32_t rect, const char *str,
+                                        float scale)
+{
+    printf("  rtir %08x %08x %08x [", screen, text, rect);
+    if (str == NULL)
+        printf("NULL");
+    else
+        print_escaped(str);
+    printf("] %08x\n", fbits(scale));
+}
+
+int32_t IsJoystickPluggedIn(JoystickPort port)
+{
+    printf("  plugged %d\n", (int)port);
+    return joyPlugged;
+}
+
+int32_t IsJoystickTypeWheel(JoystickPort port)
+{
+    printf("  wheel %d\n", (int)port);
+    return joyWheel;
+}
+
+int32_t GetJoystickType(JoystickPort port)
+{
+    printf("  joytype %d\n", (int)port);
+    return joyType;
+}
+
+int32_t GetJoystickButtonChar(JoystickPort port, JoyEvent ev)
+{
+    printf("  buttonchar %d %d\n", (int)port, (int)ev);
+    return joyChar;
+}
+
 void *bMalloc(int size, const char *name, int flags, int pool)
 {
     void *p = malloc((size_t)size);
@@ -224,7 +289,14 @@ static const char *translate(int32_t id)
             return NULL;
     if (id == STARTRACE_LANG_RACE_OF)
         return "R%d/%d";
+    if (id == STARTRACE_LANG_EVENT_OBJECTIVE)
+        return "E%d:";
     s = ring[at++ & 7];
+    // The cop's lines, which the Blurb prints its button into.
+    if (id >= 970001 && id <= 970020) {
+        snprintf(s, 32, "T%x %%c.", (unsigned)id);
+        return s;
+    }
     snprintf(s, 32, "T%x", (unsigned)id);
     return s;
 }
@@ -289,6 +361,19 @@ static void dump(void)
     }
 }
 
+static void blurb_dump(void)
+{
+    printf("  bl %d", (int)PreRaceBlurbButtonChar);
+    if (PreRaceBlurbInstance != NULL)
+        printf(" 1 %08x", PreRaceBlurbInstance->ScreenHash);
+    else
+        printf(" 0");
+    if (PreRace2PBeACopInstance != NULL)
+        printf(" 1 %08x\n", PreRace2PBeACopInstance->ScreenHash);
+    else
+        printf(" 0\n");
+}
+
 static void callback(void (*fn)(struct BGameFlow *, BScreenMessage,
                                 BScreenCallbackData *),
                      char **arg)
@@ -328,6 +413,8 @@ int main(int argc, char **argv)
     }
     for (i = 0; i < 8; i++)
         playerCars[i].pPlayer = &players[i];
+    PlayerPlayersByNumber[0] = &players[0];
+    PlayerPlayersByNumber[1] = &players[1];
     pCurrentRace = &race;
     CurrentTrackInfo = &track;
     theRc = &rcMem;
@@ -457,6 +544,37 @@ int main(int argc, char **argv)
             callback(pre_race_letterbox_callback, arg);
         } else if (!strcmp(op, "dump")) {
             dump();
+        } else if (!strcmp(op, "blurb")) {
+            callback(pre_race_blurb_callback, arg);
+        } else if (!strcmp(op, "twop")) {
+            callback(pre_race_2p_be_a_cop_callback, arg);
+        } else if (!strcmp(op, "etr")) {
+            TheRaceParameters.EventTreeRace = (int32_t)num(arg[1]);
+        } else if (!strcmp(op, "obj")) {
+            snprintf(TheRaceParameters.sObjective,
+                     sizeof TheRaceParameters.sObjective, "%s",
+                     n > 1 ? arg[1] : "");
+        } else if (!strcmp(op, "evnum")) {
+            TheRaceEvent.nNumber = (int16_t)num(arg[1]);
+        } else if (!strcmp(op, "joy")) {
+            joyPlugged = (int32_t)num(arg[1]);
+            joyWheel = (int32_t)num(arg[2]);
+            joyType = (int32_t)num(arg[3]);
+            joyChar = (int32_t)num(arg[4]);
+        } else if (!strcmp(op, "trans")) {
+            players[num(arg[1])].PlayerSettings.TransmissionType =
+                (int8_t)num(arg[2]);
+        } else if (!strcmp(op, "pick")) {
+            const char *t = pre_race_blurb_text((int32_t)num(arg[1]));
+
+            printf("  pick [");
+            if (t == NULL)
+                printf("NULL");
+            else
+                print_escaped(t);
+            printf("]\n");
+        } else if (!strcmp(op, "bdump")) {
+            blurb_dump();
         } else {
             fprintf(stderr, "bad op %s\n", op);
             return 3;

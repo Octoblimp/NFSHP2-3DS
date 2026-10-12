@@ -95,3 +95,28 @@ int32_t flailer_render_text_into_group(uint32_t screen, uint32_t group,
         chunks[i]->Object.Visibility = FLAILER_OBJECT_INVISIBLE;
     return ee_trunc_w(last->Object.Y + h);
 }
+
+void (*gFlailerTextIntoRectangleFn)(struct FlailerTextChunk *t,
+                                    const char *str, float tlx, float tly,
+                                    float brx, float bry, float scale);
+
+void flailer_render_text_into_rectangle(uint32_t screen, uint32_t text,
+                                        uint32_t rect, const char *str,
+                                        float scale)
+{
+    struct FlailerObjectChunk *r =
+        flailer_find_object(screen, rect, FLAILER_TYPE_BITMAP);
+    struct FlailerTextChunk *t = (struct FlailerTextChunk *)
+        flailer_find_object(screen, text, FLAILER_TYPE_TEXT);
+    float tlx, tly, brx, bry;
+
+    if (r == NULL || t == NULL || str == NULL)
+        return;
+    tlx = r->X;
+    tly = r->Y;
+    brx = r->X + (float)flailerobject_get_width(r);
+    bry = r->Y + (float)flailerobject_get_height(r);
+    flailertext_set_string(t, str);
+    if (gFlailerTextIntoRectangleFn != NULL)
+        gFlailerTextIntoRectangleFn(t, str, tlx, tly, brx, bry, scale);
+}

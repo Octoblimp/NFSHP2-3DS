@@ -17,8 +17,9 @@
 // RenderSingleFlailerBitmap (0x00140538). Where the engine does something
 // surprising the comment says so and names the address.
 //
-// Not implemented, because nothing on this disc uses it: word wrap
-// (BUI_FMT_WRAP) and clipping (BUI_FMT_CLIP). RenderOnPoly/ClipToPoly are
+// Not implemented, because nothing on this disc uses it: the objects' own
+// word wrap (BUI_FMT_WRAP) and clipping (BUI_FMT_CLIP); the word wrap
+// and clipping of RenderTextIntoRectangle are uirender_queue_text_rect's. RenderOnPoly/ClipToPoly are
 // likewise unset on every object in this build.
 
 #define UIR_MAX_BUNDLES  4
@@ -90,6 +91,24 @@ typedef struct {
     bool     hasUI;
 } UIBundle;
 
+// Text RenderTextIntoRectangle (retail 0x00144ed0) lays into a box, one
+// frame's: the RENDER the current screen gets queues it, and the draw puts
+// it in its text object's layer after that layer's objects, as
+// AddFlailerStrip appends to LayerRenderInfoTable[Z]. See
+// uirender_queue_text_rect().
+#define UIR_MAX_STRIPS   4
+#define UIR_STRIP_TEXT   512   // the Blurb's bSPrintf buffer
+
+typedef struct {
+    const BUI* ui;
+    uint32_t   index;          // the text object
+    uint32_t   screen;         // its screen's index in ui->screens
+    float      tlx, tly;       // the box, in the screen's 640x480 space
+    float      brx, bry;
+    float      scale;          // the colour's, RenderCharacter's last float
+    char       text[UIR_STRIP_TEXT];
+} UITextStrip;
+
 typedef struct {
     UIBundle  bundles[UIR_MAX_BUNDLES];
     int       numBundles;
@@ -112,6 +131,11 @@ typedef struct {
     // uirender_set_placements().
     const UIPlacement* placements;
     int                numPlacements;
+
+    // This frame's text laid into boxes. See
+    // uirender_queue_text_rect().
+    UITextStrip strips[UIR_MAX_STRIPS];
+    int         numStrips;
 
     float     targetW, targetH;   // the C3D render target, e.g. 400x240
     float     scrollTime;         // seconds, for UV-scrolling textures
@@ -280,6 +304,20 @@ const char* uirender_object_string(UIRenderer* r, const BUI* ui,
 // list. This is a draw-time skip rather than a visibility write because the
 // frontend's own animations set that field every frame.
 void uirender_hide_object(UIRenderer* r, uint32_t nameHash);
+
+// FlailerRenderManager::RenderTextIntoRectangle's inner (0x00144ed0):
+// `text` laid out from text object `index`'s top left in its font, colour
+// and ScaleX/ScaleY, word-wrapped where the next word would pass the box's
+// right edge and at '@', and each glyph clipped to the box (MaybeClipPoly,
+// 0x00141808). Queued for this frame's draw in the object's layer, whether
+// the object is visible or not, as the PS2's strip is. False with nothing
+// queued when the queue is full, the object is not text, or no screen of
+// `ui` holds it.
+bool uirender_queue_text_rect(UIRenderer* r, const BUI* ui, uint32_t index,
+                              float tlx, float tly, float brx, float bry,
+                              const char* text, float scale);
+// Empties the queue: once a frame, before the current screen's RENDER.
+void uirender_clear_strips(UIRenderer* r);
 
 // The table of where objects draw (UIPlacement): the first entry that
 // matches an object wins, and an object with none draws on the top screen.

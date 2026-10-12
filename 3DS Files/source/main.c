@@ -122,6 +122,7 @@
 #include "gamedata.h"
 #include "fesound.h"
 #include "flailer.h"
+#include "flailerwrap.h"
 #include "frameprof.h"
 #include "fred.h"
 #include "fredend.h"
@@ -359,10 +360,14 @@ static const BScreenConfig kScreens[] = {
       bgf_language_screen_callback },
 
     // The race's, in INGAMEB: the screens EnableStartRaceScreens puts over
-    // the fly-by (startrace.c). The Starting Grid is every race's but You're
-    // The Cop's and Free Run's; the letterbox is up when no other is. The
-    // Blurb and the two-player cop screen are not ported, and no race the
-    // port starts asks for them.
+    // the fly-by (startrace.c). The Blurb is the objective, or You're The
+    // Cop's controls; the two-player cop screen is each player's lines.
+    // The Starting Grid is every race's but You're The Cop's and Free
+    // Run's; the letterbox is up when no other is.
+    { "Pre Race Blurb",          STARTRACE_SCREEN_BLURB,
+      pre_race_blurb_callback },
+    { "Pre Race 2P Be A Cop",    STARTRACE_SCREEN_2P_BEACOP,
+      pre_race_2p_be_a_cop_callback },
     { "Pre Race Stats",          STARTRACE_SCREEN_STATS,
       pre_race_stats_callback },
     { "Pre Race Letterbox",      STARTRACE_SCREEN_LETTERBOX,
@@ -2948,6 +2953,20 @@ static float flailerTextHeight(struct FlailerTextChunk* t)
     return uirender_object_height(g_boot.ui, ui, idx);
 }
 
+// RenderTextIntoRectangle's inner (0x00144ed0): the strip queued for the
+// frame's layers (uirender_queue_text_rect).
+static void flailerTextIntoRectangle(struct FlailerTextChunk* t,
+                                     const char* str, float tlx,
+                                     float tly, float brx, float bry,
+                                     float scale)
+{
+    BUI*     ui  = NULL;
+    uint32_t idx = 0;
+    if (!flailer_object_index(&t->Object, &ui, &idx)) return;
+    (void)uirender_queue_text_rect(g_boot.ui, ui, idx, tlx, tly, brx, bry,
+                                   str, scale);
+}
+
 static bool flailerTextureSize(struct FlailerBitmapChunk* b, int32_t* w,
                                int32_t* h)
 {
@@ -3399,6 +3418,22 @@ static void carselRender(void* user)
     if (g_flow.screen
         && (g_flow.screen->callback == bcarsel_screen_callback
             || g_flow.screen->callback == btracksel_screen_callback)) {
+        BScreenCallbackData rd;
+        memset(&rd, 0, sizeof(rd));
+        rd.itemHash = g_flow.screen->hash;
+        g_flow.screen->callback(&g_flow, BMSG_SCREEN_RENDER, &rd);
+    }
+}
+
+// RenderFlailerModels' RENDER to every other screen, before the layers
+// are drawn: the pre-race Blurb lays its text into its box then. The
+// frame's strips go first, as the PS2's layer table empties each frame.
+static void flowRender(UIRenderer* ui)
+{
+    uirender_clear_strips(ui);
+    if (g_flow.screen && g_flow.screen->callback
+        && g_flow.screen->callback != bcarsel_screen_callback
+        && g_flow.screen->callback != btracksel_screen_callback) {
         BScreenCallbackData rd;
         memset(&rd, 0, sizeof(rd));
         rd.itemHash = g_flow.screen->hash;
@@ -5943,6 +5978,7 @@ int main(int argc, char** argv)
     gFlailerTextScaledWidthFn   = flailerTextWidth;
     gFlailerTextScaledHeightFn  = flailerTextHeight;
     gFlailerBitmapTextureSizeFn = flailerTextureSize;
+    gFlailerTextIntoRectangleFn = flailerTextIntoRectangle;
     gFindFlailerObjectFn        = flailer_find_object;
     gFlailerChunkGetTopLeftFn   = flailerobject_get_top_left;
     gFlailerObjectVisibilityFn  = flailerObjectVisibility;
@@ -6642,6 +6678,7 @@ int main(int argc, char** argv)
                 C2D_TargetClear(top, clear);
             }
             C2D_SceneBegin(top);
+            flowRender(&ui);
             if (!g_track.attached && (bcarsel_active() || btracksel_active()))
                 drawCarSelTop(&ui);
             else
