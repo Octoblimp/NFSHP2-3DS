@@ -5,8 +5,7 @@
 // What the player watches all the time stays on the top screen with the
 // road: the speedometer and tach, the radar, the pursuit meter, the
 // trackers, the race position and the messages over the road. The race
-// position moves from the top left to the bottom left, where the EA TRAX
-// box was; the box goes up above it while it is shown. The rest goes to
+// position moves from the top left to the bottom left. The rest goes to
 // the bottom screen: the lap block (the lap, the times and the record),
 // the split times and the live split list, the score, and Be The Cop's
 // panel. The minimap (trackmap.c) is drawn there too, after the HUD:
@@ -34,11 +33,6 @@
 #ifdef __3DS__
 // Hands uirender the split's table, which is static and stays good.
 void hudsplit_install(UIRenderer* r);
-
-// Once a frame, before the top screen is drawn: the EA TRAX box goes
-// above the race position while the position is up, and back to its own
-// place otherwise.
-void hudsplit_update(UIRenderer* r);
 
 // Where the one-player minimap goes on the bottom screen, for the mode
 // Render drew: its box, in the 640x480, goes to x * *scale + *dx and
