@@ -12,7 +12,11 @@ lookups, the speakers' four functions, FindLandmark, and retail's new
 CarCollisionBody::AddDamage (0x001d83d0), with no damage model and no
 player so that only its last part runs, the cop manager's: the 1.0 gate,
 the two-car scan, and MonitorImpact (0x00228310) with GetCopByCar and the
-cops' own IsAIControlled under it. bATan and bToPolar run as shipped. The harness (tools/src/copmanager_test.c) runs
+cops' own IsAIControlled under it. Then GetRadarDetectorIntensity
+(0x002274a8), the HUD's radar, with the cops' IsAIControlled as shipped
+and IsCarInFront (0x00133898) and CompareDistances (0x00208598) stubbed:
+the first answers by the car asked about, the second by its second
+distance's bits, both scripted. bATan and bToPolar run as shipped. The harness (tools/src/copmanager_test.c) runs
 copmgr.c, copmanager.c, vtable.c and bmath.c and prints the same lines.
 
 **The stubs**, logged and answered by the same rule on both sides:
@@ -107,6 +111,9 @@ F_LANDMARK = 0x00228a58
 F_FREEID = 0x002244a0
 F_DELPURSUIT = 0x00224560
 F_ADDDAMAGE = 0x001d83d0
+F_RADAR = 0x002274a8                    # GetRadarDetectorIntensity
+S_INFRONT = 0x00133898                  # Car::IsCarInFront
+S_COMPARE = 0x00208598                  # TrackPathManager::CompareDistances
 
 S_MALLOC = 0x002577c0
 S_DELETE = 0x00114e98
@@ -192,6 +199,7 @@ RP_FIELDS = {"TrackDirection": 12, "AIDemoMode": 24, "TimeTrialTime": 36,
 # The cars and their collision bodies, at retail's offsets.
 CAR_SIZE = 2304
 CAR_INDEX, CAR_PLAYER, CAR_MODE, CAR_POS, CAR_DAMAGE = 8, 24, 32, 96, 2120
+CAR_DAT = 2036                          # its distance round the track
 BODY_SIZE = 352
 BODY_NCOLL, BODY_CAR = 18, 256
 NCARS = 6
@@ -465,6 +473,7 @@ def script(chunks, made):
     s += impacts()
     s += thinks(m["order"])
     s += spawns()
+    s += radars()
     return s
 
 
@@ -965,6 +974,81 @@ def impacts():
     return s
 
 
+def radars():
+    """GetRadarDetectorIntensity (12n): the radar of A0, the player's car,
+    with the cops' cars A1 to A5 about it."""
+    def car(k, x, y):
+        return "car|%d|%d|1|%s|%s" % (k, k, F(x), F(y))
+
+    def cmp(k, d):
+        return "cmp|%s|%s" % (F(1000.0 + 10.0 * k), F(d))
+
+    def radar(flag=7):
+        return ["radar|0|%d" % flag]
+
+    s = track(0) + [car(0, 0.0, 0.0), "dat|0|%s" % F(1000.0)]
+    for k in range(1, 6):
+        s += [car(k, 60.0 * k, 80.0), "dat|%d|%s" % (k, F(1000.0 + 10.0 * k)),
+              "front|%d|1" % k, cmp(k, -10.0 * k)]
+    s += ["copn|0"] + radar() + ["copn|-1"] + radar()
+
+    # One AI cop on A1, 100 m off, in each state: the speed trap, the
+    # roadblock (the flag), the patrol, the caught speeder and the guarded
+    # spot count; the rest, and every state as unsigned, do not.
+    s += ["cop|0|ai", "copcar|0|1", car(1, 60.0, 80.0), "copn|1"]
+    for st in list(range(-1, 11)) + [0xcdcdcdcd, 0x80000004, 0x104]:
+        s += ["cset|0|%d" % st] + radar() + radar(-5)
+    # The distance, in the plane: 250 is out, a hair under is in, and
+    # (250 - d) * 0.004 at a spread of them.
+    s += ["cset|0|3"]
+    for x, y in ((150.0, 200.0), (149.99998, 200.0), (0.0, 0.0),
+                 (-3.0, -4.0), (1e-20, 0.0), (17.3, 91.1),
+                 (123.456, -78.9), (-200.1, 100.7), (0.1, 0.2),
+                 (249.99998, 0.0), (0.0, -249.9), (176.7767, 176.7767),
+                 (176.7768, 176.7768), (33.3, 44.4), (-1.5, 2.25),
+                 (99.99, -0.01), (12.34567, 210.0), (float("nan"), 0.0),
+                 (float("inf"), 0.0), (1e30, 1e30), (1e-30, -1e-30)):
+        s += [car(1, x, y)] + radar()
+    # A0 off the origin: the difference is A0's less the cop's.
+    s += [car(0, 10.5, -20.25), car(1, -40.0, 30.0)] + radar()
+    s += [car(1, 260.5, -20.25)] + radar() + [car(1, 259.5, -20.25)]
+    s += radar() + [car(0, 0.0, 0.0), car(1, 60.0, 80.0)]
+    # IsCarInFront's answer, any not 0 is in front.
+    for f in (0, 2, -1, 1):
+        s += ["front|1|%d" % f] + radar()
+    # CompareDistances's answer, as an absolute value against 250.
+    for d in (250.0, -250.0, 250.00002, -250.00002, 0.0, -0.0, 249.9,
+              -260.0, float("nan"), float("inf"), float("-inf"), 1e-30,
+              -125.5, 1000.0):
+        s += [cmp(1, d)] + radar()
+    s += [cmp(1, -10.0)]
+    # A player's cop counts whatever its state, and never as a roadblock.
+    for st in (0, 4, 6, 0xcdcdcdcd):
+        s += ["cop|0|player", "copcar|0|1", "cset|0|%d" % st] + radar()
+
+    # Three cops: the nearest of those that count sets the flag.
+    s += ["cop|0|ai", "cop|1|ai", "cop|2|ai", "copcar|0|1", "copcar|1|2",
+          "copcar|2|3", "copn|3", "cset|0|3", "cset|1|4", "cset|2|5",
+          car(1, 60.0, 80.0), car(2, 30.0, 40.0), car(3, 45.0, 60.0)]
+    s += radar()
+    s += [car(3, 30.0, 40.0)] + radar() + [car(3, 40.0, 30.0)] + radar()
+    s += [car(3, 29.97, 39.96)] + radar() + radar(-5)
+    s += [car(3, 45.0, 60.0), "cset|1|6"] + radar()
+    s += ["cset|1|4", "front|2|0"] + radar() + ["front|2|1"]
+    s += [cmp(2, 300.0)] + radar() + [cmp(2, -20.0)]
+    s += ["cset|0|4", "cset|1|7", car(1, 3.0, 4.0)] + radar()
+    s += ["cset|2|8", car(3, 1.0, 1.0)] + radar()
+    s += ["copn|2"] + radar() + ["copn|1"] + radar()
+    # Two cops on one car, and the far one first.
+    s += ["copcar|1|1", "copn|3", car(1, 120.0, 0.0), car(3, 200.0, 0.0),
+          "cset|0|3", "cset|1|4", "cset|2|8"]
+    s += radar() + ["copcar|0|3", "copcar|2|1"] + radar()
+    s += ["front|1|0"] + radar() + ["front|1|1", "front|3|0"] + radar()
+    s += ["front|3|1", "cop|1|player", "copcar|1|3", "cset|1|1"] + radar()
+    s += ["cleanup"]
+    return s
+
+
 # =================================================================== model
 
 class Model(object):
@@ -1062,6 +1146,13 @@ class Model(object):
         self.ktok = e.alloc(16 * 16, align=16)
         for a, fn in ((S_GETCOLL, self.s_getcoll), (S_TWOCAR, self.s_twocar),
                       (S_DISABLE, self.s_disable)):
+            e.stub(a, fn)
+        # The radar's (12n).
+        self.infront = {}
+        self.cmp = {}
+        self.flag = e.alloc(16, align=16)
+        for a, fn in ((S_INFRONT, self.s_infront),
+                      (S_COMPARE, self.s_compare)):
             e.stub(a, fn)
         # InitSpeedTrapStructures never sets its route search's result
         # (sp+768) before the first search, and reads the point back
@@ -1355,6 +1446,20 @@ class Model(object):
     def s_disable(self, em):
         self.emit("  disable %s %d" % (self.sym(em.reg[4]), s32(em.reg[5])))
 
+    def s_infront(self, em):
+        other = em.reg[5] & M32
+        v = self.infront.get(self.cars.index(other), 0)
+        self.emit("  infront %s %s %d -> %d" % (
+            self.sym(em.reg[4]), self.sym(other), em.reg[6] & 0xffff, v))
+        return v & M32
+
+    def s_compare(self, em):
+        a, b = em.fpr[12] & M32, em.fpr[13] & M32
+        v = self.cmp.get(b, 0)
+        self.emit("  compare %s %08x %08x -> %08x" % (
+            "TPM" if em.reg[4] & M32 == TRACKLEN else "?", a, b, v))
+        em.fpr[0] = v
+
     def pursuit_index(self, p):
         for u, a in self.pursuits.items():
             if a == p & M32:
@@ -1642,6 +1747,18 @@ class Model(object):
             e.fpr[12] = v(2)
             e.call(F_ADDDAMAGE, b, 0, limit=200000)
             self.emit("impact A%d %08x" % (k, v(2)))
+        elif o == "dat":
+            e.put32(self.cars[int(a[1])] + CAR_DAT, v(2))
+        elif o == "front":
+            self.infront[int(a[1])] = s32(v(2))
+        elif o == "cmp":
+            self.cmp[v(1)] = v(2)
+        elif o == "radar":
+            k = int(a[1])
+            e.put32(self.flag, v(2))
+            e.call(F_RADAR, m, self.cars[k], self.flag, limit=200000)
+            self.emit("radar A%d -> %08x flag %d" % (
+                k, e.fpr[0] & M32, s32(e.u32(self.flag))))
         elif o == "dmg":
             self.emit("dmg %s" % " ".join(
                 "%08x" % e.u32(m + 10420 + 4 * k) for k in range(14)))
@@ -2855,6 +2972,71 @@ MUTATIONS = [
     ("ss_no_wait", C, "        *timer = 20.0f;\n        return;", "        return;"),
     ("ss_no_return", C, "        *timer = 20.0f;\n        return;",
      "        *timer = 20.0f;"),
+
+    # ---- GetRadarDetectorIntensity (12n)
+    ("rd_nearest_200", C, "    float   nearest = 500.0f;",
+     "    float   nearest = 200.0f;"),
+    ("rd_zero_neg", C, "    float   intensity = 0.0f;",
+     "    float   intensity = -0.0f;"),
+    ("rd_count_short", C, "    for (i = 0; i < m->nNumCops; i++) {\n"
+     "        tCop          *cop",
+     "    for (i = 0; i < m->nNumCops - 1; i++) {\n"
+     "        tCop          *cop"),
+    ("rd_player_switch", C,
+     "        if (((int32_t (*)(void *))e->fn)(vt_this(cop, e)) == 0) {\n"
+     "            counts = 1;\n        } else {\n            switch",
+     "        if (((int32_t (*)(void *))e->fn)(vt_this(cop, e)) == 0)\n"
+     "            counts = 1;\n        {\n            switch"),
+    ("rd_rb_no_flag", C, "                roadblock = 1;\n", ""),
+    ("rd_rb_patrol", C,
+     "            case LS_ROAD_BLOCK:\n                roadblock = 1;\n"
+     "                counts = 1;\n                break;\n"
+     "            case LS_SPEED_TRAP:\n            case LS_DRIVING_ON_PATROL:\n",
+     "            case LS_DRIVING_ON_PATROL:\n                roadblock = 1;\n"
+     "                counts = 1;\n                break;\n"
+     "            case LS_SPEED_TRAP:\n            case LS_ROAD_BLOCK:\n"),
+    ("rd_no_trap", C, "            case LS_SPEED_TRAP:\n            case LS_DRIVING",
+     "            case LS_DRIVING"),
+    ("rd_no_guard", C, "            case LS_GUARD_LOCATION:\n                counts",
+     "                counts"),
+    ("rd_pursuit", C, "            case LS_CAUGHT_SPEEDER:\n",
+     "            case LS_CAUGHT_SPEEDER:\n            case LS_HOT_PURSUIT:\n"),
+    ("rd_signed", C, "            switch ((uint32_t)cop->DesiredLogicState) {",
+     "            switch ((uint8_t)cop->DesiredLogicState) {"),
+    ("rd_dy_x", C, "            float dy = car->State.Position.y - other->State.Position.y;",
+     "            float dy = car->State.Position.x - other->State.Position.y;"),
+    ("rd_range_le", C, "            if (dist < RADAR_RANGE && car_is",
+     "            if (dist <= RADAR_RANGE && car_is"),
+    ("rd_no_front", C, "&& car_is_car_in_front(car, other, 16384)", ""),
+    ("rd_front_swap", C, "car_is_car_in_front(car, other, 16384)",
+     "car_is_car_in_front(other, car, 16384)"),
+    ("rd_front_angle", C, "car_is_car_in_front(car, other, 16384)",
+     "car_is_car_in_front(car, other, 8192)"),
+    ("rd_nearest_le", C, "                && dist < nearest\n",
+     "                && dist <= nearest\n"),
+    ("rd_nearest_first", C,
+     "            if (dist < RADAR_RANGE && car_is_car_in_front(car, other, 16384)\n"
+     "                && dist < nearest\n",
+     "            if (dist < RADAR_RANGE && dist < nearest\n"
+     "                && car_is_car_in_front(car, other, 16384)\n"),
+    ("rd_cmp_swap", C,
+     "                       car->TheTrackPathCoordinate.DistanceAroundTrack,\n"
+     "                       other->TheTrackPathCoordinate.DistanceAroundTrack))",
+     "                       other->TheTrackPathCoordinate.DistanceAroundTrack,\n"
+     "                       car->TheTrackPathCoordinate.DistanceAroundTrack))"),
+    ("rd_cmp_no_abs", C, "                && fabsf(trackpath_compare_distances(",
+     "                && (trackpath_compare_distances("),
+    ("rd_cmp_lt", C, "                       <= RADAR_RANGE) {",
+     "                       < RADAR_RANGE) {"),
+    ("rd_flag_rb_only", C, "                *flag = roadblock;",
+     "                if (roadblock)\n                    *flag = 1;"),
+    ("rd_no_nearest", C, "                nearest = dist;\n", ""),
+    ("rd_divide", C, "        intensity = (RADAR_RANGE - nearest) * RADAR_PER_METRE;",
+     "        intensity = (RADAR_RANGE - nearest) / RADAR_RANGE;"),
+    ("rd_flag_after", C,
+     "                *flag = roadblock;\n                nearest = dist;",
+     "                nearest = dist;\n            }\n            if (counts) {\n"
+     "                *flag = roadblock;"),
 ]
 
 EQUIVALENT = {

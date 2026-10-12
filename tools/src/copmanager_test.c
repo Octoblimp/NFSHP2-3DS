@@ -479,12 +479,32 @@ void carstate_world_to_car2(CarState *s, bVector2 *out, const bVector2 *in)
     unreached("carstate_world_to_car2");
 }
 
+// The radar's (12n). IsCarInFront answers by the car asked about, and
+// CompareDistances by its second distance's bits (0 for one not given).
+static int32_t  infront[NCARS];
+static uint32_t cmp_key[16], cmp_ans[16];
+static int      ncmp;
+
+int32_t car_is_car_in_front(Car *c, Car *other, uint16_t angle)
+{
+    int32_t v = infront[other - cars];
+
+    printf("  infront %s %s %d -> %d\n", sym(c), sym(other), (int)angle, v);
+    return v;
+}
+
 float trackpath_compare_distances(const TrackPathManager *m, float a,
                                   float b)
 {
-    (void)m; (void)a; (void)b;
-    unreached("trackpath_compare_distances");
-    return 0.0f;
+    uint32_t v = 0;
+    int      i;
+
+    for (i = 0; i < ncmp; i++)
+        if (cmp_key[i] == fb(b))
+            v = cmp_ans[i];
+    printf("  compare %s %08x %08x -> %08x\n",
+           m == &TheTrackPathManager ? "TPM" : "?", fb(a), fb(b), v);
+    return bf(v);
 }
 
 int32_t did_these_cars_collide(Car *a, Car *b)
@@ -1325,6 +1345,28 @@ static void op(char **a, int na)
         printf("dmg ");
         hexwords(m->fCarDamage, 14);
         printf("\n");
+    } else if (!strcmp(o, "dat")) {
+        cars[atoi(a[1])].TheTrackPathCoordinate.DistanceAroundTrack =
+            bf(num(a[2]));
+    } else if (!strcmp(o, "front")) {
+        infront[atoi(a[1])] = (int32_t)num(a[2]);
+    } else if (!strcmp(o, "cmp")) {
+        // An answer for a distance's bits, in place of any it had.
+        int i;
+
+        for (i = 0; i < ncmp && cmp_key[i] != num(a[1]); i++)
+            ;
+        if (i == ncmp)
+            ncmp++;
+        cmp_key[i] = num(a[1]);
+        cmp_ans[i] = num(a[2]);
+    } else if (!strcmp(o, "radar")) {
+        int     k = atoi(a[1]);
+        int32_t flag = (int32_t)num(a[2]);
+        float   r = copmanager_get_radar_detector_intensity(m, &cars[k],
+                                                            &flag);
+
+        printf("radar A%d -> %08x flag %d\n", k, fb(r), flag);
     } else if (!strcmp(o, "spike")) {
         int          k = atoi(a[1]);
         tSpikeStrip *s = malloc(sizeof *s);

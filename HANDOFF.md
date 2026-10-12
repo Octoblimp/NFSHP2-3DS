@@ -20840,6 +20840,25 @@ it up from here.
 - **On Azahar** (AC, 100%): the cop route from the frontend, the
   Blurb as shown to the user (`out/azahar_t43icons2/zoom_blurb.png`),
   the race at 30 FPS.
-- **Next.** TASKS 40 (12n, the radar meter): retail's
-  GetRadarDetectorIntensity (0x002274a8) into copmgr.c, checked in
-  copmanager_check, bound in main.c. Then TASKS 49, then 39.
+- **TASKS 40, the radar meter (12n).** Retail's
+  GetRadarDetectorIntensity (0x002274a8) is copmgr.c's
+  copmanager_get_radar_detector_intensity, and main.c binds the
+  HUD's seam to it. Of the cops, a player's counts, and an AI's at
+  a speed trap, a roadblock, on patrol, with a caught speeder or
+  guarding a spot (DesiredLogicState 3, 4, 5, 7, 8; not 6, the
+  chase). The nearest under 250 m in the plane, in front
+  (IsCarInFront 16384) and within 250 along the track
+  (CompareDistances of the two cars' DistanceAroundTrack, retail's
+  Car+2036) sets the flag (1 for a roadblock's cop) and gives
+  (250 - d) * 0.004. `tools/copmanager_check.py` runs it on
+  retail's image with IsCarInFront and CompareDistances scripted:
+  95 radar calls, 25 mutations, all caught. pursuit_test.c and
+  loadertable_copstubs.c gained the two as unreached stubs.
+- **On Azahar** (AC, 100%, 30 FPS): a Hot Pursuit quick race from
+  the frontend, gas only. The lights stayed dark with no cop near,
+  one lit as a cop came in range, and six as one came up ahead
+  (`out/azahar_t40radar/21_race-19.png`, the strip in
+  `radar_strip.png`), and turned yellow, four lit, with a roadblock
+  ahead on the minimap (`48_race-46.png`).
+- **Next.** TASKS 49 (the joystick tables and Joystick.obj from
+  retail), then 39.

@@ -2374,7 +2374,7 @@ phases.
           comes from the track's data: find where BombRunType is set
           and check that only the armed helicopter's tracks pick row
           kind 0.
-40. [ ] **The radar detection meter.** Asked for on 2026-10-10: the
+40. [x] **The radar detection meter.** Asked for on 2026-10-10: the
         bar of lights under the rear-view mirror. The user's
         description: it fills as the car nears a cop, green first and
         then red when close, and flashes yellow when a roadblock or a
@@ -2391,6 +2391,17 @@ phases.
         checker against retail, bind it in `main.c`, and check in
         Azahar that the lights climb near a cop and turn yellow for a
         roadblock or spikes ahead.
+        Done in Session 83: `copmgr.c`'s
+        copmanager_get_radar_detector_intensity, bound in `main.c`.
+        The cops that count are a player's and the AI's at a speed
+        trap, a roadblock (the flag), on patrol, with a caught
+        speeder or guarding a spot; the nearest under 250 m, in
+        front and within 250 along the track gives (250 - d) *
+        0.004. `tools/copmanager_check.py` runs retail's own and
+        catches 25 of 25 mutations. On Azahar (Hot Pursuit quick
+        race, 100%, 30 FPS) the lights climbed to six as a cop
+        came up ahead, and turned yellow, four lit, with a roadblock
+        ahead on the minimap (`48_race-46.png`).
 41. [x] **The Starting Grid before the track has loaded.** Asked for
         on 2026-10-11, with an Azahar shot: the Pre Race Stats screen
         (Starting Grid) comes up over a black screen while the race is

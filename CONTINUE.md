@@ -77,9 +77,10 @@ reads X target, R helicopter, L roadblock, D-pad Down boost. Its
 target was the boost's glyph: retail's JoyEvent numbers run one
 above the demo's from 110 (TASKS 49 has the joystick tables, which
 are still the demo's). New: TASKS 48 (tHelpMenu, the frontend's
-dead Circle "help"). Next: TASKS 40 (12n, the radar meter), then
-49, then 39 (12k-6, after step 14b). TASKS 47 and 46 wait on the
-user.**
+dead Circle "help"). TASKS 40 (12n, the radar meter) is done too:
+`copmgr.c`'s GetRadarDetectorIntensity, retail-checked and bound,
+and the lights climb near a cop on Azahar. Next: TASKS 49, then 39
+(12k-6, after step 14b). TASKS 47 and 46 wait on the user.**
 
 **Now (Session 82, 2026-10-12): step 14 is done (14-10d, 3ac6572)
 and so is task 38 (BUSTED! animates and is whole; no change, see
@@ -1104,7 +1105,8 @@ pursuit.obj, on a 10 KB manager. Its slices:
     the D-Pad triggers the cop's options (the helicopter, backup and
     the like) and the Circle Pad drives. In a racer's race the D-Pad is
     just another directional control;
-  - **12n** the radar detector's intensity.
+  - **12n** the radar detector's intensity. Done (TASKS 40,
+    Session 83).
 
   Since 12j-1 the radar traps take cops out of limbo, so a chase can
   start.
@@ -5534,7 +5536,7 @@ each class shows what it reaches.
 That was about 41-60 slices to the full game when the table was set.
 After 12k-7 (2026-10-09), about 22-35 are left, and the count has
 run low before:
-- step 12's: 12m and 12n, with 12k-6 after step 14b, and the NIS
+- step 12's: 12m (12n is done), with 12k-6 after step 14b, and the NIS
   player;
 - steps 10, 14, 14b, 16, 17, 18 and 20.
 

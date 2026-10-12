@@ -116,6 +116,19 @@ struct CarCollisionBody;
 void copmgr_car_impact(tCopManager *m, struct CarCollisionBody *b,
                        float amount);
 
+// GetRadarDetectorIntensity, 0x002274a8: the HUD's radar for `car`. Of
+// the nNumCops cops, those a player drives, and the AI's whose
+// DesiredLogicState is a speed trap, a roadblock, a patrol, a caught
+// speeder or a guarded spot, count. Of those, the nearest in the plane
+// that is under 250 m, in front (IsCarInFront's 16384, a quarter turn
+// either side) and within 250 along the track (CompareDistances of the
+// two cars' distances) sets *flag, 1 for a roadblock's cop, and the
+// answer is (250 - its distance) * 0.004; with none it is 0 and *flag
+// is left alone. Every cop's car is read with no test.
+float copmanager_get_radar_detector_intensity(tCopManager *m,
+                                              struct Car *car,
+                                              int32_t *flag);
+
 // fDisablingImpactMagnitudeTable, 0x0031c560: by nDifficultyLevel, the
 // hit that disables an AI cop's car or wrecks Be A Cop's suspect.
 extern float fDisablingImpactMagnitudeTable[3];

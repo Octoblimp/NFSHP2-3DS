@@ -5611,9 +5611,10 @@ int main(int argc, char** argv)
     gStartScoreFn = player_start_score_value;
     // The HUD's cop parts (hudcop.c): the radar detector, the trackers and
     // the pursuit meter, which UpdateHud calls when the HUD shows them. The
-    // radar's GetRadarDetectorIntensity comes with the cops (step 12); until
-    // then it reads 0.
+    // radar reads the cop manager's GetRadarDetectorIntensity (copmgr.c).
     gUpdateRadarDetectorFn = player_update_radar_detector;
+    gCopManagerGetRadarDetectorIntensityFn =
+        copmanager_get_radar_detector_intensity;
     gDrawTrackerFn = player_draw_tracker;
     gUpdatePursuitMeterFn = player_update_pursuit_meter;
     // The NIS overlay (hudnis.c): RenderHud updates it, SetHudFeatures shows

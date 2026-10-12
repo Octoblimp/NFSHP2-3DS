@@ -470,6 +470,66 @@ void copmgr_car_impact(tCopManager *m, struct CarCollisionBody *b,
     copmanager_monitor_impact(m, b->pCar, amount, twoCar);
 }
 
+// ------------------------------------------------------- the radar detector
+
+// The radar's reach, and its intensity per metre inside it: 1/250 as
+// retail's constant (gp-27096, 0x3b83126f), a product and not a divide.
+#define RADAR_RANGE      250.0f
+#define RADAR_PER_METRE  0.004f
+
+float copmanager_get_radar_detector_intensity(tCopManager *m, Car *car,
+                                              int32_t *flag)
+{
+    float   nearest = 500.0f;
+    float   intensity = 0.0f;
+    int32_t i;
+
+    for (i = 0; i < m->nNumCops; i++) {
+        tCop          *cop = m->Cops[i];
+        const VtEntry *e = vt_slot(cop->vptr, TCOP_VT_IS_AI_CONTROLLED);
+        int32_t        roadblock = 0, counts = 0;
+
+        if (((int32_t (*)(void *))e->fn)(vt_this(cop, e)) == 0) {
+            counts = 1;
+        } else {
+            switch ((uint32_t)cop->DesiredLogicState) {
+            case LS_ROAD_BLOCK:
+                roadblock = 1;
+                counts = 1;
+                break;
+            case LS_SPEED_TRAP:
+            case LS_DRIVING_ON_PATROL:
+            case LS_CAUGHT_SPEEDER:
+            case LS_GUARD_LOCATION:
+                counts = 1;
+                break;
+            default:
+                break;
+            }
+        }
+        if (counts) {
+            Car  *other = cop->pMyCar;
+            float dx = car->State.Position.x - other->State.Position.x;
+            float dy = car->State.Position.y - other->State.Position.y;
+            float dist = sqrtf(dx * dx + dy * dy);
+
+            if (dist < RADAR_RANGE && car_is_car_in_front(car, other, 16384)
+                && dist < nearest
+                && fabsf(trackpath_compare_distances(
+                       &TheTrackPathManager,
+                       car->TheTrackPathCoordinate.DistanceAroundTrack,
+                       other->TheTrackPathCoordinate.DistanceAroundTrack))
+                       <= RADAR_RANGE) {
+                *flag = roadblock;
+                nearest = dist;
+            }
+        }
+    }
+    if (nearest <= RADAR_RANGE)
+        intensity = (RADAR_RANGE - nearest) * RADAR_PER_METRE;
+    return intensity;
+}
+
 void (*gCarDamageRepairAllFn)(void *damage);
 
 void copmanager_reset_all_damage(tCopManager *m, Car *car)

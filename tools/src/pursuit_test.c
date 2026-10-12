@@ -536,6 +536,22 @@ int32_t did_these_cars_collide(Car *a, Car *b)
     return r;
 }
 
+// copmgr.c's radar, which the script never reaches.
+int32_t car_is_car_in_front(Car *c, Car *other, uint16_t angle)
+{
+    (void)c; (void)other; (void)angle;
+    unreached("car_is_car_in_front");
+    return 0;
+}
+
+float trackpath_compare_distances(const TrackPathManager *m, float a,
+                                  float b)
+{
+    (void)m; (void)a; (void)b;
+    unreached("trackpath_compare_distances");
+    return 0.0f;
+}
+
 int32_t race_parameters_is_free_run(const RaceParameters *rp)
 {
     printf("  freerun%s -> %d\n", rp == &TheRaceParameters ? "" : " ?rp",

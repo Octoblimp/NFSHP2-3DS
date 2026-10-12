@@ -21,10 +21,18 @@ All three are in `hudcop.c`. `main.c` binds `gUpdateRadarDetectorFn`,
   racing.
 
 The radar asks tCopManager::GetRadarDetectorIntensity (`0x002274a8`) how
-near the nearest cop is. That walks the cops and the track path, so it
-comes with them in step 12. Until then its seam,
-`gCopManagerGetRadarDetectorIntensityFn`, is NULL, and the radar reads
-0: every light unlit, no beep.
+near the nearest cop is. That walks the cops and the track path; it is
+copmgr.c's (12n), bound to the seam
+`gCopManagerGetRadarDetectorIntensityFn` in main.c and checked on
+retail's image by tools/copmanager_check.py. The cops that count are
+a player's, and the AI's at a speed trap, a roadblock, on patrol, with
+a caught speeder or guarding a spot (not those chasing or in limbo).
+The nearest under 250 m in the plane, in front (IsCarInFront, a
+quarter turn either side) and within 250 along the track gives
+(250 - distance) * 0.004, so a cop 250 m off lights nothing and one
+just ahead lights the lot; its flag is 1 for a roadblock's cop, which
+turns the lights to RadarColours' yellow rows. With no cop near the
+answer is 0, every light unlit, no beep.
 
 The Player fields are:
 

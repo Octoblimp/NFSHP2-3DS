@@ -154,6 +154,13 @@ int32_t did_these_cars_collide(struct Car *a, struct Car *b)
     return 0;
 }
 
+int32_t car_is_car_in_front(Car *c, Car *other, uint16_t angle)
+{
+    (void)c, (void)other, (void)angle;
+    unreached("car_is_car_in_front");
+    return 0;
+}
+
 struct Car *car_caused_recent_collision(struct Car *car)
 {
     (void)car;

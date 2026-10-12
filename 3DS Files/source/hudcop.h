@@ -12,8 +12,7 @@
 // and cop drawn, in a race that is racing.
 //
 // tCopManager::GetRadarDetectorIntensity (0x002274a8) walks the cops and
-// the track path, and comes with them in step 12. Until then its seam is
-// NULL and the radar reads 0.
+// the track path; it is copmgr.c's, and main.c binds its seam (12n).
 //
 // Step 8m-4c-1. Written up in docs/formats/hud-cop.md; checked on
 // retail's image by tools/hudcop_check.py.
@@ -51,8 +50,9 @@ void player_draw_tracker(struct Player *p, struct Car *c, int32_t index);
 void player_update_pursuit_meter(struct Player *p, int32_t level);
 
 // tCopManager::GetRadarDetectorIntensity (0x002274a8): 0 to 1 for the
-// nearest cop in range, with *flag the cop's kind. A seam until step 12;
-// NULL reads 0 and leaves the flag 0.
+// nearest cop in range, with *flag the cop's kind (1 for a roadblock's).
+// copmgr.c's copmanager_get_radar_detector_intensity; NULL reads 0 and
+// leaves the flag 0.
 extern float (*gCopManagerGetRadarDetectorIntensityFn)(struct tCopManager *m,
                                                        struct Car *c,
                                                        int32_t *flag);
