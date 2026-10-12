@@ -15,6 +15,13 @@
 // 0x7fffffff: the start a monitor has before any tune.
 #define NO_START 0x7fffffffu
 
+// How long the box stays up. Retail's is 5.0; the port keeps it up a little
+// longer (the user, 2026-10-11: it went away too quickly). The checker
+// builds with -DCHYRON_SECONDS=5.0f to run against retail's.
+#ifndef CHYRON_SECONDS
+#define CHYRON_SECONDS 8.0f
+#endif
+
 void bsm_init(BSongMonitor* m, const BSongMonitorHooks* hooks)
 {
     m->hooks = hooks;
@@ -110,7 +117,7 @@ void bsm_update(BSongMonitor* m)
         return;
     }
     float t = (float)(int32_t)(H->realTimer(H->user) - m->start) * 0.00025f;
-    if (!(0.0f < t) || !(t < 5.0f)) {
+    if (!(0.0f < t) || !(t < CHYRON_SECONDS)) {
         H->setScreenVisible(H->user, m->screen, 0);
         return;
     }

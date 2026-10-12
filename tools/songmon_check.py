@@ -349,7 +349,10 @@ def model(lines):
 # ================================================================= build
 
 def build_harness(tmp, name="songmon_test"):
-    return hostbuild.build(tmp, SOURCES, name=name)
+    # The port keeps the box up 8 s; retail's 5 is what the model runs.
+    return hostbuild.build(tmp, SOURCES, name=name,
+                           flags=hostbuild.FLAGS
+                           + ["-DCHYRON_SECONDS=5.0f"])
 
 
 def run_harness(exe, sc_path, out_path):
@@ -382,7 +385,9 @@ def write_script(d, lines):
 S = SONGMON
 MUTATIONS = [
     ("init-track", S, "    m->track = 0xffffffffu;", "    m->track = 0;"),
-    ("init-start", S, "    m->start = NO_START;", "    m->start = 0;"),
+    ("init-start", S, "    m->track = 0xffffffffu;" + NL
+     + "    m->start = NO_START;",
+     "    m->track = 0xffffffffu;" + NL + "    m->start = 0;"),
     ("init-screen", S, 'bchunk_hash("CHYRON")', 'bchunk_hash("CHYRONS")'),
     ("no-start-value", S, "#define NO_START 0x7fffffffu",
      "#define NO_START 0x7ffffffeu"),
@@ -405,12 +410,12 @@ MUTATIONS = [
     ("t-unsigned", S, "(float)(int32_t)(H->realTimer(H->user) - m->start)",
      "(float)(H->realTimer(H->user) - m->start)"),
     ("t-rate", S, "m->start) * 0.00025f;", "m->start) * 0.00026f;"),
-    ("t-zero-shows", S, "!(0.0f < t) || !(t < 5.0f)",
-     "!(0.0f <= t) || !(t < 5.0f)"),
-    ("t-five-shows", S, "!(0.0f < t) || !(t < 5.0f)",
-     "!(0.0f < t) || !(t <= 5.0f)"),
-    ("t-four", S, "!(0.0f < t) || !(t < 5.0f)",
-     "!(0.0f < t) || !(t < 4.9f)"),
+    ("t-zero-shows", S, "!(0.0f < t) || !(t < CHYRON_SECONDS)",
+     "!(0.0f <= t) || !(t < CHYRON_SECONDS)"),
+    ("t-five-shows", S, "!(0.0f < t) || !(t < CHYRON_SECONDS)",
+     "!(0.0f < t) || !(t <= CHYRON_SECONDS)"),
+    ("t-four", S, "!(0.0f < t) || !(t < CHYRON_SECONDS)",
+     "!(0.0f < t) || !(t < CHYRON_SECONDS - 0.1f)"),
     ("hide-vis", S, "        H->setScreenVisible(H->user, m->screen, 0);",
      "        H->setScreenVisible(H->user, m->screen, 1);"),
     ("hide-silent", S, "        H->setScreenVisible(H->user, m->screen, 0);"

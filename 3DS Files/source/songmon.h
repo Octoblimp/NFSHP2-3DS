@@ -2,7 +2,8 @@
 // tNewSongMonitor (0x0016bd30 .. 0x0016c214): the EA TRAX box. FlailerScreenList
 // owns one (+416) and ticks it every frame, after the menus' movie. When the
 // jukebox starts a tune -- a new one, or any after a stretch of silence --
-// it shows GLOBALB's CHYRON screen for five seconds, prints the tune's album,
+// it shows GLOBALB's CHYRON screen for five seconds (eight in the port;
+// songmon.c's CHYRON_SECONDS), prints the tune's album,
 // artist and "title" into it, and stretches the five CHYRON_BG_n strips to
 // the widest of those lines and the EA GAMES TRAX one, plus 20.
 //

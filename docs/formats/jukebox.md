@@ -232,7 +232,11 @@ The log notes each tune that starts (`jukebox playing:`).
 In the main menu the tune is "Hot Action Cop-Fever for the Flava--Rock-4".
 Its label is empty, so the box shows "Fever for the Flava", then Hot Action
 Cop, then EA GAMES TRAX. It sits bottom-left and covers the Help button for
-five seconds, as the retail photo shows it. The strips are black on
+five seconds, as the retail photo shows it. The port keeps it up for eight
+(`CHYRON_SECONDS` in `songmon.c`; the user found five went too quickly), and
+the checker builds with `-DCHYRON_SECONDS=5.0f` to run against retail's. In
+a race it sits over the race position, which the port moved to the bottom
+left; that is as the user wants it. The strips are black on
 `WHITE16X16` at an over-bright alpha 0xc8. They come out as charcoal bars
 only with the GS's multiply (flailer-ui.md, "Colour: the GS's MODULATE").
 
