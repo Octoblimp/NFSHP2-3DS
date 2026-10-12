@@ -1,5 +1,7 @@
 // joyevent -- Joystick.obj, the part that turns pad bytes into JoyEvents
-// (0x00150a50 .. 0x00152860 in NFSHP2.ELF). joystick.{c,h} keep the two
+// (0x00150a50 .. 0x00152860 in NFSHP2.ELF, 0x00153a00 .. 0x00155930 in
+// retail's SLES_507.31, which is what this follows; the addresses below
+// are the demo's unless they say retail). joystick.{c,h} keep the two
 // type queries the physics already needed; everything else in the object
 // is here.
 //
@@ -12,7 +14,7 @@
 // the scanner returns. Then it calls the handlers, in queue order.
 //
 // Nothing here knows what a button is. The meaning of every bit is in
-// ScannerConfigTable (231 entries, scannertab.c, generated from the image),
+// ScannerConfigTable (230 entries, scannertab.c, generated from retail),
 // and the pad buffer is the DualShock 2's 32 bytes whatever the hardware:
 // joypad.c builds one from the 3DS's buttons and sticks.
 //
@@ -79,10 +81,12 @@ typedef struct EventNode {
     int32_t              UserParam;     // 32
 } EventNode;
 
-// 32 bytes, one row of ScannerConfigTable. ConfigurationNumbers lists the
+// 36 bytes, one row of ScannerConfigTable. ConfigurationNumbers lists the
 // configurations the row belongs to: -1 is all of them, 0 is an unused
 // slot. Shift is a bit number in the 32-byte buffer and Xor is 1 for the
-// DualShock's active-low buttons.
+// DualShock's active-low buttons. A combo's row has the second button's
+// glyph too ("TRIANGLE + R2" is R2 and TRIANGLE); retail added it, and the
+// demo's rows are 32 bytes without it.
 typedef struct ScannerConfig {
     int8_t      ConfigurationNumbers[8]; // 0
     JoyEvent    Event;                   // 8
@@ -95,7 +99,8 @@ typedef struct ScannerConfig {
     uint8_t     AnalogDeviceNumber;      // 21
     uint8_t     ValidDuringReplay;       // 22
     int32_t     ButtonChar;              // 24, an eButtonChars glyph
-    const char *ButtonName;              // 28
+    int32_t     ButtonChar2;             // 28, the combo's other, or 0
+    const char *ButtonName;              // 32
 } ScannerConfig;
 
 // 20 bytes, one row of ValidJoystickConfigurationTable: a controller type
@@ -164,7 +169,7 @@ typedef struct QueuedJoystickEvents {
 #if UINTPTR_MAX == 0xffffffffu
 typedef char joyevent_layout_check[
     (sizeof(EventNode) == 36 && offsetof(EventNode, UserParam) == 32
-     && sizeof(ScannerConfig) == 32 && offsetof(ScannerConfig, ButtonName) == 28
+     && sizeof(ScannerConfig) == 36 && offsetof(ScannerConfig, ButtonName) == 32
      && sizeof(ValidJoystickConfiguration) == 20
      && sizeof(AnalogJoystickCalibration) == 44
      && offsetof(AnalogJoystickCalibration, HysterysisAmount) == 40
@@ -175,14 +180,15 @@ typedef char joyevent_layout_check[
 
 // ----------------------------------------------------------------- tables
 
-// Generated into scannertab.c by tools/gen_scanner_tables.py.
-extern const ScannerConfig ScannerConfigTable[];               // 0x002dc6c0
-extern const int32_t NumScannerConfigs;                        // gp-24344, 231
+// Generated into scannertab.c by tools/gen_scanner_tables.py, from retail
+// (the demo's addresses in docs/formats/joystick.md).
+extern const ScannerConfig ScannerConfigTable[];               // 0x002dc500
+extern const int32_t NumScannerConfigs;                        // gp-23824, 230
 extern const ValidJoystickConfiguration
-    ValidJoystickConfigurationTable[];                         // 0x002de3a0
-extern const int32_t NumValidJoystickConfigurations;           // gp-24340, 7
-extern const EventName EventNameTable[];                       // 0x002f22f8
-#define JOY_EVENT_NAMES 127
+    ValidJoystickConfigurationTable[];                         // 0x002de558
+extern const int32_t NumValidJoystickConfigurations;           // gp-23820, 7
+extern const EventName EventNameTable[];                       // 0x002fa2d0
+#define JOY_EVENT_NAMES 130
 
 // ---------------------------------------------------------------- globals
 
@@ -204,9 +210,9 @@ void QueuedJoystickEvents_RemoveEvent(QueuedJoystickEvents *q, int32_t port,
 
 // --------------------------------------------------------------- Joystick
 
-// 0x00150ae8. Ten frames of the same new type before it is believed; then
-// every node is reconnected to the new type's configs. Answers how many
-// events it queued.
+// 0x00150ae8. 32 frames of the same new type before it is believed
+// (retail's; the demo took 10); then every node is reconnected to the new
+// type's configs. Answers how many events it queued.
 int32_t Joystick_GenerateEventsFromScanners(Joystick *joy, int32_t type,
                                             const uint32_t *data,
                                             const uint32_t *data2,
@@ -274,9 +280,22 @@ void RemoveJoyHandler(JoystickPort port, JoyEvent ev);
 // 0x001512c8.
 int32_t IsJoyHandlerAdded(JoystickPort port, JoyEvent ev);
 
-// 0x001512f8. Writes the new type into CurrentJoystickTypes.
+// 0x001512f8, retail's 0x001542a8. Writes the new type into
+// CurrentJoystickTypes. Retail first stops the port's rumble (0x00155e40)
+// and has every player car driven from the port drop its held inputs
+// (World.obj's 0x0014e8c8): gJoyResetPortDriversFn, which main.c binds to
+// realdriver_reset_port_joy_values. The 3DS has no rumble.
 void TypeChangedHandler(JoystickPort port, JoyEvent ev, uint8_t value,
                         void *obj);
+extern void (*gJoyResetPortDriversFn)(JoystickPort port);
+
+// Retail's 0x001543f0, unnamed: for both ports, RemoveJoyHandler and
+// AddJoyHandler of TYPE_CHANGED with TypeChangedHandler. The fresh node
+// sees the type as new, so TypeChangedHandler runs again on the next
+// frame and the cars drop what they held. The replay states and
+// PauseMenu::MaybeResume call it, through gRestoreTypeChangedHandlersFn
+// (rcpost.h).
+void RestoreTypeChangedHandlers(void);
 
 // 0x00151308. CurrentJoystickTypes[port] != 255.
 int32_t IsJoystickPluggedIn(JoystickPort port);
@@ -293,8 +312,8 @@ void TestJoystick(void);
 void InitJoystick(void);
 void CloseJoystick(void);
 
-// 0x001514f8. "JOY_EVENT_MISSING_NAME!" for the five events the table
-// does not name.
+// 0x001514f8. "JOY_EVENT_MISSING_NAME!" for an event the table does not
+// name: three, and the code reader's sixteen.
 const char *GetJoyEventName(JoyEvent ev);
 
 // ----------------------------------------------------------- the scanners
@@ -352,6 +371,11 @@ const ScannerConfig *FindScannerConfigByName(const char *name, int32_t type,
 const char *GetJoystickButtonName(JoystickPort port, JoyEvent ev);
 int32_t     GetJoystickButtonChar(JoystickPort port, JoyEvent ev);
 JoyEvent    GetJoystickButtonEvent(JoystickPort port, const char *name);
+
+// Retail's 0x001552d0, unnamed: both of the row's glyphs, 0 and 0 without
+// a row. The controller options screen draws a combo with it.
+void GetJoystickButtonChars(JoystickPort port, JoyEvent ev, int32_t *ch,
+                            int32_t *ch2);
 
 // 0x00152370. The events the options screen lets a player rebind.
 int32_t IsConfigurableRacingEvent(JoyEvent ev);

@@ -20862,3 +20862,60 @@ it up from here.
   ahead on the minimap (`48_race-46.png`).
 - **Next.** TASKS 49 (the joystick tables and Joystick.obj from
   retail), then 39.
+
+## Session 84 -- TASKS 49, the joystick from retail
+
+- **The tables.** `tools/gen_scanner_tables.py` reads retail's
+  ScannerConfigTable (0x002dc500, 230 rows of 36 bytes),
+  ValidJoystickConfigurationTable (0x002de558) and EventNameTable
+  (0x002fa2d0, 130 names). Retail has no stabs, so the enums start from
+  the demo's and take retail's changes: REPLAY_ERASE_DEMO at 110, which
+  moves STEER and every later event up one, and sixteen unnamed events
+  at 133..148 that the main menu's code reader registers
+  (JOY_EVENT_CHEAT_*, the port's names). The demo's LEFT_ANALOG and
+  RIGHT_ANALOG glyphs are gone; retail's 144..157 are the sticks'
+  directions, the D-pad and the wheel's. A row carries a second glyph
+  for a combo, and GetJoystickButtonChars (0x001552d0) answers both.
+  Configurations 24 and 34 are gone.
+- **Joystick.obj and JoystickPS2.obj.**
+  - A new type is believed after 32 more reads, not 10.
+  - The vblank reads only if JoypadReadInVBlank, which nothing sets.
+    PrepareToGetJoystickData reads once itself, so the frame reads the
+    pads.
+  - A pad whose scePadGetState is not 6 or 2, or whose scePadRead fails,
+    reads 0xff throughout, which is no controller. `joyhid_read` now
+    answers whether it read.
+  - TypeChangedHandler stops the port's rumble and resets the port's
+    drivers (World.obj's 0x0014e8c8, `realdriver_reset_port_joy_values`).
+  - RestoreTypeChangedHandlers (0x001543f0) is ported, and bound for the
+    replay states and the pause menu's resume.
+  - FindScannerConfig differed only in its address and stride.
+- **The literals.** The Blurb's 126 (Session 83) was the only event
+  number taken from a retail-only function. `playerinput.h`'s note on
+  the numbering now says they are retail's. `helpglyph.c` maps
+  retail's stick glyphs to the Circle Pad and the C-Stick.
+- **The checker.** `tools/joystick_check.py` runs retail's image
+  through `retail_model`. The play session reads both ways (the
+  frame's own read, then the vblank's), has pads that stop answering
+  (scePadGetState 1, then a scePadRead that fails), remakes the type
+  monitor, and checks TypeChangedHandler's driver reset. 65,880 ops, 79,028
+  lines, 0 differ; 266 mutations, 261 caught, 5 equivalent. dp-150 (a
+  DoublePress count from 150 up, which the scanner never makes itself)
+  had survived on retail's table, whose draws no longer seeded one. It
+  has its own edge now.
+- **Not in the port.** `replay.h` has the demo's ReplayManager layout,
+  and retail's moves PausedThisFrame to 24 and the fancy replay's fields
+  to 32..44. GenerateJoyEvents reads those, and the replay is not
+  ported. Rumble is not ported either.
+- **Found: the code reader** (TASKS 50). Retail's main menu registers
+  133..148 on port 0 and matches the last eight presses against a table
+  of codes.
+- **Found: the smokeables load as nothing.** bchunkload.c's slot 27
+  (0x00034026/7) is unported, so no breakable roadside object or
+  roadblock barrel exists in a race. Step 14b fixes that, and 12k-6
+  (TASKS 39) comes after it. Retail's InitSmokeables (0x0021f270, 652
+  bytes; the demo's was 8) orthonormalizes each spawner's packed
+  matrix. SpawnSmokeables (0x0021f930) fetches the infos' emitters,
+  makes the two pools and a VirginSmokeable for each spawner whose
+  info it finds.
+- **Next.** Step 14b, the smokeables, then TASKS 39 (12k-6).

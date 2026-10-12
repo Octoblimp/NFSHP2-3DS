@@ -133,10 +133,11 @@ uint32_t joyhid_menu_pad(JoyHidMenuPad *p, int32_t cx, int32_t cy);
 // The DualShock 2 buffer for one reading.
 void joyhid_build(const JoyHidState *s, uint8_t buf[32]);
 
-// gJoypadRead: port 0 is the console, port 1 is left empty (all zero,
-// which ReadRegularController answers -1 for -- nothing plugged in).
-// Reads hidKeysHeld, so it wants hidScanInput to have run this frame.
-void joyhid_read(int32_t port, uint8_t *buf);
+// gJoypadRead: port 0 is the console and answers 1; port 1 answers 0,
+// nothing plugged in (joypad.c fills its read with 0xff, as retail's
+// failed scePadRead is). Reads hidKeysHeld, so it wants hidScanInput to
+// have run this frame.
+int32_t joyhid_read(int32_t port, uint8_t *buf);
 
 // gJoypadRead = joyhid_read.
 void joyhid_install(void);

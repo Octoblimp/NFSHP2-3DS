@@ -22,8 +22,8 @@
 //                                                     helicopter, the
 //                                                     roadblock)
 //     R3             D-pad Down, the nitro's (joyhid's double of R3)
-//     left stick     the Circle Pad (0x90, and 0x98, BUTTONSOUT's stick)
-//     right stick    the C-Stick (0x91)
+//     left stick     the Circle Pad (retail's 0x90..0x94)
+//     right stick    the C-Stick (retail's 0x95..0x98)
 //
 // In the menus Triangle is B and Square Y because main.c's frontend keys
 // are what the menus hear: B pops the screen and Y is MENU_SQUARE, which

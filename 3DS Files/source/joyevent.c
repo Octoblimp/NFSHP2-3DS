@@ -19,6 +19,10 @@ BSlotPool           *EventNodeSlotPool;
 #define LOG_COUNT_BITS 8
 #define LOG_EVENT_BITS 19
 
+// How many reads of a new controller type it takes to believe it. The demo
+// waited 10; retail waits 32 (0x00153b00, `slti v1,v0,32`).
+#define TYPE_DETECTIONS 32
+
 // One bit, or one byte, of the pad buffer: `data[s >> 5] >> (s & 31)`.
 static uint32_t pad_word(const uint32_t *data, uint32_t shift)
 {
@@ -73,7 +77,7 @@ int32_t Joystick_GenerateEventsFromScanners(Joystick *joy, int32_t type,
             joy->NumValidTypeDetections = 0;
             return 0;
         }
-        if (++joy->NumValidTypeDetections < 10)
+        if (++joy->NumValidTypeDetections < TYPE_DETECTIONS)
             return 0;
         joy->CurrentType = type;
         for (i = 0; i < JOY_CALIBRATIONS; i++)
@@ -391,12 +395,28 @@ int32_t IsJoyHandlerAdded(JoystickPort port, JoyEvent ev)
     return Joystick_FindEventNode(&JoystickArray[port], ev) != NULL;
 }
 
+void (*gJoyResetPortDriversFn)(JoystickPort port);
+
 void TypeChangedHandler(JoystickPort port, JoyEvent ev, uint8_t value,
                         void *obj)
 {
     (void)ev;
     (void)obj;
+    // 0x00155e40, SetRumble(port, 0, 0) when CanRumble(the type): the 3DS
+    // has no motor to stop.
+    if (gJoyResetPortDriversFn != NULL)
+        gJoyResetPortDriversFn(port);
     CurrentJoystickTypes[port] = value;
+}
+
+void RestoreTypeChangedHandlers(void)
+{
+    int32_t p;
+
+    for (p = 0; p < JOYSTICK_PORTS; p++) {
+        RemoveJoyHandler(p, JOY_EVENT_TYPE_CHANGED);
+        AddJoyHandler(p, JOY_EVENT_TYPE_CHANGED, TypeChangedHandler, NULL);
+    }
 }
 
 int32_t IsJoystickPluggedIn(JoystickPort port)
@@ -913,6 +933,21 @@ int32_t GetJoystickButtonChar(JoystickPort port, JoyEvent ev)
         ev, GetJoystickType(port), GetJoystickUserConfiguration(port));
 
     return s ? s->ButtonChar : 0;
+}
+
+void GetJoystickButtonChars(JoystickPort port, JoyEvent ev, int32_t *ch,
+                            int32_t *ch2)
+{
+    const ScannerConfig *s;
+
+    *ch = 0;
+    *ch2 = 0;
+    s = FindScannerConfig(ev, GetJoystickType(port),
+                          GetJoystickUserConfiguration(port));
+    if (s == NULL)
+        return;
+    *ch = s->ButtonChar;
+    *ch2 = s->ButtonChar2;
 }
 
 JoyEvent GetJoystickButtonEvent(JoystickPort port, const char *name)

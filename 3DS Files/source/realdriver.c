@@ -293,6 +293,24 @@ void realdriver_reset_joy_values(RealDriver *d)
     d->ReverseInput               = 0.0f;
 }
 
+void realdriver_reset_port_joy_values(JoystickPort port)
+{
+    int32_t i;
+
+    if (pCurrentWorld == NULL)
+        return;
+    for (i = 0; i < pCurrentWorld->TotalNumCars; i++) {
+        Car        *car = pCurrentWorld->CarTable[i];
+        RealDriver *d;
+
+        if (car->TheControlMode != REAL_CONTROL)
+            continue;
+        d = (RealDriver *)(void *)car->pCarDriver;
+        if (d->Port == port)
+            realdriver_reset_joy_values(d);
+    }
+}
+
 JoystickPort realdriver_get_port(RealDriver *d) { return d->Port; }
 
 int32_t realdriver_get_driver_number(RealDriver *d)

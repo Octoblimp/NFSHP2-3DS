@@ -16,11 +16,9 @@
 // camera's on the second pad (0x00178540, bridge 0x001832b8), which only
 // DebugCamerasEnabled turns on and the disc ships off.
 //
-// **Retail's JoyEvent numbers are one higher from 110 on.** Retail added
-// JOY_EVENT_REPLAY_ERASE_DEMO at 110 (its EventNameTable, 0x002fa5d0);
-// joyeventid.h is the demo's enum, and the port's scanner table is the
-// demo's, so the port registers by name. Retail's 128 to 132 are
-// joyeventid.h's REQUEST_ROADBLOCK to SKIP.
+// The JoyEvent numbers are retail's (joyeventid.h): retail added
+// JOY_EVENT_REPLAY_ERASE_DEMO at 110, so from STEER on they are one above
+// the demo's, and its 128 to 132 are REQUEST_ROADBLOCK to SKIP.
 //
 // Written up in docs/formats/player.md, "Input modes".
 

@@ -155,7 +155,7 @@ void joyhid_build(const JoyHidState *s, uint8_t buf[32])
     buf[7] = axis(-s->cy);
 }
 
-void joyhid_read(int32_t port, uint8_t *buf)
+int32_t joyhid_read(int32_t port, uint8_t *buf)
 {
 #ifdef __3DS__
     static JoyHidCop cop;
@@ -164,7 +164,7 @@ void joyhid_read(int32_t port, uint8_t *buf)
     circlePosition cs;
 
     if (port != 0)
-        return;
+        return 0;
     hidCircleRead(&cp);
     hidCstickRead(&cs);
     s.keys = hidKeysHeld();
@@ -176,9 +176,11 @@ void joyhid_read(int32_t port, uint8_t *buf)
                                          : JOYHID_LAYOUT_MENU;
     s.keys = joyhid_cop_keys(&cop, s.keys, s.race == JOYHID_LAYOUT_COP);
     joyhid_build(&s, buf);
+    return 1;
 #else
     (void)port;
     (void)buf;
+    return 0;
 #endif
 }
 

@@ -70,6 +70,18 @@ cop's HUD (hudcop.c, hudrender.c, hudscore.c), the setup screens
   R helicopter (ce58fac). Not seen: an arrest, which the gas-only
   script cannot make. TASKS 43 is done (3DS button icons).
 
+**Now (Session 84, 2026-10-12): TASKS 49 is done. The joystick is
+retail's: its tables and event numbers (`gen_scanner_tables.py` from
+SLES_507.31), the 32-read type detection, the frame's own pad read, and
+the type monitor letting go of a port's cars
+(`docs/formats/joystick.md`). joystick_check runs retail's image: 0
+differ, 266 mutations, 261 caught, 5 equivalent. New: TASKS 50 (the main
+menu's code reader, the cheats). Next: TASKS 39, the helicopter's
+missiles and barrels. Its munitions are Smokeables, so step 14b comes
+first: the smokeable chunk loads as nothing today (bchunkload.c's slot
+27), so the track's breakables and the roadblock's barrels are
+missing. TASKS 47 and 46 wait on the user.**
+
 **Now (Session 83, 2026-10-12): TASKS 43 is done. Every help
 character draws the 3DS key that does its job (`helpglyph.c`, the
 port's own icon sheet `data/buttons3ds.bin`), and the cop's Blurb

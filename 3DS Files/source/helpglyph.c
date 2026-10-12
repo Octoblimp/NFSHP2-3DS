@@ -22,9 +22,13 @@ enum {
     HC_L2       = 0x8c,
     HC_R2       = 0x8d,
     HC_R3       = 0x8f,
+    // Retail's sticks (joyeventid.h's JOY_LSTICK_* and JOY_RSTICK_*): the
+    // left's up-down, up, down and left-right, then the right's four.
     HC_LSTICK   = 0x90,
-    HC_RSTICK   = 0x91,
-    HC_STICK    = 0x98,     // BUTTONSOUT's 'c', the stick
+    HC_APOS     = 0x92,     // the apostrophe, not a help character
+    HC_LSTICK_LAST = 0x94,
+    HC_RSTICK   = 0x95,
+    HC_RSTICK_LAST = 0x98,
 };
 
 #define ICON(i) (HELPGLYPH_ICON + (i))
@@ -57,12 +61,11 @@ int32_t helpglyph_map(unsigned char c, int32_t layout)
                                                 : HELPGLYPH_3DS_ZR);
     case HC_R3:
         return HC_DDOWN;
-    case HC_LSTICK:
-    case HC_STICK:
-        return ICON(HELPGLYPH_3DS_CPAD);
-    case HC_RSTICK:
-        return ICON(HELPGLYPH_3DS_CSTICK);
     default:
+        if (c >= HC_LSTICK && c <= HC_LSTICK_LAST && c != HC_APOS)
+            return ICON(HELPGLYPH_3DS_CPAD);
+        if (c >= HC_RSTICK && c <= HC_RSTICK_LAST)
+            return ICON(HELPGLYPH_3DS_CSTICK);
         // The D-pad, START, SELECT, and the rest as retail draws them.
         return c;
     }

@@ -2569,7 +2569,7 @@ phases.
         back and A select; X is free outside car select), and the 'k'
         text then draws that key's icon.
 
-49. [ ] **The joystick tables are the demo's.** Found on 2026-10-12.
+49. [x] **The joystick tables are the demo's.** Found on 2026-10-12.
         `scannertab.c` and `joyeventid.h` come from NFSHP2.ELF;
         retail's (SLES_507.31: ScannerConfigTable 0x002dc500, 230 rows
         of 36 bytes, the count at gp-23824; EventNameTable 0x002fa2d0,
@@ -2582,6 +2582,43 @@ phases.
         Regenerate both files from retail, then check every literal
         event number taken from a retail-only function (the Blurb's
         was one).
+        Done in Session 84. `tools/gen_scanner_tables.py` writes both
+        files from retail. JoyEvent is retail's: REPLAY_ERASE_DEMO at
+        110, and at 133..148 the main menu's code reader's sixteen
+        (JOY_EVENT_CHEAT_*, the port's names; JOY_EVENT_COUNT 149).
+        Retail's glyphs from 144 are the sticks' directions, the D-pad
+        and the wheel's; `helpglyph.c` maps the sticks' to the Circle
+        Pad and the C-Stick. Joystick.obj and JoystickPS2.obj follow
+        retail as well:
+        - A type is believed after 32 reads; the demo's took 10.
+        - The frame reads the pads itself, since JoypadReadInVBlank is
+          never set. A pad that does not answer reads 0xff throughout
+          (`joyhid.c`'s port 1).
+        - TypeChangedHandler makes the cars driven from the port let
+          go (World.obj's 0x0014e8c8, `realdriver_reset_port_joy_values`).
+        - RestoreTypeChangedHandlers (0x001543f0) is bound for the
+          replay states and the pause menu's resume.
+        - GetJoystickButtonChars (0x001552d0) is ported.
+        FindScannerConfig differed only in its address and stride. The
+        Blurb's 126 was the one literal. `tools/joystick_check.py` runs
+        retail's image: 65,880 ops, 79,028 lines, 0 differ; 266 mutations, 261
+        caught, 5 equivalent (`docs/formats/joystick.md`). Not ported:
+        rumble, and the code reader (TASKS 50).
+
+50. [ ] **The main menu's code reader.** Found on 2026-10-12 with
+        TASKS 49. Retail's NewMainMenu constructor (its call at
+        0x00216550) hands the reader at 0x0031d7e8 to 0x0024f488, which
+        registers one handler (0x0024fa88, on to 0x0024f748) for
+        JoyEvents 133..148 on port 0, one per button. The handler keeps
+        the last eight presses in a ring (+20, the count at +52, the
+        head at +56). Once it has eight, it compares them with each
+        code: +12 is the codes, 56 bytes each, and +16 their count. A
+        match calls 0x0024f9f8 for the code's group (+40), which clears
+        +48 in every code of that group, and goes on to act on the code.
+        These are the PS2 game's cheat codes. Decode what each code does
+        and where the table comes from, then port it. On the 3DS the
+        sixteen buttons are joyhid's DualShock 2 buttons, so a code is
+        entered with the 3DS keys mapped to them.
 
 ### The retail frontend
 

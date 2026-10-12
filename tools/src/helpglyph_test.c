@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include "helpglyph.h"
+#include "joyeventid.h"
 #include "joyhid.h"
 #include "joypad.h"
 
@@ -180,6 +181,30 @@ static void menus(int32_t layout, const char *name)
     }
 }
 
+// Retail's stick glyphs (joyeventid.h). joyhid_build puts the Circle Pad on
+// the DualShock's left stick and the C-Stick on its right.
+static const struct {
+    int  glyph;
+    int  icon;
+} kSticks[] = {
+    { JOY_LSTICK_UPDOWN,    HELPGLYPH_3DS_CPAD },
+    { JOY_LSTICK_UP,        HELPGLYPH_3DS_CPAD },
+    { JOY_LSTICK_DOWN,      HELPGLYPH_3DS_CPAD },
+    { JOY_LSTICK_LEFTRIGHT, HELPGLYPH_3DS_CPAD },
+    { JOY_RSTICK_UPDOWN,    HELPGLYPH_3DS_CSTICK },
+    { JOY_RSTICK_UP,        HELPGLYPH_3DS_CSTICK },
+    { JOY_RSTICK_DOWN,      HELPGLYPH_3DS_CSTICK },
+    { JOY_RSTICK_LEFTRIGHT, HELPGLYPH_3DS_CSTICK },
+};
+
+static int is_stick(int c)
+{
+    for (size_t i = 0; i < sizeof kSticks / sizeof kSticks[0]; i++)
+        if (kSticks[i].glyph == c)
+            return 1;
+    return 0;
+}
+
 // What every layout shares: the D-pad, START, SELECT and the rest drawn
 // as retail draws them, R3 as D-pad Down, the sticks as the 3DS's.
 static void shared(int32_t layout, const char *name)
@@ -189,19 +214,19 @@ static void shared(int32_t layout, const char *name)
     for (int c = 0x80; c <= 0x9d; c++) {
         int32_t want = c;
 
-        if ((c >= 0x86 && c <= 0x8d) || c == 0x8f || c == 0x90 || c == 0x91
-            || c == 0x98)
+        if ((c >= 0x86 && c <= 0x8d) || c == 0x8f || is_stick(c))
             continue;
         snprintf(what, sizeof what, "%s: 0x%02x drawn as retail's", name, c);
         expect(helpglyph_map((unsigned char)c, layout), want, what);
     }
     snprintf(what, sizeof what, "%s: R3 is D-pad Down's", name);
     expect(helpglyph_map(0x8f, layout), 0x83, what);
-    snprintf(what, sizeof what, "%s: the left stick is the Circle Pad", name);
-    expect(helpglyph_map(0x90, layout), ICON(HELPGLYPH_3DS_CPAD), what);
-    expect(helpglyph_map(0x98, layout), ICON(HELPGLYPH_3DS_CPAD), what);
-    snprintf(what, sizeof what, "%s: the right stick is the C-Stick", name);
-    expect(helpglyph_map(0x91, layout), ICON(HELPGLYPH_3DS_CSTICK), what);
+    for (size_t i = 0; i < sizeof kSticks / sizeof kSticks[0]; i++) {
+        snprintf(what, sizeof what, "%s: stick glyph 0x%02x", name,
+                 kSticks[i].glyph);
+        expect(helpglyph_map((unsigned char)kSticks[i].glyph, layout),
+               ICON(kSticks[i].icon), what);
+    }
 }
 
 static void rewrite(void)

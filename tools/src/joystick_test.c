@@ -25,8 +25,14 @@ enum {
     OP_CHOOSEDZ, OP_FIND, OP_FINDNAME, OP_AVAIL, OP_CHOOSECFG, OP_BUTTON,
     OP_BUTTONEV, OP_CONFIGURABLE, OP_EVNAME, OP_MAKELOG, OP_ADDLOG,
     OP_GETLOG, OP_REPLAY, OP_FEED, OP_JOYLOG, OP_NODE, OP_SCAN, OP_SETJOY,
-    OP_QRESET, OP_QREMOVE, OP_CURTYPE, OP_TYPEQ, OP_RING, OP_DESTROY
+    OP_QRESET, OP_QREMOVE, OP_CURTYPE, OP_TYPEQ, OP_RING, OP_DESTROY,
+    OP_VBLANK, OP_PADGONE, OP_RESTORE
 };
+
+// OP_PADGONE's ways for a port to stop answering; to the port both are a
+// read that answers 0.
+#define GONE_STATE 1
+#define GONE_READ 2
 
 #define N_HANDLERS 8
 #define H_TC 8
@@ -123,13 +129,23 @@ void bDeleteSlotPool(BSlotPool *pool)
 // ------------------------------------------------------- the platform read
 
 static uint32_t pads[2][8];
+static int32_t  gone[2];
 
-static void pad_read(int32_t port, uint8_t *buf)
+static int32_t pad_read(int32_t port, uint8_t *buf)
 {
     int32_t i;
 
+    if (gone[port])
+        return 0;
     for (i = 0; i < 32; i++)
         buf[i] = (uint8_t)(pads[port][i >> 2] >> (8 * (i & 3)));
+    return 1;
+}
+
+// World.obj's 0x0014e8c8, which TypeChangedHandler calls.
+static void reset_drivers(JoystickPort port)
+{
+    printf("  reset drivers port %d\n", (int)port);
 }
 
 // ------------------------------------------------------ the scripted feeds
@@ -329,6 +345,15 @@ static void ring(void)
             printf(" %d/%d", PadRingData[port][i].RegularControllerType,
                    PadRingData[port][i].LogitechDeviceID);
         printf("\n");
+        printf("  words %d", port);
+        for (i = 0; i < JOYPAD_RING; i++) {
+            const JoyData *d = &PadRingData[port][i];
+            uint32_t last;
+
+            memcpy(&last, d->LogitechPosition + 12, 4);
+            printf(" %08x/%08x", (unsigned)d->ThePadData[0], (unsigned)last);
+        }
+        printf("\n");
     }
 }
 
@@ -385,6 +410,7 @@ int main(int argc, char **argv)
     end += rd;
 
     gJoypadRead = pad_read;
+    gJoyResetPortDriversFn = reset_drivers;
     gReplayManagerGetData = rm_get;
     gReplayManagerAddData = rm_add;
     gJoylogRepeatGetData = jl_get;
@@ -528,9 +554,12 @@ int main(int argc, char **argv)
         case OP_BUTTON: {
             int32_t port = next(), ev = next();
             const char *nm = GetJoystickButtonName(port, ev);
+            int32_t ch = (int32_t)0xeeeeeeeeu, ch2 = (int32_t)0xeeeeeeeeu;
+            int32_t c = GetJoystickButtonChar(port, ev);
 
-            printf("button %d %d -> \"%s\" %d\n", port, ev, nm ? nm : "(null)",
-                   GetJoystickButtonChar(port, ev));
+            GetJoystickButtonChars(port, ev, &ch, &ch2);
+            printf("button %d %d -> \"%s\" %d %d %d\n", port, ev,
+                   nm ? nm : "(null)", c, ch, ch2);
             break;
         }
         case OP_BUTTONEV: {
@@ -693,6 +722,19 @@ int main(int argc, char **argv)
             Joystick_Destroy(&JoystickArray[port], 2);
             break;
         }
+        case OP_VBLANK:
+            JoypadReadInVBlank = next();
+            break;
+        case OP_PADGONE: {
+            int32_t port = next();
+
+            gone[port] = next();
+            break;
+        }
+        case OP_RESTORE:
+            printf("restore\n");
+            RestoreTypeChangedHandlers();
+            break;
         default:
             fprintf(stderr, "unknown op %d at word %zu\n", op, rd - 1);
             return 2;

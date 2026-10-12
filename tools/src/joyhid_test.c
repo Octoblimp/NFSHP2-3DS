@@ -55,14 +55,16 @@ void bDeleteSlotPool(BSlotPool *pool)
 static JoyHidState pad;
 static JoyHidCop   cop;
 
-static void read_pad(int32_t port, uint8_t *buf)
+// joyhid_read's, with the console's state from the test.
+static int32_t read_pad(int32_t port, uint8_t *buf)
 {
     JoyHidState s = pad;
 
     if (port != 0)
-        return;
+        return 0;
     s.keys = joyhid_cop_keys(&cop, s.keys, s.race == JOYHID_LAYOUT_COP);
     joyhid_build(&s, buf);
+    return 1;
 }
 
 // --------------------------------------------------------- the events
@@ -216,9 +218,9 @@ int main(void)
     for (i = 0; i < NWATCHED; i++)
         AddJoyHandler(0, watched[i], record, NULL);
 
-    // Ten matching reads before the type is believed; the eleventh frame
-    // reports it.
-    for (i = 0; i < 12; i++)
+    // 32 matching reads before the type is believed (retail's count); the
+    // 33rd frame reports it.
+    for (i = 0; i < 34; i++)
         frame();
     if (GetJoystickType(0) != 121 || !IsJoystickPluggedIn(0)) {
         printf("FAIL type: port 0 is %d\n", GetJoystickType(0));

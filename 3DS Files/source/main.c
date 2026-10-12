@@ -5735,11 +5735,14 @@ int main(int argc, char** argv)
     // The joystick layer: the ring of pad reads, the type monitor and the
     // event-node pool (so after sinit_run, which brings the pool manager
     // up). The 3DS's buttons reach it as a DualShock 2 through joyhid.c.
-    // Nothing registers a game handler yet -- the menus below still read
-    // kDown -- so for now it runs the type detection, which logs
-    // "joystick: port 0 type 121" once ten reads have agreed.
+    // The type detection logs "joystick: port 0 type 121" once 32 reads
+    // have agreed (retail's count). A new type makes the cars driven from
+    // that port drop what they held, and the replay and the pause menu's
+    // resume register the type monitor again so it does (retail's).
     joyhid_install();
     gJoyHidRaceLayoutFn = joyhidRaceLayout;
+    gJoyResetPortDriversFn = realdriver_reset_port_joy_values;
+    gRestoreTypeChangedHandlersFn = RestoreTypeChangedHandlers;
     InitJoystick();
 
     logPrintf("NFSHP2-3DS -- boot flow\n");

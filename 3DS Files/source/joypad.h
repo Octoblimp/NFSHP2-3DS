@@ -1,16 +1,17 @@
 // joypad -- the platform half of the joystick: JoystickPS2.obj's ring of
-// pad reads (0x0011d150 .. 0x0011da60 in NFSHP2.ELF), with the 3DS's
-// buttons where the PS2 had libpad.
+// pad reads (0x0011d150 .. 0x0011da60 in NFSHP2.ELF; retail's, which this
+// follows, from 0x0011c930), with the 3DS's buttons where the PS2 had
+// libpad.
 //
-// The PS2 reads both pads from its vertical-blank interrupt, ReadJoystick-
-// Data into a 32-deep ring per port, so a frame that runs long does not
-// drop a press; the main loop then drains every read since the last frame
-// through GenerateJoyEvents. The ring, the drain and the type-and-data
-// lookup are ported as they are. What changes is the read: the 3DS has no
-// vblank handler here, so main.c calls ReadJoystickData itself once a frame
-// just before GenerateJoyEvents, and the read is gJoypadRead, which builds
-// the DualShock 2's 32 bytes out of the 3DS's buttons (joyhid.c). Every
-// scanner and every config row downstream then works unchanged.
+// The demo read both pads from its vertical-blank interrupt, ReadJoystick-
+// Data into a 32-deep ring per port, and the main loop drained every read
+// since the last frame through GenerateJoyEvents. Retail keeps the ring and
+// the drain but reads in the vblank only if JoypadReadInVBlank, which is 0
+// and which nothing sets: PrepareToGetJoystickData, at the top of
+// GenerateJoyEvents, reads once itself. main.c still calls ReadJoystickData
+// once a frame where the vblank would. The read is gJoypadRead, which
+// builds the DualShock 2's 32 bytes out of the 3DS's buttons (joyhid.c).
+// Every scanner and every config row downstream then works unchanged.
 //
 // The DualShock 2 buffer, as ScannerConfigTable's bit numbers read it:
 //
@@ -56,23 +57,28 @@ extern int32_t JoystickRingBufferTop;                     // gp-24328
 extern int32_t JoystickRingBufferBottom;                  // gp-24324
 extern int32_t JoystickRingBufferPreparedTop;             // gp-24320
 extern int32_t JoypadInitialised;                         // gp-24316
+extern int32_t JoypadReadInVBlank;                        // retail gp-23792
 extern int32_t JoypadPortState[JOYSTICK_PORTS];           // gp-24296
 
-// scePadRead's place: fill the 32-byte buffer for one port. NULL leaves it
-// zero, which ReadRegularController reads as nothing plugged in.
-typedef void (*JoypadReadFn)(int32_t port, uint8_t *buf);
+// scePadRead's place: fill the 32-byte buffer for one port and answer 1, or
+// answer 0 for no pad, and the read is 0xff throughout, as retail's is.
+// NULL is no pad on either port.
+typedef int32_t (*JoypadReadFn)(int32_t port, uint8_t *buf);
 extern JoypadReadFn gJoypadRead;
 
-// 0x0011d150. One read of both ports into the ring, unless the ring is
-// full or the pads were never opened.
+// Retail's 0x0011c930. In the vblank, one read of both ports into the ring
+// (retail's 0x0011c950: unless the ring is full or the pads were never
+// opened) if JoypadReadInVBlank; else nothing.
 void ReadJoystickData(void);
 
 // 0x0011d200 / 0x0011d218.
 int32_t IsThereJoystickData(void);
 void    AdvanceJoystickData(void);
 
-// 0x0011d230. Fixes how far this frame will drain, and works out the
-// controller type of every read up to there.
+// Retail's 0x0011ca78. Reads once unless the vblank does, fixes how far
+// this frame will drain, and works out the controller type of every read
+// up to there: -1 if the port's ReadRegularController says so, else the
+// mode byte of a good read (retail's 0x0011d058).
 void PrepareToGetJoystickData(void);
 
 // 0x0011d360. The read at the bottom of the ring for `port`, the one
@@ -80,10 +86,10 @@ void PrepareToGetJoystickData(void);
 const uint32_t *GetJoystickTypeAndData(int32_t port, int32_t *type,
                                        const uint32_t **data2);
 
-// 0x0011d420, the PS2's libpad state machine. What it answers once a pad
-// has settled is the mode byte if the read was good, and -1 otherwise;
-// the 3DS pad is always settled, so that is all this does.
-int32_t ReadRegularController(int32_t port, const JoyData *d, int32_t *state);
+// Retail's 0x0011cd10, the PS2's libpad state machine, -1 until a pad
+// settles. Retail no longer hands it the read (the demo's took the JoyData
+// and answered its mode byte). The 3DS pad is always settled: 0.
+int32_t ReadRegularController(int32_t port, int32_t *state);
 
 // 0x0011d9e0 / 0x0011da60. Open the pads; closing does nothing.
 void PlatformInitJoystick(void);

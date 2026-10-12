@@ -8,8 +8,9 @@
 // steer and power-slide assist, the return-to-centre rate).
 //
 // Everything reaches it through JoyHandlers. AddJoyHandlers registers
-// eleven handlers on seventeen events, JOY_EVENT_STEER (110) through
-// JOY_EVENT_NITRO_BOOST (126), with the driver as the handler's object;
+// eleven handlers on seventeen events, JOY_EVENT_STEER (retail's 111)
+// through JOY_EVENT_NITRO_BOOST (127), with the driver as the handler's
+// object;
 // the joystick layer calls them from GenerateJoyEvents.
 //
 // 640 bytes, type#2160: CarDriver's 560 and twenty-six fields after it.
@@ -186,6 +187,10 @@ void realdriver_set_low_gear(RealDriver *d);              // 0x001395d8
 // is faster than 20 mph. The demo's (0x00139760) took an on/off int.
 void realdriver_force_ebrake_stop(RealDriver *d, float t);
 void realdriver_reset_joy_values(RealDriver *d);          // 0x00139768
+// Retail's World.obj 0x0014e8c8, unnamed: ResetJoyValues for every car on
+// pCurrentWorld that a player drives (REAL_CONTROL) from `port`. Retail's
+// TypeChangedHandler calls it, through joyevent.h's gJoyResetPortDriversFn.
+void realdriver_reset_port_joy_values(JoystickPort port);
 void realdriver_do_steering(RealDriver *d, float dt, JoystickPort port); // 0x00139838
 void realdriver_do_throttle_brake_reverse(RealDriver *d, float dt);// 0x00139d48
 void realdriver_do_brake(RealDriver *d, float dt);        // 0x00139ff0, no caller

@@ -184,15 +184,29 @@ static const char *hname(JoyHandler fn)
     return "?";
 }
 
+// The model is the demo's image, whose JoyEvent has no REPLAY_ERASE_DEMO,
+// so from STEER on its numbers are one below joyeventid.h's, which are
+// retail's. The script's events are the demo's: in through from_demo, and
+// what the port hands out printed through to_demo.
+static int32_t from_demo(int32_t ev)
+{
+    return ev >= JOY_EVENT_REPLAY_ERASE_DEMO ? ev + 1 : ev;
+}
+
+static int32_t to_demo(JoyEvent ev)
+{
+    return ev > JOY_EVENT_REPLAY_ERASE_DEMO ? (int32_t)ev - 1 : (int32_t)ev;
+}
+
 void AddJoyHandler(JoystickPort port, JoyEvent ev, JoyHandler fn, void *obj)
 {
-    printf("  joy add port %d ev %d fn %s obj %s\n", (int)port, (int)ev,
-           hname(fn), label(obj));
+    printf("  joy add port %d ev %d fn %s obj %s\n", (int)port,
+           (int)to_demo(ev), hname(fn), label(obj));
 }
 
 void RemoveJoyHandler(JoystickPort port, JoyEvent ev)
 {
-    printf("  joy remove port %d ev %d\n", (int)port, (int)ev);
+    printf("  joy remove port %d ev %d\n", (int)port, (int)to_demo(ev));
 }
 
 int32_t IsJoystickPluggedIn(JoystickPort port)
@@ -253,8 +267,8 @@ static void s_replay_event(struct ReplayManager *rm, float weight,
 static void s_reroute(struct Player *p, JoystickPort port, JoyEvent ev,
                       uint8_t value)
 {
-    printf("  seam reroute %s %d %d %d\n", label(p), (int)port, (int)ev,
-           (int)value);
+    printf("  seam reroute %s %d %d %d\n", label(p), (int)port,
+           (int)to_demo(ev), (int)value);
 }
 
 static int32_t s_allowed_reset(struct Player *p)
@@ -675,7 +689,7 @@ static void handler(int slot, int32_t h, int32_t port, int32_t ev,
         realdriver_joy_nitro_boost,
     };
 
-    fns[h](port, ev, (uint8_t)value, &drv[slot]);
+    fns[h](port, from_demo(ev), (uint8_t)value, &drv[slot]);
 }
 
 typedef void    (*VVoid)(void *);

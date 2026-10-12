@@ -587,9 +587,7 @@ void pre_race_blurb_handle_event(PreRaceBlurb *b, BScreenMessage msg,
         char buf[512];
         const char *fmt;
 
-        // Retail passes 126, which is the horn: retail's JoyEvent has
-        // REPLAY_ERASE_DEMO at 110, so from there on its numbers are one
-        // above the demo's, which this port's joyeventid.h holds.
+        // Retail passes 126, JOY_EVENT_HONK_HORN.
         if (IsJoystickPluggedIn(0))
             PreRaceBlurbButtonChar =
                 GetJoystickButtonChar(0, JOY_EVENT_HONK_HORN);

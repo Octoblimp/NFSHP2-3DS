@@ -9,11 +9,15 @@ int32_t JoystickRingBufferTop;
 int32_t JoystickRingBufferBottom;
 int32_t JoystickRingBufferPreparedTop;
 int32_t JoypadInitialised;
+int32_t JoypadReadInVBlank;
 int32_t JoypadPortState[JOYSTICK_PORTS];
 
 JoypadReadFn gJoypadRead;
 
-void ReadJoystickData(void)
+// Retail's 0x0011c950. scePadGetState is 6 (stable) or 2 for a pad libpad
+// can read, and the 3DS's always is; a port that answers nothing is 0xff
+// throughout, which reads as no controller.
+static void read_pads(void)
 {
     int32_t next;
     int32_t port;
@@ -27,10 +31,16 @@ void ReadJoystickData(void)
         JoyData *d = &PadRingData[port][JoystickRingBufferTop];
 
         memset(d, 0, sizeof(*d));
-        if (gJoypadRead)
-            gJoypadRead(port, (uint8_t *)d->ThePadData);
+        if (gJoypadRead == NULL || !gJoypadRead(port, (uint8_t *)d->ThePadData))
+            memset(d, 0xff, sizeof(*d));
     }
     JoystickRingBufferTop = next;
+}
+
+void ReadJoystickData(void)
+{
+    if (JoypadReadInVBlank)
+        read_pads();
 }
 
 int32_t IsThereJoystickData(void)
@@ -44,27 +54,41 @@ void AdvanceJoystickData(void)
                                & (JOYPAD_RING - 1);
 }
 
+// Retail's 0x0011d058: the mode byte of a good read, else -1.
+static int32_t pad_type(const JoyData *d)
+{
+    const uint8_t *b = (const uint8_t *)d->ThePadData;
+
+    if (b[0] != 0 || b[1] == 0)
+        return -1;
+    return b[1];
+}
+
 void PrepareToGetJoystickData(void)
 {
-    int32_t i;
     int32_t port;
 
     // UpdateLogitechWheels would run here.
+    if (!JoypadReadInVBlank)
+        read_pads();
     JoystickRingBufferPreparedTop = JoystickRingBufferTop;
-    i = JoystickRingBufferBottom;
-    if (i == JoystickRingBufferPreparedTop)
+    if (JoystickRingBufferBottom == JoystickRingBufferPreparedTop)
         return;
-    do {
-        for (port = 0; port < JOYSTICK_PORTS; port++) {
+    for (port = 0; port < JOYSTICK_PORTS; port++) {
+        int32_t rc = ReadRegularController(port, &JoypadPortState[port]);
+        int32_t i = JoystickRingBufferBottom;
+
+        do {
             JoyData *d = &PadRingData[port][i];
 
-            d->RegularControllerType =
-                ReadRegularController(port, d, &JoypadPortState[port]);
+            d->RegularControllerType = rc == -1 ? -1 : pad_type(d);
             // GetWheelDevice(port) is NULL: there is no wheel.
             d->LogitechDeviceID = -1;
-        }
-        i = (i + 1) & (JOYPAD_RING - 1);
-    } while (i != JoystickRingBufferPreparedTop);
+            i = (i + 1) & (JOYPAD_RING - 1);
+        } while (i != JoystickRingBufferPreparedTop);
+        // Retail sends a rumble change waiting for the port here
+        // (scePadSetActDirect); the 3DS has no motor.
+    }
 }
 
 const uint32_t *GetJoystickTypeAndData(int32_t port, int32_t *type,
@@ -80,15 +104,11 @@ const uint32_t *GetJoystickTypeAndData(int32_t port, int32_t *type,
     return cur->ThePadData;
 }
 
-int32_t ReadRegularController(int32_t port, const JoyData *d, int32_t *state)
+int32_t ReadRegularController(int32_t port, int32_t *state)
 {
-    const uint8_t *b = (const uint8_t *)d->ThePadData;
-
     (void)port;
     (void)state;
-    if (b[0] != 0 || b[1] == 0)
-        return -1;
-    return b[1];
+    return 0;
 }
 
 void PlatformInitJoystick(void)

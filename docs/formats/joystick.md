@@ -2,18 +2,33 @@
 
 The first slice of task 26. Everything between the pad and a `JoyHandler`:
 
-| Object | Range | Port |
-|--------|-------|------|
-| `Joystick.obj` | 0x00150a50 .. 0x00152860 | `joyevent.{c,h}` |
-| `JoystickPS2.obj`, the ring | 0x0011d150 .. 0x0011da60 | `joypad.{c,h}` |
-| `Joylog`'s two accessors | 0x0017b920, 0x0017ba60 | `joylog.{c,h}` |
-| `ScannerConfigTable`, `ValidJoystickConfigurationTable`, `EventNameTable` | 0x002dc6c0, 0x002de3a0, 0x002f22f8 | `scannertab.c`, generated |
-| the 3DS's buttons as a DualShock 2 | -- | `joyhid.{c,h}` |
+| Object | Demo (NFSHP2.ELF) | Retail (SLES_507.31) | Port |
+|--------|-------------------|----------------------|------|
+| `Joystick.obj` | 0x00150a50 .. 0x00152860 | 0x00153a00 .. 0x00155930 | `joyevent.{c,h}` |
+| `JoystickPS2.obj`, the ring | 0x0011d150 .. 0x0011da60 | from 0x0011c930 | `joypad.{c,h}` |
+| `Joylog`'s two accessors | 0x0017b920, 0x0017ba60 | 0x00183358, 0x00183498 | `joylog.{c,h}` |
+| `ScannerConfigTable` | 0x002dc6c0 | 0x002dc500 | `scannertab.c`, generated |
+| `ValidJoystickConfigurationTable` | 0x002de3a0 | 0x002de558 | `scannertab.c` |
+| `EventNameTable` | 0x002f22f8 | 0x002fa2d0 | `scannertab.c` |
+| the 3DS's buttons as a DualShock 2 | -- | -- | `joyhid.{c,h}` |
+
+The port follows retail (TASKS 49, 2026-10-12). Other addresses below are
+the demo's unless they say retail. Retail's joystick differs from the
+demo's in these ways:
+
+- `REPLAY_ERASE_DEMO` at 110 moves every event from `STEER` up one.
+- The main menu's code reader has sixteen events of its own at 133..148.
+- A row carries a second glyph.
+- The configurations are 30-33 where the demo had 30-34.
+- A type is believed after 32 reads, not 10.
+- The frame reads the pads itself.
+- `TypeChangedHandler` resets the port's drivers.
 
 `tools/gen_scanner_tables.py` writes `scannertab.c` and `joyeventid.h` from
-the image and the stabs, and `--check`s they are current.
-`tools/joystick_check.py` holds the port to the image in mipsemu (below);
-`tools/joyhid_check.py` holds the 3DS map to what `joyhid.h` promises.
+retail's image and the demo's stabs, and `--check`s they are current.
+`tools/joystick_check.py` holds the port to retail's image in mipsemu
+(below); `tools/joyhid_check.py` holds the 3DS map to what `joyhid.h`
+promises.
 
 ## The shape of it
 
@@ -32,9 +47,14 @@ builds a DualShock 2 buffer and every row works as shipped.
 
 ### The frame
 
-`ReadJoystickData` (the PS2 calls it from the vertical-blank interrupt; the
-3DS from the main loop, once a frame) reads both ports into a 32-deep ring.
-`GenerateJoyEvents` then:
+The demo read both ports into a 32-deep ring from the vertical-blank
+interrupt (`ReadJoystickData`). Retail keeps the ring, but the vblank reads
+only if `JoypadReadInVBlank` (gp-23792), which nothing sets: instead
+`PrepareToGetJoystickData`, at the top of the frame's drain, reads once
+itself. The 3DS calls `ReadJoystickData` from the main loop where the vblank
+would, and it does nothing. A port whose `scePadGetState` is not 6 or 2, or
+whose `scePadRead` fails, is read as 0xff throughout, which is no
+controller; `joyhid.c` answers port 1 that way. `GenerateJoyEvents`:
 
 1. Empties the queue.
 2. If the joylog is replaying, queues its recorded events and skips the
@@ -77,22 +97,26 @@ The buttons are **active low**: a released button reads 1.
 
 ### Controller types
 
-`ReadRegularController` answers the mode byte on a good read and -1
-otherwise. `ValidJoystickConfigurationTable` lists the types the game
+A read's type is its mode byte when byte 0 is 0 and the mode byte is not
+(retail's 0x0011d058), and -1 otherwise. Every read is -1 while
+`ReadRegularController`, the PS2's libpad state machine, says the pad has
+not settled; the 3DS's always has. `ValidJoystickConfigurationTable` lists
+the types the game
 knows, the user configurations each allows (the options screen's layouts),
 and the dead zone and hysteresis for its three analog devices:
 
 | Type | Mode | Configurations | Steer hyst / dz | Throttle, brake hyst / dz |
 |-----:|------|----------------|-----------------|---------------------------|
 | 65 | 0x41 digital pad | 10-13 | 0 / 0 | 0 / 0 |
-| 83 | 0x53 analog joystick | 20-24 | 4 / 20 | 12 / 20 |
-| 115 | 0x73 DualShock, analog mode | 20-24 | 4 / 20 | 12 / 20 |
-| 121 | 0x79 DualShock 2, pressure | 30-34 | 4 / 20 | 12 / 20 |
+| 83 | 0x53 analog joystick | 20-23 | 4 / 20 | 12 / 20 |
+| 115 | 0x73 DualShock, analog mode | 20-23 | 4 / 20 | 12 / 20 |
+| 121 | 0x79 DualShock 2, pressure | 30-33 | 4 / 20 | 12 / 20 |
 | 35 | 0x23 NeGcon | 40 | 4 / 8 | 12 / 8 |
 | 21, 22 | Logitech wheels | 50, 51 | 2 / 0 | 12 / 8 |
 
 `IsJoystickTypeWheel` is true for 21, 22 and 35, and
-`DoesJoystickHaveStiffThrottle` (0x0011daf8) for 83, 115 and 121: the pads
+`DoesJoystickHaveStiffThrottle` (0x0011daf8, retail's 0x0011d480) for 83,
+115 and 121: the pads
 whose analog pedal travels a quarter as far, which RealDriver's throttle
 and reverse handlers read four times over (see
 [real-driver](real-driver.md)). A type not in the table
@@ -103,7 +127,8 @@ otherwise; a type with no row has configuration 0.
 ### Type detection
 
 A read whose type differs from the port's `CurrentType` is not believed at
-once: it has to repeat, unchanged, for ten more reads. Only then does the
+once: it has to repeat, unchanged, for 32 more reads (the demo's waited
+for ten; retail's 0x00153b00, `slti v1,v0,32`). Only then does the
 port take it, choose each analog device's dead zone and hysteresis for it,
 and reconnect every node -- the rows are per configuration, so a new type
 means new rows. Until the first type is believed `CurrentType` is -1,
@@ -113,7 +138,14 @@ node registered before the pad is recognised is idle until then.
 The type monitor is two nodes that `InitJoystick` registers, one per port,
 for `TYPE_CHANGED` with `TypeChangedHandler`, which writes
 `CurrentJoystickTypes[port]`. 255 there (the byte of -1) means nothing is
-plugged in.
+plugged in. Retail's handler (0x001542a8) first stops the port's rumble
+(0x00155e40; the 3DS has no motor) and has every player car driven from
+the port let go of what it held (World.obj's 0x0014e8c8,
+`realdriver_reset_port_joy_values`, bound through
+`gJoyResetPortDriversFn`). Retail's 0x001543f0,
+`RestoreTypeChangedHandlers`, removes and re-adds both ports' monitor
+nodes; the fresh node reports the type again on the next frame, so the
+cars let go. The replay states and `PauseMenu::MaybeResume` call it.
 
 ### Calibration
 
@@ -129,12 +161,15 @@ and 255 until the options screen calibrates them.
 
 ## The rows
 
-A `ScannerConfig` is 32 bytes: eight configuration numbers (-1 is every
-configuration, 0 an unused slot), the event, the scanner, then `Xor1`,
-`Xor2`, `Shift1`, `Shift2`, `Param`, `AnalogDevice`, `ValidDuringReplay`,
-the button glyph (`eButtonChars`) and the button's name for the options
-screen. `FindScannerConfig` takes the first row for the event that lists
-the configuration.
+A `ScannerConfig` is 36 bytes in retail (230 rows; the demo's were 32
+bytes, 231 rows): eight configuration numbers (-1 is every configuration,
+0 an unused slot), the event, the scanner, then `Xor1`, `Xor2`, `Shift1`,
+`Shift2`, `Param`, `AnalogDevice`, `ValidDuringReplay`, the button glyph
+(`eButtonChars`), retail's second glyph (a combo's other button, so
+`TRIANGLE + R2` is R2 and Triangle; 0 otherwise) and the button's name for
+the options screen. `FindScannerConfig` takes the first row for the event
+that lists the configuration. Retail's 0x001552d0,
+`GetJoystickButtonChars`, answers both glyphs.
 
 ### The scanners
 
@@ -205,9 +240,9 @@ The default for the DualShock 2, and so for the 3DS (below). The menu rows
 | `HONK_HORN` | Circle |
 | `CYCLE_HUD` | D-pad Up |
 
-Configurations 31-34 move the throttle, brake, e-brake and horn around;
-34 is the "triggers" layout, R2 throttle and L2 brake with the gears on the
-right stick.
+Configurations 31-33 move the throttle, brake, e-brake and horn around.
+The demo's 34, the "triggers" layout (R2 throttle and L2 brake with the
+gears on the right stick), is not in retail.
 
 ## The 3DS
 
@@ -254,7 +289,7 @@ and R the helicopter. X, the horn, stays the cop's target: in retail
 `HONK_HORN` goes to `BeACopToggleSirenAndLights`, which changes the chase
 target. The nitro stays on D-pad Down. Retail's two calls are combos,
 `REQUEST_HELICOPTER` TRIANGLE + L2 and `REQUEST_ROADBLOCK` TRIANGLE + R2
-(rows 178 and 180 in configuration 30), so the race layout's Y + ZL and
+(rows 160 and 161 in configuration 30), so the race layout's Y + ZL and
 Y + ZR make them too. `gJoyHidRaceLayoutFn` answers `JOYHID_LAYOUT_COP` in
 a Be A Cop race when player 1's car is the player cop's, and
 `joyhid_cop_keys` then rewrites the keys before the map:
@@ -325,7 +360,7 @@ handlers are ported, but nothing builds a RealDriver until a race builds
 a `RealController`. No menu handler is registered yet either: the
 frontend's own registration (`AddNormalMenuJoyHandlers`) comes with the
 menus that use it. So for now it runs the type monitor, and logs
-`joystick: port 0 type 121` once ten reads agree.
+`joystick: port 0 type 121` once 32 more reads agree.
 
 ## Not ported
 
@@ -336,6 +371,8 @@ menus that use it. So for now it runs the type monitor, and logs
   `ConvertLogitechToDualShock`): the 3DS has no wheel, so
   `LogitechDeviceID` is always -1.
 * The joystick monkey, a debug feature the retail build never turns on.
+* Rumble (`CanRumble`, `SetRumble`, the waiting change that
+  `PrepareToGetJoystickData` sends): the 3DS has no motor.
 * `bRepeat`, behind the joylog. `Joylog::Init` returns at once unless
   `bPSX2PlatformType` is 1, and on a retail console it is 0, so `pRepeat`
   stays NULL and both accessors do nothing. The image's `Joylog::GetData`
@@ -346,35 +383,55 @@ menus that use it. So for now it runs the type monitor, and logs
   `ReplaySnapshot`. `RegisterInterestingEvent` and
   `InvalidateInterestingEvents` are ported, for Car's resets
   ([car](car.md)). `GetData` and `AddData` are still seams, and
-  `pReplayManager` stays NULL until the replay is ported.
+  `pReplayManager` stays NULL until the replay is ported. `replay.h` has
+  the demo's layout. Retail's moves `ReplayPausedThisFrame` to 24 and the
+  fancy replay's fields four bytes up, to 32..44; `GenerateJoyEvents`
+  reads those.
 
 ## The checker
 
 `tools/joystick_check.py` writes one script of ops -- register a handler,
 set a pad, read it into the ring, run a frame, call one scanner on one
-buffer, look a config up -- and runs it twice: on the image in mipsemu, and
-on the port through `tools/src/joystick_test.c`, which reads the same ops
-from a file. Both print the same transcript.
+buffer, look a config up -- and runs it twice: on retail's image in
+mipsemu (`retail_model`, by the demo's names), and on the port through
+`tools/src/joystick_test.c`, which reads the same ops from a file. Both
+print the same transcript.
 
 On the image, the platform reads, the slot pool, `ReplayManager`'s two
-accessors, `bRepeat`'s two and the handlers are stubs; everything in
-`Joystick.obj`, `Graph`, `bStrCmp` and `TypeChangedHandler` run as shipped.
-The scenarios are every lookup over every event and a spread of types and
-user configurations; the calibration calls; each scanner over long
-run-length-coded button and stick sequences from the table's own rows and
-from fuzzed ones; and a play session through `GenerateJoyEvents` -- type
-detection and flicker, mode changes, the ring overflowing, handlers added
-and removed from inside a handler, a queue past 256, the replay and the
-joylog in each of their states, and the teardown. The two type predicates are asked about all 256 type
-codes. 64,240 ops, 75,891 lines, no difference.
+accessors, `bRepeat`'s two and the handlers are stubs. scePadGetState
+answers 6, or 1 for a pad the script has taken away; scePadRead copies the
+script's 32 bytes, or fails for a pad taken away; `ReadRegularController`
+answers 0, settled. `TypeChangedHandler`'s rumble stop does nothing, and
+its driver reset logs its port, as the harness's `gJoyResetPortDriversFn`
+does. Everything else in `Joystick.obj`, `JoystickPS2.obj`'s ring,
+`Graph` and `bStrCmp` runs as shipped. The scenarios are every lookup over
+every event and a spread of types and user configurations; the
+calibration calls; `GetJoystickButtonChars` over every event; each
+scanner over long run-length-coded button and stick sequences from the
+table's own rows and from fuzzed ones; and a play session through
+`GenerateJoyEvents`. The session has type detection and flicker, mode
+changes, pads that stop answering, the frame's own reads and the
+vblank's, the ring overflowing, handlers added and removed from inside a
+handler, the type monitor made anew, a queue past 256, the replay and the
+joylog in each of their states, and the teardown. The two type
+predicates are asked about all 256 type codes. 65,880 ops, 79,028 lines, no
+difference.
 
-`--mutate` runs 250 mutants of `joyevent.c`, `joypad.c`, `joylog.c`,
-`joystick.c` and the generated tables against that transcript: 246
-caught, 4 equivalent, none unexplained. The equivalents are
-`choosedz-break` (each type has one row in
-`ValidJoystickConfigurationTable`, so the last match is also the first),
-`find-zero` (`FindScannerConfig` has already tested for configuration 0)
-`platforminit-state` (nothing reads the port state that scePad's
-state machine would keep) and `gen-count` (retail's one reader of the
-scanners' count is the demo disc's activity stamp, which the port leaves
-out).
+`--mutate` runs 266 mutants of `joyevent.c`, `joypad.c`, `joylog.c`,
+`joystick.c` and the generated tables against that transcript: 261
+caught, 5 equivalent, none unexplained. The equivalents are:
+- `choosedz-break`: each type has one row in
+  `ValidJoystickConfigurationTable`, so the last match is also the first.
+- `find-zero`: `FindScannerConfig` has already tested for configuration 0.
+- `find-j8`: only four rows use a row's eighth configuration slot, and
+  all four put 34 there. That is the demo's triggers layout, which
+  retail's `ValidJoystickConfigurationTable` no longer offers, so
+  `ChooseJoystickConfigurationNumber` never answers it.
+- `platforminit-state`: nothing reads the port state that scePad's state
+  machine would keep.
+- `gen-count`: retail's one reader of the scanners' count is the demo
+  disc's activity stamp, which the port leaves out.
+
+One mutant, `advance-mask`, wraps the ring's bottom at 16, not 32. The
+bottom then never reaches a top above 16, so the harness never returns;
+the pass kills it after 300 s and counts it caught.

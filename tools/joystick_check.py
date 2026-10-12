@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cross-check the joystick layer against the image itself, run in mipsemu.
+"""Cross-check the joystick layer against retail's image, run in mipsemu.
 
     3DS Files/source/joyevent.c    Joystick.obj: the nodes, the queue, the
                                    eleven scanners, the config lookups,
@@ -8,6 +8,9 @@
     3DS Files/source/joylog.c      Joylog's two accessors
     3DS Files/source/replay.c      ReplayManager's two, as seams
     3DS Files/source/scannertab.c  the three tables (gen_scanner_tables.py)
+
+The image is retail's SLES_507.31, through retail_model.RetailEmu and so
+by the demo's names; the port's tables and event numbers are retail's.
 
 **The script.** Every scenario is a list of ops -- register a handler, set
 a pad, read it into the ring, run a frame, call one scanner on one buffer,
@@ -19,12 +22,18 @@ the code under test does.
 
 **What is stubbed on the image**, and why each is fair:
 
-  * The platform reads. scePadRead copies the op's 32 bytes;
-    ReadRegularController answers the 3DS rule (the mode byte on a good
-    read, -1 otherwise), which is the settled answer of the PS2's libpad
-    state machine and all joypad.c keeps of it; UpdateLogitechWheels does
-    nothing and GetWheelDevice answers NULL, because the 3DS has no wheel;
-    PlatformInitJoystick sets the flag and the two port states.
+  * The platform reads. scePadGetState answers 6 (stable) or, for a pad
+    the op has taken away, 0 or 6 with a scePadRead that fails; scePadRead
+    copies the op's 32 bytes. ReadRegularController, the PS2's libpad
+    state machine, answers 0, settled, as the 3DS pad always is: the
+    image's own 0x0011d058 then reads the mode byte, as joypad.c's does.
+    UpdateLogitechWheels does nothing and GetWheelDevice answers NULL,
+    because the 3DS has no wheel; PlatformInitJoystick sets the flag and
+    the two port states.
+  * TypeChangedHandler's two calls: the rumble stop (0x00155e40) does
+    nothing, the 3DS having no motor, and World.obj's driver reset
+    (0x0014e8c8) logs its port, as the harness's gJoyResetPortDriversFn
+    does.
   * The slot pool. bNewSlotPool, bOMalloc, bFree and bDeleteSlotPool log,
     and hand out fresh 0xa5-filled blocks that are never reused, so a field
     AddJoyHandler forgets shows up on both sides alike. The harness defines
@@ -48,7 +57,9 @@ run-length-coded button and stick sequences, from the table's own rows and
 from fuzzed ones; and a play session through GenerateJoyEvents: type
 detection and flicker, mode changes, the ring filling and overflowing,
 handlers added and removed mid-frame, a queue past 256, the replay and the
-joylog in each of their states, and the teardown.
+joylog in each of their states, and the teardown. Retail reads
+the pads from GenerateJoyEvents, once a frame, unless JoypadReadInVBlank;
+the session runs both ways, and with pads that stop answering.
 
     python tools/joystick_check.py
     python tools/joystick_check.py --mutate
@@ -67,7 +78,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gen_scanner_tables
 import hostbuild
 import physicscar_check as pcc
-from mipsemu import Emu, M32, s32
+import retail_model
+from mipsemu import M32, s32
 
 ROOT = pcc.ROOT
 NL = pcc.NL
@@ -90,26 +102,31 @@ HARNESS_TIMEOUT = 300
 
 # ================================================================ the image
 
-GP = 0x00328bf0
-JOYARR = 0x002f1558             # JoystickArray[2], 204 bytes each
+# Retail's addresses.
+GP = retail_model.RETAIL_GP
+JOYARR = 0x002f9530             # JoystickArray[2], 204 bytes each
 JOYSZ = 204
-QUEUE = 0x002f16f0              # TheQueuedJoystickEvents
-SCANTAB = 0x002dc6c0            # ScannerConfigTable, 32 bytes a row
-RING = 0x002de480               # PadRingData[2][32], 84 bytes a read
-CURTYPES = 0x00323448           # CurrentJoystickTypes[2]
-G_POOL = GP - 22456             # EventNodeSlotPool
-G_REPLAY = GP - 23008           # pReplayManager
-G_FRAME = GP - 20264            # FrameCounter
-G_REAL = GP - 20256             # RealTimer
-G_JL_REPLAYING = GP - 21256
-G_JL_CAPTURING = GP - 21252
-G_JL_REPEAT = GP - 21248
-G_TOP = GP - 24328
-G_BOT = GP - 24324
-G_PREP = GP - 24320
-G_INIT = GP - 24316
-G_PORTSTATE = GP - 24296
-assert G_REPLAY == 0x00323210 and G_REAL == 0x00323cd0
+QUEUE = 0x002f96c8              # TheQueuedJoystickEvents
+SCANTAB = 0x002dc500            # ScannerConfigTable, 36 bytes a row
+SCANROW, SCANROWS = 36, 230
+RING = 0x002de640               # PadRingData[2][32], 84 bytes a read
+CURTYPES = GP - 21920           # CurrentJoystickTypes[2]
+G_POOL = GP - 21936             # EventNodeSlotPool
+G_REPLAY = GP - 22440           # pReplayManager
+G_FRAME = GP - 19616            # FrameCounter
+G_REAL = GP - 19608             # RealTimer
+G_JL_REPLAYING = GP - 20668
+G_JL_CAPTURING = GP - 20664
+G_JL_REPEAT = GP - 20660
+G_TOP = GP - 23808
+G_BOT = GP - 23804
+G_PREP = GP - 23800
+G_INIT = GP - 23796
+G_VBLANK = GP - 23792           # JoypadReadInVBlank
+G_RUMBLE = GP - 23784           # a rumble change waiting, per port
+G_PORTSTATE = GP - 23776
+G_MONKEY = GP - 24040           # the joystick monkey, a debug toy
+assert G_REPLAY == 0x00330148 and G_REAL == 0x00330c58
 
 # Joystick, EventNode, QueuedJoystickEvent, ReplayManager: the offsets
 # joyevent.h and replay.h name.
@@ -118,10 +135,14 @@ J_PORT, J_CUR, J_PREV, J_DET, J_USER = 184, 188, 192, 196, 200
 N_EVENT, N_CFG, N_HANDLER, N_OBJ, N_PREV, N_FIRST, N_USER = (
     8, 12, 16, 20, 24, 28, 32)
 RM_REPLAYING, RM_PAUSED, RM_FANCY, RM_FNUM, RM_NFANCY, RM_TABLE = (
-    0, 20, 28, 32, 36, 40)
+    0, 24, 32, 36, 40, 44)
 
-STATIC_INIT = 0x00152588        # _GLOBAL_$I$EventNodeSlotPool
-TYPE_CHANGED_HANDLER = 0x001512f8
+STATIC_INIT = 0x00155670        # _GLOBAL_$I$EventNodeSlotPool
+TYPE_CHANGED_HANDLER = 0x001542a8
+RESTORE = 0x001543f0            # RestoreTypeChangedHandlers
+BUTTON_CHARS = 0x001552d0       # GetJoystickButtonChars
+RUMBLE_OFF = 0x00155e40
+RESET_DRIVERS = 0x0014e8c8      # World.obj, per port
 
 SYM = {
     "init": "InitJoystick__Fv",
@@ -184,7 +205,12 @@ H_TC, H_NULL = 8, 9
  OP_FIND, OP_FINDNAME, OP_AVAIL, OP_CHOOSECFG, OP_BUTTON, OP_BUTTONEV,
  OP_CONFIGURABLE, OP_EVNAME, OP_MAKELOG, OP_ADDLOG, OP_GETLOG, OP_REPLAY,
  OP_FEED, OP_JOYLOG, OP_NODE, OP_SCAN, OP_SETJOY, OP_QRESET, OP_QREMOVE,
- OP_CURTYPE, OP_TYPEQ, OP_RING, OP_DESTROY) = range(38)
+ OP_CURTYPE, OP_TYPEQ, OP_RING, OP_DESTROY, OP_VBLANK, OP_PADGONE,
+ OP_RESTORE) = range(41)
+
+# OP_PADGONE's ways for a port to stop answering: scePadGetState not 6 or
+# 2, or a scePadRead that fails. 0 is a pad there.
+GONE_STATE, GONE_READ = 1, 2
 
 # Fixed argument counts; OP_SCAN is 10 + 8 + 1 (+ 8 when its last flag is 1).
 ARGS = {OP_TAG: 1, OP_INIT: 0, OP_CLOSE: 0, OP_ADD: 4, OP_REMOVE: 2,
@@ -195,7 +221,7 @@ ARGS = {OP_TAG: 1, OP_INIT: 0, OP_CLOSE: 0, OP_ADD: 4, OP_REMOVE: 2,
         OP_EVNAME: 1, OP_MAKELOG: 3, OP_ADDLOG: 1, OP_GETLOG: 1,
         OP_REPLAY: 14, OP_FEED: 2, OP_JOYLOG: 3, OP_NODE: 5, OP_SETJOY: 4,
         OP_QRESET: 0, OP_QREMOVE: 2, OP_CURTYPE: 2, OP_TYPEQ: 1, OP_RING: 0,
-        OP_DESTROY: 1}
+        OP_DESTROY: 1, OP_VBLANK: 1, OP_PADGONE: 2, OP_RESTORE: 0}
 
 
 def words(pad):
@@ -210,9 +236,13 @@ def pad_bytes(ws):
 # ================================================================ the tables
 
 
+JOY_EVENT_COUNT = 149
+
+
 def table():
-    events, _, rows, valid, _ = gen_scanner_tables.read_all()
+    events, _, rows, valid, _, _ = gen_scanner_tables.read_all()
     ev = dict(events)
+    assert max(ev.values()) + 1 == JOY_EVENT_COUNT
     out = []
     for r in rows:
         out.append(dict(nums=r["nums"], ev=ev[r["ev"]],
@@ -361,9 +391,9 @@ class Script(object):
 
 def scenario_tables(sc, ev, rows, valid):
     sc.tag("tables")
-    for e in range(-2, 136):
+    for e in range(-2, JOY_EVENT_COUNT + 4):
         sc.op(OP_EVNAME, e)
-    for e in range(-2, 141):
+    for e in range(-2, JOY_EVENT_COUNT + 9):
         sc.op(OP_CONFIGURABLE, e)
     cfgs = {}
     for typ, nums, _ in valid:
@@ -379,7 +409,7 @@ def scenario_tables(sc, ev, rows, valid):
     for typ, u in combos:
         sc.op(OP_CHOOSECFG, typ, u)
     for typ, u in combos:
-        for e in range(-1, 133):
+        for e in range(-1, JOY_EVENT_COUNT + 1):
             sc.op(OP_FIND, e, typ, u)
     names = sorted(set(r["name"] for r in rows if r["name"]))
     names += ["", "NOPE", "START ", "start", "L"]
@@ -389,8 +419,8 @@ def scenario_tables(sc, ev, rows, valid):
             for n in names:
                 sc.op(OP_FINDNAME, sc.name(n), typ, u)
             sc.op(OP_FINDNAME, -1, typ, u)
-    for e, v, p in [(0, 0, 0), (5, 1, 0), (131, 255, 1), (93, 128, 1),
-                    (300, 7, 1), (-1, 0, 0), (40, 200, 0)]:
+    for e, v, p in [(0, 0, 0), (5, 1, 0), (ev["JOY_EVENT_SKIP"], 255, 1),
+                    (93, 128, 1), (300, 7, 1), (-1, 0, 0), (40, 200, 0)]:
         sc.op(OP_MAKELOG, e, v, p)
 
 
@@ -425,7 +455,7 @@ def fuzz_cfg(rnd, kind):
     if kind == 6 and rnd.random() < 0.5:
         s2 = 0
     return dict(x1=xr(), x2=xr(), s1=s1, s2=s2, param=param,
-                dev=rnd.randrange(4), ev=rnd.randrange(1, 132))
+                dev=rnd.randrange(4), ev=rnd.randrange(1, JOY_EVENT_COUNT))
 
 
 def scenario_scanners(sc, rnd, rows):
@@ -601,6 +631,12 @@ def scenario_edges(sc, rnd):
                 for pad, n in ((down, a), (up, g), (down, b), (up, 3)):
                     for _ in range(n):
                         scan(6, 2, c, pad)
+    # A count the scanner never makes itself (149 is its highest): from
+    # 150 on the image leaves it as it is, pressed or not.
+    for u in (148, 149, 150, 151, 1200, -1):
+        sc.op(OP_NODE, 2, c["ev"], 0, 1, u)
+        for pad in (down, up, down, up):
+            scan(6, 2, c, pad)
 
     # Shift 0 as the first button: "none", held, whatever byte 0 holds --
     # which here is 0, so reading bit 0 of it would say released.
@@ -641,25 +677,32 @@ class Player(object):
 
 
 def scenario_play(sc, rnd, ev, rows):
+    skip = ev["JOY_EVENT_SKIP"]
     sc.tag("play: init")
     # The scanner scenarios left types behind; a boot has none.
     sc.op(OP_SETJOY, 0, -1, -1, 0)
     sc.op(OP_SETJOY, 1, -1, -1, 0)
     sc.op(OP_RING)
     sc.op(OP_TYPEQ, 0)
-    # Before the pads are opened a read does nothing.
+    # Before the pads are opened no read does anything: the vblank's, or
+    # the frame's own.
     sc.op(OP_PAD, 0, *words(0x7901))
     sc.op(OP_READ, 2)
+    sc.op(OP_VBLANK, 1)
+    sc.op(OP_READ, 2)
+    sc.op(OP_VBLANK, 0)
+    sc.op(OP_FRAME)
     sc.op(OP_RING)
     sc.op(OP_INIT)
     sc.op(OP_DUMP, 0)
     sc.op(OP_DUMP, 1)
     sc.op(OP_TYPEQ, 0)
     sc.op(OP_TYPEQ, 1)
+    # Retail's ReadJoystickData does nothing unless the vblank reads.
     sc.op(OP_READ, 1)
     sc.op(OP_RING)
-    # One frame drains that read and the next finds the ring empty: the
-    # 31 slots never read keep their zeroes, not -1 for a pad unplugged.
+    # Each frame reads once and drains it: the 30 slots never read keep
+    # their zeroes, not -1 for a pad unplugged.
     sc.op(OP_FRAME)
     sc.op(OP_FRAME)
     sc.op(OP_RING)
@@ -693,7 +736,7 @@ def scenario_play(sc, rnd, ev, rows):
     add(0, ev["JOY_EVENT_MENU_L1"], 6, (0 << 8) | menu_select)
     add(0, ev["JOY_EVENT_TOGGLE_TRACK_MARKER"], 7,
         (1 << 8) | ev["JOY_EVENT_MENU_SQUARE"])
-    for e in (start, ev["JOY_EVENT_STEER"], 131, 0):
+    for e in (start, ev["JOY_EVENT_STEER"], skip, 0):
         for p in (0, 1):
             sc.op(OP_ISADDED, p, e)
     sc.op(OP_DUMP, 0)
@@ -702,58 +745,89 @@ def scenario_play(sc, rnd, ev, rows):
     pl = Player(rnd)
     frame = [0]
     real = [100000]
+    vblank = [0]
+
+    def set_vblank(on):
+        vblank[0] = on
+        sc.op(OP_VBLANK, on)
+
+    def step_pads():
+        for port in (0, 1):
+            pl.step(port)
+            sc.op(OP_PAD, port, *words(pl.pad(port)))
 
     def one_frame(reads=None, dump=False):
         frame[0] += 1
         real[0] += rnd.choice([66, 66, 67, 67, 133, 0, -500])
         sc.op(OP_CLOCK, frame[0], real[0])
-        n = reads if reads is not None else rnd.choice([1] * 12 + [0, 2, 2, 3,
-                                                                  5])
-        for _ in range(n):
-            for port in (0, 1):
-                pl.step(port)
-                sc.op(OP_PAD, port, *words(pl.pad(port)))
+        if vblank[0]:
+            # The vblank's reads since the last frame, into the ring.
+            n = reads if reads is not None else rnd.choice([1] * 12
+                                                           + [0, 2, 2, 3, 5])
+            for _ in range(n):
+                step_pads()
+                sc.op(OP_READ, 1)
+        else:
+            # Retail's way, and the 3DS's: the frame reads once itself, and
+            # main.c's ReadJoystickData, where the vblank's would be, does
+            # nothing.
+            assert reads is None
+            step_pads()
             sc.op(OP_READ, 1)
         sc.op(OP_FRAME)
         if dump:
             sc.op(OP_DUMP, 0)
             sc.op(OP_DUMP, 1)
 
-    # Modes for port 0 and port 1, stretch by stretch: (b0, b1, frames).
+    # Modes for port 0 and port 1, stretch by stretch: (b0, b1, frames). A
+    # new mode is believed on its 33rd read in a row, the 33rd frame where
+    # the frame reads once; from "vblank reads" on, the ring fills as the
+    # demo's did.
     segments = [
-        ((0, 0x79), (0, 0), 14, "detect"),
-        ((0, 0x79), (0, 0), 260, "dualshock"),
+        ((0, 0x79), (0, 0), 40, "detect"),
+        ((0, 0x79), (0, 0), 200, "dualshock"),
         ((0xff, 0x79), (0, 0), 4, "flicker bad read"),
-        ((0, 0x79), (0, 0x73), 40, "port 1 plugged"),
+        ((0, 0x79), (0, 0x73), 50, "port 1 plugged"),
+        ((0, 0x79), (0, 0x73), 3, "port 0 gone a moment"),
+        ((0, 0x79), (0, 0x73), 100, "vblank reads"),
         ((0, 0x41), (0, 0x73), 60, "digital"),
         ((0, 0x00), (0, 0x73), 12, "mode 0"),
         ((0, 0x53), (0, 0x73), 40, "mode 0x53"),
+        ((0, 0x53), (0, 0x73), 60, "port 1 gone"),
         ((0, 0x23), (1, 0x73), 50, "negcon, port 1 unplugged"),
         ((0, 0x73), (0, 0x79), 60, "analog"),
         ((0, 0x79), (0, 0x79), 200, "dualshock again"),
     ]
     remover_armed = False
-    for si, (m0, m1, n, name) in enumerate(segments):
+    for m0, m1, n, name in segments:
         sc.tag("play: " + name)
         pl.mode = [m0, m1]
-        if si == 5:
+        if name == "port 0 gone a moment":
+            sc.op(OP_PADGONE, 0, GONE_READ)
+        elif name == "vblank reads":
+            set_vblank(1)
+        elif name == "mode 0":
             sc.op(OP_SETUSER, 0, 33)
             sc.op(OP_SETUSER, 1, 22)
-        if si == 6:
+        elif name == "mode 0x53":
             sc.op(OP_SETUSER, 0, 99)
-        if si == 7:
+        elif name == "port 1 gone":
+            sc.op(OP_PADGONE, 1, GONE_STATE)
+        elif name.startswith("negcon"):
             # Each valid for the type its port turns to next, so the
             # reconnect reads them.
             sc.op(OP_SETUSER, 0, 22)
             sc.op(OP_SETUSER, 1, 32)
         for i in range(n):
             one_frame(dump=(i == n - 1 or i % 64 == 63))
-            if si == 4 and i == 0:
-                # 0x41 read 1..8 times, 0x79 still believed: a node added
+            if name == "digital" and i == 0:
+                # 0x41 read 3..8 times, 0x79 still believed: a node added
                 # now connects for the believed type, not the one coming.
                 one_frame(reads=3)
                 add(0, ev["JOY_EVENT_THROTTLE_ANALOG"], 1, 4000)
                 sc.op(OP_DUMP, 0)
+            if name == "port 1 gone" and i == n // 2:
+                sc.op(OP_PADGONE, 1, GONE_READ)
             k = rnd.random()
             if k < 0.03 and registered[0]:
                 e = rnd.choice(registered[0])
@@ -765,11 +839,22 @@ def scenario_play(sc, rnd, ev, rows):
                 add(rnd.randrange(2), e, rnd.randrange(6), 2000 + e)
             elif k < 0.06:
                 sc.op(OP_REMOVE, 1, rnd.choice(all_events))
-            if not remover_armed and si == 1 and i == 100:
+            if not remover_armed and name == "dualshock" and i == 100:
                 # h6 on the event it removes, so the rest of that event's
                 # queue entries this frame are cleared.
                 add(0, menu_select, 6, (0 << 8) | menu_select)
                 remover_armed = True
+            if name == "dualshock" and i == 150:
+                # Both ports' TYPE_CHANGED nodes made anew: each fires on
+                # the next frame, and the cars on its port drop what they
+                # held.
+                sc.op(OP_RESTORE)
+                sc.op(OP_DUMP, 0)
+                sc.op(OP_DUMP, 1)
+        if name == "port 0 gone a moment":
+            sc.op(OP_PADGONE, 0, 0)
+        elif name == "port 1 gone":
+            sc.op(OP_PADGONE, 1, 0)
         sc.op(OP_RING)
 
     sc.tag("play: ring overflow")
@@ -806,7 +891,7 @@ def scenario_play(sc, rnd, ev, rows):
     sc.op(OP_GETLOG, 255)
     sc.op(OP_QRESET)
     for logged in (start, start | (1 << 8), start | (1 << 16),
-                   131 | (200 << 8), shiftup | (7 << 8) | (1 << 16),
+                   skip | (200 << 8), shiftup | (7 << 8) | (1 << 16),
                    ev["JOY_EVENT_STEER"] | (128 << 8)):
         sc.op(OP_ADDLOG, logged)
     for i in range(4):
@@ -835,7 +920,7 @@ def scenario_play(sc, rnd, ev, rows):
     sc.tag("replay: playing back")
     replay(1, replaying=1)
     feed(0, [2, start | (1 << 8), steer | (40 << 8), 0, 1,
-             start | (1 << 16), 3, 131, shiftup | (1 << 16),
+             start | (1 << 16), 3, skip, shiftup | (1 << 16),
              ev["JOY_EVENT_SELECT"] | (9 << 8)])
     for _ in range(6):
         one_frame()
@@ -845,7 +930,7 @@ def scenario_play(sc, rnd, ev, rows):
         one_frame()
     sc.tag("replay: fancy")
     replay(1, replaying=1, fancy=1, fnum=0, nfancy=5,
-           tab=[start, 0, steer, 131, ev["JOY_EVENT_SELECT"], 77])
+           tab=[start, 0, steer, skip, ev["JOY_EVENT_SELECT"], 77])
     feed(0, [1, start, 0, 0, 2, steer, start | (1 << 16), 0])
     for _ in range(8):
         one_frame(dump=False)
@@ -854,6 +939,17 @@ def scenario_play(sc, rnd, ev, rows):
         one_frame()
     replay(0)
     one_frame()
+
+    # The vblank stops with reads in the ring: the next frame reads once
+    # more and drains them all, and from here the frame reads.
+    sc.tag("vblank off")
+    for _ in range(3):
+        step_pads()
+        sc.op(OP_READ, 1)
+    sc.op(OP_RING)
+    set_vblank(0)
+    one_frame(dump=True)
+    sc.op(OP_RING)
 
     sc.tag("joylog")
     sc.op(OP_JOYLOG, 1, 0, 0)
@@ -887,7 +983,7 @@ def scenario_play(sc, rnd, ev, rows):
             sc.op(OP_CURTYPE, 0, typ)
             sc.op(OP_SETUSER, 0, user)
             sc.op(OP_TYPEQ, 0)
-            for e in range(-1, 133):
+            for e in range(-1, JOY_EVENT_COUNT + 1):
                 sc.op(OP_BUTTON, 0, e)
             for n in names:
                 sc.op(OP_BUTTONEV, 0, sc.name(n))
@@ -934,13 +1030,14 @@ class Model(object):
     def __init__(self, sc):
         self.sc = sc
         self.out = []
-        e = self.e = Emu(ieee=True)
+        e = self.e = retail_model.RetailEmu(ieee=True)
         e.stub_bware()
         self.fn = {k: e.addr_of(v) for k, v in SYM.items()}
         self.scanner = [e.addr_of("Scanner_" + s + SCANNER_SUFFIX)
                         for s in SCANNERS]
         self.blocks = {}
         self.pads = [bytes(32), bytes(32)]
+        self.gone = [0, 0]
         self.feeds = [[], []]
         self.data2 = [0] * 8
 
@@ -988,18 +1085,32 @@ class Model(object):
         e.stub("UpdateLogitechWheels__Fv", lambda em: None)
         e.stub("GetWheelDevice__Fi", lambda em: 0)
 
+        def pad_state(em):
+            return 1 if self.gone[s32(em.reg[4])] == GONE_STATE else 6
+
         def pad_read(em):
             port, buf = s32(em.reg[4]), em.reg[6] & M32
+            if self.gone[port]:
+                return 0
             em.mem[buf:buf + 32] = self.pads[port]
             return 1
 
-        def read_regular(em):
-            d = em.reg[5] & M32
-            b0, b1 = em.mem[d], em.mem[d + 1]
-            return -1 if (b0 != 0 or b1 == 0) else b1
-
+        e.stub("scePadGetState", pad_state)
         e.stub("scePadRead", pad_read)
-        e.stub("ReadRegularController__FiP7JoyDataRi", read_regular)
+        e.stub("ReadRegularController__FiP7JoyDataRi", lambda em: 0)
+
+        def rumble(em):
+            emit("  rumble? port %d" % s32(em.reg[4]))
+
+        e.stub("scePadSetActDirect", rumble)
+        e.stub(RUMBLE_OFF, lambda em: None)
+        e.stub(RESET_DRIVERS,
+               lambda em: emit("  reset drivers port %d" % s32(em.reg[4])))
+        # No rumble change waits, and the monkey that presses buttons at
+        # random for soak tests stays off.
+        e.put32(G_RUMBLE, 0)
+        e.put32(G_RUMBLE + 4, 0)
+        e.put32(G_MONKEY, 0)
 
         def pop(which):
             f = self.feeds[which]
@@ -1106,8 +1217,9 @@ class Model(object):
     def cfg_row(self, p):
         if p == 0:
             return -1
-        if SCANTAB <= p < SCANTAB + 32 * 231 and not (p - SCANTAB) % 32:
-            return (p - SCANTAB) // 32
+        if (SCANTAB <= p < SCANTAB + SCANROW * SCANROWS
+                and not (p - SCANTAB) % SCANROW):
+            return (p - SCANTAB) // SCANROW
         return -2
 
     def f32bits(self, a):
@@ -1163,10 +1275,15 @@ class Model(object):
                      s32(e.u32(G_INIT))))
         for port in (0, 1):
             ts = []
+            ws = []
             for i in range(32):
                 d = RING + 2688 * port + 84 * i
                 ts.append("%d/%d" % (s32(e.u32(d + 36)), s32(e.u32(d + 40))))
+                # The read's first word and the slot's last, which only a
+                # read that failed fills (0xff throughout).
+                ws.append("%08x/%08x" % (e.u32(d), e.u32(d + 80)))
             self.emit("  types %d %s" % (port, " ".join(ts)))
+            self.emit("  words %d %s" % (port, " ".join(ws)))
 
     def after_frame(self):
         e = self.e
@@ -1254,7 +1371,11 @@ class Model(object):
             elif code == OP_BUTTON:
                 p = e.call(fn["bname"], *a) & M32
                 c = e.call(fn["bchar"], *a)
-                emit("button %d %d -> \"%s\" %d" % (a + (self.cstr(p), c)))
+                e.mem[OUT_ADDR:OUT_ADDR + 8] = b"\xee" * 8
+                e.call(BUTTON_CHARS, a[0], a[1], OUT_ADDR, OUT_ADDR + 4)
+                emit("button %d %d -> \"%s\" %d %d %d"
+                     % (a + (self.cstr(p), c, s32(e.u32(OUT_ADDR)),
+                             s32(e.u32(OUT_ADDR + 4)))))
             elif code == OP_BUTTONEV:
                 ptr = 0 if a[1] < 0 else NAME_ADDR + 64 * a[1]
                 emit("bevent %d %d -> %d"
@@ -1306,7 +1427,7 @@ class Model(object):
                     self.data2 = [w & M32 for w in a[19:27]]
                 n = NODE_ADDR + 64 * slot
                 c = CFG_ADDR
-                e.mem[c:c + 32] = bytes(32)
+                e.mem[c:c + SCANROW] = bytes(SCANROW)
                 e.put32(c + 8, e.u32(n + N_EVENT))
                 e.put32(c + 12, self.scanner[kind])
                 e.mem[c + 16:c + 23] = bytes([x1, x2, s1, s2, param, dev, 0])
@@ -1344,6 +1465,13 @@ class Model(object):
             elif code == OP_DESTROY:
                 emit("destroy %d" % a[0])
                 e.call(fn["destroy"], JOYARR + JOYSZ * a[0], 2)
+            elif code == OP_VBLANK:
+                e.put32(G_VBLANK, a[0])
+            elif code == OP_PADGONE:
+                self.gone[a[0]] = a[1]
+            elif code == OP_RESTORE:
+                emit("restore")
+                e.call(RESTORE)
             else:
                 raise SystemExit("unknown op %d" % code)
         return self.out
@@ -1407,8 +1535,7 @@ MUTATIONS = [
 
     # -- type detection and the scan --------------------------------------------
     ("gen-prevtype", JEC, "if (type != joy->PreviousType) {", "if (0) {"),
-    ("gen-det-10", JEC, "if (++joy->NumValidTypeDetections < 10)",
-     "if (++joy->NumValidTypeDetections < 9)"),
+    ("gen-det-32", JEC, "#define TYPE_DETECTIONS 32", "#define TYPE_DETECTIONS 31"),
     ("gen-det-reset", JEC, "            joy->PreviousType = type;" + NL
      + "            joy->NumValidTypeDetections = 0;",
      "            joy->PreviousType = type;"),
@@ -1584,18 +1711,34 @@ MUTATIONS = [
      ""),
     ("typechanged-handler", JEC, "CurrentJoystickTypes[port] = value;",
      "CurrentJoystickTypes[port] = (uint8_t)(value + 1);"),
+    ("typechanged-reset", JEC, "    if (gJoyResetPortDriversFn != NULL)" + NL
+     + "        gJoyResetPortDriversFn(port);" + NL, ""),
+    ("restore-remove", JEC, "    for (p = 0; p < JOYSTICK_PORTS; p++) {" + NL
+     + "        RemoveJoyHandler(p, JOY_EVENT_TYPE_CHANGED);" + NL
+     + "        AddJoyHandler(", "    for (p = 0; p < JOYSTICK_PORTS; p++) {" + NL
+     + "        AddJoyHandler("),
+    ("restore-add", JEC, "        RemoveJoyHandler(p, JOY_EVENT_TYPE_CHANGED);" + NL
+     + "        AddJoyHandler(p, JOY_EVENT_TYPE_CHANGED, TypeChangedHandler, NULL);",
+     "        RemoveJoyHandler(p, JOY_EVENT_TYPE_CHANGED);"),
+    ("restore-ports", JEC, "    for (p = 0; p < JOYSTICK_PORTS; p++) {" + NL
+     + "        RemoveJoyHandler(p, JOY_EVENT_TYPE_CHANGED);" + NL
+     + "        AddJoyHandler(", "    for (p = 0; p < 1; p++) {" + NL
+     + "        RemoveJoyHandler(p, JOY_EVENT_TYPE_CHANGED);" + NL
+     + "        AddJoyHandler("),
     ("plugged", JEC, "return CurrentJoystickTypes[port] != 0xff;",
      "return CurrentJoystickTypes[port] != 0;"),
     ("monitor-reset", JEC, "        CurrentJoystickTypes[p] = 0xff;" + NL
      + "        AddJoyHandler", "        CurrentJoystickTypes[p] = 0;" + NL
      + "        AddJoyHandler"),
-    ("monitor-handler", JEC,
-     "AddJoyHandler(p, JOY_EVENT_TYPE_CHANGED, TypeChangedHandler, NULL);",
-     "AddJoyHandler(p, JOY_EVENT_TYPE_CHANGED, TestJoyHandler, NULL);"),
+    ("monitor-handler", JEC, "0xff;" + NL
+     + "        AddJoyHandler(p, JOY_EVENT_TYPE_CHANGED, TypeChangedHandler, NULL);",
+     "0xff;" + NL
+     + "        AddJoyHandler(p, JOY_EVENT_TYPE_CHANGED, TestJoyHandler, NULL);"),
     ("monitor-close-reset", JEC, "        CurrentJoystickTypes[p] = 0xff;" + NL
      + "        RemoveJoyHandler", "        RemoveJoyHandler"),
     ("monitor-close-remove", JEC,
-     "        RemoveJoyHandler(p, JOY_EVENT_TYPE_CHANGED);" + NL, ""),
+     "0xff;" + NL + "        RemoveJoyHandler(p, JOY_EVENT_TYPE_CHANGED);" + NL,
+     "0xff;" + NL),
     ("init-portnumber", JEC, "JoystickArray[p].PortNumber = p;",
      "JoystickArray[p].PortNumber = 0;"),
     ("init-pool-n", JEC, "bNewSlotPool(sizeof(EventNode), 96,",
@@ -1868,6 +2011,12 @@ MUTATIONS = [
      "int32_t GetJoystickButtonChar(JoystickPort port, JoyEvent ev)"
      + NL + "{" + NL + "    const ScannerConfig *s = FindScannerConfig(" + NL
      + "        ev, GetJoystickType(port), 0);"),
+    ("chars-ch", JEC, "    *ch = s->ButtonChar;", "    *ch = s->ButtonChar2;"),
+    ("chars-ch2", JEC, "    *ch2 = s->ButtonChar2;", "    *ch2 = s->ButtonChar;"),
+    ("chars-zero", JEC, "    *ch = 0;" + NL + "    *ch2 = 0;" + NL, ""),
+    ("chars-user", JEC, "    s = FindScannerConfig(ev, GetJoystickType(port)," + NL
+     + "                          GetJoystickUserConfiguration(port));",
+     "    s = FindScannerConfig(ev, GetJoystickType(port), 0);"),
     ("bevent-configurable", JEC, "        || !IsConfigurableRacingEvent(s->Event))",
      "        )"),
     ("bevent-user", JEC,
@@ -1880,6 +2029,23 @@ MUTATIONS = [
      "    default:" + NL + "        return 1;"),
 
     # -- the ring ---------------------------------------------------------------
+    ("vblank-read", JPC, "    if (JoypadReadInVBlank)" + NL + "        read_pads();",
+     "    read_pads();"),
+    ("vblank-never", JPC, "    if (JoypadReadInVBlank)" + NL + "        read_pads();",
+     "    (void)0;"),
+    ("prepare-read", JPC, "    if (!JoypadReadInVBlank)" + NL + "        read_pads();" + NL,
+     ""),
+    ("prepare-read-always", JPC,
+     "    if (!JoypadReadInVBlank)" + NL + "        read_pads();",
+     "    read_pads();"),
+    ("read-gone", JPC,
+     "if (gJoypadRead == NULL || !gJoypadRead(port, (uint8_t *)d->ThePadData))"
+     + NL + "            memset(d, 0xff, sizeof(*d));",
+     "if (gJoypadRead != NULL)" + NL
+     + "            gJoypadRead(port, (uint8_t *)d->ThePadData);"),
+    ("read-gone-fill", JPC, "            memset(d, 0xff, sizeof(*d));",
+     "            memset(d, 0, sizeof(*d));"),
+    ("read-clear", JPC, "        memset(d, 0, sizeof(*d));" + NL, ""),
     ("read-uninit", JPC, "    if (!JoypadInitialised)" + NL + "        return;" + NL,
      ""),
     ("read-full", JPC, "    if (next == JoystickRingBufferBottom)" + NL
@@ -1892,10 +2058,12 @@ MUTATIONS = [
      "(JoystickRingBufferBottom + 1)" + NL + "                               & 15;"),
     ("prepare-top", JPC,
      "    JoystickRingBufferPreparedTop = JoystickRingBufferTop;" + NL, ""),
-    ("prepare-empty", JPC, "    if (i == JoystickRingBufferPreparedTop)" + NL
+    ("prepare-empty", JPC,
+     "    if (JoystickRingBufferBottom == JoystickRingBufferPreparedTop)" + NL
      + "        return;" + NL, ""),
-    ("prepare-type", JPC, "ReadRegularController(port, d, &JoypadPortState[port]);",
-     "121;"),
+    ("prepare-type", JPC,
+     "d->RegularControllerType = rc == -1 ? -1 : pad_type(d);",
+     "d->RegularControllerType = 121;"),
     ("prepare-wheel", JPC, "d->LogitechDeviceID = -1;", "d->LogitechDeviceID = 0;"),
     ("prepare-one", JPC, "    } while (i != JoystickRingBufferPreparedTop);",
      "    } while (0);"),
@@ -1923,10 +2091,12 @@ MUTATIONS = [
     # -- the generated tables ---------------------------------------------------
     ("tab-repeat-shift", STC, [("Scanner_DigitalRepeat, 1, 0, 20, 0, 0, 0, 1,",
                                 "Scanner_DigitalRepeat, 1, 0, 21, 0, 0, 0, 1,", 1)]),
-    ("tab-valid-dz", STC, "{ 121, { 30, 31, 32, 33, 34, 0, 0, 0, 0, 0 }, 4, 20,",
-     "{ 121, { 30, 31, 32, 33, 34, 0, 0, 0, 0, 0 }, 4, 19,"),
-    ("tab-valid-cfg", STC, "{ 115, { 20, 21, 22, 23, 24,",
-     "{ 115, { 21, 20, 22, 23, 24,"),
+    ("tab-valid-dz", STC, "{ 121, { 30, 31, 32, 33, 0, 0, 0, 0, 0, 0 }, 4, 20,",
+     "{ 121, { 30, 31, 32, 33, 0, 0, 0, 0, 0, 0 }, 4, 19,"),
+    ("tab-valid-cfg", STC, "{ 115, { 20, 21, 22, 23,",
+     "{ 115, { 21, 20, 22, 23,"),
+    ("tab-char2", STC, [("JOY_R2, JOY_TRIANGLE, \"TRIANGLE + R2\"",
+                         "JOY_R2, JOY_NONE, \"TRIANGLE + R2\"", 1)]),
 
     # -- the type questions -----------------------------------------------------
     ("stiff-83", JC, "    case 83:" + NL, ""),
@@ -1959,6 +2129,11 @@ EQUIVALENT = {
     # Retail's one reader of GenerateEventsFromScanners' count is the demo
     # disc's activity stamp in GenerateJoyEvents, which the port leaves out.
     "gen-count": "no caller reads the count",
+    # Only four rows use a row's eighth configuration slot, and all four
+    # put 34 there: the demo's triggers layout, which retail's
+    # ValidJoystickConfigurationTable no longer offers, so
+    # ChooseJoystickConfigurationNumber never answers it.
+    "find-j8": "slot 7 is only 34, which no type has",
 }
 
 
