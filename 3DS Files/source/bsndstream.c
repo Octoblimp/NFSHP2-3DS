@@ -68,6 +68,7 @@ uint32_t bss_decode(BssDecoder* d, const uint8_t* in, uint32_t frames,
 #include <stdlib.h>
 
 #include "gamedata.h"
+#include "threadguard.h"
 
 #define BSS_WAVES        8
 #define BSS_WAVE_FRAMES  128                 // 3584 samples, 149 ms at 24 kHz
@@ -222,7 +223,7 @@ static void worker_main(void* arg)
 {
     BssStream* s = (BssStream*)arg;
     for (;;) {
-        LightEvent_WaitTimeout(&s->wake, 10 * 1000000LL);
+        LightEvent_WaitTimeout(&s->wake, threadguard_wait_ns());
         LightLock_Lock(&s->lock);
         if (s->quit) {
             LightLock_Unlock(&s->lock);
@@ -284,6 +285,7 @@ bool bsndstream_init(void)
     }
     s->worker = threadCreate(worker_main, s, 16 << 10, prio, -2, false);
     s->created = s->worker != NULL;
+    threadguard_watch("speech stream", s->worker, &s->wake);
     return s->created;
 }
 
@@ -295,8 +297,9 @@ void bsndstream_exit(void)
         s->quit = true;
         halt(s);
         LightLock_Unlock(&s->lock);
-        LightEvent_Signal(&s->wake);
+        threadguard_signal(&s->wake, "speech stream: quit");
         threadJoin(s->worker, U64_MAX);
+        threadguard_forget(s->worker);
         threadFree(s->worker);
         s->worker = NULL;
         s->created = false;
@@ -344,7 +347,7 @@ void bsndstream_play(unsigned ch, const BsndStreamPart* parts,
     LightLock_Unlock(&s->lock);
     // The opens and the reads are the worker's, so the game's frame never
     // waits on the card; the voice counts as playing from here.
-    LightEvent_Signal(&s->wake);
+    threadguard_signal(&s->wake, "speech stream: play");
 }
 
 void bsndstream_stop(unsigned ch)

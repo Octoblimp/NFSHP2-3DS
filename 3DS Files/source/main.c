@@ -69,6 +69,7 @@
 #include "cameracoord.h"
 #include "democam.h"
 #include "drivecam.h"
+#include "drivetarget.h"
 #include "cammover.h"
 #include "bscreens.h"
 #include "bcarsel.h"
@@ -130,6 +131,7 @@
 #include "gameflow.h"
 #include "capture.h"
 #include "hangwatch.h"
+#include "threadguard.h"
 #include "heapcfg.h"
 #include "helisheet.h"
 #include "logwriter.h"
@@ -4226,8 +4228,9 @@ static void logRaceState(void)
             }
         }
         logLine("race: world objects %d (%d on), spike strips %d, heli "
-                "sheet %d polys", objects, on, strips,
-                TheHeliSheet != NULL ? TheHeliSheet->NumPolys : -1);
+                "sheet %d polys; drive target NaN resamples %d", objects, on,
+                strips, TheHeliSheet != NULL ? TheHeliSheet->NumPolys : -1,
+                (int)DriveTargetNaNResamples);
     }
     if (pCopManager != NULL) {
         // The chases, the first one's helicopter side, and the helicopter.
@@ -4421,6 +4424,24 @@ static void logRaceState(void)
     }
 }
 
+// A hangwatch mark, and the thread guard's check there (threadguard.h):
+// a write over the audio workers' blocks is caught at the next mark, and
+// the report names the two it fell between.
+static void frameMark(const char* where)
+{
+    hangwatch_mark(where);
+    threadguard_check(where);
+}
+
+// The guard's report's last line: where the game was.
+static void guardNote(FILE* f)
+{
+    const Race* r = pCurrentRace;
+    fprintf(f, "threadguard: flow %d, race %s, stage %d, %d racing cars\n",
+            (int)g_flow.current, r ? "up" : "none",
+            r ? (int)r->RaceStage : -1, r ? (int)r->NumRacingCars : 0);
+}
+
 // MainLoop's race half (0x0012f3c8 .. 0x0012f5fc), after the flow's
 // service: the coordinator, the world's step, and the cameras. The calls
 // the port does not have yet are named where they would be.
@@ -4432,7 +4453,7 @@ static void raceFrame(void)
     // The coordinator's queued messages, CheckForDemoDiscTimeout (the
     // demo disc's, and the port runs as retail with DemoDiscManager off),
     // a TICK, and ServiceGameFlow again.
-    hangwatch_mark("race: coordinator");
+    frameMark("race: coordinator");
     racecoordinator_execute_queued_messages(rc);
     racecoordinator_send_message(rc, RC_TICK, 0);
     bgf_service(&g_flow);
@@ -4467,12 +4488,12 @@ static void raceFrame(void)
             PrepareWorldTimestep(step);
             GenerateJoyEvents();
             MainLoopTiming.GenerateJoyEvents = bGetTicker();
-            hangwatch_mark("race: the world's step");
+            frameMark("race: the world's step");
             world_do_timestep(w, step);
         }
     }
     MainLoopTiming.WorldDoTimestep = bGetTicker();
-    hangwatch_mark("race: the cameras");
+    frameMark("race: the cameras");
 
     // MenuSystemTick is bgf_frame's. ReplayScreen::Update is not ported.
     // UpdateCameraCoordinators (0x00199bd0) takes the real step
@@ -4484,7 +4505,7 @@ static void raceFrame(void)
     update_camera_movers();
     MainLoopTiming.UpdateCameraMovers = bGetTicker();
     update_camera_shakers();
-    hangwatch_mark("race: the log");
+    frameMark("race: the log");
     logRaceState();
 }
 
@@ -5150,6 +5171,7 @@ int main(int argc, char** argv)
     // Where the main loop was if it stops (hangwatch.h): the first race on
     // a New 3DS XL drew a frame and stopped there.
     hangwatch_start(logLine);
+    threadguard_note = guardNote;
 
     // The original runs every _GLOBAL_$I$ through __main before main()
     // does anything of its own; sinit_run() is that walk over the ported
@@ -6388,7 +6410,7 @@ int main(int argc, char** argv)
         // muffler. The delayed start counts down by the world's step
         // (gp-19560), which is still the last frame's here: the clocks
         // advance below. Then the port's stream feed for the jukebox.
-        hangwatch_mark("sound");
+        frameMark("sound");
         sound_update(&gSoundModule);
         if (soundUp) jbstream_poll(&g_jukebox.jukebox);
         {
@@ -6484,7 +6506,7 @@ int main(int argc, char** argv)
             // MainLoop: one pass of the flow per frame, by the real step.
             // bgf_frame is the flow's service and the menus' tick both.
             // With no race the race's three stamps are the same tick.
-            hangwatch_mark("flow");
+            frameMark("flow");
             bgf_frame(&g_flow, RealTimeElapsed);
             MainLoopTiming.ServiceGameFlow = bGetTicker();
             MainLoopTiming.MenuSystemTick = MainLoopTiming.ServiceGameFlow;
@@ -6499,7 +6521,7 @@ int main(int argc, char** argv)
                 // still paused, let it go. Before the queue it would be
                 // racing again by the players' turn, and pause again.
                 if (flowInput(kDown)) redraw = 1;
-                hangwatch_mark("race: the track's attach");
+                frameMark("race: the track's attach");
                 (void)raceAttachTrack();
             } else if (raceUp) {
                 // The coordinator went in the flow's pass (Quit Race's
@@ -6553,7 +6575,7 @@ int main(int argc, char** argv)
             // the track is attached (raceAttachTrack). They keep the blank's
             // pace and the loads' service.
             if (raceHoldsLoadingScreen()) {
-                hangwatch_mark("race: the Loading screen held");
+                frameMark("race: the Loading screen held");
                 C3D_FrameSync();
                 (void)service_resource_loading();
                 bootServiceLoads(&g_boot);
@@ -6573,7 +6595,7 @@ int main(int argc, char** argv)
             // eDisplayFrame times into WaitBufferSwapTime. VifTime is the
             // GPU's last frame, on the same scale (frame-profiler.md).
             uint32_t syncTick = bGetTicker();
-            hangwatch_mark("C3D_FrameSync: the vertical blank");
+            frameMark("C3D_FrameSync: the vertical blank");
             if (g_track.attached && C3D_FrameCounter(0) == lastSync)
                 C3D_FrameSync();
             C3D_FrameSync();
@@ -6581,7 +6603,7 @@ int main(int argc, char** argv)
             hangwatch_gpu_race(g_track.attached);
             capture_race(g_track.attached);
             warp_race(g_track.attached);
-            hangwatch_mark("C3D_FrameBegin: the GPU's last frame");
+            frameMark("C3D_FrameBegin: the GPU's last frame");
             C3D_FrameBegin(0);
             hangwatch_gpu_begin();
             uint32_t drawTick = bGetTicker();
@@ -6602,7 +6624,7 @@ int main(int argc, char** argv)
                 // frame's depth, as the track viewer reads them.
                 const u32 sky = C2D_Color32(0x8c, 0xa8, 0xc8, 0xFF);
 
-                hangwatch_mark("the sun's depth read");
+                frameMark("the sun's depth read");
                 if (capture_read(top))
                     trackview_capture_names(&g_track);
                 trackview_read_depth(&g_track, top);
@@ -6681,11 +6703,11 @@ int main(int argc, char** argv)
             MainLoopTiming.DisplayFrame = bGetTicker();
             // MainLoop's ServiceResourceLoading, after eDisplayFrame: the
             // resource system's, then the frontend's bundles (bootQueue).
-            hangwatch_mark("the loads");
+            frameMark("the loads");
             (void)service_resource_loading();
             bootServiceLoads(&g_boot);
             MainLoopTiming.ServiceFileSystem = bGetTicker();
-            hangwatch_mark("the frame's sums");
+            frameMark("the frame's sums");
 
             // MainLoop's end (0x0012f664): the last tick, then
             // CalculateFrameRate and MaybePrintTiming. The race's phases go

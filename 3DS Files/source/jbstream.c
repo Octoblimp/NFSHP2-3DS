@@ -76,6 +76,7 @@ uint32_t jbs_decode(JBSDecoder* d, const uint8_t* pair, int16_t* out,
 
 #include "bticker.h"
 #include "gamedata.h"
+#include "threadguard.h"
 
 #define JBS_WAVES        8
 #define JBS_WAVE_FRAMES  128                 // 3584 samples, 112 ms
@@ -226,7 +227,7 @@ static void worker_main(void* arg)
 {
     JBStream* s = (JBStream*)arg;
     for (;;) {
-        LightEvent_WaitTimeout(&s->wake, 10 * 1000000LL);
+        LightEvent_WaitTimeout(&s->wake, threadguard_wait_ns());
         LightLock_Lock(&s->lock);
         if (s->quit) {
             LightLock_Unlock(&s->lock);
@@ -303,6 +304,7 @@ static void h_create(void* ctx, uint32_t rate)
     }
     s->worker = threadCreate(worker_main, s, 16 << 10, prio, -2, false);
     s->created = s->worker != NULL;
+    threadguard_watch("jukebox stream", s->worker, &s->wake);
 }
 
 static void h_destroy(void* ctx)
@@ -315,8 +317,9 @@ static void h_destroy(void* ctx)
     s->quit = true;
     halt(s);
     LightLock_Unlock(&s->lock);
-    LightEvent_Signal(&s->wake);
+    threadguard_signal(&s->wake, "jukebox stream: quit");
     threadJoin(s->worker, U64_MAX);
+    threadguard_forget(s->worker);
     threadFree(s->worker);
     s->worker = NULL;
     ndspChnReset(JBS_CHANNEL);
@@ -358,7 +361,7 @@ static void h_load(void* ctx, const char* path, uint32_t offset,
     s->fading = false;
     s->level = 1.0f;
     set_paused(s);
-    LightEvent_Signal(&s->wake);
+    threadguard_signal(&s->wake, "jukebox stream: load");
 }
 
 static void h_play(void* ctx, float volume, float a, float b)

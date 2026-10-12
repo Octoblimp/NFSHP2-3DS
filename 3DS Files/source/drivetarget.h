@@ -157,6 +157,10 @@ extern float DriveTargetMinDistanceToPointSquared;  // 16.0f after the init
 extern int32_t CameraFollowDefaultCar;       // 1
 extern int32_t CameraFollowThisCarInstead;   // -1
 
+// The port's: resamples that met a NaN length and left the points alone
+// (see drivetarget_resample), for main.c's race log.
+extern int32_t DriveTargetNaNResamples;
+
 // 0x0020ab48. Runs the one line of static initialisation.
 void drivetarget_static_init(void);
 

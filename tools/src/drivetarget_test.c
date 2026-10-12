@@ -15,6 +15,7 @@
 #include <math.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "carstate.h"
@@ -995,6 +996,28 @@ static void s_resample(void)
     drivetarget_recalculate_length(&t);
     drivetarget_resample(&t, &car);
     pdt("rs twenty", &t, 20);
+
+    // The port's alone, and silent, since the EE has no infinity for the
+    // model to compare: an infinite point, points too far apart for the
+    // squares, and a NaN point. Each walk must end inside its twenty slots
+    // -- unbounded, the first two wrote NaN up the stack until something
+    // died (the device's race-end crash) -- and the NaN must leave the
+    // points alone.
+    for (i = 0; i < 3; i++) {
+        dt_reset(&t);
+        dt_point(&t, 0, 0.0f, 0.0f, 0.0f, 1.0f, 2, 0, 1);
+        dt_point(&t, 1, 10.0f, 0.0f, 0.0f, 1.0f, 2, 1, 1);
+        dt_point(&t, 2, i == 0 ? INFINITY : i == 1 ? 3e19f : NAN, 0.0f,
+                 0.0f, 1.0f, 2, 2, 1);
+        dt_point(&t, 3, 20.0f, 0.0f, 0.0f, 1.0f, 2, 3, 1);
+        t.NumPoints = 4;
+        drivetarget_recalculate_length(&t);
+        drivetarget_resample(&t, &car);
+        if (i == 2 && t.Points[1].x != 10.0f) {
+            fprintf(stderr, "rs nan: the points moved\n");
+            exit(1);
+        }
+    }
 }
 
 // -------------------------------------------------------------- the scoring

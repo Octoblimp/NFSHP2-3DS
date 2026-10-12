@@ -78,6 +78,7 @@ float DriveTargetMinDistanceToPoint        = 4.0f;
 float DriveTargetMinDistanceToPointSquared = 0.0f;  // .sbss; see below
 int32_t CameraFollowDefaultCar     = 1;
 int32_t CameraFollowThisCarInstead = -1;
+int32_t DriveTargetNaNResamples;
 
 void drivetarget_static_init(void)
 {
@@ -92,9 +93,18 @@ void drivetarget_static_init(void)
 
 // The VU0 three-lane length: vmul.xyz, vaddy.x, vaddz.x, sqrt.s. The sum
 // associates left, so it is (x*x + y*y) + z*z and not any other grouping.
+//
+// The VU has no infinity: a square or a sum past FLT_MAX is FLT_MAX, and
+// its root about 1.8e19. IEEE's infinity here is what drivetarget_resample
+// can't walk (see there), so the sum is held as the VU holds it. A NaN,
+// which the VU never sees, passes.
 static float dt_len3(float x, float y, float z)
 {
-    return sqrtf((x * x + y * y) + z * z);
+    float s = (x * x + y * y) + z * z;
+
+    if (s > 3.40282347e+38f)
+        s = 3.40282347e+38f;
+    return sqrtf(s);
 }
 
 // The two-lane one, which the FPU does directly: mul, mul, add, sqrt.
@@ -835,7 +845,17 @@ void drivetarget_resample(DriveTarget *t, Car *car)
     limit = n;
 
     if (n <= 0) goto done;
-    if (!(0.0f <= t->Length)) goto done;
+
+    // On the EE the length is never NaN, so this way out is n <= 0's alone,
+    // and it copies an `out` nothing wrote. On the port a NaN point makes a
+    // NaN length: the points are left as they are.
+    if (!(0.0f <= t->Length)) {
+        DriveTargetNaNResamples++;
+        t->Length = next;
+        t->WhichPointIPickedTime = 0;
+        t->WhichPointIPickedCalculationTime = 0;
+        return;
+    }
 
     j = 0;
     for (;;) {
@@ -851,6 +871,13 @@ void drivetarget_resample(DriveTarget *t, Car *car)
         travelled = travelled + step;
         j++;
 
+        // The port's bound. With a finite length the n-th point is past it
+        // and the test below ends the walk there. With an infinite one
+        // (inf <= inf) and a NaN `travelled` (inf - inf) nothing ever did:
+        // the walk wrote NaN vectors up the main stack and on through the
+        // heap until the speech worker woke on its own clobbered stack --
+        // the device's race-end crash of 2026-10-11, at 0x7fc00000.
+        if (j >= limit) break;
         if (!(emitted <= t->Length)) break;
         if (!(k < n)) goto done_keep;
         if (len[k] <= travelled) {
