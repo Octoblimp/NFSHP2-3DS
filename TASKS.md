@@ -2621,6 +2621,41 @@ phases.
         and where the table comes from, then port it. On the 3DS the
         sixteen buttons are joyhid's DualShock 2 buttons, so a code is
         entered with the 3DS keys mapped to them.
+51. [ ] **The damage system (CarDamage).** Found on 2026-10-12 with
+        TASKS 39. `cardamage.h` has only the layouts and
+        GetVisibleTotalDamage: nothing makes a CarDamage
+        (`gCarDamageCtorFn` is NULL), so `pCarDamage` is NULL on every
+        car. The munitions' ExplodeWarhead wrecks a car hit harder than
+        0.8 of MaxStrength through `gCarDamageWreckFn`, which it skips
+        for a NULL `pCarDamage`. On Azahar a blast throws the car as
+        retail's does, but the car is never wrecked. The other seams
+        waiting on it: `gCarDamageAddDamageFn` (collisions),
+        `gCarDamageAboveFn` (the render's DamageAbove),
+        `gCarDamageRepairAllFn` (the cop manager) and
+        `gCarDamageFindItemPartsFn` / `gCarDamageDestroyFn` (car init).
+        Port the damage models, the breakable items and the wreck with
+        a checker, after the user's order of 2026-10-12 (profiles, then
+        the debug menu).
+52. [x] **Profiles: save, load, and a save prompt after each race.**
+        Asked for on 2026-10-12. The profile is retail's one save,
+        `settings.db` in `sdmc:/NFSHP2/SAVES` (the folder is made on
+        demand). The Options menu's Save/Load saves, loads, and turns
+        autosave on or off, as retail's does. The port adds two things.
+        Every race's Quit or Next Race goes through "Autosave", even
+        with autosave off (`gEndGameAlwaysAskToSave`). The Autosaver
+        also asks "create the save?" before it makes the file
+        (`saveAskCreate`). So each race ends with a create or overwrite
+        question that can be declined. Both were seen on Azahar in
+        Session 86: Save, Load and Autosave on Options, and Quit Race's
+        overwrite question after a quick race. A Quit from the pause
+        menu leaves without a save, as retail's does.
+  - [ ] The popups say retail's "Memory Card (PS2)" and "MEMORY CARD
+        slot 1". The 3DS has an SD card.
+53. [ ] **The debug menu.** Asked for on 2026-10-12. A panel in the
+        main menu, opened by pressing L + R + D-Pad Up together there,
+        or by "DebugMenu 1" in nfshp2_config.txt. It starts any track
+        straight away with custom settings, unlocks everything, and
+        gives NFS points. It comes after TASKS 39 (the munitions).
 
 ### The retail frontend
 
@@ -2654,7 +2689,12 @@ ahead of step 6's second slice, which waits on `wip/carrenderinfo`.
   - [ ] `ANY_BUTTON_PRESSED` (message 24) from `JoyHandler`.
   - [ ] `OverwriteFred`'s six calls into the frontend. Nothing reads the
         loaded `Fred` yet.
-  - [ ] `MemcardSaver`, and the Options screen's manual load.
+  - [x] `MemcardSaver`, and the Options screen's manual load (Session
+        86). Retail's `MemcardSaver`, `LoadSaveWrapper` ("Phils Load
+        Save", the Options menu's Save/Load) and `Autosaver`
+        ("Autosave") are in `memcard.c`. `bootflow_check` runs them on
+        the retail image: 34 rows; 76 mutations, 75 caught, 1
+        equivalent. See task 52.
   - [ ] `DemoModeReplay`'s internals.
   - [ ] `bmenu.c`'s menus recolour the demo's way; retail's
         `FlailerMenuItem` recolour is only the popups'.

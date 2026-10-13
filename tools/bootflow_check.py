@@ -99,7 +99,8 @@ ITEM_MENUITEM_3 = 0x52e039f5    # "Options"
 ITEM_MENUITEM_6 = 0x52e039f8    # the language screen's last language
 ITEM_MENUITEM_7 = 0x52e039f9    # ... and its Load All Languages
 LANGUAGE = 0x632b068e
-BOOT_AUTOLOAD = 0xfa2ac5c6
+BOOT_AUTOLOAD = 0xfa2ac5c6      # and "Autosave"'s
+LOAD_SAVE = 0x9829bfab          # "Phils Load Save"
 MUMBO_JUMBO = 0xdd4197c9
 LOADING_TRACK = 0xd0131dd1
 
@@ -223,6 +224,8 @@ class Flow(object):
         ("Title Screen", TITLE, "title"),
         ("New Main Menu", NEW_MAIN_MENU, "mainmenu"),
         ("Legal MumboJumbo", MUMBO_JUMBO, "mumbo"),
+        ("Phils Load Save", LOAD_SAVE, "loadsave"),
+        ("Autosave", BOOT_AUTOLOAD, "autosave"),
     ]
 
     def find_screen(self, name):
@@ -550,8 +553,8 @@ class Flow(object):
             self.mainmenu.callback(msg, data)
         elif kind == "mumbo":
             self.mumbo(msg, data)
-        elif kind == "autoload":
-            self.autoload.callback(msg, data)
+        elif kind in ("autoload", "loadsave", "autosave"):
+            self.autoload.callback(msg, data, kind)
         elif kind == "language":
             self.language.callback(msg, data)
 
@@ -1076,6 +1079,14 @@ class RetailLanguage(object):
 AUTOLOAD_CALLBACK = 0x00247ab0          # BootAutoLoader::Callback
 AUTOLOAD_INST = RETAIL_GP - 15084       # its pInstance
 LOADER_CTOR = 0x00246bd8                # MemcardLoader(this, hash, mode)
+LSW_CALLBACK = 0x00247830               # LoadSaveWrapper::Callback
+LSW_INST = RETAIL_GP - 15088            # its pInstance
+AUTOSAVE_CALLBACK = 0x00247d00          # Autosaver::Callback
+AUTOSAVE_INST = RETAIL_GP - 15080       # its pInstance
+SET_AUTOSAVE_DONE = 0x00247d98          # SetAutosaveCompletionCallback
+START_WRITE_CALL = 0x0024631c           # CHECK_IF_CARD_OK's jal StartWrite
+START_WRITE = 0x00246b10
+ITEM_SAVE, ITEM_LOAD, ITEM_AUTOSAVE = 0x52e039f3, 0x52e039f4, 0x52e039f5
 REAL_ELAPSED = RETAIL_GP - 19596        # RealTimeElapsed, a float
 FRED = 0x002fc050                       # TheFrontendDatabase
 DEMO_REPLAY = 0x002f0960                # TheDemoModeReplay: +4 loading, +8 loaded
@@ -1085,6 +1096,7 @@ POPUP_SIZE = 512
 
 SAVE_SIZE, CHECKSUM_OFFSET = 0x114e0, 0x114dc
 FRED_LANGUAGE, FRED_CLEARED = 372, 904
+FRED_AUTOSAVE = 4
 
 # PadEvent, as the pad hands them to FlailerScreenList::JoyHandler.
 JOY_UP, JOY_DOWN, JOY_LEFT, JOY_RIGHT = 3, 4, 5, 6
@@ -1115,31 +1127,42 @@ POPUP_OBJS = [
 # the lastError it settles at, then what each job leaves -- VERIFY, the
 # first CHECK_EXISTENCE and every later one (-1 the same), LOAD -- whether
 # the file's checksum holds, the free KB, the Services a job takes and
-# whether SetState takes one at all. Same rows as kCards in the C harness.
+# whether SetState takes one at all; then every VERIFY after the first (-1
+# the same), SAVE and FORMAT. A card a FORMAT has left formatted verifies
+# clean, has no file and has room; one a SAVE has written has the file.
+# Same rows as kCards in the C harness.
 CARD_FIELDS = ("pump", "settle", "verify", "check", "check2", "load",
-               "goodSum", "freeKB", "busy", "refuse")
+               "goodSum", "freeKB", "busy", "refuse", "verify2", "save",
+               "format")
 CARDS = {
-    "blank":       (1, 0, 0, 5, -1, 0, 1, 8192, 1, 0),
-    "good":        (1, 0, 0, 0, -1, 0, 1, 8192, 1, 0),
-    "badsum":      (1, 0, 0, 0, -1, 0, 0, 8192, 1, 0),
-    "loaderr":     (1, 0, 0, 0, -1, 3, 1, 8192, 1, 0),
-    "nocard":      (1, 3, 3, 3, -1, 3, 1, 0, 1, 0),
-    "unformatted": (1, 1, 1, 1, -1, 1, 1, 0, 1, 0),
-    "newcard":     (1, 0, 2, 5, -1, 0, 1, 8192, 1, 0),
-    "full":        (1, 0, 0, 5, -1, 0, 1, 10, 1, 0),
-    "tight":       (1, 0, 0, 5, -1, 0, 1, 75, 1, 0),
-    "checkerr":    (1, 0, 0, 3, -1, 0, 1, 8192, 1, 0),
-    "busy":        (3, 0, 0, 5, -1, 0, 1, 8192, 3, 0),
-    "slow":        (1, 0, 0, 5, -1, 0, 1, 8192, 6, 0),
-    "refuse":      (1, 0, 0, 5, -1, 0, 1, 8192, 1, 1),
-    "gone":        (1, 0, 0, 0, 5, 0, 1, 8192, 1, 0),
-    "swapped":     (1, 0, 0, 0, 2, 0, 1, 8192, 1, 0),
-    "pulled":      (1, 0, 0, 0, 3, 0, 1, 8192, 1, 0),
+    "blank":       (1, 0, 0, 5, -1, 0, 1, 8192, 1, 0, -1, 0, 0),
+    "good":        (1, 0, 0, 0, -1, 0, 1, 8192, 1, 0, -1, 0, 0),
+    "badsum":      (1, 0, 0, 0, -1, 0, 0, 8192, 1, 0, -1, 0, 0),
+    "loaderr":     (1, 0, 0, 0, -1, 3, 1, 8192, 1, 0, -1, 0, 0),
+    "nocard":      (1, 3, 3, 3, -1, 3, 1, 0, 1, 0, -1, 0, 0),
+    "unformatted": (1, 1, 1, 1, -1, 1, 1, 0, 1, 0, -1, 0, 0),
+    "newcard":     (1, 0, 2, 5, -1, 0, 1, 8192, 1, 0, -1, 0, 0),
+    "full":        (1, 0, 0, 5, -1, 0, 1, 10, 1, 0, -1, 0, 0),
+    "tight":       (1, 0, 0, 5, -1, 0, 1, 75, 1, 0, -1, 0, 0),
+    "checkerr":    (1, 0, 0, 3, -1, 0, 1, 8192, 1, 0, -1, 0, 0),
+    "busy":        (3, 0, 0, 5, -1, 0, 1, 8192, 3, 0, -1, 0, 0),
+    "slow":        (1, 0, 0, 5, -1, 0, 1, 8192, 6, 0, -1, 0, 0),
+    "refuse":      (1, 0, 0, 5, -1, 0, 1, 8192, 1, 1, -1, 0, 0),
+    "gone":        (1, 0, 0, 0, 5, 0, 1, 8192, 1, 0, -1, 0, 0),
+    "swapped":     (1, 0, 0, 0, 2, 0, 1, 8192, 1, 0, -1, 0, 0),
+    "pulled":      (1, 0, 0, 0, 3, 0, 1, 8192, 1, 0, -1, 0, 0),
+    "savefail":    (1, 0, 0, 5, -1, 0, 1, 8192, 1, 0, -1, 3, 0),
+    "savefull":    (1, 0, 0, 5, -1, 0, 1, 8192, 1, 0, -1, 4, 0),
+    "badformat":   (1, 1, 1, 1, -1, 1, 1, 0, 1, 0, -1, 0, 3),
+    "fixed":       (1, 1, 1, 1, -1, 1, 1, 0, 1, 0, 0, 0, 0),
+    "yanked":      (1, 0, 0, 5, -1, 0, 1, 8192, 1, 0, 3, 0, 0),
+    "goneafter":   (1, 0, 0, 0, 3, 0, 1, 8192, 1, 0, -1, 0, 0),
 }
 
-FS_LOAD, FS_CHECK, FS_VERIFY = 2, 3, 7
+FS_SAVE, FS_LOAD, FS_CHECK, FS_FORMAT, FS_VERIFY = 1, 2, 3, 5, 7
 FS_IN_PROGRESS, FS_ERROR = 15, 16
 FS_LAST_ERROR, FS_VTABLE = 292, 376     # cDBFilesBase's mLastError, vtable
+FS_FILE_EXISTS = 1460                   # what CHECK_EXISTENCE found
 
 
 def save_image(good):
@@ -1164,6 +1187,9 @@ def translated(i):
     if i in (0x24de3, 0x24df3):
         return ("<string %d> slot %%d needs %%d KB free, more than the card"
                 " has left.@Try again?" % i)
+    if i == 0x24df4:
+        return ("<string %d> with nothing to fill in: a message long enough"
+                " that it has to wrap onto another line.@ @And one more." % i)
     return ("<string %d> in slot %%d: a message long enough that it has to"
             " wrap onto another line.@ @And one more." % i)
 
@@ -1231,15 +1257,59 @@ class RetailAutoload(object):
                 e.put32(e.al_vtbl + slot, 0)
                 e.put32(e.al_vtbl + slot + 4,
                         e.al_svc if fn is None else e.al_code + fn)
+        if not getattr(e, "al_save", 0):
+            # The port's question before the saver makes the file, which
+            # retail never asks: CHECK_IF_CARD_OK's `jal StartWrite` goes to
+            # a `jr t9` whose hook picks StartWrite or the question -- the
+            # same DisplayYesNoMessage the overwrite's is (0x002462a4), with
+            # 151023, 1 for yes and 0 for no, then PROMPT_TO_CREATE. Its
+            # answers are retail's own. +128 is the Autosave screen's
+            # completion callback, a stub, and +136 Quit's, which leaves the
+            # screen up.
+            e.al_save = e.alloc(256)
+            e.al_ask = e.al_save + 16
+            e.al_done = e.al_save + 128
+            e.al_stay = e.al_save + 136
+            e.write(e.al_save, mips_words(0x03200008, 0x00000000))
+            e.write(e.al_ask, mips_words(
+                0x27bdffe0,     # addiu sp,sp,-32
+                0xffbf0010,     # sd    ra,16(sp)
+                0xffb00000,     # sd    s0,0(sp)
+                0x00808021,     # move  s0,a0
+                0x8e020004,     # lw    v0,4(s0)      the tester
+                0x0c091582,     # jal   GetSlotForMemcardDevice
+                0x8c44000c,     # lw    a0,12(v0)     its device
+                0x00404021,     # move  t0,v0         the slot
+                0x8e040008,     # lw    a0,8(s0)      the prompter
+                0x3c050002,     # lui   a1,0x0002
+                0x34a54def,     # ori   a1,a1,0x4def  151023
+                0x24060001,     # li    a2,1          yes
+                0x00003821,     # move  a3,zero       no
+                0x0c0917d8,     # jal   DisplayYesNoMessage
+                0x00004821,     # move  t1,zero       no KB
+                0x24020005,     # li    v0,5          PROMPT_TO_CREATE
+                0xae020010,     # sw    v0,16(s0)
+                0xdfbf0010,     # ld    ra,16(sp)
+                0xdfb00000,     # ld    s0,0(sp)
+                0x03e00008,     # jr    ra
+                0x27bd0020))    # addiu sp,sp,32
+            e.start_write_word = e.u32(START_WRITE_CALL)
         self.card = dict(zip(CARD_FIELDS,
                              CARDS[flow.sc.get("card") or "blank"]))
         self.fs = None
+        self.formatted = 0              # the card, since a FORMAT
+        self.saved = 0                  # ... since a SAVE
         self.deferred = None
         self.parent = [None, None]      # the name each popup reports to
         self.animated = [1, 1]          # "popup %d animate" said since Summon
+        self.bloom_animated = 1         # "bloom animate", the menu's
         # Each boot starts with no loader, no replay and the objects as the
-        # file has them.
+        # file has them; with no Load/Save or Autosave screen, and with
+        # Fred cleared, as the C harness clears it.
         e.put32(AUTOLOAD_INST, 0)
+        e.put32(LSW_INST, 0)
+        e.put32(AUTOSAVE_INST, 0)
+        e.write(FRED, bytes(SAVE_SIZE))
         e.put32(DEMO_REPLAY + 4, 0)
         e.put32(DEMO_REPLAY + 8, 0)
         for chunk, row in zip(e.al_chunks, POPUP_OBJS):
@@ -1294,11 +1364,38 @@ class RetailAutoload(object):
             return
         job = fs["job"]
         if job == FS_VERIFY:
-            err = card["verify"]
+            if self.formatted:
+                err = 0
+            elif fs["verifies"] > 0 and card["verify2"] >= 0:
+                err = card["verify2"]
+            else:
+                err = card["verify"]
+            fs["verifies"] += 1
         elif job == FS_CHECK:
-            err = (card["check2"] if fs["checks"] > 0 and card["check2"] >= 0
-                   else card["check"])
+            if self.saved:
+                err = 0
+            elif self.formatted:
+                err = 5
+            elif fs["checks"] > 0 and card["check2"] >= 0:
+                err = card["check2"]
+            else:
+                err = card["check"]
             fs["checks"] += 1
+            e.put32(fs["obj"] + FS_FILE_EXISTS, 1 if err == 0 else 0)
+        elif job == FS_SAVE:
+            # What went to the card: Fred's size, its Autosave word and its
+            # checksum.
+            err = card["save"]
+            if err == 0 and fs["data"] and fs["size"] >= SAVE_SIZE:
+                d = fs["data"]
+                f.say("fs saved %08x %08x %08x"
+                      % (e.u32(d), e.u32(d + FRED_AUTOSAVE),
+                         e.u32(d + CHECKSUM_OFFSET)))
+                self.saved = 1
+        elif job == FS_FORMAT:
+            err = card["format"]
+            if err == 0:
+                self.formatted = 1
         elif job == FS_LOAD:
             err = card["load"]
             if err == 0 and fs["data"] and fs["size"] >= SAVE_SIZE:
@@ -1331,8 +1428,10 @@ class RetailAutoload(object):
             f.say("fs new")
             obj = arg(0)
             e.put32(obj + FS_VTABLE, e.al_vtbl)
+            e.put32(obj + FS_FILE_EXISTS, 0)
             self.fs = dict(obj=obj, pump=self.card["pump"], job=0, left=0,
-                           checks=0, done=0, param=0, data=0, size=0)
+                           checks=0, verifies=0, done=0, param=0, data=0,
+                           size=0)
             self.fs_error(FS_ERROR)
             return obj
 
@@ -1351,8 +1450,9 @@ class RetailAutoload(object):
             return (size + 1023) // 1024 + 5
 
         def fs_free(_e):
-            f.say("fs free %d" % self.card["freeKB"])
-            return self.card["freeKB"]
+            free = 8192 if self.formatted else self.card["freeKB"]
+            f.say("fs free %d" % free)
+            return free
 
         def fs_state(_e):
             f.say("fs state %d" % s32(arg(1)))
@@ -1412,16 +1512,49 @@ class RetailAutoload(object):
             return buf
 
         # -- the highlight -----------------------------------------------------
+        # A popup's, at +108, or the Load/Save menu's, which says less.
+        def is_popup(this):
+            return this - 108 in self.popups
+
+        def bloom_init(_e):                # tHighlightAnimation(screen, obj, color)
+            if not is_popup(arg(0)):
+                f.say("bloom init %08x %08x %08x" % (arg(1), arg(2), arg(3)))
+                self.bloom_animated = 0
+            return arg(0)
+
         def bloom_item(_e):                # tHighlightAnimation::SetCurrentMenuItem
+            if not is_popup(arg(0)):
+                f.say("bloom item %08x" % arg(1))
+                self.bloom_animated = 0
+                return
             p = arg(0) - 108
             f.say("popup %d bloom %08x %08x"
                   % (self.popup_index(p), e.u32(arg(0)), arg(1)))
 
         def bloom_animate(_e):             # tHighlightAnimation::Animate
+            if not is_popup(arg(0)):
+                if not self.bloom_animated:
+                    f.say("bloom animate")
+                self.bloom_animated = 1
+                return
             i = self.popup_index(arg(0) - 108)
             if not self.animated[i]:
                 f.say("popup %d animate" % i)
             self.animated[i] = 1
+
+        # -- the Load/Save menu's slide, which the port has not ----------------
+        def slide_init(_e):                # tSlideOnScreen(screen, a, b, c)
+            f.say("slide init %08x %08x %08x %08x"
+                  % (arg(1), arg(2), arg(3), e.reg[8] & 0xffffffff))
+            return arg(0)
+
+        # -- the Autosave screen's completion callback, the race's end's ------
+        def autosave_done(_e):
+            f.say("autosave done")
+            self.deferred = lambda: f.change_to_screen("New Main Menu", 0)
+
+        def autosave_stay(_e):
+            f.say("autosave done")
 
         # -- the rest ------------------------------------------------------------
         def memset(_e):
@@ -1481,9 +1614,18 @@ class RetailAutoload(object):
             0x00144458: set_top_left_y,
             0x00143e70: printf,
             0x001449a8: set_language_id,
-            0x00248870: lambda _e: arg(0),           # tHighlightAnimation()
+            0x00248870: bloom_init,
             0x002488d0: bloom_item,
             0x00248970: bloom_animate,
+            0x00257690: lambda _e: e.alloc(max(s32(arg(0)), 16)),  # bMalloc
+            0x0016eb68: screen_visibility,           # FlailerSetScreenVisibility
+            0x001ee918: slide_init,
+            0x001eead8: lambda _e: f.say("slide appear"),
+            0x001eea80: lambda _e: f.say("slide disappear"),
+            0x001ee9f8: nothing,                     # tSlideOnScreen::Tick
+            0x001ee9a8: nothing,                     # ~tSlideOnScreen
+            e.al_done: autosave_done,
+            e.al_stay: autosave_stay,
             0x0025a5e0: nothing,                     # bSin, thrown away
             0x00250340: memset,                      # bMemSet
             0x00296ec4: memset,
@@ -1523,7 +1665,16 @@ class RetailAutoload(object):
             if f.sc.get("manual"):
                 e.reg[6] = 0
 
+        def ask_create(_e):                # the `jr t9` StartWrite's jal is to
+            inst = e.u32(AUTOSAVE_INST)
+            # Only CHECK_IF_CARD_OK's call (state 2) asks; 15 and 16 write.
+            asks = (f.sc.get("askCreate") and inst and arg(0) == inst + 8
+                    and e.u32(arg(0) + 16) == 2)
+            e.reg[25] = e.al_ask if asks else START_WRITE
+
+        e.put32(START_WRITE_CALL, 0x0c000000 | (e.al_save >> 2))
         hooks = {
+            e.al_save: ask_create,
             e.al_svc: self.service,
             POPUP_SUMMON: summon,
             POPUP_DISMISS: dismiss,
@@ -1541,8 +1692,9 @@ class RetailAutoload(object):
     def unhook(self):
         for addr in (self.e.al_svc, POPUP_SUMMON, POPUP_DISMISS, 0x0016b7c8,
                      0x0016ba24, 0x0016bc70, 0x00245f44, 0x002460bc,
-                     0x00144dd8, LOADER_CTOR):
+                     0x00144dd8, LOADER_CTOR, self.e.al_save):
             self.e.hooks.pop(addr, None)
+        self.e.put32(START_WRITE_CALL, self.e.start_write_word)
 
     def run(self, addr, *args):
         e, f = self.e, self.flow
@@ -1559,8 +1711,8 @@ class RetailAutoload(object):
         name = (f.screen[0] if f.screen else "").encode() + b"\0"
         e.write(e.al_name, name)
         e.put32(e.al_config + 8, e.al_name)
-        e.put32(e.al_config + 12, AUTOLOAD_CALLBACK
-                if f.screen and f.screen[2] == "autoload" else 0)
+        e.put32(e.al_config + 12, self.CALLBACKS.get(f.screen[2], 0)
+                if f.screen else 0)
         e.put32(e.al_node + 16, e.al_config)
         e.put32(e.al_list + 392, self.popups[0])
         e.put32(e.al_list + 396, self.popups[1])
@@ -1578,7 +1730,12 @@ class RetailAutoload(object):
             d()
         return r
 
-    def callback(self, msg, data):
+    # The screens this class runs, by kind: BootAutoload, Options' Load/Save
+    # and the race's end's Autosave.
+    CALLBACKS = {"autoload": AUTOLOAD_CALLBACK, "loadsave": LSW_CALLBACK,
+                 "autosave": AUTOSAVE_CALLBACK}
+
+    def callback(self, msg, data, kind="autoload"):
         e = self.e
         # ScreenCallbackData: ItemHash, Port, Param, Noise.
         d = e.al_data
@@ -1586,7 +1743,7 @@ class RetailAutoload(object):
         e.put32(d + 4, data["port"])
         e.put32(d + 8, data["param"])
         e.put32(d + 12, data["noise"])
-        self.run(AUTOLOAD_CALLBACK, msg, d)
+        self.run(self.CALLBACKS[kind], msg, d)
         data["param"] = s32(e.u32(d + 8))
         data["noise"] = e.u32(d + 12)
 
@@ -2014,6 +2171,13 @@ def card_row(name, frames, dt=1.0, **kw):
     return row
 
 
+def save_row(name, frames, input, **kw):
+    """A row for the saver: back from a race with a demo waiting, so on the
+    main menu with no BootAutoload, at a second a frame."""
+    return card_row(name, frames, frontendLaunchType=2, demoModeStatus=2,
+                    input=input, **kw)
+
+
 # Same rows as kScenarios[] in tools/src/gameflow_test.c.
 SCENARIOS = [
     dict(name="ntsc", videoMode=1, currLanguage=0, skipMovies=0,
@@ -2163,6 +2327,84 @@ SCENARIOS = [
     card_row("leavemovie", BOOT60 + 320, dt=SIXTIETH, skipMovies=0,
              gameType=2,
              input=[(BOOT60 + 270, "select"), (BOOT60 + 300, "race")]),
+    # MemcardSaver: Options' Load/Save over the main menu, or the race's
+    # end's Autosave. See kScenarios[] for each.
+    save_row("lssave", 24, [(3, "loadsave"), (5, "picksave"), (20, "back")]),
+    save_row("lsoverwriteyes", 24, [(3, "loadsave"), (5, "picksave"),
+                                    (9, "left"), (10, "select")], card="good"),
+    save_row("lsoverwriteno", 16, [(3, "loadsave"), (5, "picksave"),
+                                   (9, "select")], card="good"),
+    save_row("lsnocardno", 16, [(3, "loadsave"), (5, "picksave"),
+                                (9, "select")], card="nocard"),
+    save_row("lsnocardyes", 24, [(3, "loadsave"), (5, "picksave"),
+                                 (9, "left"), (10, "select"), (16, "select")],
+             card="nocard"),
+    save_row("lsformatyes", 36, [(3, "loadsave"), (5, "picksave"),
+                                 (9, "left"), (10, "select")],
+             card="unformatted"),
+    save_row("lsformatno", 16, [(3, "loadsave"), (5, "picksave"),
+                                (9, "select")], card="unformatted"),
+    save_row("lsbadformat", 40, [(3, "loadsave"), (5, "picksave"),
+                                 (9, "left"), (10, "select"), (18, "left"),
+                                 (19, "select"), (28, "select")],
+             card="badformat"),
+    save_row("lsfixed", 24, [(3, "loadsave"), (5, "picksave"), (9, "left"),
+                             (10, "select")], card="fixed"),
+    save_row("lsfull", 16, [(3, "loadsave"), (5, "picksave"), (9, "select")],
+             card="full"),
+    save_row("lssavefail", 36, [(3, "loadsave"), (5, "picksave"),
+                                (12, "left"), (13, "select"), (24, "select")],
+             card="savefail"),
+    save_row("lssavefull", 20, [(3, "loadsave"), (5, "picksave"),
+                                (12, "select")], card="savefull"),
+    save_row("lsnewcard", 20, [(3, "loadsave"), (5, "picksave")],
+             card="newcard"),
+    save_row("lsgone", 24, [(3, "loadsave"), (5, "picksave"), (9, "left"),
+                            (10, "select"), (16, "select")],
+             card="goneafter"),
+    save_row("lscheckerr", 16, [(3, "loadsave"), (5, "picksave")],
+             card="checkerr"),
+    save_row("lsfilegone", 24, [(3, "loadsave"), (5, "picksave"), (9, "left"),
+                                (10, "select")], card="gone"),
+    save_row("lsautoon", 20, [(3, "loadsave"), (5, "asright")]),
+    save_row("lsautooff", 24, [(3, "loadsave"), (5, "asleft"),
+                               (16, "asright"), (18, "picksave")]),
+    save_row("lsautonocard", 16, [(3, "loadsave"), (5, "asright"),
+                                  (9, "select")], card="nocard"),
+    save_row("lsskip", 32, [(2, "fredautosave"), (3, "loadsave"),
+                            (5, "picksave"), (9, "select"), (11, "select"),
+                            (15, "select"), (17, "left"), (18, "select")],
+             card="nocard"),
+    save_row("lsload", 24, [(3, "loadsave"), (5, "pickload"), (9, "left"),
+                            (10, "select")], card="good"),
+    save_row("lslite", 12, [(3, "loadsave"), (5, "litesave"),
+                            (7, "liteauto"), (9, "back")]),
+    save_row("lsmovie", 8, [(3, "optionsmovie"), (4, "loadsave")],
+             skipMovies=0),
+    save_row("lssaveslow", 400, [(3, "loadsave"), (5, "picksave")],
+             dt=SIXTIETH),
+    save_row("asblank", 16, [(3, "autosave")]),
+    save_row("ascb", 16, [(3, "autosave"), (4, "autosavecb")]),
+    save_row("asstay", 16, [(3, "autosave"), (4, "autosavestay")]),
+    save_row("ascreateyes", 20, [(3, "autosave"), (4, "autosavecb"),
+                                 (7, "left"), (8, "select")], askCreate=1),
+    save_row("ascreateno", 16, [(3, "autosave"), (4, "autosavecb"),
+                                (7, "select")], askCreate=1),
+    save_row("ascreateskip", 20, [(2, "fredautosave"), (3, "autosave"),
+                                  (4, "autosavecb"), (7, "select"),
+                                  (9, "left"), (10, "select")], askCreate=1),
+    save_row("ascreatenew", 20, [(3, "autosave"), (4, "autosavecb"),
+                                 (7, "left"), (8, "select")],
+             card="newcard", askCreate=1),
+    save_row("ascreateyank", 20, [(3, "autosave"), (4, "autosavecb"),
+                                  (7, "left"), (8, "select"), (12, "select")],
+             card="yanked", askCreate=1),
+    save_row("asoverwrite", 20, [(3, "autosave"), (4, "autosavecb"),
+                                 (7, "left"), (8, "select")],
+             card="good", askCreate=1),
+    save_row("asunformatted", 16, [(3, "autosave"), (4, "autosavecb"),
+                                   (7, "select")],
+             card="unformatted", askCreate=1),
 ]
 
 
@@ -2202,7 +2444,26 @@ def run_scenario(sc):
                 continue
             out.append("input %s" % what)
             # The pad's events go to a popup that is up before the screen.
-            if what == "select":
+            if what in ("loadsave", "autosave"):
+                f.push("New Main Menu")
+                f.change_to_screen("Phils Load Save" if what == "loadsave"
+                                   else "Autosave", 0)
+            elif what in ("picksave", "pickload"):
+                f.menu_item_event(MENUITEM_SELECT, ITEM_SAVE if what[4] == "s"
+                                  else ITEM_LOAD, 0)
+            elif what in ("asleft", "asright"):
+                f.menu_item_event(MENUITEM_PAD_LEFT if what[2] == "l"
+                                  else MENUITEM_PAD_RIGHT, ITEM_AUTOSAVE, 0)
+            elif what in ("litesave", "liteauto"):
+                f.menu_item_event(MENUITEM_HIGHLIGHT, ITEM_SAVE
+                                  if what[4] == "s" else ITEM_AUTOSAVE, 0)
+            elif what == "fredautosave":
+                retail_emu().put32(FRED + FRED_AUTOSAVE, 1)
+            elif what == "autosavecb":
+                f.autoload.run(SET_AUTOSAVE_DONE, retail_emu().al_done)
+            elif what == "autosavestay":
+                f.autoload.run(SET_AUTOSAVE_DONE, retail_emu().al_stay)
+            elif what == "select":
                 if not f.autoload.joy(0, JOY_MENU_SELECT):
                     f.screen_event(MENUITEM_SELECT, 0)
             elif what == "start":
@@ -2244,15 +2505,15 @@ def run_scenario(sc):
         f.service_loads()
         f.service_replay()
         out.append("frame %d %u %u" % (frame, f.real_time, f.real_timer))
-    out.append("final %s %s %d cops %d language %d"
+    out.append("final %s %s %d cops %d language %d autosave %08x"
                % (STATE_NAMES[f.current],
                   f.screen[0] if f.screen else "-", f.index, f.cops_on,
-                  f.curr_language))
+                  f.curr_language, retail_emu().u32(FRED + FRED_AUTOSAVE)))
     # Whatever is still open, as the next boot would find it.
-    if f.screen and f.screen[2] == "autoload":
+    if f.screen and f.screen[2] in RetailAutoload.CALLBACKS:
         f.autoload.callback(SCREEN_UNACTIVATE, {"itemHash": f.screen[1],
                                                 "port": 0, "param": 0,
-                                                "noise": 0})
+                                                "noise": 0}, f.screen[2])
     return out
 
 
@@ -2798,6 +3059,276 @@ MUTATIONS += [
     ("mc-autoload-always-boot", GF,
      "                                         gf->autoloadManual);",
      "                                         0);"),
+    # MemcardSaver: 0x00246110, the cancel 0x002469e0, and its states.
+    ("mc-saver-finish-keeps-autosave", MC,
+     "    if (notSaved == 1 && !s->keepAutosave) setAutosave(s->gf, 0);",
+     "    (void)0;"),
+    ("mc-saver-finish-ignores-keep", MC,
+     "    if (notSaved == 1 && !s->keepAutosave) setAutosave(s->gf, 0);",
+     "    if (notSaved == 1) setAutosave(s->gf, 0);"),
+    ("mc-cancel-never-asks", MC,
+     "    if (autosaveOn(s->gf) && s->keepAutosave == 1) {",
+     "    if (0) {"),
+    ("mc-cancel-ignores-keep", MC,
+     "    if (autosaveOn(s->gf) && s->keepAutosave == 1) {",
+     "    if (autosaveOn(s->gf)) {"),
+    ("mc-cancel-ignores-autosave", MC,
+     "    if (autosaveOn(s->gf) && s->keepAutosave == 1) {",
+     "    if (s->keepAutosave == 1) {"),
+    ("mc-skip-params-swapped", MC,
+     "prompterYesNo(s->prompter, MSG_NO_SAVE, 2, 3,",
+     "prompterYesNo(s->prompter, MSG_NO_SAVE, 3, 2,"),
+    ("mc-skip-yes-asks-again", MC,
+     "                if (s->state == BMC_SAVER_PROMPT_RETRY) {",
+     "                if (1) {"),
+    ("mc-retry-no-skips-ask", MC,
+     "                if (s->state == BMC_SAVER_PROMPT_RETRY) {",
+     "                if (0) {"),
+    ("mc-retry-yes-stays", MC,
+     "            } else if (data->param == 3) {" + NL
+     + "                saverStartSaveSequence(s);",
+     "            } else if (data->param == 3) {" + NL
+     + "                (void)0;"),
+    ("mc-saver-error-stale-timer", MC,
+     "    s->state = BMC_SAVER_SHOWING_ERROR;" + NL
+     + "    s->timer = s->gf->realTimer;",
+     "    s->state = BMC_SAVER_SHOWING_ERROR;"),
+    ("mc-saver-error-one-second", MC,
+     "if (waited(s->gf, s->timer, 2.0f)) saverCancel(s);",
+     "if (waited(s->gf, s->timer, 1.0f)) saverCancel(s);"),
+    ("mc-saver-status-one-second", MC,
+     "if (waited(s->gf, s->timer, 2.0f)) s->state = BMC_SAVER_DONE;",
+     "if (waited(s->gf, s->timer, 1.0f)) s->state = BMC_SAVER_DONE;"),
+    ("mc-saver-check-two-seconds", MC,
+     "    if (s->tester->active || !waited(s->gf, s->timer, 1.0f)) return;",
+     "    if (s->tester->active || !waited(s->gf, s->timer, 2.0f)) return;"),
+    ("mc-saver-unformatted-retries", MC,
+     "        saverAsk(s, MSG_FORMAT_ASK, 7, 6, 0, BMC_SAVER_FORMAT_PROMPT);" + NL
+     + "    } else if (err == BMC_OK || err == BMC_NEW_CARD) {",
+     "        saverAskRetry(s, MSG_NO_CARD_RETRY, 0);" + NL
+     + "    } else if (err == BMC_OK || err == BMC_NEW_CARD) {"),
+    ("mc-saver-format-params-swapped", MC,
+     "        saverAsk(s, MSG_FORMAT_ASK, 7, 6, 0, BMC_SAVER_FORMAT_PROMPT);" + NL
+     + "    } else if (err == BMC_OK || err == BMC_NEW_CARD) {",
+     "        saverAsk(s, MSG_FORMAT_ASK, 6, 7, 0, BMC_SAVER_FORMAT_PROMPT);" + NL
+     + "    } else if (err == BMC_OK || err == BMC_NEW_CARD) {"),
+    ("mc-saver-new-card-refused", MC,
+     "    } else if (err == BMC_OK || err == BMC_NEW_CARD) {" + NL
+     + "        s->state = BMC_SAVER_CHECK_IF_CARD_OK;",
+     "    } else if (err == BMC_OK) {" + NL
+     + "        s->state = BMC_SAVER_CHECK_IF_CARD_OK;"),
+    ("mc-saver-no-card-errors", MC,
+     "    } else {" + NL + "        saverAskRetry(s, MSG_NO_CARD_RETRY, 0);"
+     + NL + "    }" + NL + "}",
+     "    } else {" + NL + "        saverShowError(s, MSG_NO_CARD_SLOT1);"
+     + NL + "    }" + NL + "}"),
+    ("mc-card-ok-not-found-errors", MC,
+     "    if (err != BMC_OK && err != BMC_FILE_NOT_FOUND) {",
+     "    if (err != BMC_OK) {"),
+    ("mc-card-ok-error-ignored", MC,
+     "    if (err != BMC_OK && err != BMC_FILE_NOT_FOUND) {",
+     "    if (0) {"),
+    ("mc-overwrite-never-asked", MC,
+     "    } else if (fs->fileExists) {", "    } else if (0) {"),
+    ("mc-overwrite-params-swapped", MC,
+     "        saverAsk(s, MSG_SAVE_OVERWRITE, 5, 4, 0,",
+     "        saverAsk(s, MSG_SAVE_OVERWRITE, 4, 5, 0,"),
+    ("mc-saver-no-space-unchecked", MC,
+     "        if (freeKB < need)" + NL
+     + "            saverAskRetry(s, MSG_NO_SPACE, need);",
+     "        if (0)" + NL
+     + "            saverAskRetry(s, MSG_NO_SPACE, need);"),
+    ("mc-saver-no-space-shows-free", MC,
+     "            saverAskRetry(s, MSG_NO_SPACE, need);",
+     "            saverAskRetry(s, MSG_NO_SPACE, freeKB);"),
+    ("mc-create-never-asked", MC,
+     "        else if (s->askCreate)", "        else if (0)"),
+    ("mc-create-always-asked", MC,
+     "        else if (s->askCreate)", "        else if (1)"),
+    ("mc-create-params-swapped", MC,
+     "saverAsk(s, MSG_CREATE, 1, 0, 0, BMC_SAVER_PROMPT_TO_CREATE);",
+     "saverAsk(s, MSG_CREATE, 0, 1, 0, BMC_SAVER_PROMPT_TO_CREATE);"),
+    ("mc-write-one-second", MC,
+     "    if (s->tester->active || !waited(s->gf, s->timer, 2.0f)) return;"
+     + NL + "    err = saverError(s);" + NL + "    if (err == BMC_OK) {",
+     "    if (s->tester->active || !waited(s->gf, s->timer, 1.0f)) return;"
+     + NL + "    err = saverError(s);" + NL + "    if (err == BMC_OK) {"),
+    ("mc-saved-no-message", MC,
+     "        prompterDisplayMessage(s->prompter, MSG_SAVED, saverSlot(s), 0);",
+     "        (void)0;"),
+    ("mc-write-full-plain-retry", MC,
+     "    } else if (err == BMC_INSUFFICIENT_FREE_SPACE) {",
+     "    } else if (0) {"),
+    ("mc-write-full-no-kb", MC,
+     "        saverAskRetry(s, MSG_NO_SPACE," + NL
+     + "                      fs->vt->calcFreeSpaceRequired(fs, BMC_SAVE_SIZE));",
+     "        saverAskRetry(s, MSG_NO_SPACE," + NL + "                      0);"),
+    ("mc-before-format-unchecked", MC,
+     "    if (err == BMC_NOT_FORMATTED)" + NL
+     + "        saverStartFormat(s);",
+     "    if (1)" + NL + "        saverStartFormat(s);"),
+    ("mc-before-format-ok-formats", MC,
+     "    else if (err == BMC_OK || err == BMC_NEW_CARD)" + NL
+     + "        saverShowError(s, MSG_NEW_CARD);",
+     "    else if (err == BMC_NEW_CARD)" + NL
+     + "        saverShowError(s, MSG_NEW_CARD);"),
+    ("mc-format-one-second", MC,
+     "    if (s->tester->active || !waited(s->gf, s->timer, 2.0f)) return;"
+     + NL + "    if (saverError(s) == BMC_OK)",
+     "    if (s->tester->active || !waited(s->gf, s->timer, 1.0f)) return;"
+     + NL + "    if (saverError(s) == BMC_OK)"),
+    ("mc-format-ok-writes", MC,
+     "    if (saverError(s) == BMC_OK)" + NL
+     + "        saverStartSaveSequence(s);",
+     "    if (saverError(s) == BMC_OK)" + NL + "        saverStartWrite(s);"),
+    ("mc-format-retry-params-swapped", MC,
+     "        saverAsk(s, MSG_FORMAT_RETRY, 9, 8, 0,",
+     "        saverAsk(s, MSG_FORMAT_RETRY, 8, 9, 0,"),
+    ("mc-before-overwrite-not-found-writes", MC,
+     "    else if (err == BMC_OK)" + NL + "        saverStartWrite(s);",
+     "    else if (err == BMC_OK || err == BMC_FILE_NOT_FOUND)" + NL
+     + "        saverStartWrite(s);"),
+    ("mc-before-create-new-card-writes", MC,
+     "    if (err == BMC_NEW_CARD)" + NL
+     + "        saverShowError(s, MSG_NEW_CARD);" + NL
+     + "    else if (err == BMC_OK || err == BMC_FILE_NOT_FOUND)",
+     "    if (0)" + NL
+     + "        saverShowError(s, MSG_NEW_CARD);" + NL
+     + "    else if (err == BMC_OK || err == BMC_FILE_NOT_FOUND)"),
+    ("mc-before-create-no-card-errors", MC,
+     "        saverAskRetry(s, MSG_NO_CARD_RETRY, 0);" + NL
+     + "    else" + NL + "        saverShowError(s, MSG_NO_CARD_SLOT1);" + NL
+     + "}" + NL + NL + "int memcard_saver_event",
+     "        saverShowError(s, MSG_NO_CARD_SLOT1);" + NL
+     + "    else" + NL + "        saverShowError(s, MSG_NO_CARD_SLOT1);" + NL
+     + "}" + NL + NL + "int memcard_saver_event"),
+    ("mc-saver-tick-no-service", MC,
+     "        if (s->tester->active) testerEvent(s->tester, BMSG_SCREEN_TICK);",
+     "        (void)0;"),
+    ("mc-saver-done-leaves-popup", MC,
+     "        if (s->state == BMC_SAVER_DONE) {" + NL
+     + "            prompterClear(s->prompter);",
+     "        if (s->state == BMC_SAVER_DONE) {"),
+    ("mc-saver-dismiss-clicks", MC,
+     "            data->noise = 0;" + NL + "            break;" + NL
+     + "        case BMC_SAVER_PROMPT_SKIP:",
+     "            break;" + NL + "        case BMC_SAVER_PROMPT_SKIP:"),
+    ("mc-create-no-cancels-quietly", MC,
+     "            if (data->param == 0)" + NL + "                saverCancel(s);",
+     "            if (data->param == 0)" + NL
+     + "                s->state = BMC_SAVER_DONE;"),
+    ("mc-create-yes-writes-at-once", MC,
+     "                saverRecheck(s, BMC_SAVER_CHECK_BEFORE_CREATE, 0);",
+     "                saverStartWrite(s);"),
+    ("mc-overwrite-yes-verifies", MC,
+     "                saverRecheck(s, BMC_SAVER_CHECK_BEFORE_OVERWRITE, 1);",
+     "                saverRecheck(s, BMC_SAVER_CHECK_BEFORE_OVERWRITE, 0);"),
+    ("mc-overwrite-no-stays-up", MC,
+     "            else if (data->param == 4)" + NL + "                saverCancel(s);",
+     "            else if (data->param == 4)" + NL + "                (void)0;"),
+    ("mc-format-yes-unchecked", MC,
+     "            if (data->param == 7)" + NL
+     + "                saverRecheck(s, BMC_SAVER_CHECK_BEFORE_FORMAT, 0);",
+     "            if (data->param == 7)" + NL + "                saverStartFormat(s);"),
+    ("mc-format-no-stays-up", MC,
+     "            else if (data->param == 6)" + NL + "                saverCancel(s);",
+     "            else if (data->param == 6)" + NL + "                (void)0;"),
+    ("mc-format-retry-no-stays-up", MC,
+     "            else if (data->param == 8)" + NL + "                saverCancel(s);",
+     "            else if (data->param == 8)" + NL + "                (void)0;"),
+    ("mc-recheck-no-message", MC,
+     "    prompterDisplayMessage(s->prompter, MSG_CHECKING, saverSlot(s), 0);"
+     + NL + "    s->state = state;",
+     "    s->state = state;"),
+    # LoadSaveWrapper, 0x00247830 and its constructor 0x00247378.
+    ("lsw-autosave-line-inverted", MC,
+     "autosaveOn(w->gf) ? BMC_LANG_AUTOSAVE_ON" + NL
+     + "                                    : BMC_LANG_AUTOSAVE_OFF",
+     "autosaveOn(w->gf) ? BMC_LANG_AUTOSAVE_OFF" + NL
+     + "                                    : BMC_LANG_AUTOSAVE_ON"),
+    ("lsw-back-stays-hidden", MC,
+     "    screenVisible(w->gf, w->screenHash, 1);" + NL
+     + "    lswSlide(w, \"appear\");" + NL + "    w->state = 0;" + NL
+     + "    lswAutosaveLine(w);",
+     "    lswSlide(w, \"appear\");" + NL + "    w->state = 0;" + NL
+     + "    lswAutosaveLine(w);"),
+    ("lsw-back-keeps-autosave-line", MC,
+     "    w->state = 0;" + NL + "    lswAutosaveLine(w);" + NL + "}",
+     "    w->state = 0;" + NL + "}"),
+    ("lsw-save-menu-shown", MC,
+     "    screenVisible(w->gf, w->screenHash, 0);" + NL + "    saverStart(",
+     "    saverStart("),
+    ("lsw-save-no-slide", MC,
+     "    lswSlide(w, \"disappear\");" + NL + "}", "}"),
+    ("lsw-pick-save-drops-autosave", MC,
+     "                lswStartSave(w, 1);", "                lswStartSave(w, 0);"),
+    ("lsw-toggle-keeps-autosave", MC,
+     "            if (autosaveOn(gf)) lswStartSave(w, 0);",
+     "            if (autosaveOn(gf)) lswStartSave(w, 1);"),
+    ("lsw-toggle-off-saves", MC,
+     "            if (autosaveOn(gf)) lswStartSave(w, 0);",
+     "            lswStartSave(w, 0);"),
+    ("lsw-toggle-no-line", MC,
+     "            setAutosave(gf, !autosaveOn(gf));" + NL
+     + "            lswAutosaveLine(w);",
+     "            setAutosave(gf, !autosaveOn(gf));"),
+    ("lsw-toggle-silent", MC,
+     "            data->noise = 2;", "            data->noise = 0;"),
+    ("lsw-load-ignored", MC,
+     "            } else if (data->itemHash == BMC_ITEM_LOAD) {",
+     "            } else if (0) {"),
+    ("lsw-load-menu-shown", MC,
+     "                w->state = 2;" + NL
+     + "                screenVisible(gf, w->screenHash, 0);",
+     "                w->state = 2;"),
+    ("lsw-load-back-hidden", MC,
+     "            if (memcard_loader_event(&w->loader, msg, data) == 1)" + NL
+     + "                lswBackToMenu(w);",
+     "            if (memcard_loader_event(&w->loader, msg, data) == 1)" + NL
+     + "                w->state = 0;"),
+    ("lsw-save-back-hidden", MC,
+     "            if (memcard_saver_event(&w->saver, msg, data) == 1)" + NL
+     + "                lswBackToMenu(w);",
+     "            if (memcard_saver_event(&w->saver, msg, data) == 1)" + NL
+     + "                w->state = 0;"),
+    ("lsw-menu-live-while-saving", MC,
+     "                lswBackToMenu(w);" + NL + "            return;" + NL
+     + "        case 2:",
+     "                lswBackToMenu(w);" + NL + "            break;" + NL
+     + "        case 2:"),
+    ("lsw-no-highlight", MC,
+     "    lswHighlight(w, msg, data);" + NL + "    switch (msg) {",
+     "    switch (msg) {"),
+    ("lsw-init-no-line", MC,
+     "    w->screenHash = screenHash;" + NL + "    lswAutosaveLine(w);",
+     "    w->screenHash = screenHash;"),
+    ("lsw-init-movie-plays", MC,
+     "    bgf_stop_movie(gf);                // 0x00247468" + NL, ""),
+    ("lsw-leaks", GF,
+     "            if (gf->loadSaveActive) memcard_load_save_destroy(&gf->loadSave);",
+     "            (void)0;"),
+    # Autosaver, 0x00247d00, its constructor 0x00247b48 and 0x00247d98.
+    ("as-never-asks", MC,
+     "    a->saver.askCreate = gf->saveAskCreate;", "    a->saver.askCreate = 0;"),
+    ("as-drops-autosave", MC,
+     "    saverStart(&a->saver, &a->tester, &a->prompter, 1);",
+     "    saverStart(&a->saver, &a->tester, &a->prompter, 0);"),
+    ("as-never-done", MC,
+     "    if (memcard_saver_event(&a->saver, msg, data) == 1) a->state = 0;",
+     "    (void)memcard_saver_event(&a->saver, msg, data);"),
+    ("as-done-ignores-callback", MC,
+     "    if (a->done) {", "    if (0) {"),
+    ("as-done-back-two", MC,
+     "        bgf_move_back_screen(gf, 1);" + NL + "    }" + NL + "}",
+     "        bgf_move_back_screen(gf, 2);" + NL + "    }" + NL + "}"),
+    ("as-runs-after-done", MC,
+     "    if (a->state != 1) return;", "    (void)0;"),
+    ("as-leaks", GF,
+     "            if (gf->autosaverActive) memcard_autosaver_destroy(&gf->autosaver);",
+     "            (void)0;"),
+    ("as-callback-not-kept", GF,
+     "        gf->autosaver.done = cb;" + NL + "        return;",
+     "        return;"),
     # tPopupMenu: Summon 0x0016b660, Dismiss 0x0016b9c0, HandleJoy 0x0016bac0.
     ("popup-clear-order", BP,
      "    itemClearState(gf, &p->items[2], BMENU_HIGHLIGHTED);" + NL
@@ -3202,8 +3733,12 @@ MUTATIONS += [
 # the main menu starts the first panel movie, so its StopMovie never finds
 # one; the movie it is for is the Options screen's, whose manual load is
 # not ported.
+# lsw-menu-live-while-saving: while the saver works the wrapper's menu is
+# hidden and a popup is up, which takes every button (popup-joy-passes-on),
+# so the only message that reaches the menu's half is TICK -- and the bloom
+# it animates is on the hidden screen and traced once per item.
 EQUIVALENT = {"back-names-screen", "mc-loadfailed-quiet",
-              "mc-autoload-plays-on"}
+              "mc-autoload-plays-on", "lsw-menu-live-while-saving"}
 
 
 def mutate_pass(only=None):

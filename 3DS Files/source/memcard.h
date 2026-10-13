@@ -1,20 +1,23 @@
 #pragma once
 #include <stdint.h>
 
+#include "banim.h"
 #include "bmenu.h"
 
-// The memory card, as the boot uses it: BootAutoLoader and the four classes
-// under it -- MemcardLoader, MemcardTester, MemcardPrompter and SavegameData
-// -- over cDBFileSys, the card's file system. Retail's, SLES_507.31, and
-// every address here is retail's.
+// The memory card: BootAutoLoader, the Options screen's LoadSaveWrapper and
+// the end of a race's Autosaver, and the five classes under them --
+// MemcardLoader, MemcardSaver, MemcardTester, MemcardPrompter and
+// SavegameData -- over cDBFileSys, the card's file system. Retail's,
+// SLES_507.31, and every address here is retail's.
 //
 // BootAutoload is the first screen of every boot. It checks the card, loads
 // "settings.db" from it if there is one, and says what it found in a popup
 // (bpopup.h) that stays up for four seconds; then it moves back to the
-// language screen or the title. The whole of it, every card state included,
-// is here. What it does NOT do yet is what the loaded settings are for:
-// OverwriteFred's six calls into the frontend database, the sound mixer and
-// the controller setup (memcard_overwrite_fred).
+// language screen or the title. "Phils Load Save", Options' Load/Save,
+// loads and saves on request and turns autosave on and off; "Autosave" is
+// the save the end of a race goes through. Every card state of all three
+// is here. What the loader hands the host once the settings are in is the
+// host's (fredLoaded).
 //
 // cDBFileSys is the one part that is not ported. It is the PS2's memory
 // card library behind a vtable, and the 3DS has no memory card: the host
@@ -63,6 +66,9 @@ enum {
 // The Fred fields OverwriteFred writes after the copy.
 #define BMC_FRED_LANGUAGE   372
 #define BMC_FRED_CLEARED    904
+// Fred.Autosave (0x002fc054), which the Load/Save screen toggles and a
+// failed autosave clears. Fred+0 is the size, which SetupForSave writes.
+#define BMC_FRED_AUTOSAVE   4
 
 typedef struct BMemcardFileSys BMemcardFileSys;
 
@@ -90,6 +96,9 @@ typedef struct {
 struct BMemcardFileSys {
     const BMemcardFileSysVtbl* vt;
     int                        lastError;   // +292
+    // +1460: what the last CHECK_EXISTENCE found, 1 if the file opened.
+    // The saver reads it; the loader goes by lastError.
+    int                        fileExists;
 };
 
 // SavegameData (0x00245640), 4 bytes: the local copy a load reads into,
@@ -178,6 +187,106 @@ void memcard_boot_autoloader_event(BBootAutoLoader* b, BScreenMessage msg,
 // finishes.
 int memcard_loader_event(BMemcardLoader* l, BScreenMessage msg,
                          BScreenCallbackData* data);
+
+// MemcardSaver's states, as the code numbers them. The .mdebug's enum
+// (IDLE to READY_TO_LEAVE, 0-11) is an older class's, like the loader's.
+// PROMPT_TO_CREATE is set by nothing in retail -- the demo's saver asked
+// before it made the file, and retail's dismiss handler still answers it
+// -- and is the port's again (BMemcardSaver.askCreate).
+enum {
+    BMC_SAVER_IDLE = 0,
+    BMC_SAVER_CHECK_FOR_CARD = 1,       // Verify, a second of "Checking"
+    BMC_SAVER_CHECK_IF_CARD_OK = 2,     // CheckForSavegameFile
+    BMC_SAVER_PROMPT_SKIP = 3,          // 151028: go on without saving?
+    BMC_SAVER_PROMPT_RETRY = 4,
+    BMC_SAVER_PROMPT_TO_CREATE = 5,     // 151023
+    BMC_SAVER_WRITING_FILE = 6,
+    BMC_SAVER_PROMPT_TO_OVERWRITE = 7,  // 151020
+    BMC_SAVER_SHOWING_STATUS = 8,       // "saved successfully"
+    BMC_SAVER_SHOWING_ERROR = 9,
+    BMC_SAVER_FORMAT_PROMPT = 10,       // 151007
+    BMC_SAVER_CHECK_BEFORE_FORMAT = 11,
+    BMC_SAVER_DOING_FORMAT = 12,
+    BMC_SAVER_PROMPT_RETRY_FORMAT = 13, // 151010
+    BMC_SAVER_DONE = 14,
+    BMC_SAVER_CHECK_BEFORE_OVERWRITE = 15,
+    BMC_SAVER_CHECK_BEFORE_CREATE = 16,
+};
+
+// MemcardSaver (0x002460f8), 24 bytes.
+typedef struct {
+    uint32_t          screenHash;  // +0
+    BMemcardTester*   tester;      // +4
+    BMemcardPrompter* prompter;    // +8
+    uint32_t          timer;       // +12
+    int               state;       // +16
+    // +20, StartSaveSequence's third argument: 1 for a save the player
+    // asked for -- Load/Save's Save, the end of a race's -- and 0 for the
+    // one that turning autosave on starts. A save that does not happen
+    // turns autosave back off when it is 0, and asks "continue without
+    // saving?" when it is 1 and autosave is on.
+    int               keepAutosave;
+    // Port-only: ask before making the file (PROMPT_TO_CREATE) rather
+    // than writing it at once, so the end of a race always asks.
+    int               askCreate;
+    BGameFlow*        gf;
+} BMemcardSaver;
+
+// MemcardSaver::HandleEvent (0x00246138). Returns 1 on the tick it
+// finishes.
+int memcard_saver_event(BMemcardSaver* s, BScreenMessage msg,
+                        BScreenCallbackData* data);
+
+// "Phils Load Save"'s items, and the Autosave line's two strings.
+#define BMC_ITEM_SAVE            0x52e039f3u
+#define BMC_ITEM_LOAD            0x52e039f4u
+#define BMC_ITEM_AUTOSAVE        0x52e039f5u
+#define BMC_LANG_AUTOSAVE_OFF    0x249f2   // 150002, "Autosave off"
+#define BMC_LANG_AUTOSAVE_ON     0x249f3   // 150003, "Autosave on"
+
+// LoadSaveWrapper (0x002473d0), 192 bytes: 0 on the menu, 1 saving, 2
+// loading. 3 and 4 are set by nothing.
+typedef struct {
+    BSavegameData    savegame;   // +0, a local copy for the loader
+    BMemcardSaver    saver;      // +4
+    BMemcardLoader   loader;     // +28, MANUAL
+    BMemcardTester   tester;     // +56
+    BMemcardPrompter prompter;   // +76
+    uint32_t         screenHash; // +80
+    int              state;      // +84, which the constructor leaves be
+    // +88, tSlideOnScreen: not the port's yet, so only traced.
+    BHighlightAnim   highlight;  // +160
+    BGameFlow*       gf;
+    int              tracedAnimate;  // "bloom animate" said since the item
+} BLoadSaveWrapper;
+
+void memcard_load_save_init(BLoadSaveWrapper* w, BGameFlow* gf,
+                            uint32_t screenHash);
+void memcard_load_save_destroy(BLoadSaveWrapper* w);
+// HandleEvent, 0x00247530.
+void memcard_load_save_event(BLoadSaveWrapper* w, BScreenMessage msg,
+                             BScreenCallbackData* data);
+
+// Autosaver (0x00247b48), 64 bytes: the save started by the constructor,
+// with no local copy -- the saver writes Fred itself -- and on its end the
+// completion callback, or a move back with none.
+typedef struct {
+    void (*done)(void);          // +0
+    BSavegameData    savegame;   // +4
+    BMemcardSaver    saver;      // +8
+    BMemcardTester   tester;     // +32
+    BMemcardPrompter prompter;   // +52
+    uint32_t         screenHash; // +56
+    int              state;      // +60: 1 saving, 0 done
+} BAutosaver;
+
+void memcard_autosaver_init(BAutosaver* a, BGameFlow* gf,
+                            uint32_t screenHash);
+void memcard_autosaver_destroy(BAutosaver* a);
+// HandleEvent, 0x00247c68. Nothing after the callback may touch `a`: the
+// callback moves on to another screen, which destroys it.
+void memcard_autosaver_event(BAutosaver* a, BScreenMessage msg,
+                             BScreenCallbackData* data);
 
 // CalculateChecksum (0x001878b0).
 uint32_t memcard_checksum(const uint8_t* fred);

@@ -1198,6 +1198,68 @@ void bgf_boot_autoload_callback(BGameFlow* gf, BScreenMessage msg,
     }
 }
 
+// ------------------------------------------- LoadSaveWrapper, Autosaver
+
+void bgf_load_save_callback(BGameFlow* gf, BScreenMessage msg,
+                            BScreenCallbackData* data)
+{
+    // 0x00247830: built from ItemHash, the screen's. The original keeps
+    // pInstance after the delete and calls through it unchecked.
+    switch (msg) {
+        case BMSG_SCREEN_ACTIVATE:
+            memcard_load_save_init(&gf->loadSave, gf, data ? data->itemHash : 0);
+            gf->loadSaveActive = 1;
+            break;
+
+        case BMSG_SCREEN_UNACTIVATE:
+            if (gf->loadSaveActive) memcard_load_save_destroy(&gf->loadSave);
+            gf->loadSaveActive = 0;
+            break;
+
+        default:
+            if (gf->loadSaveActive)
+                memcard_load_save_event(&gf->loadSave, msg, data);
+            break;
+    }
+}
+
+void bgf_autosave_callback(BGameFlow* gf, BScreenMessage msg,
+                           BScreenCallbackData* data)
+{
+    // 0x00247d00. As the boot's: the constructor's popup announces itself
+    // to nobody.
+    switch (msg) {
+        case BMSG_SCREEN_ACTIVATE:
+            memcard_autosaver_init(&gf->autosaver, gf,
+                                   data ? data->itemHash : 0);
+            gf->autosaverActive = 1;
+            break;
+
+        case BMSG_SCREEN_UNACTIVATE:
+            if (gf->autosaverActive) memcard_autosaver_destroy(&gf->autosaver);
+            gf->autosaverActive = 0;
+            break;
+
+        default:
+            if (gf->autosaverActive)
+                memcard_autosaver_event(&gf->autosaver, msg, data);
+            break;
+    }
+}
+
+// 0x00247d98 stores the callback through pInstance with no test. The port
+// calls it at once when no Autosave screen is up, so a race whose Autosave
+// screen could not come up still goes on.
+void bgf_set_autosave_completion_callback(BGameFlow* gf, void (*cb)(void))
+{
+    if (gf->autosaverActive) {
+        gf->autosaver.done = cb;
+        return;
+    }
+    trace(gf, "autosave none");
+    if (cb) cb();
+}
+
 // ------------------------------------------------------------ plain screen
 
 void bgf_plain_screen_callback(BGameFlow* gf, BScreenMessage msg,

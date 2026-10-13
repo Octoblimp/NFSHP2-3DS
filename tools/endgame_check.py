@@ -1700,10 +1700,15 @@ MUTATIONS = [
       + NL + "        if (data->param != 1)"),
     M("dismiss-quit-keep", "        if (fred_use_the_race_event(&Fred))" + NL
       + "            race_event_keep_state();" + NL
-      + "        if (endgame_should_auto_save()) {",
-      "        if (endgame_should_auto_save()) {"),
-    M("dismiss-quit-auto", "        if (endgame_should_auto_save()) {",
+      + "        if (goes_through_autosave()) {",
+      "        if (goes_through_autosave()) {"),
+    M("dismiss-quit-auto", "        if (goes_through_autosave()) {",
       "        if (0) {"),
+    # The port's: retail's test unless gEndGameAlwaysAskToSave, which the
+    # harness leaves 0.
+    M("dismiss-always-autosave",
+      "    return gEndGameAlwaysAskToSave || endgame_should_auto_save();",
+      "    return 1;"),
     M("dismiss-quit-push", "            change_to_screen(kEndGameAutosaveScreen, "
       "0);" + NL + "            set_autosave_completion_callback(quit_race);",
       "            change_to_screen(kEndGameAutosaveScreen, 1);" + NL
@@ -1738,7 +1743,7 @@ MUTATIONS = [
       + "        if (data->param <= 0)"),
     M("dismiss-next-fell", "!race_event_status_fell()",
       "race_event_status_fell()"),
-    M("dismiss-next-auto", "endgame_should_auto_save() && "
+    M("dismiss-next-auto", "goes_through_autosave() && "
       "!race_event_status_fell()", "!race_event_status_fell()"),
     M("dismiss-next-cb", "set_autosave_completion_callback(next_race);",
       "set_autosave_completion_callback(quit_race);"),

@@ -74,6 +74,7 @@ static void blankService(BMemcardFileSys* fs, int port, int slot)
         case BMC_FS_CHECK_EXISTENCE: fs->lastError = BMC_FILE_NOT_FOUND; break;
         default:                     fs->lastError = BMC_OK;             break;
     }
+    if (c->pending == BMC_FS_CHECK_EXISTENCE) fs->fileExists = 0;
     c->pending = BMC_FS_IDLE;
     done       = c->done;
     c->done    = NULL;
@@ -169,6 +170,17 @@ static int savegameVerify(const BSavegameData* s)
     return memcard_checksum(s->local) == get32(s->local + BMC_CHECKSUM_OFFSET);
 }
 
+// SetupForSave, 0x00245738: Fred itself, whatever the SavegameData, with
+// its size in its first word and its checksum in its last.
+static uint8_t* savegameSetupForSave(BGameFlow* gf)
+{
+    uint8_t* fred = gf->fred;
+    if (!fred) return NULL;
+    put32(fred, BMC_SAVE_SIZE);
+    put32(fred + BMC_CHECKSUM_OFFSET, memcard_checksum(fred));
+    return fred;
+}
+
 // ---------------------------------------------------------- MemcardTester
 
 // GetPort and GetSlot (0x00245600, 0x00245608) of the tester's device:
@@ -257,6 +269,42 @@ static int testerCheckForSavegameFile(BMemcardTester* t)
     return testerStart(t, BMC_FS_CHECK_EXISTENCE);
 }
 
+// Save, 0x00245b00: Fred, checksummed, written whole.
+static int testerSave(BMemcardTester* t)
+{
+    uint8_t* buf;
+    t->active = 1;
+    buf       = savegameSetupForSave(t->gf);
+    if (t->fs)
+        t->fs->vt->setFileData(t->fs, BMC_SAVE_NAME, buf, BMC_SAVE_SIZE);
+    return testerStart(t, BMC_FS_SAVE);
+}
+
+// FormatCallback, 0x00245a40: the format done, the card verified, with
+// Active up again until that is done too. Its lastError is the one the
+// saver reads.
+static void testerFormatDone(void* param)
+{
+    BMemcardTester* t = (BMemcardTester*)param;
+    t->active = 1;
+    if (!t->fs->vt->setState(t->fs, BMC_FS_VERIFY, testerDone, t))
+        t->active = 0;
+}
+
+// Format, 0x00245a98. Unformat (0x002459d8) and ShowDirectoryTree
+// (0x00245970), the class's other two jobs, are called by nothing.
+static int testerFormat(BMemcardTester* t)
+{
+    t->active = 1;
+    if (!t->fs) {
+        t->active = 0;
+        return 0;
+    }
+    if (!t->fs->vt->setState(t->fs, BMC_FS_FORMAT, testerFormatDone, t))
+        t->active = 0;
+    return t->active != 0;
+}
+
 // OverwriteFred, 0x00245d30: the loaded copy over Fred, DemoModeStatus's
 // neighbour at +904 cleared, and the language the boot chose kept over the
 // file's. Then six calls this port owes, which take the loaded settings
@@ -289,16 +337,25 @@ static void testerOverwriteFred(BMemcardTester* t)
 #define PROMPT_YES       0x24a57
 #define PROMPT_NO        0x24a58
 
-// The messages the loader shows: 151001 and on.
+// The messages the loader and the saver show: 151001 and on.
 #define MSG_LOADING      0x24dd9   // 151001
 #define MSG_LOADED       0x24dda   // 151002
 #define MSG_NO_FILE      0x24ddb   // 151003
+#define MSG_SAVING       0x24ddc   // 151004: the slot, twice
+#define MSG_SAVED        0x24ddd   // 151005
 #define MSG_NO_CARD_RETRY 0x24dde  // 151006
+#define MSG_FORMAT_ASK   0x24ddf   // 151007
+#define MSG_FORMATTING   0x24de0   // 151008
+#define MSG_FORMAT_RETRY 0x24de2   // 151010
 #define MSG_NO_SPACE     0x24de3   // 151011: slot, then KB
+#define MSG_SAVE_RETRY   0x24de4   // 151012
 #define MSG_CHECKING     0x24de5   // 151013
 #define MSG_NEW_CARD     0x24de6   // 151014
+#define MSG_NO_CARD_SLOT1 0x24de9  // 151017, "slot 1" in the string
 #define MSG_LOAD_RETRY   0x24dea   // 151018
+#define MSG_SAVE_OVERWRITE 0x24dec // 151020
 #define MSG_OVERWRITE    0x24dee   // 151022
+#define MSG_CREATE       0x24def   // 151023, the demo's
 #define MSG_LOAD_FAILED  0x24df0   // 151024
 #define MSG_NO_CARD      0x24df1   // 151025
 #define MSG_NO_CARD_KB   0x24df3   // 151027: slot, then KB
@@ -672,6 +729,539 @@ int memcard_loader_event(BMemcardLoader* l, BScreenMessage msg,
         }
     }
     return 0;
+}
+
+// ----------------------------------------------------------- MemcardSaver
+
+static int autosaveOn(const BGameFlow* gf)
+{
+    return gf->fred && get32(gf->fred + BMC_FRED_AUTOSAVE) != 0;
+}
+
+static void setAutosave(BGameFlow* gf, int on)
+{
+    if (gf->fred) put32(gf->fred + BMC_FRED_AUTOSAVE, (uint32_t)on);
+}
+
+// The constructor, 0x002460f8.
+static void saverInit(BMemcardSaver* s, BGameFlow* gf, uint32_t screenHash)
+{
+    memset(s, 0, sizeof(*s));
+    s->screenHash = screenHash;
+    s->gf         = gf;
+}
+
+static int saverSlot(const BMemcardSaver* s)
+{
+    return deviceSlot(s->tester->device);
+}
+
+static int saverError(const BMemcardSaver* s)
+{
+    return s->tester->fs ? s->tester->fs->lastError : BMC_NO_CARD;
+}
+
+// 0x00246110, with 1 when the save did not happen: turning autosave on
+// takes it back off again.
+static void saverFinish(BMemcardSaver* s, int notSaved)
+{
+    if (notSaved == 1 && !s->keepAutosave) setAutosave(s->gf, 0);
+}
+
+// 0x002469e0, every "no" and every error's end: with autosave on, a save
+// the player asked for asks whether to go on without one.
+static void saverCancel(BMemcardSaver* s)
+{
+    if (autosaveOn(s->gf) && s->keepAutosave == 1) {
+        prompterYesNo(s->prompter, MSG_NO_SAVE, 2, 3, saverSlot(s), 0);
+        s->state = BMC_SAVER_PROMPT_SKIP;
+    } else {
+        s->state = BMC_SAVER_DONE;
+        saverFinish(s, 1);
+    }
+}
+
+// ShowErrorAndLeave, 0x00246a78: two seconds of it, then the cancel.
+static void saverShowError(BMemcardSaver* s, int id)
+{
+    prompterDisplayMessage(s->prompter, id, saverSlot(s), 0);
+    s->state = BMC_SAVER_SHOWING_ERROR;
+    s->timer = s->gf->realTimer;
+}
+
+static void saverAsk(BMemcardSaver* s, int id, int yes, int no, int kb,
+                     int state)
+{
+    prompterYesNo(s->prompter, id, yes, no, saverSlot(s), kb);
+    s->state = state;
+}
+
+// The retry prompt, which most errors end in: "try again?", 3 yes, 2 no.
+static void saverAskRetry(BMemcardSaver* s, int id, int kb)
+{
+    saverAsk(s, id, 3, 2, kb, BMC_SAVER_PROMPT_RETRY);
+}
+
+// StartFormat, 0x00246ab8.
+static void saverStartFormat(BMemcardSaver* s)
+{
+    s->state = BMC_SAVER_DOING_FORMAT;
+    s->timer = s->gf->realTimer;
+    prompterDisplayMessage(s->prompter, MSG_FORMATTING, saverSlot(s), 0);
+    testerFormat(s->tester);
+}
+
+// StartWrite, 0x00246b10.
+static void saverStartWrite(BMemcardSaver* s)
+{
+    s->state = BMC_SAVER_WRITING_FILE;
+    s->timer = s->gf->realTimer;
+    prompterDisplayMessage(s->prompter, MSG_SAVING, saverSlot(s), 0);
+    testerSave(s->tester);
+}
+
+// StartSaveSequence(), 0x00246b80.
+static void saverStartSaveSequence(BMemcardSaver* s)
+{
+    s->state = BMC_SAVER_CHECK_FOR_CARD;
+    s->timer = s->gf->realTimer;
+    prompterDisplayMessage(s->prompter, MSG_CHECKING, saverSlot(s), 0);
+    testerVerify(s->tester);
+}
+
+// StartSaveSequence(tester, prompter, keepAutosave), 0x00246b68.
+static void saverStart(BMemcardSaver* s, BMemcardTester* t,
+                       BMemcardPrompter* p, int keepAutosave)
+{
+    s->tester       = t;
+    s->prompter     = p;
+    s->keepAutosave = keepAutosave;
+    saverStartSaveSequence(s);
+}
+
+// A second look at the card after a prompt (Verify, or the file check):
+// "Checking" up, and the state that reads it.
+static void saverRecheck(BMemcardSaver* s, int state, int checkFile)
+{
+    prompterDisplayMessage(s->prompter, MSG_CHECKING, saverSlot(s), 0);
+    s->state = state;
+    s->timer = s->gf->realTimer;
+    if (checkFile)
+        testerCheckForSavegameFile(s->tester);
+    else
+        testerVerify(s->tester);
+}
+
+// CHECK_FOR_CARD: a second of "Checking", then what Verify found.
+static void saverCheckForCard(BMemcardSaver* s)
+{
+    int err;
+    if (s->tester->active || !waited(s->gf, s->timer, 1.0f)) return;
+    err = saverError(s);
+    if (err == BMC_NOT_FORMATTED) {
+        saverAsk(s, MSG_FORMAT_ASK, 7, 6, 0, BMC_SAVER_FORMAT_PROMPT);
+    } else if (err == BMC_OK || err == BMC_NEW_CARD) {
+        s->state = BMC_SAVER_CHECK_IF_CARD_OK;
+        if (!testerCheckForSavegameFile(s->tester))
+            saverShowError(s, MSG_NO_CARD_SLOT1);
+    } else {
+        saverAskRetry(s, MSG_NO_CARD_RETRY, 0);
+    }
+}
+
+// CHECK_IF_CARD_OK: the file there is overwritten if the player says so;
+// with none, the card needs the room for one.
+static void saverCheckIfCardOK(BMemcardSaver* s)
+{
+    BMemcardFileSys* fs = s->tester->fs;
+    int              err;
+    if (s->tester->active) return;
+    err = saverError(s);
+    if (err != BMC_OK && err != BMC_FILE_NOT_FOUND) {
+        saverShowError(s, MSG_NO_CARD_SLOT1);
+    } else if (fs->fileExists) {
+        saverAsk(s, MSG_SAVE_OVERWRITE, 5, 4, 0,
+                 BMC_SAVER_PROMPT_TO_OVERWRITE);
+    } else {
+        int freeKB = fs->vt->getFreeSpace(fs);
+        int need   = fs->vt->calcFreeSpaceRequired(fs, BMC_SAVE_SIZE);
+        if (freeKB < need)
+            saverAskRetry(s, MSG_NO_SPACE, need);
+        else if (s->askCreate)
+            // The port's: the demo's question (0x002304a0), where retail
+            // makes the file without one.
+            saverAsk(s, MSG_CREATE, 1, 0, 0, BMC_SAVER_PROMPT_TO_CREATE);
+        else
+            saverStartWrite(s);
+    }
+}
+
+// WRITING_FILE: two seconds of "Saving", then how it went.
+static void saverWritingFile(BMemcardSaver* s)
+{
+    BMemcardFileSys* fs = s->tester->fs;
+    int              err;
+    if (s->tester->active || !waited(s->gf, s->timer, 2.0f)) return;
+    err = saverError(s);
+    if (err == BMC_OK) {
+        prompterDisplayMessage(s->prompter, MSG_SAVED, saverSlot(s), 0);
+        s->state = BMC_SAVER_SHOWING_STATUS;
+        s->timer = s->gf->realTimer;
+    } else if (err == BMC_INSUFFICIENT_FREE_SPACE) {
+        saverAskRetry(s, MSG_NO_SPACE,
+                      fs->vt->calcFreeSpaceRequired(fs, BMC_SAVE_SIZE));
+    } else {
+        saverAskRetry(s, MSG_SAVE_RETRY, 0);
+    }
+}
+
+// CHECK_BEFORE_FORMAT: the card looked at again once the player has said
+// to format it, in case it changed under the prompt.
+static void saverCheckBeforeFormat(BMemcardSaver* s)
+{
+    int err;
+    if (s->tester->active || !waited(s->gf, s->timer, 2.0f)) return;
+    err = saverError(s);
+    if (err == BMC_NOT_FORMATTED)
+        saverStartFormat(s);
+    else if (err == BMC_OK || err == BMC_NEW_CARD)
+        saverShowError(s, MSG_NEW_CARD);
+    else if (err == BMC_NO_CARD)
+        saverAskRetry(s, MSG_NO_CARD_RETRY, 0);
+    else
+        saverShowError(s, MSG_NO_CARD_SLOT1);
+}
+
+// DOING_FORMAT: what the Verify after the format found.
+static void saverDoingFormat(BMemcardSaver* s)
+{
+    if (s->tester->active || !waited(s->gf, s->timer, 2.0f)) return;
+    if (saverError(s) == BMC_OK)
+        saverStartSaveSequence(s);
+    else
+        saverAsk(s, MSG_FORMAT_RETRY, 9, 8, 0,
+                 BMC_SAVER_PROMPT_RETRY_FORMAT);
+}
+
+// CHECK_BEFORE_OVERWRITE: the file looked for again once the player has
+// said to overwrite it.
+static void saverCheckBeforeOverwrite(BMemcardSaver* s)
+{
+    int err;
+    if (s->tester->active || !waited(s->gf, s->timer, 2.0f)) return;
+    err = saverError(s);
+    if (err == BMC_NOT_FORMATTED)
+        saverAsk(s, MSG_FORMAT_ASK, 7, 6, 0, BMC_SAVER_FORMAT_PROMPT);
+    else if (err == BMC_OK)
+        saverStartWrite(s);
+    else if (err == BMC_NEW_CARD)
+        saverShowError(s, MSG_NEW_CARD);
+    else if (err == BMC_NO_CARD)
+        saverAskRetry(s, MSG_NO_CARD_RETRY, 0);
+    else
+        saverShowError(s, MSG_NO_CARD_SLOT1);
+}
+
+// CHECK_BEFORE_CREATE: the card verified again once the player has said
+// to make the file.
+static void saverCheckBeforeCreate(BMemcardSaver* s)
+{
+    int err;
+    if (s->tester->active || !waited(s->gf, s->timer, 2.0f)) return;
+    err = saverError(s);
+    if (err == BMC_NEW_CARD)
+        saverShowError(s, MSG_NEW_CARD);
+    else if (err == BMC_OK || err == BMC_FILE_NOT_FOUND)
+        saverStartWrite(s);
+    else if (err == BMC_NO_CARD)
+        saverAskRetry(s, MSG_NO_CARD_RETRY, 0);
+    else
+        saverShowError(s, MSG_NO_CARD_SLOT1);
+}
+
+int memcard_saver_event(BMemcardSaver* s, BScreenMessage msg,
+                        BScreenCallbackData* data)
+{
+    if (msg == BMSG_SCREEN_TICK) {
+        if (s->tester->active) testerEvent(s->tester, BMSG_SCREEN_TICK);
+        switch (s->state) {       // 0x002bee00 on State - 1
+            case BMC_SAVER_CHECK_FOR_CARD:   saverCheckForCard(s);  break;
+            case BMC_SAVER_CHECK_IF_CARD_OK: saverCheckIfCardOK(s); break;
+            case BMC_SAVER_WRITING_FILE:     saverWritingFile(s);   break;
+            case BMC_SAVER_SHOWING_STATUS:
+                if (waited(s->gf, s->timer, 2.0f)) s->state = BMC_SAVER_DONE;
+                break;
+            case BMC_SAVER_SHOWING_ERROR:
+                if (waited(s->gf, s->timer, 2.0f)) saverCancel(s);
+                break;
+            case BMC_SAVER_CHECK_BEFORE_FORMAT: saverCheckBeforeFormat(s); break;
+            case BMC_SAVER_DOING_FORMAT:        saverDoingFormat(s);       break;
+            case BMC_SAVER_CHECK_BEFORE_OVERWRITE:
+                saverCheckBeforeOverwrite(s);
+                break;
+            case BMC_SAVER_CHECK_BEFORE_CREATE:
+                saverCheckBeforeCreate(s);
+                break;
+            default:              // IDLE, the prompts, DONE
+                break;
+        }
+        if (s->state == BMC_SAVER_DONE) {
+            prompterClear(s->prompter);
+            return 1;
+        }
+        return 0;
+    }
+
+    // The original reads Param and writes Noise with no check on `data`.
+    if (msg != BMSG_POPUP_DISMISS || !data) return 0;
+    switch (s->state) {           // 0x002bee40 on State - 1
+        case BMC_SAVER_CHECK_FOR_CARD:
+        case BMC_SAVER_WRITING_FILE:
+        case BMC_SAVER_SHOWING_STATUS:
+        case BMC_SAVER_DOING_FORMAT:
+        case BMC_SAVER_DONE:
+            // A message taken down to put the next one up: no click.
+            data->noise = 0;
+            break;
+        case BMC_SAVER_PROMPT_SKIP:
+        case BMC_SAVER_PROMPT_RETRY:
+            if (data->param == 2) {
+                if (s->state == BMC_SAVER_PROMPT_RETRY) {
+                    saverCancel(s);
+                } else {
+                    s->state = BMC_SAVER_DONE;
+                    saverFinish(s, 1);
+                }
+            } else if (data->param == 3) {
+                saverStartSaveSequence(s);
+            }
+            break;
+        case BMC_SAVER_PROMPT_TO_CREATE:
+            if (data->param == 0)
+                saverCancel(s);
+            else if (data->param == 1)
+                saverRecheck(s, BMC_SAVER_CHECK_BEFORE_CREATE, 0);
+            break;
+        case BMC_SAVER_PROMPT_TO_OVERWRITE:
+            if (data->param == 5)
+                saverRecheck(s, BMC_SAVER_CHECK_BEFORE_OVERWRITE, 1);
+            else if (data->param == 4)
+                saverCancel(s);
+            break;
+        case BMC_SAVER_FORMAT_PROMPT:
+            if (data->param == 7)
+                saverRecheck(s, BMC_SAVER_CHECK_BEFORE_FORMAT, 0);
+            else if (data->param == 6)
+                saverCancel(s);
+            break;
+        case BMC_SAVER_PROMPT_RETRY_FORMAT:
+            if (data->param == 9)
+                saverRecheck(s, BMC_SAVER_CHECK_BEFORE_FORMAT, 0);
+            else if (data->param == 8)
+                saverCancel(s);
+            break;
+        default:                  // the two checks after a prompt, and 9
+            break;
+    }
+    return 0;
+}
+
+// --------------------------------------------------------- LoadSaveWrapper
+
+// FlailerSetScreenVisibility (0x0016eb68), as a bool.
+static void screenVisible(BGameFlow* gf, uint32_t screen, int visible)
+{
+    trace(gf, "vis screen %08x %d", (unsigned)screen, visible);
+    if (gf->hooks.setScreenVisible)
+        gf->hooks.setScreenVisible(gf->hooks.user, screen, visible);
+}
+
+// FlailerSetLanguageID (0x001449a8).
+static void setLanguageId(BGameFlow* gf, uint32_t screen, uint32_t object,
+                          int id)
+{
+    trace(gf, "language id %08x %08x %d", (unsigned)screen, (unsigned)object,
+          id);
+    if (gf->hooks.setLanguageId)
+        gf->hooks.setLanguageId(gf->hooks.user, screen, object, id);
+}
+
+// The Autosave line says which it is.
+static void lswAutosaveLine(BLoadSaveWrapper* w)
+{
+    setLanguageId(w->gf, w->screenHash, BMC_ITEM_AUTOSAVE,
+                  autosaveOn(w->gf) ? BMC_LANG_AUTOSAVE_ON
+                                    : BMC_LANG_AUTOSAVE_OFF);
+}
+
+// The tSlideOnScreen at +88 (0x001ee918): the menu slides off while the
+// card works and back on after. The port has no slide yet; the menu
+// screen's own visibility, which the wrapper sets around it, is what the
+// player sees.
+static void lswSlide(BLoadSaveWrapper* w, const char* what)
+{
+    trace(w->gf, "slide %s", what);
+}
+
+// tHighlightAnimation::HandleMessage (0x00248ae0) on the bloom at +160:
+// TICK animates it, MENUITEM_HIGHLIGHT moves it to the item.
+static void lswHighlight(BLoadSaveWrapper* w, BScreenMessage msg,
+                         BScreenCallbackData* data)
+{
+    BAnim* a = w->gf->anim;
+    if (msg == BMSG_SCREEN_TICK) {
+        if (!w->tracedAnimate) trace(w->gf, "bloom animate");
+        w->tracedAnimate = 1;
+        if (a) banim_highlight_animate(a, &w->highlight);
+    } else if (msg == BMSG_MENUITEM_HIGHLIGHT && data) {
+        trace(w->gf, "bloom item %08x", (unsigned)data->itemHash);
+        w->tracedAnimate = 0;
+        if (a) banim_highlight_set_item(a, &w->highlight, data->itemHash);
+    }
+}
+
+// The card's job done: the menu back, sliding on, with its Autosave line.
+static void lswBackToMenu(BLoadSaveWrapper* w)
+{
+    screenVisible(w->gf, w->screenHash, 1);
+    lswSlide(w, "appear");
+    w->state = 0;
+    lswAutosaveLine(w);
+}
+
+// ... and off while it works.
+static void lswStartSave(BLoadSaveWrapper* w, int keepAutosave)
+{
+    w->state = 1;
+    screenVisible(w->gf, w->screenHash, 0);
+    saverStart(&w->saver, &w->tester, &w->prompter, keepAutosave);
+    lswSlide(w, "disappear");
+}
+
+void memcard_load_save_init(BLoadSaveWrapper* w, BGameFlow* gf,
+                            uint32_t screenHash)
+{
+    BAnim* a = gf->anim;
+    memset(w, 0, sizeof(*w));
+    w->gf = gf;
+    savegameInit(&w->savegame, 1);
+    saverInit(&w->saver, gf, screenHash);
+    loaderInit(&w->loader, gf, screenHash, BMC_LOAD_MANUAL);
+    testerInit(&w->tester, gf, screenHash, 0, &w->savegame);
+    prompterInit(&w->prompter, gf, screenHash);
+    trace(gf, "slide init %08x %08x %08x %08x", (unsigned)screenHash,
+          0x03c790bbu, 0x718cd8c3u, 0x95ad096bu);
+    trace(gf, "bloom init %08x %08x %08x", (unsigned)screenHash,
+          0xab671c9au, BANIM_BLOOM_COLOR);
+    if (a)
+        banim_highlight_init(a, &w->highlight, screenHash, 0xab671c9au,
+                             (int32_t)BANIM_BLOOM_COLOR);
+    bgf_stop_movie(gf);                // 0x00247468
+    w->screenHash = screenHash;
+    lswAutosaveLine(w);
+}
+
+// The destructor, 0x002474b8. Like the boot's, it leaves the popup be.
+void memcard_load_save_destroy(BLoadSaveWrapper* w)
+{
+    testerDestroy(&w->tester);
+    savegameDestroy(&w->savegame);
+}
+
+void memcard_load_save_event(BLoadSaveWrapper* w, BScreenMessage msg,
+                             BScreenCallbackData* data)
+{
+    BGameFlow* gf = w->gf;
+
+    switch (w->state) {
+        case 1:
+            if (memcard_saver_event(&w->saver, msg, data) == 1)
+                lswBackToMenu(w);
+            return;
+        case 2:
+            if (memcard_loader_event(&w->loader, msg, data) == 1)
+                lswBackToMenu(w);
+            return;
+        case 3:
+        case 4:
+            if (w->tester.active) {
+                testerEvent(&w->tester, msg);
+                return;
+            }
+            screenVisible(gf, w->screenHash, 1);
+            lswSlide(w, "appear");
+            w->state = 0;
+            break;
+        default:
+            break;
+    }
+
+    lswHighlight(w, msg, data);
+    switch (msg) {
+        case BMSG_MENUITEM_SELECT:
+            if (!data) break;
+            if (data->itemHash == BMC_ITEM_SAVE) {
+                lswStartSave(w, 1);
+            } else if (data->itemHash == BMC_ITEM_LOAD) {
+                w->state = 2;
+                screenVisible(gf, w->screenHash, 0);
+                loaderStart(&w->loader, &w->tester, &w->prompter);
+                lswSlide(w, "disappear");
+            }
+            break;
+        case BMSG_MENUITEM_PAD_LEFT:
+        case BMSG_MENUITEM_PAD_RIGHT:
+            // Either way flips it; turned on, it saves at once, and a save
+            // that does not happen turns it back off.
+            if (!data || data->itemHash != BMC_ITEM_AUTOSAVE) break;
+            setAutosave(gf, !autosaveOn(gf));
+            lswAutosaveLine(w);
+            data->noise = 2;
+            if (autosaveOn(gf)) lswStartSave(w, 0);
+            break;
+        default:                  // TICK's slide, which the port has not
+            break;
+    }
+}
+
+// -------------------------------------------------------------- Autosaver
+
+void memcard_autosaver_init(BAutosaver* a, BGameFlow* gf, uint32_t screenHash)
+{
+    memset(a, 0, sizeof(*a));
+    savegameInit(&a->savegame, 0);
+    saverInit(&a->saver, gf, screenHash);
+    testerInit(&a->tester, gf, screenHash, 0, &a->savegame);
+    prompterInit(&a->prompter, gf, screenHash);
+    a->screenHash = screenHash;
+    a->state      = 1;
+    // The port's: ask before making the file, so the end of a race always
+    // asks before it saves (gf->saveAskCreate).
+    a->saver.askCreate = gf->saveAskCreate;
+    saverStart(&a->saver, &a->tester, &a->prompter, 1);
+    a->done = NULL;
+}
+
+// The destructor, 0x00247c08.
+void memcard_autosaver_destroy(BAutosaver* a)
+{
+    testerDestroy(&a->tester);
+    savegameDestroy(&a->savegame);
+}
+
+void memcard_autosaver_event(BAutosaver* a, BScreenMessage msg,
+                             BScreenCallbackData* data)
+{
+    BGameFlow* gf = a->saver.gf;
+    if (a->state != 1) return;
+    if (memcard_saver_event(&a->saver, msg, data) == 1) a->state = 0;
+    if (msg != BMSG_SCREEN_TICK || a->state != 0) return;
+    if (a->done) {
+        trace(gf, "autosave done");
+        a->done();
+    } else {
+        bgf_move_back_screen(gf, 1);
+    }
 }
 
 // --------------------------------------------------------- BootAutoLoader

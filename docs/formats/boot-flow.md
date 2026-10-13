@@ -1375,6 +1375,146 @@ It moves back in frame 368. The checker's rows written before the card add
 `BOOT60` (365) frames at 1/60, and `BOOT1` (8) at a second a frame, so their
 frame numbers still count from where they did.
 
+### `MemcardSaver`, `LoadSaveWrapper` and `Autosaver`
+
+`MemcardSaver` writes `settings.db`. Its object is 24 bytes: the tester at
++4, the prompter at +8, the timer at +12, `State` at +16 and `KeepAutosave`
+at +20. `StartSaveSequence(tester, prompter, keepAutosave)` (`0x00246b68`)
+stores the three and calls `StartSaveSequence()` (`0x00246b80`), which puts
+"Checking" (151013) up and starts a Verify.
+
+On a tick, `HandleEvent` runs `State - 1` through the table at
+`0x002bee00`:
+
+| State | On a tick |
+|---|---|
+| 1 `CHECK_FOR_CARD` | After one second and with the Verify done. Not formatted asks 151007 (format it?). OK or a new card looks for the file; if the tester refuses the job, it shows 151017. Anything else asks 151006 (no card, try again?). |
+| 2 `CHECK_IF_CARD_OK` | Once the look is done. An error other than "not found" shows 151017. A file there asks 151020 (overwrite it?). With none, a card without the room asks 151011 with the size; otherwise it writes (`StartWrite`, `0x00246b10`). |
+| 6 `WRITING_FILE` | After two seconds of "Saving" (151004) and with the write done. OK shows "Saved" (151005). No room asks 151011 again, and any other error asks 151012 (try again?). |
+| 8 `SHOWING_STATUS` | After two seconds, `DONE`. |
+| 9 `SHOWING_ERROR` | After two seconds, the cancel (below). |
+| 11 `CHECK_BEFORE_FORMAT` | After two seconds of a second Verify. Still unformatted formats (`StartFormat`, `0x00246ab8`, with 151008). OK or a new card shows 151014. No card asks 151006, and anything else shows 151017. |
+| 12 `DOING_FORMAT` | After two seconds. OK starts the sequence over. Otherwise it asks 151010 (format failed, try again?). |
+| 15 `CHECK_BEFORE_OVERWRITE` | After two seconds of a second look for the file. Not formatted asks 151007. OK writes. A new card shows 151014. No card asks 151006, and anything else shows 151017, "not found" included. |
+| 16 `CHECK_BEFORE_CREATE` | After two seconds of a second Verify. A new card shows 151014. OK or "not found" writes. No card asks 151006, and anything else shows 151017. |
+| 14 `DONE` | The popup comes down and `HandleEvent` returns 1. |
+
+`POPUP_DISMISS` runs `State - 1` through `0x002bee40`. States 1, 6, 8, 12
+and 14 clear `Noise`, as the loader's do. The answers:
+
+| State | Yes | No |
+|---|---|---|
+| 4 retry | 3: start over | 2: the cancel |
+| 3 skip (151028) | 3: start over | 2: `DONE`, not saved |
+| 5 create (151023) | 1: `CHECK_BEFORE_CREATE` | 0: the cancel |
+| 7 overwrite (151020) | 5: `CHECK_BEFORE_OVERWRITE` | 4: the cancel |
+| 10 format (151007) | 7: `CHECK_BEFORE_FORMAT` | 6: the cancel |
+| 13 format again (151010) | 9: `CHECK_BEFORE_FORMAT` | 8: the cancel |
+
+Yes is on the left, and every prompt starts on No. Each "check before"
+shows "Checking" first.
+
+The cancel (`0x002469e0`) is the end of every No and every error. With
+autosave on (`Fred+4`) and `KeepAutosave` 1, it asks 151028 (go on without
+saving?). Otherwise it is `DONE`, and `0x00246110` turns autosave off
+unless `KeepAutosave` is set. So a save that turning autosave on started,
+and that did not happen, turns it back off.
+
+151028 takes no argument. `DisplayYesNoMessage`'s switch on the id
+(`0x002bed90`) reaches a case that calls `sprintf` with only the string, so
+a `%d` in it would print the stale `a2`. Retail's string has none, and the
+checker's stand-in has none either.
+
+Retail never asks 151023. The question and its state are the demo's
+(`0x002304a0`). The retail saver goes from `CHECK_IF_CARD_OK` straight to
+`StartWrite`, and `CHECK_BEFORE_CREATE`'s code is unreached. The port asks
+it when `askCreate` is set (below).
+
+#### `LoadSaveWrapper` (`0x00247830`)
+
+`Phils Load Save` is the Options menu's Load/Save page: Save
+(`0x52e039f3`), Load (`0x52e039f4`) and the Autosave line (`0x52e039f5`).
+The wrapper owns a loader in `MANUAL` mode (+28), the saver (+4), a tester
+(+56), the prompter (+76), a `tSlideOnScreen` (+88) and a bloom (+160);
+`State` is at +84. Its constructor stops the movie (`0x00247468`), as
+BootAutoload's does, and sets the Autosave line to 150003 ("on") or 150002
+("off").
+
+| `State` | Messages go to |
+|---|---|
+| 1 | the saver, until it returns 1 |
+| 2 | the loader, until it returns 1 |
+| 0 | the menu |
+
+When either returns 1, the menu screen is made visible, slides on and gets
+its Autosave line again. On the menu:
+
+* **SELECT on Save** hides the menu, slides it off, and starts the saver
+  with `KeepAutosave` 1.
+* **SELECT on Load** does the same with the loader.
+* **Left or right on the Autosave line** flips autosave, rewrites the line
+  and clicks (`Noise` 2). Turned on, it saves at once with `KeepAutosave`
+  0, so a save that does not happen turns it back off. Turned off, it does
+  not save.
+* **TICK and HIGHLIGHT** go to the bloom.
+
+#### `Autosaver` (`0x00247d00`)
+
+"Autosave" is the end of a race's save. It uses BootAutoload's Flailer
+screen. Its constructor starts the saver with `KeepAutosave` 1 at once, and `State` (+60) is 1. When the saver returns 1, `State` goes to
+0. On that tick it calls the completion callback (+0) if one was set, and
+otherwise moves back a screen. With `State` 0 it ignores everything, so a
+callback that leaves the screen up (Quit's, a message to the race) runs
+once.
+
+`SetAutosaveCompletionCallback` (`0x00247d98`) stores the callback through
+the instance pointer (`gp-15080`) with no test. The race's end changes to
+"Autosave" and then sets it, so the instance is always there.
+
+#### The port
+
+`memcard.c` has all three. `gameflow.c`'s `bgf_load_save_callback` and
+`bgf_autosave_callback` are the two screens' callbacks, built from
+`ItemHash` as BootAutoload's is.
+
+There are two port additions:
+
+* **`gf->saveAskCreate` makes the Autosaver ask 151023 before it makes the
+  file.** `main.c` sets it, and the end of a race always goes through
+  "Autosave" (see [end-game.md](end-game.md)). Every race therefore ends
+  with a question: "create the save?" with no file, or "overwrite it?" with
+  one. The Load/Save page's Save does not ask, as retail's does not.
+* **`bgf_set_autosave_completion_callback` calls the callback at once when
+  no Autosave screen is up.** A race whose Autosave screen could not come
+  up still goes on.
+
+`bootflow_check` runs retail's `LoadSaveWrapper::Callback`,
+`Autosaver::Callback` and `SetAutosaveCompletionCallback` against the
+port's. Thirty-four rows cover:
+
+* creating, overwriting and declining;
+* no card, unformatted, formatting (it works, fails, or the card was fixed
+  under the prompt), a full card and a failed write;
+* a new card, a card pulled after the first look, and a file gone by the
+  second;
+* autosave on, off, and on with no card;
+* the skip question, Load, the bloom and BACK;
+* the Options movie stopped;
+* the timers at 1/60;
+* the Autosave screen with and without a callback, and the port's create
+  question with its answers.
+
+For the port's question, the checker patches the `jal StartWrite` at
+`0x0024631c` to a `jr t9` stub. When the row asks for it and the saver is
+the Autosaver's, in state 2, the stub runs injected MIPS: retail's own
+`DisplayYesNoMessage(0x24def, 1, 0, slot, 0)`, then `State = 5`. Retail
+handles the answers itself, through its unreached state 16.
+
+The `--mutate` pass breaks the saver, the wrapper and the Autosaver 76
+ways. It catches all but `lsw-menu-live-while-saving`. That one lets the
+wrapper's menu half see messages while the saver works, and it is listed as
+equivalent: the menu is hidden then, and the popup takes every button.
+
 ### `tPopupMenu` and the screen list's popups
 
 `FlailerScreenList` holds two popups, at +392 and +396.
@@ -1806,13 +1946,13 @@ tester an `SdCard`, a `cDBFileSys` whose jobs finish on the next Service:
 
 * `LOAD` reads `sdmc:/NFSHP2/SAVES/settings.db` whole, or answers error.
 * `SAVE` writes it, making `sdmc:/NFSHP2` and `SAVES` first.
-* `CHECK_EXISTENCE` is a `stat`.
+* `CHECK_EXISTENCE` is a `stat`, which sets `fileExists` for the saver.
 * Every other job is OK.
 
 `GetFreeSpace` is the SD card's free clusters in kilobytes, from
 `FSUSER_GetSdmcArchiveResource`, or 8192 if that fails. `CalculateFreeSpace`
-is retail's `(size + 1023) / 1024 + 5`. The flow's `fred` is a
-`BMC_SAVE_SIZE` buffer in `main.c`, which nothing reads yet.
+is retail's `(size + 1023) / 1024 + 5`. The flow's `fred` is the game's
+`Fred` (`fred_bytes()`), which the save writes whole.
 
 While a popup is up, `main.c` gives it the pad before the menus see it:
 
@@ -1911,8 +2051,6 @@ Not yet on the host:
   current screen when no popup takes a button.
 * **`OverwriteFred`'s six calls** into the frontend. The loaded `Fred` is
   copied, and nothing reads it yet.
-* **`MemcardSaver`**, the other half of `BootAutoLoader`, and the Options
-  screen's manual load, which is reached only in the checker.
 * **`StartDemoMode`'s track and `DemoModeReplay`'s internals.** The port
   stops the movie, traces "demo mode" and goes to attract.
 
@@ -1936,7 +2074,7 @@ in one entry: French plays `NFSINTRO_FR.AVI` second, where the demo had
 `NFSINTRO_EN.AVI` in every row. `bootflow_check` holds its table to the
 image.
 
-Three deliberate differences. The first two are there because the data may
+Four deliberate differences. The first two are there because the data may
 be missing:
 
 * **A movie missing from the card is skipped.** `GAMESTAGE_TITLE` treats a
@@ -1963,3 +2101,8 @@ be missing:
     edge, in both the English and the French intro.
   Both planes stay visible exactly when retail's are, and the flow never
   knows.
+* **The end of a race always asks whether to save.** The user asked for
+  it on 2026-10-12. Retail saves there only with autosave on, and makes the
+  file without asking. The port goes through "Autosave" every time and asks
+  before it makes or overwrites the file
+  ([`MemcardSaver`, `LoadSaveWrapper` and `Autosaver`](#memcardsaver-loadsavewrapper-and-autosaver)).

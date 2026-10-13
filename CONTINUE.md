@@ -70,6 +70,18 @@ cop's HUD (hudcop.c, hudrender.c, hudscore.c), the setup screens
   R helicopter (ce58fac). Not seen: an arrest, which the gas-only
   script cannot make. TASKS 43 is done (3DS button icons).
 
+**Now (Session 86, 2026-10-12): TASKS 52 is done, the profiles.
+Retail's `MemcardSaver`, `LoadSaveWrapper` and `Autosaver` are in
+`memcard.c`. The Options menu's Save/Load saves, loads and turns
+autosave on or off. Each race's Quit or Next Race asks to create or
+overwrite `sdmc:/NFSHP2/SAVES/settings.db`
+(`gEndGameAlwaysAskToSave`, `saveAskCreate`). bootflow_check: 95
+scenarios, 0 differ; the save/load mutations are 76, with 75 caught and
+1 equivalent. endgame_check: 0 differ. Both are seen on Azahar
+(HANDOFF.md, "Session 86"). Next: TASKS 39 (12k-6, the helicopter's
+munitions) to 100%, then TASKS 53 (the debug menu). TASKS 47 and 46
+wait on the user.**
+
 **Now (Session 85, 2026-10-12): step 14b is done. The smokeables are
 retail's (`smokeable.c`, `smokeableinfo.c`; `docs/formats/smokeable.md`):
 the two chunks load, a virgin stands in for each spawner, a car's touch
@@ -2873,8 +2885,8 @@ and so replaced every boot.
        three-second one end together.
      - The `slow` card's Verify outlasts the "Checking" wait.
    - Owed: message 24 (`ANY_BUTTON_PRESSED`), `OverwriteFred`'s six calls
-     (nothing reads `Fred` yet), `MemcardSaver`, and the internals of
-     `StartDemoMode` and `DemoModeReplay`. The popup's title strip runs
+     (nothing reads `Fred` yet), and the internals of `StartDemoMode`
+     and `DemoModeReplay`. `MemcardSaver` came in Session 86. The popup's title strip runs
      off the right edge, as the popup screen is authored.
 
    **The frontend's fourth slice is closed: the menus' movie.** The main

@@ -52,26 +52,41 @@ typedef struct {
     int freeKB;    // GetFreeSpace
     int busy;      // Services a job takes
     int refuse;    // SetState takes no job
+    int verify2;   // ... every VERIFY after the first, -1 for the same
+    int save;      // ... a SAVE
+    int format;    // ... a FORMAT
 } Card;
 
+// A card a FORMAT has left formatted verifies clean, has no file and has
+// room; one a SAVE has written has the file. That is the card's, not the
+// file system object's: it outlasts the tester that did it.
 static const Card kCards[] = {
-    // name          pump set  ver chk chk2 load sum  free busy ref
-    { "blank",        1,  0,   0,  5,  -1,  0,   1, 8192,  1,  0 },
-    { "good",         1,  0,   0,  0,  -1,  0,   1, 8192,  1,  0 },
-    { "badsum",       1,  0,   0,  0,  -1,  0,   0, 8192,  1,  0 },
-    { "loaderr",      1,  0,   0,  0,  -1,  3,   1, 8192,  1,  0 },
-    { "nocard",       1,  3,   3,  3,  -1,  3,   1,    0,  1,  0 },
-    { "unformatted",  1,  1,   1,  1,  -1,  1,   1,    0,  1,  0 },
-    { "newcard",      1,  0,   2,  5,  -1,  0,   1, 8192,  1,  0 },
-    { "full",         1,  0,   0,  5,  -1,  0,   1,   10,  1,  0 },
-    { "tight",        1,  0,   0,  5,  -1,  0,   1,   75,  1,  0 },
-    { "checkerr",     1,  0,   0,  3,  -1,  0,   1, 8192,  1,  0 },
-    { "busy",         3,  0,   0,  5,  -1,  0,   1, 8192,  3,  0 },
-    { "slow",         1,  0,   0,  5,  -1,  0,   1, 8192,  6,  0 },
-    { "refuse",       1,  0,   0,  5,  -1,  0,   1, 8192,  1,  1 },
-    { "gone",         1,  0,   0,  0,   5,  0,   1, 8192,  1,  0 },
-    { "swapped",      1,  0,   0,  0,   2,  0,   1, 8192,  1,  0 },
-    { "pulled",       1,  0,   0,  0,   3,  0,   1, 8192,  1,  0 },
+    // name          pump set  ver chk chk2 load sum  free busy ref ver2 save fmt
+    { "blank",        1,  0,   0,  5,  -1,  0,   1, 8192,  1,  0,  -1,  0,  0 },
+    { "good",         1,  0,   0,  0,  -1,  0,   1, 8192,  1,  0,  -1,  0,  0 },
+    { "badsum",       1,  0,   0,  0,  -1,  0,   0, 8192,  1,  0,  -1,  0,  0 },
+    { "loaderr",      1,  0,   0,  0,  -1,  3,   1, 8192,  1,  0,  -1,  0,  0 },
+    { "nocard",       1,  3,   3,  3,  -1,  3,   1,    0,  1,  0,  -1,  0,  0 },
+    { "unformatted",  1,  1,   1,  1,  -1,  1,   1,    0,  1,  0,  -1,  0,  0 },
+    { "newcard",      1,  0,   2,  5,  -1,  0,   1, 8192,  1,  0,  -1,  0,  0 },
+    { "full",         1,  0,   0,  5,  -1,  0,   1,   10,  1,  0,  -1,  0,  0 },
+    { "tight",        1,  0,   0,  5,  -1,  0,   1,   75,  1,  0,  -1,  0,  0 },
+    { "checkerr",     1,  0,   0,  3,  -1,  0,   1, 8192,  1,  0,  -1,  0,  0 },
+    { "busy",         3,  0,   0,  5,  -1,  0,   1, 8192,  3,  0,  -1,  0,  0 },
+    { "slow",         1,  0,   0,  5,  -1,  0,   1, 8192,  6,  0,  -1,  0,  0 },
+    { "refuse",       1,  0,   0,  5,  -1,  0,   1, 8192,  1,  1,  -1,  0,  0 },
+    { "gone",         1,  0,   0,  0,   5,  0,   1, 8192,  1,  0,  -1,  0,  0 },
+    { "swapped",      1,  0,   0,  0,   2,  0,   1, 8192,  1,  0,  -1,  0,  0 },
+    { "pulled",       1,  0,   0,  0,   3,  0,   1, 8192,  1,  0,  -1,  0,  0 },
+    // The saver's: a write that fails, or finds no room; a format that
+    // fails; a card formatted under the prompt; one pulled after the first
+    // look, and one that cannot be read for the file once it was there.
+    { "savefail",     1,  0,   0,  5,  -1,  0,   1, 8192,  1,  0,  -1,  3,  0 },
+    { "savefull",     1,  0,   0,  5,  -1,  0,   1, 8192,  1,  0,  -1,  4,  0 },
+    { "badformat",    1,  1,   1,  1,  -1,  1,   1,    0,  1,  0,  -1,  0,  3 },
+    { "fixed",        1,  1,   1,  1,  -1,  1,   1,    0,  1,  0,   0,  0,  0 },
+    { "yanked",       1,  0,   0,  5,  -1,  0,   1, 8192,  1,  0,   3,  0,  0 },
+    { "goneafter",    1,  0,   0,  0,   3,  0,   1, 8192,  1,  0,  -1,  0,  0 },
 };
 
 typedef struct {
@@ -94,6 +109,7 @@ typedef struct {
     // mode -- 1 AIDemoMode, 2 ReplayDemoMode, which the hook answers alike.
     int gameType;
     int raceDemo;
+    int askCreate;        // gf.saveAskCreate: the Autosaver asks to make the file
 } Scenario;
 
 // A load in flight: what to print when it lands, and its callback.
@@ -112,6 +128,7 @@ typedef struct {
     int             job;
     int             left;
     int             checks;
+    int             verifies;
     BMemcardDone    done;
     void*           param;
     uint8_t*        data;
@@ -164,6 +181,8 @@ struct World {
     int             numPending;
     WCard           fs;
     int             fsOpen;
+    int             formatted;    // the card, since a FORMAT
+    int             saved;        // ... since a SAVE
     WObj            objs[NUM_POPUP_OBJS];
     int             replaysLeft;
     uint32_t        replayDue;
@@ -403,15 +422,41 @@ static void cService(BMemcardFileSys* fs, int port, int slot)
     }
     if (--c->left > 0) return;
     switch (c->job) {
-        case BMC_FS_VERIFY: fs->lastError = card->verify; break;
+        case BMC_FS_VERIFY:
+            fs->lastError = c->w->formatted ? BMC_OK
+                          : c->verifies > 0 && card->verify2 >= 0
+                                ? card->verify2 : card->verify;
+            c->verifies++;
+            break;
         case BMC_FS_CHECK_EXISTENCE:
-            fs->lastError = c->checks > 0 && card->check2 >= 0 ? card->check2
+            fs->lastError = c->w->saved ? BMC_OK
+                          : c->w->formatted ? BMC_FILE_NOT_FOUND
+                          : c->checks > 0 && card->check2 >= 0 ? card->check2
                                                                : card->check;
             c->checks++;
+            fs->fileExists = fs->lastError == BMC_OK;
             break;
         case BMC_FS_LOAD:
             fs->lastError = card->load;
             if (card->load == BMC_OK) wWriteSave(c);
+            break;
+        case BMC_FS_SAVE:
+            // What went to the card: Fred's size, its Autosave word and its
+            // checksum.
+            fs->lastError = card->save;
+            if (card->save == BMC_OK && c->data && c->size >= BMC_SAVE_SIZE) {
+                uint32_t w0, as, sum;
+                memcpy(&w0, c->data, 4);
+                memcpy(&as, c->data + BMC_FRED_AUTOSAVE, 4);
+                memcpy(&sum, c->data + BMC_CHECKSUM_OFFSET, 4);
+                printf("fs saved %08x %08x %08x\n", (unsigned)w0,
+                       (unsigned)as, (unsigned)sum);
+                c->w->saved = 1;
+            }
+            break;
+        case BMC_FS_FORMAT:
+            fs->lastError = card->format;
+            if (card->format == BMC_OK) c->w->formatted = 1;
             break;
         default: fs->lastError = BMC_OK; break;
     }
@@ -440,9 +485,10 @@ static int cCalcFree(BMemcardFileSys* fs, int size)
 
 static int cFreeSpace(BMemcardFileSys* fs)
 {
-    WCard* c = (WCard*)fs;
-    printf("fs free %d\n", c->w->card->freeKB);
-    return c->w->card->freeKB;
+    WCard* c    = (WCard*)fs;
+    int    free = c->w->formatted ? 8192 : c->w->card->freeKB;
+    printf("fs free %d\n", free);
+    return free;
 }
 
 static int cSetState(BMemcardFileSys* fs, int state, BMemcardDone done,
@@ -591,6 +637,13 @@ static const char* aTranslate(void* u, int id)
         snprintf(w->text, sizeof(w->text),
                  "<string %d> slot %%d needs %%d KB free, more than the"
                  " card has left.@Try again?", id);
+    else if (id == 0x24df4)
+        // 151028 is passed nothing: retail's sprintf would read a stale
+        // register for a %d.
+        snprintf(w->text, sizeof(w->text),
+                 "<string %d> with nothing to fill in: a message long enough"
+                 " that it has to wrap onto another line.@ @And one more.",
+                 id);
     else
         snprintf(w->text, sizeof(w->text),
                  "<string %d> in slot %%d: a message long enough that it"
@@ -631,6 +684,12 @@ static const BScreenConfig kScreens[] = {
     // -- but registered so a scenario can force it.
     { "Legal MumboJumbo",        BGF_SCREEN_MUMBO_JUMBO,
       bgf_mumbo_jumbo_callback },
+    // Options' Load/Save, and the race's end's save, which shares
+    // BootAutoload's empty Flailer screen.
+    { "Phils Load Save",         0x9829bfabu,
+      bgf_load_save_callback },
+    { "Autosave",                BGF_SCREEN_BOOT_AUTOLOAD,
+      bgf_autosave_callback },
 };
 
 // LaunchFrontendMenus' push list. The last row that passes is the first
@@ -675,6 +734,18 @@ static const BGameFlowStateInfo kGameFlowStates[BGF_NUM_STATES] = {
 // kept for the predicate's first test and the screen's -1 paths.
 // The rows before the card's leave its four fields out: blank, BOOT, no
 // replay, no attract mode.
+// The saver's rows: back from a race with a demo waiting, so straight to
+// the main menu with no BootAutoload, at a second a frame. SAVE_ASK asks
+// before making the file.
+#define SAVE_ROW(n, c, f, ...)                                              \
+    { .name = n, .videoMode = 1, .skipMovies = 1, .frontendLaunchType = 2, \
+      .demoModeStatus = 2, .frames = f, .dt = 1.0f, .card = c,            \
+      .input = __VA_ARGS__ }
+#define SAVE_ASK(n, c, f, ...)                                              \
+    { .name = n, .videoMode = 1, .skipMovies = 1, .frontendLaunchType = 2, \
+      .demoModeStatus = 2, .frames = f, .dt = 1.0f, .card = c,            \
+      .askCreate = 1, .input = __VA_ARGS__ }
+
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 static const Scenario kScenarios[] = {
@@ -1003,6 +1074,100 @@ static const Scenario kScenarios[] = {
     { .name = "leavemovie", .videoMode = 1, .frontendLaunchType = 1,
       .frames = BOOT60 + 320, .dt = SIXTIETH, .gameType = 2,
       .input = {{BOOT60 + 270, "select"}, {BOOT60 + 300, "race"}} },
+
+    // ------------------------------------------------------- MemcardSaver
+    //
+    // Back from a race with a demo waiting, so straight to the main menu
+    // with no BootAutoload, at a second a frame; then Options' Load/Save
+    // over it, or the race's end's Autosave.
+    { .name = "lssave", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 2, .demoModeStatus = 2, .frames = 24, .dt = 1.0f,
+      .input = {{3, "loadsave"}, {5, "picksave"}, {20, "back"}} },
+    SAVE_ROW("lsoverwriteyes", "good", 24, {{3, "loadsave"}, {5, "picksave"},
+             {9, "left"}, {10, "select"}}),
+    SAVE_ROW("lsoverwriteno", "good", 16, {{3, "loadsave"}, {5, "picksave"},
+             {9, "select"}}),
+    SAVE_ROW("lsnocardno", "nocard", 16, {{3, "loadsave"}, {5, "picksave"},
+             {9, "select"}}),
+    SAVE_ROW("lsnocardyes", "nocard", 24, {{3, "loadsave"}, {5, "picksave"},
+             {9, "left"}, {10, "select"}, {16, "select"}}),
+    SAVE_ROW("lsformatyes", "unformatted", 36, {{3, "loadsave"},
+             {5, "picksave"}, {9, "left"}, {10, "select"}}),
+    SAVE_ROW("lsformatno", "unformatted", 16, {{3, "loadsave"},
+             {5, "picksave"}, {9, "select"}}),
+    SAVE_ROW("lsbadformat", "badformat", 40, {{3, "loadsave"},
+             {5, "picksave"}, {9, "left"}, {10, "select"}, {18, "left"},
+             {19, "select"}, {28, "select"}}),
+    SAVE_ROW("lsfixed", "fixed", 24, {{3, "loadsave"}, {5, "picksave"},
+             {9, "left"}, {10, "select"}}),
+    SAVE_ROW("lsfull", "full", 16, {{3, "loadsave"}, {5, "picksave"},
+             {9, "select"}}),
+    SAVE_ROW("lssavefail", "savefail", 36, {{3, "loadsave"},
+             {5, "picksave"}, {12, "left"}, {13, "select"}, {24, "select"}}),
+    SAVE_ROW("lssavefull", "savefull", 20, {{3, "loadsave"},
+             {5, "picksave"}, {12, "select"}}),
+    SAVE_ROW("lsnewcard", "newcard", 20, {{3, "loadsave"},
+             {5, "picksave"}}),
+    SAVE_ROW("lsgone", "goneafter", 24, {{3, "loadsave"}, {5, "picksave"},
+             {9, "left"}, {10, "select"}, {16, "select"}}),
+    // The look for the file fails; the file there at the first look is
+    // gone at the second, after Yes to overwriting it.
+    SAVE_ROW("lscheckerr", "checkerr", 16, {{3, "loadsave"},
+             {5, "picksave"}}),
+    SAVE_ROW("lsfilegone", "gone", 24, {{3, "loadsave"}, {5, "picksave"},
+             {9, "left"}, {10, "select"}}),
+    // Autosave turned on saves at once, and stays on; off again does not
+    // save. On with no card: the save that does not happen turns it back
+    // off.
+    SAVE_ROW("lsautoon", "blank", 20, {{3, "loadsave"}, {5, "asright"}}),
+    SAVE_ROW("lsautooff", "blank", 24, {{3, "loadsave"}, {5, "asleft"},
+             {16, "asright"}, {18, "picksave"}}),
+    SAVE_ROW("lsautonocard", "nocard", 16, {{3, "loadsave"},
+             {5, "asright"}, {9, "select"}}),
+    // Autosave on and Save with no card: No to trying again asks whether
+    // to go on without saving; No to that tries again, Yes leaves.
+    SAVE_ROW("lsskip", "nocard", 32, {{2, "fredautosave"}, {3, "loadsave"},
+             {5, "picksave"}, {9, "select"}, {11, "select"}, {15, "select"},
+             {17, "left"}, {18, "select"}}),
+    // Load, the loader's MANUAL sequence under the menu.
+    SAVE_ROW("lsload", "good", 24, {{3, "loadsave"}, {5, "pickload"},
+             {9, "left"}, {10, "select"}}),
+    // The bloom on the menu's lines, and BACK out of the menu.
+    SAVE_ROW("lslite", "blank", 12, {{3, "loadsave"}, {5, "litesave"},
+             {7, "liteauto"}, {9, "back"}}),
+    // The Options screen's movie, which the wrapper's constructor stops.
+    // Movies on, or StartMovie opens nothing.
+    { .name = "lsmovie", .videoMode = 1, .frontendLaunchType = 2,
+      .demoModeStatus = 2, .frames = 8, .dt = 1.0f, .card = "blank",
+      .input = {{3, "optionsmovie"}, {4, "loadsave"}} },
+    // At 1/60, where the saver's timers end: a second of "Checking", two
+    // of "Saving" and two of "Saved".
+    { .name = "lssaveslow", .videoMode = 1, .skipMovies = 1,
+      .frontendLaunchType = 2, .demoModeStatus = 2, .frames = 400,
+      .dt = SIXTIETH, .card = "blank",
+      .input = {{3, "loadsave"}, {5, "picksave"}} },
+
+    // The race's end's Autosave: with no callback it moves back; with one
+    // it hands over. The port asks before making the file.
+    SAVE_ROW("asblank", "blank", 16, {{3, "autosave"}}),
+    SAVE_ROW("ascb", "blank", 16, {{3, "autosave"}, {4, "autosavecb"}}),
+    // A callback that leaves the screen up is called once.
+    SAVE_ROW("asstay", "blank", 16, {{3, "autosave"}, {4, "autosavestay"}}),
+    SAVE_ASK("ascreateyes", "blank", 20, {{3, "autosave"}, {4, "autosavecb"},
+             {7, "left"}, {8, "select"}}),
+    SAVE_ASK("ascreateno", "blank", 16, {{3, "autosave"}, {4, "autosavecb"},
+             {7, "select"}}),
+    SAVE_ASK("ascreateskip", "blank", 20, {{2, "fredautosave"},
+             {3, "autosave"}, {4, "autosavecb"}, {7, "select"},
+             {9, "left"}, {10, "select"}}),
+    SAVE_ASK("ascreatenew", "newcard", 20, {{3, "autosave"},
+             {4, "autosavecb"}, {7, "left"}, {8, "select"}}),
+    SAVE_ASK("ascreateyank", "yanked", 20, {{3, "autosave"},
+             {4, "autosavecb"}, {7, "left"}, {8, "select"}, {12, "select"}}),
+    SAVE_ASK("asoverwrite", "good", 20, {{3, "autosave"}, {4, "autosavecb"},
+             {7, "left"}, {8, "select"}}),
+    SAVE_ASK("asunformatted", "unformatted", 16, {{3, "autosave"},
+             {4, "autosavecb"}, {7, "select"}}),
 };
 #pragma GCC diagnostic pop
 #define NUM_SCENARIOS ((int)(sizeof(kScenarios) / sizeof(kScenarios[0])))
@@ -1024,6 +1189,21 @@ static int popupJoy(BGameFlow* gf, int ev)
 }
 
 static uint8_t sFred[BMC_SAVE_SIZE];
+
+// The Autosave screen's completion callback, as the end of a race hands it
+// one: on to the next screen, here the main menu. memcard.c says
+// "autosave done" before it calls this.
+static BGameFlow* sAutosaveFlow;
+
+static void wAutosaveDone(void)
+{
+    bgf_change_to_screen(sAutosaveFlow, "New Main Menu", 0);
+}
+
+// Quit's: a message posted to the race, with the Autosave screen still up.
+static void wAutosaveStay(void)
+{
+}
 
 static void runScenario(const Scenario* sc)
 {
@@ -1089,8 +1269,10 @@ static void runScenario(const Scenario* sc)
     gf.demoModeStatus     = sc->demoModeStatus;
     gf.forceLegalScreens  = sc->forceLegal;
     gf.autoloadManual     = sc->manual;
+    gf.saveAskCreate      = sc->askCreate;
     memset(sFred, 0, sizeof(sFred));
-    gf.fred = sFred;
+    gf.fred       = sFred;
+    sAutosaveFlow = &gf;
 
     // The animation kit: the title's bloom, which finds nothing on its
     // screen and only keeps its timers, and the popup's screen, which is
@@ -1117,7 +1299,44 @@ static void runScenario(const Scenario* sc)
         for (int i = 0; i < MAX_INPUTS; i++) {
             const char* what = sc->input[i].what;
             if (!what || sc->input[i].frame != f) continue;
-            if (!strcmp(what, "select")) {
+            if (!strcmp(what, "loadsave") || !strcmp(what, "autosave")) {
+                // Options' Load/Save, or the race's end's save, over the
+                // main menu.
+                printf("input %s\n", what);
+                bgf_push_screen(&gf, "New Main Menu");
+                bgf_change_to_screen(&gf, what[0] == 'l' ? "Phils Load Save"
+                                                         : "Autosave", 0);
+            } else if (!strcmp(what, "picksave") || !strcmp(what, "pickload")) {
+                // SELECT on the Save or the Load line.
+                printf("input %s\n", what);
+                bgf_menu_item_event(&gf, BMSG_MENUITEM_SELECT,
+                                    what[4] == 's' ? BMC_ITEM_SAVE
+                                                   : BMC_ITEM_LOAD, 0);
+            } else if (!strcmp(what, "asleft") || !strcmp(what, "asright")) {
+                // The d-pad on the Autosave line.
+                printf("input %s\n", what);
+                bgf_menu_item_event(&gf, what[2] == 'l' ? BMSG_MENUITEM_PAD_LEFT
+                                                        : BMSG_MENUITEM_PAD_RIGHT,
+                                    BMC_ITEM_AUTOSAVE, 0);
+            } else if (!strcmp(what, "litesave") || !strcmp(what, "liteauto")) {
+                // MENUITEM_HIGHLIGHT on the Save or the Autosave line.
+                printf("input %s\n", what);
+                bgf_menu_item_event(&gf, BMSG_MENUITEM_HIGHLIGHT,
+                                    what[4] == 's' ? BMC_ITEM_SAVE
+                                                   : BMC_ITEM_AUTOSAVE, 0);
+            } else if (!strcmp(what, "fredautosave")) {
+                // Autosave on, as a loaded profile can have it.
+                printf("input fredautosave\n");
+                memset(sFred + BMC_FRED_AUTOSAVE, 0, 4);
+                sFred[BMC_FRED_AUTOSAVE] = 1;
+            } else if (!strcmp(what, "autosavecb")) {
+                // The race's end's SetAutosaveCompletionCallback.
+                printf("input autosavecb\n");
+                bgf_set_autosave_completion_callback(&gf, wAutosaveDone);
+            } else if (!strcmp(what, "autosavestay")) {
+                printf("input autosavestay\n");
+                bgf_set_autosave_completion_callback(&gf, wAutosaveStay);
+            } else if (!strcmp(what, "select")) {
                 printf("input select\n");
                 if (!popupJoy(&gf, BJOY_MENU_SELECT))
                     bgf_screen_event(&gf, BMSG_MENUITEM_SELECT, 0);
@@ -1199,12 +1418,18 @@ static void runScenario(const Scenario* sc)
                (unsigned)gf.realTimer);
     }
 
-    printf("final %s %s %d cops %d language %d\n",
-           bgf_state_name(&gf, gf.current),
-           gf.screen ? gf.screen->name : "-", gf.stack.index, gf.copsOn,
-           gf.currLanguage);
+    {
+        uint32_t autosave;
+        memcpy(&autosave, sFred + BMC_FRED_AUTOSAVE, 4);
+        printf("final %s %s %d cops %d language %d autosave %08x\n",
+               bgf_state_name(&gf, gf.current),
+               gf.screen ? gf.screen->name : "-", gf.stack.index, gf.copsOn,
+               gf.currLanguage, (unsigned)autosave);
+    }
     // Whatever is still open, as the next boot would find it.
     if (gf.autoloadActive) memcard_boot_autoloader_destroy(&gf.autoload);
+    if (gf.loadSaveActive) memcard_load_save_destroy(&gf.loadSave);
+    if (gf.autosaverActive) memcard_autosaver_destroy(&gf.autosaver);
 }
 
 int main(int argc, char** argv)

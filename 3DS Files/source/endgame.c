@@ -41,6 +41,7 @@ EndGameScreenCtor gEndGameScreenCtorFns[END_GAME_NUM_CLASSES];
 const char *(*gEndGameTranslateFn)(int32_t id);
 BAnim *(*gEndGameMenuAnimFn)(void);
 void (*gSetAutosaveCompletionCallbackFn)(void (*cb)(void));
+int32_t gEndGameAlwaysAskToSave;
 int32_t (*gEndGameReplayViewableFn)(void);
 int32_t (*gRaceEventRewardTestFn)(int32_t i);
 int32_t (*gRaceEventStatusAdvancedFn)(void);
@@ -108,6 +109,12 @@ static void set_autosave_completion_callback(void (*cb)(void))
 {
     if (gSetAutosaveCompletionCallbackFn != NULL)
         gSetAutosaveCompletionCallbackFn(cb);
+}
+
+// ShouldAutoSave where Quit and Next Race ask it, or the port's always.
+static int32_t goes_through_autosave(void)
+{
+    return gEndGameAlwaysAskToSave || endgame_should_auto_save();
 }
 
 // PostMessage on pRaceCoordinator, which retail passes without a test:
@@ -926,7 +933,8 @@ static void next_race(void)
 }
 
 // The popup's answer: OK goes on, through the Autosave screen for Quit and
-// Next Race when the game autosaves; Cancel shows the menu again.
+// Next Race when the game autosaves (or always: gEndGameAlwaysAskToSave);
+// Cancel shows the menu again.
 static void popup_dismissed(EndGameMenu *m, const BScreenCallbackData *data)
 {
     switch (m->State) {
@@ -935,7 +943,7 @@ static void popup_dismissed(EndGameMenu *m, const BScreenCallbackData *data)
             break;
         if (fred_use_the_race_event(&Fred))
             race_event_keep_state();
-        if (endgame_should_auto_save()) {
+        if (goes_through_autosave()) {
             change_to_screen(kEndGameAutosaveScreen, 0);
             set_autosave_completion_callback(quit_race);
         } else {
@@ -958,7 +966,7 @@ static void popup_dismissed(EndGameMenu *m, const BScreenCallbackData *data)
     case END_GAME_MENU_STATE_NEXT_RACE:
         if (data->param == 0)
             break;
-        if (endgame_should_auto_save() && !race_event_status_fell()) {
+        if (goes_through_autosave() && !race_event_status_fell()) {
             change_to_screen(kEndGameAutosaveScreen, 0);
             set_autosave_completion_callback(next_race);
         } else {

@@ -20964,3 +20964,66 @@ it up from here.
   Smokeable. After that, the user's profile save and load, and a
   save / don't-save prompt after each race or event (under
   sdmc:/NFSHP2/SAVES).
+
+## Session 86 -- the profiles: the saver, Load/Save and a save prompt after each race
+
+The user's order of 2026-10-12: finish the save and load work in
+`memcard.c`, then the munitions (TASKS 39), then the debug menu.
+
+- **The saver.** `memcard.c` gains retail's `MemcardSaver` (0x00246b68
+  .. 0x002469e0, its tables at 0x002bee00 and 0x002bee40). It has the
+  checks, the format, the overwrite, the write and the cancel that
+  turns autosave back off. It also gains `LoadSaveWrapper` (0x00247830),
+  which is "Phils Load Save", the Options menu's Save, Load and
+  Autosave line, and `Autosaver` (0x00247d00) with
+  SetAutosaveCompletionCallback (0x00247d98). `gameflow.c`'s
+  `bgf_load_save_callback` and `bgf_autosave_callback` are the two
+  screens' callbacks. `main.c` registers "Phils Load Save" and
+  "Autosave". "Autosave" uses BootAutoload's Flailer screen, which INGAMEB
+  has a copy of. The Load/Save screen gets a setLanguageId hook, and
+  the card's CHECK_EXISTENCE sets fileExists.
+- **The prompt after each race (the user's ask).** endgame.c's
+  `gEndGameAlwaysAskToSave` (main.c sets it) sends Quit and Next Race
+  through "Autosave" even with autosave off. `gf->saveAskCreate` makes
+  the Autosaver ask 151023 ("create the save?") before it makes the
+  file. So each race ends with a create or overwrite question, and No
+  goes on without saving. Retail never asks 151023: it is the demo's
+  question, and the retail saver's state 16 is unreached. A pause menu
+  Quit still leaves without a save, as retail's does.
+  `bgf_set_autosave_completion_callback` calls the callback at once when
+  no Autosave screen is up.
+- **The checker.** `bootflow_check` runs retail's LoadSaveWrapper and
+  Autosaver Callbacks and SetAutosaveCompletionCallback against
+  `gameflow_test.c`: 95 scenarios, 0 differ. Its 34 save rows cover
+  create, overwrite, decline, no card, unformatted, format (it works,
+  fails, or the card was fixed under the prompt), a full card, a failed
+  write, a new card, a pulled card, a file gone, autosave on and off,
+  the skip question, Load, the bloom, BACK, the Options movie and the
+  port's create question. For that question the checker patches the
+  `jal StartWrite` at 0x0024631c to a stub that runs retail's own
+  DisplayYesNoMessage and sets state 5. There are 76 mutations: 75 are
+  caught, and `lsw-menu-live-while-saving` is equivalent (the menu is
+  hidden and the popup takes every button). `endgame_check`: 0 differ.
+  Its dismiss mutations, 6 of 6, include the new
+  `dismiss-always-autosave`.
+- **Seen on Azahar** (100%, on AC):
+  - Options, Save/Load. Save made `settings.db` with no question, as
+    retail's Save does, and a second Save asked to overwrite. Turning
+    Autosave on saved again and the line read "on". Load asked
+    "Current settings will be overwritten", loaded, and the line showed
+    the loaded "on". BootAutoload loaded the file at the next boot.
+  - The end of a quick race. A test-only hook finished the player 600
+    race frames in; it was removed and the game rebuilt clean. The user
+    chose Quit Race: "Checking", then "Overwrite existing game
+    settings", Yes, "Saving", the file written, "Game settings saved
+    successfully!", and back to the frontend.
+  - One run lost a D-pad Left on a popup, so A answered No. The cancel
+    then turned autosave back off, which is retail's behaviour.
+- **docs.** boot-flow.md has a new section, "`MemcardSaver`,
+  `LoadSaveWrapper` and `Autosaver`". end-game.md has the
+  always-ask seam.
+- **Why quick race has 4 racers.** Retail's StartQuickRace (0x00216c18)
+  sets 3 AI with Hot Pursuit, so it is 4 racers and 4 cops, the cap of
+  8. World Racing sets 7 AI. The port matches it.
+- **Next.** TASKS 39 (12k-6), the helicopter's munitions, to 100%. Then
+  TASKS 53, the debug menu.

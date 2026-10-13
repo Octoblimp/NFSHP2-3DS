@@ -368,6 +368,10 @@ extern BAnim *(*gEndGameMenuAnimFn)(void);
 // SetAutosaveCompletionCallback (0x00247d98): what to call when the
 // Autosave screen is done.
 extern void (*gSetAutosaveCompletionCallbackFn)(void (*cb)(void));
+// The port's: non-zero, Quit and Next Race go through the Autosave screen
+// with autosave off too, so the end of a race always asks before it saves.
+// 0 is retail's, which goes there only with Fred.Autosave on.
+extern int32_t gEndGameAlwaysAskToSave;
 // The port's: whether View Replay has a replay to go to. A 0 leaves the
 // item off; NULL is retail's, which only reads the ReplayManager.
 extern int32_t (*gEndGameReplayViewableFn)(void);

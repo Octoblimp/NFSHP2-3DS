@@ -246,7 +246,8 @@ The seams are in `endgame.h`. main.c fills them:
 | `gEndGameScreensCtorFn`, `DestroyFn`, `ResumeFn`, `SuspendFn` | `endgame_screens_*` |
 | `gEndGameTranslateFn` | `startRaceTranslate` |
 | `gEndGameMenuAnimFn` | `pauseMenuAnim`, the pause menu's |
-| `gSetAutosaveCompletionCallbackFn` | `endGameAutosaveNow`: no Autosave screen, so the callback runs at once |
+| `gSetAutosaveCompletionCallbackFn` | `endGameAutosaveNow`: `bgf_set_autosave_completion_callback`, which gives it to the Autosave screen, or calls it at once with none up |
+| `gEndGameAlwaysAskToSave` | 1: Quit and Next Race go through "Autosave" with autosave off too |
 | `gEndGameReplayViewableFn` | `endGameReplayViewable`: 0 while `RCSTATE_INSTANT_REPLAY` has no handler |
 | `gFEDIsThereAnotherRaceFn`, `gFEDIsMultiTrackFn` | `fedIsThereAnotherRace`, `fedIsMultiTrack`, on `Fred` |
 
@@ -258,6 +259,18 @@ Best Lap Times and Best Total Times (`endtimes.c`, RE-3;
 each one shows the screen with a bare base, which only walks the list.
 Lap Times 1P and 2P are rows of their own, with
 `lap_times_display_callback`.
+
+"Autosave" is `memcard.c`'s Autosaver on `bgf_autosave_callback`, on
+BootAutoload's Flailer screen (`0xfa2ac5c6`), which INGAMEB has a copy of
+([boot-flow.md](boot-flow.md#memcardsaver-loadsavewrapper-and-autosaver)).
+Retail goes there only with `Fred.Autosave` on, and its saver makes the file
+without asking. The port asks for every race: `gEndGameAlwaysAskToSave`
+sends Quit and Next Race there either way, and `saveAskCreate` makes the
+saver ask before it makes the file, as it already asks before it overwrites
+one. So the end of a race always asks whether to save. No does not save;
+with autosave on, it then asks whether to go on without saving, as retail
+does. `endgame_should_auto_save` is retail's, and the checker runs with the
+flag at 0.
 
 Three of retail's reads are tested first in the port:
 

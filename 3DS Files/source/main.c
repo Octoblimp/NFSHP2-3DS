@@ -311,6 +311,10 @@ static const BScreenConfig kScreens[] = {
     // RaceSetupBaseClass screen ported.
     { "Be The Cop Setup",        BSETUP_SCREEN_BE_THE_COP_SETUP,
       bsetup_btc_callback },
+    // Options' Load/Save (memcard.c's LoadSaveWrapper): Save, Load, and
+    // the Autosave line, onto settings.db in sdmc:/NFSHP2/SAVES.
+    { "Phils Load Save",         0x9829bfabu,
+      bgf_load_save_callback },
 
     // Registered, drawn, and not ported. Every name below is one the port's
     // own code can ChangeToScreen() to -- the two Mode Selects' item tables
@@ -335,8 +339,6 @@ static const BScreenConfig kScreens[] = {
     { "Joystick PreConfig",      0x8bd5060bu,   // JoystickPreConfig
       bgf_plain_screen_callback },
     { "Display Options",         0x8bc68340u,   // tDisplayOptionsScreen
-      bgf_plain_screen_callback },
-    { "Phils Load Save",         0x9829bfabu,   // LoadSaveWrapper
       bgf_plain_screen_callback },
     { "NameEntry",               0x617a4e0au,   // NameEntry
       bgf_plain_screen_callback },
@@ -381,8 +383,11 @@ static const BScreenConfig kScreens[] = {
     // one callback that makes its class by name. The four reward screens
     // share one Flailer screen. The classes not ported yet are the bare
     // EndGameMenusBase, which SELECT passes and BACK walks back from. The
-    // Autosave screen is not ported. The Lap Times screens View Lap Times
-    // goes to have their own callback (endtimes.c).
+    // Lap Times screens View Lap Times goes to have their own callback
+    // (endtimes.c). Autosave is memcard.c's Autosaver, on BootAutoload's
+    // Flailer screen, which INGAMEB has a copy of.
+    { "Autosave",                BGF_SCREEN_BOOT_AUTOLOAD,
+      bgf_autosave_callback },
     { "Points Rewards",          END_GAME_REWARDS_SCREEN,
       endgame_screen_callback },
     { "Task Rewards",            END_GAME_REWARDS_SCREEN,
@@ -1759,6 +1764,8 @@ static void sdService(BMemcardFileSys* fs, int port, int slot)
                                     && stat(path, &st) == 0
                                 ? BMC_OK
                                 : BMC_FILE_NOT_FOUND;
+            // What the saver reads to ask before overwriting (+1460).
+            fs->fileExists = fs->lastError == BMC_OK;
             break;
         default:            // VERIFY, and the rest the boot never asks for
             fs->lastError = BMC_OK;
@@ -1833,6 +1840,14 @@ static void hookFredLoaded(void* user, uint8_t* fred)
     int mode = jb_audio_apply(&g_jukebox, fred + FRED_AUDIO_OPTIONS);
     sound_set_audio_mode(&gSoundModule, mode);
     logLine("audio options loaded: mode %d", mode);
+}
+
+// FlailerSetLanguageID: the Load/Save screen's Autosave line.
+static void hookSetLanguageId(void* user, uint32_t screen, uint32_t object,
+                              int id)
+{
+    (void)user;
+    flailer_set_language_id(screen, object, (uint32_t)id);
 }
 
 // FrontendDatabase::InitWithDefaults' calls out (fred.h): the audio
@@ -4863,13 +4878,11 @@ static BAnim* pauseMenuAnim(void)
 //
 // endgame.c's seams, and the FED's two that TheRaceHasFinished asks.
 
-// SetAutosaveCompletionCallback (0x00247d98). The Autosave screen is not
-// ported, and nothing is saved at the end of a race yet: what comes after
-// the autosave comes now.
+// SetAutosaveCompletionCallback (0x00247d98): what comes after the save,
+// once the Autosave screen is done -- or now, with none up.
 static void endGameAutosaveNow(void (*cb)(void))
 {
-    if (cb != NULL)
-        cb();
+    bgf_set_autosave_completion_callback(&g_flow, cb);
 }
 
 // View Replay changes to RCSTATE_INSTANT_REPLAY. Until that state has a
@@ -5431,6 +5444,9 @@ int main(int argc, char** argv)
     gEndGameTranslateFn = startRaceTranslate;
     gEndGameMenuAnimFn = pauseMenuAnim;
     gSetAutosaveCompletionCallbackFn = endGameAutosaveNow;
+    // Quit and Next Race always end at the Autosave screen, which asks
+    // before it makes or overwrites the save (g_flow.saveAskCreate).
+    gEndGameAlwaysAskToSave = 1;
     gEndGameReplayViewableFn = endGameReplayViewable;
     gFEDIsThereAnotherRaceFn = fedIsThereAnotherRace;
     gFEDIsMultiTrackFn = fedIsMultiTrack;
@@ -5921,6 +5937,7 @@ int main(int argc, char** argv)
     hooks.displayFrame     = hookDisplayFrame;
     hooks.newFileSys       = hookNewFileSys;
     hooks.fredLoaded       = hookFredLoaded;
+    hooks.setLanguageId    = hookSetLanguageId;
     hooks.raceDefaults     = hookRaceDefaults;
     hooks.frontendDefaults = hookFrontendDefaults;
     hooks.challengeCars    = hookChallengeCars;
@@ -5952,6 +5969,9 @@ int main(int argc, char** argv)
     // FlailerScreenList's constructor makes its song monitor (0x0016c25c).
     bsm_init(&g_songMonitor, &kSongMonitorHooks);
     g_flow.fred = fred_bytes();
+    // The Autosave screen asks before it makes the save file, as the end
+    // of a race always goes through it.
+    g_flow.saveAskCreate = 1;
     // Player's POV cycle reads SkipFE (gp-23220), which the flow holds.
     gPlayerCamSkipFE = &g_flow.skipFE;
     // Retail sets SkipFE only from a joylog's config items (LoadConfigItems,

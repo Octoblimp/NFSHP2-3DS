@@ -217,6 +217,10 @@ typedef struct {
     // OverwriteFred's calls after the copy (memcard.c), which take the
     // loaded settings into the rest of the game: Fred whole, as loaded.
     void (*fredLoaded)(void* user, uint8_t* fred);
+    // FlailerSetLanguageID (0x001449a8): the text object `object` on
+    // `screen` shows string `id` -- the Load/Save screen's Autosave line.
+    void (*setLanguageId)(void* user, uint32_t screen, uint32_t object,
+                          int id);
     // RaceParameters::InitWithDefaults (0x001ed5c8) on TheRaceParameters,
     // which BeginGameFlowLoadingFrontEnd and NewMainMenu's constructor
     // call; FrontendDatabase::InitWithDefaults (0x00183830) on Fred, the
@@ -457,6 +461,16 @@ struct BGameFlow {
     // the Options screen's, so its prompts can be driven before that screen
     // is ported.
     int               autoloadManual;
+    // LoadSaveWrapper::pInstance (gp-15088), Options' Load/Save, and
+    // Autosaver::pInstance (gp-15080), the end of a race's save: each
+    // `Active` once its constructor has returned.
+    BLoadSaveWrapper  loadSave;
+    int               loadSaveActive;
+    BAutosaver        autosaver;
+    int               autosaverActive;
+    // Port-only: the Autosaver asks before it makes the save file, the
+    // demo's question, where retail makes it at once (memcard.h).
+    int               saveAskCreate;
     BLanguageScreen   language;
     BNewMainMenu      mainMenu;
 };
@@ -628,6 +642,17 @@ void bgf_mumbo_jumbo_callback(BGameFlow* gf, BScreenMessage msg,
                               BScreenCallbackData* data);     // 0x0016f810
 void bgf_boot_autoload_callback(BGameFlow* gf, BScreenMessage msg,
                                 BScreenCallbackData* data);   // demo 0x00231488
+
+// LoadSaveWrapper::Callback (0x00247830), "Phils Load Save", and
+// Autosaver::Callback (0x00247d00), "Autosave" -- memcard.h.
+void bgf_load_save_callback(BGameFlow* gf, BScreenMessage msg,
+                            BScreenCallbackData* data);
+void bgf_autosave_callback(BGameFlow* gf, BScreenMessage msg,
+                           BScreenCallbackData* data);
+// SetAutosaveCompletionCallback (0x00247d98): what the Autosave screen
+// does once it is done, in place of moving back. Retail writes through
+// pInstance unchecked; with no Autosaver the port calls `cb` at once.
+void bgf_set_autosave_completion_callback(BGameFlow* gf, void (*cb)(void));
 
 // LanguageOptionsScreenBase::Callback (0x001f1dd8), for "Language Options
 // Pre FE": the six languages on MENUITEM_1..6, and MENUITEM_7, Load All
