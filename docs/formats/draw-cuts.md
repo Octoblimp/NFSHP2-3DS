@@ -502,7 +502,7 @@ GPU and changes no pixel.
   CPU builds the rest, rather than idling until `C3D_FrameEnd`.
   Azahar draws the same frames with it. "GpuSends 1" in
   nfshp2_config.txt turns it on; it stays off until a device run has
-  shown it never stops the GPU.
+  shown it never stops the GPU. (On by default since TASKS 57, below.)
 - **The clusters** (bb70171). Each batch of a baked mesh keeps a box
   round it and one round each 32 of its triangles, in their order,
   after its indices in the same linear block (`geocull.c`). A batch
@@ -536,10 +536,68 @@ nothing; the device's timing lines are what will say how much of the
 
 - **The device's numbers** at the laggy places: the fog, the desert's
   end with the chopper. A timing run (`sdmc:/nfshp2_gputiming.txt`,
-  `DebugLog 1`) with and without `ClusterCull 0` and `GpuSends 1`.
+  `DebugLog 1`) with and without `ClusterCull 0` and `GpuSends 0`.
 - **The envmap a face a frame.** Its six faces are a third of a light
   frame's GPU. Drawing one face a frame would cut most of that, but the
   cars' reflections would lag the world by a few frames: a change to the
   look, so the user decides.
 - **Early depth and RGB8.** The timing frame's probes (2fc77fc) still
   wait for a device run.
+
+## TASKS 57: the fire on track 11 (Session 88)
+
+The user's report of 2026-10-12: the track with the fire truck, its
+fire, smoke and fog, "is a bit laggy". It is track 11 (TRACKB11.BUN,
+Coastal Parklands). Its acid emitters put the forest fire (the
+`XE_FFire_` flames, black and white smoke and sparks) at about x -580
+to -700, y 145 to 240, and the truck's four water jets
+(`XE_FireTruck_WaterA` to `D`) at about -584 to -570, 151.
+
+**The user's device log** (`3DS Files/nfshp2_debug.txt`, track 11 with
+four AI and two cops) is slow from about (434, 229) through
+(-106, -144) to the fire at (-588, 220): 13 to 18 FPS. The worst
+second:
+
+    13.8 fps, 72.6 ms: world 4.5, draw 23.1 (envmap 4.4, mirror 2.9,
+    models 6.9, scenery 2.1, cars 2.2), vsync 8.7, gpu wait 35.2;
+    citro3d cpu 22.8, gpu 49.6
+
+The GPU is the bottleneck, and it only started once the CPU's whole
+draw was done, so the frame was roughly the draw plus the GPU,
+23 + 50 ms. A least-squares fit over 274 s of the log (rms 2.4 ms) puts
+the GPU's time at about 0.09 to 0.14 ms per 1,000 indices and 2.3 to
+2.5 ms per 100 sprites. Its worst second split as the view about 22 ms
+(119,832 indices in 1,170 batches), the envmap about 16 (146,145 in
+715), the mirror about 5.5 (60,700 in 437), and up to 12.8 ms of
+sprites at the fire (511 of them).
+
+What was weighed, lossless only:
+
+- **A smaller vertex.** GeoRenderVertex is 28 bytes, with float
+  positions and texture coordinates. Retail's strips hold both as
+  32-bit floats, so 16-bit ones would not be exact. Not done.
+- **The frame to the GPU in parts.** Done: `GpuSends` is now 1 by
+  default (`configitems.c`). One more send goes between the envmap and
+  the mirror (`main.c`), so the GPU starts on the envmap's faces as
+  soon as they are built, not after the mirror too. The sends are now:
+  after the envmap, after the mirror, after the models, after the top
+  screen's HUD and before `C3D_FrameEnd`. The pixels are the same:
+  the parts run in order on one queue, each clear still runs before
+  the draws to its own target, and each send flushes the linear heap
+  after its split (04aa510). Expected at the fire: about 4.4 + 50 ms a frame,
+  where it was 23 + 50, so about 18 FPS from 13.8. Not measured on the
+  device yet. "GpuSends 0" sends the frame whole, as before.
+- **The smoke's fill.** The sprites are fill-bound (25 µs each, four
+  vertices). A quad cut to its texture's non-zero alpha, over every mip
+  level and with the filter's texel of margin, would draw the same
+  pixels if the sprites write no depth. Not done.
+- **The envmap a face a frame** (TASKS 46) would cut most of its
+  16 ms, but it changes the look, so it is the user's call.
+
+On Azahar (AC power, speed 100%, `run_azahar_race.ps1 -HoldKeys 65`
+with `nfshp2_warp.txt` at the fire): the whole race ran with the sends
+on, with no hang and the GX queue at most 17 of 32 entries. The shots
+at the fire (`$TEMP\nfshp2_fire57`) match the run without the sends
+(`$TEMP\nfshp2_fire1`): the flames, the truck's jets, the smoke, the
+fog and the mirror, whole. Azahar's GPU takes no time, so only the
+device can show the gain.

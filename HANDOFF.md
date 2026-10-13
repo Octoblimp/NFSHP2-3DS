@@ -21205,3 +21205,88 @@ diagnostics below are not kept.
 - **If it comes back:** compare the rail meshes with their wall
   polygons, which are retail data. A car scraping a rail can show its
   side through the rail (clip9's shot 35, at 2 km/h).
+
+## Session 88 -- TASKS 57, the fire truck track's lag
+
+The user's report of 2026-10-12: the track with the fire truck, its
+fire, smoke and fog, lags a bit. Session 87 found the track and
+profiled it before it ran out. This session made the change, ran it on
+Azahar, and ended at the user's word ("wrap up those GPU optimizations
+... and end your session").
+
+- **The place.** Track 11 (TRACKB11.BUN, Coastal Parklands). The
+  fire's emitters (`XE_FFire_` flames, smoke and sparks) are at about
+  x -580 to -700, y 145 to 240. The truck's water jets
+  (`XE_FireTruck_WaterA` to `D`) are at about -584 to -570, 151.
+- **The user's device log** (`3DS Files/nfshp2_debug.txt`, track 11
+  with four AI and two cops). It is slow from about (434, 229) to the
+  fire at (-588, 220): 13 to 18 FPS, with track triangles at 30k to
+  50k and up to 511 sprites. The worst second: 13.8 FPS, 72.6 ms. That
+  is world 4.5, draw 23.1, vsync 8.7 and GPU wait 35.2; citro3d's GPU
+  time was 49.6.
+- **GPU-bound, one part after the other.** A least-squares fit over
+  274 s of the log (rms 2.4 ms) gives the GPU about 0.09 to 0.14 ms
+  per 1,000 indices and 2.3 to 2.5 ms per 100 sprites. The worst
+  seconds split as:
+  - the view, about 22 ms;
+  - the envmap, about 16;
+  - the mirror, about 5.5;
+  - the sprites, up to 12.8 at the fire.
+
+  The GPU started only at `C3D_FrameEnd`, so a frame was the CPU's draw
+  plus the GPU's, about 23 + 50 ms.
+- **Not a smaller vertex.** Retail's strips hold positions and texture
+  coordinates as 32-bit floats, so a 16-bit vertex would not be exact.
+- **The change.** `ConfigGpuSends` is 1 by default (`configitems.c`;
+  its comment is in `configitems.h`). TASKS 46's sends had been
+  opt-in since 9e044f3. `main.c` adds one more send between the envmap
+  and the mirror. A race's frame now goes to the GPU after the envmap,
+  the mirror, the models and the top screen's HUD, and before
+  `C3D_FrameEnd`.
+  - **Expected at the fire:** about 4.4 + 50 ms a frame, where it was
+    23 + 50, so about 18 FPS from 13.8. Not measured on the device.
+  - **To go back:** "GpuSends 0" in nfshp2_config.txt.
+- **Why the pixels are the same:**
+  - the parts run in order on the one GX queue;
+  - each clear still runs before the draws to its own target;
+  - each send flushes the linear heap after its split (04aa510).
+
+  A mid-frame end of the queue only runs citro3d's onQueueFinish with
+  no swap pending and no GPU clock started. The GPU clock starts at
+  `C3D_FrameEnd`.
+- **The profiler.** citro3d's "gpu" time on the frame line now counts
+  only what the GPU has left after `C3D_FrameEnd`. The frame rate and
+  the GPU wait are the measures (`frame-profiler.md`).
+- **On Azahar** (AC power, speed 100%). The fire's config (track 11,
+  2 laps, 3 AI) and `nfshp2_warp.txt` ("6 -476 88 -66.6 22380 20")
+  were used with `run_azahar_race.ps1 -HoldKeys 65 -WatchSeconds 30
+  -RunSeconds 120 -ShotSeconds 1.5`.
+  - The race ran whole, with no hang, at 20 to 30 FPS on Azahar's CPU.
+    The GX queue peaked at 17 of 32 entries.
+  - The shots at the fire (`$TEMP\nfshp2_fire57`) match Session 87's
+    run without the sends (`$TEMP\nfshp2_fire1`): the flames, the
+    truck's jets, the smoke, the fog and the mirror, whole.
+  - Azahar's GPU takes no time, so only the device shows the gain.
+- **The card.** Azahar's nfshp2_config.txt is "DebugLog 1" again. The
+  fire's config and warp are kept on the card as
+  `nfshp2_config.txt.fire57` and `nfshp2_warp.txt.fire57`. Copy both
+  back to their names for another run at the fire, and move them away
+  after.
+- **Docs:**
+  - `docs/formats/draw-cuts.md`, "TASKS 57";
+  - `frame-profiler.md`'s citro3d times;
+  - TASKS 57 done;
+  - TASKS 46's left list.
+- **To ask the user:**
+  - a log at the fire with this build ("DebugLog 1" on the card,
+    nothing else);
+  - whether the GPU ever stops. If it does, "GpuSends 0" is the way
+    back, and the sends are the first suspect.
+- **Left (TASKS 46):**
+  - The smoke's quads cut to their texture's non-zero alpha. Take it
+    over every mip level, with a texel of margin for the filter, and
+    only for sprites that write no depth. The sprites are fill-bound,
+    about 25 µs each.
+  - The envmap a face a frame. That is the user's call, since the
+    reflections would lag.
+- **Next:** TASKS 53 (the debug menu), then 54 (the keyboard).

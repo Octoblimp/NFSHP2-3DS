@@ -84,9 +84,19 @@ keeps it, and points now add up across races and boots (HANDOFF.md,
 "Session 87, continued -- TASKS 56"). TASKS 58 (the car through the
 road, walls and cars) is closed at the user's word with no fault
 found: the hull matches the body and no penetration showed (HANDOFF.md,
-"Session 87, continued -- TASKS 58"). Next, one at a time: TASKS 57
-(the fire truck track's lag), then 53 (the debug menu) and 54 (the
-keyboard).**
+"Session 87, continued -- TASKS 58").**
+
+**Now (Session 88, 2026-10-13): TASKS 57 is done, waiting on the
+device's word. The fire is on track 11, where the user's log was
+GPU-bound at 13.8 FPS, with the GPU starting only after the CPU's whole
+draw. The frame now goes to the GPU in parts by default (`GpuSends`
+1, with one more send after the envmap). "GpuSends 0" in
+nfshp2_config.txt goes back. The pixels are the same, and Azahar ran
+the race with no hang (HANDOFF.md, "Session 88";
+`docs/formats/draw-cuts.md`, "TASKS 57"). Ask the user for a log at
+the fire with this build ("DebugLog 1"). If the GPU ever stops, the
+sends are the first suspect. Next, one at a time: TASKS 53 (the debug
+menu), then 54 (the keyboard).**
 
 **Now (Session 86, 2026-10-12): TASKS 52 is done, the profiles.
 Retail's `MemcardSaver`, `LoadSaveWrapper` and `Autosaver` are in

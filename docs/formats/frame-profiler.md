@@ -167,7 +167,12 @@ Each second of a race, `frameprof` logs a line (wrapped here):
   phase it interrupted. Only the decode is CPU time
   (`new3ds-mode.md`).
 - citro3d's own times: the CPU's from C3D_FrameBegin to C3D_FrameEnd,
-  and the GPU's.
+  and the GPU's. The GPU's runs from C3D_FrameEnd, where it starts its
+  clock, to the queue's end. Since the race's frame goes to the GPU in
+  parts by default (`GpuSends`, TASKS 57), the GPU has done part of the
+  frame by then, and this is only what is left after C3D_FrameEnd. The
+  frame rate and the GPU wait are the measures then; "GpuSends 0"
+  gives the whole time back.
 - Retail's two rates, as the HUD would print them.
 
 Since 13b-4 a `models:` line follows each `frame:` line, with

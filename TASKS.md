@@ -2536,6 +2536,11 @@ phases.
         the mirror's triangles. Left: the device's timing at the fog
         and the desert, and the user's word on the envmap a face a
         frame. (`docs/formats/draw-cuts.md`, "TASKS 46")
+        Session 88 (TASKS 57): the sends are on by default, with one
+        more after the envmap; "GpuSends 0" turns them off. Also left:
+        the device's log at track 11's fire with that build, and the
+        smoke's quads cut to their texture's non-zero alpha (the
+        sprites are fill-bound, 2.3 to 2.5 ms per 100 on the device).
 
 47. [ ] **A brief artifact on the bridge before the finish line.**
         Reported on 2026-10-12, after the user played build bb70171 on
@@ -2708,11 +2713,30 @@ phases.
         a save of 11,000 points, a cop race ended at 11,100, Quit
         saved 11,100, and the next boot loaded that file. The user
         saw the points kept on 2026-10-12.
-57. [ ] **The fire truck's track lags.** Reported on 2026-10-12: the
+57. [x] **The fire truck's track lags.** Reported on 2026-10-12: the
         track with the fire truck, its fire, smoke and fog, is a bit
         laggy. Find the track, profile it, and cut the cost there and
         in places like it (TASKS 46's rules: lossless). It comes after
         TASKS 58; then TASKS 53.
+        Done in Session 88 (2026-10-13), to be confirmed on the device
+        (`docs/formats/draw-cuts.md`, "TASKS 57"):
+        - The track is 11 (Coastal Parklands); the fire's emitters are
+          at about x -580 to -700, y 145 to 240.
+        - The user's log there: 13.8 FPS at worst, GPU-bound (about
+          50 ms of GPU against 23 of CPU draw). The GPU only started
+          once the whole draw was built, so the two added up.
+        - Retail's strips hold float positions and texture
+          coordinates, so a smaller vertex would not be exact.
+        - The frame now goes to the GPU in parts by default
+          (`GpuSends` 1, TASKS 46's opt-in), with one more send
+          between the envmap and the mirror. That is about 18 FPS
+          expected there where it was 13.8, with the same pixels.
+          "GpuSends 0" in nfshp2_config.txt goes back.
+        - On Azahar the race ran whole with no hang, and the shots at
+          the fire match the run without the sends.
+        - Left for TASKS 46: the device's log at the fire with this
+          build, the smoke's quads cut to their texture's alpha, and
+          the envmap a face a frame (the user's call).
 58. [x] **The car goes through things.** Reported on 2026-10-12, while
         watching a scripted cop race on Azahar: the car clips through
         the road, through walls, rails and hills, and through other

@@ -38,7 +38,7 @@ int32_t ForceAllAICarsToBeThisType = -1;    // gp-23116
 int32_t MaximumNumAICars = 7;               // gp-23112
 int32_t TunePreRaceSequence;                // gp-23108
 int32_t ConfigDebugLog;                     // the port's own
-int32_t ConfigGpuSends;                     // the port's own
+int32_t ConfigGpuSends = 1;                 // the port's own
 int32_t ConfigClusterCull = 1;              // the port's own
 int32_t ConfigForceChopper;                 // the port's own
 

@@ -6879,10 +6879,11 @@ int main(int argc, char** argv)
                 trackview_read_depth(&g_track, top);
                 trackview_draw_envmap(&g_track);
                 FRAMEPROF_STAMP(FRAMEPROF_ENVMAP);
+                // The envmap's faces to the GPU while the mirror is built,
+                // then the mirror while the view is (hangwatch.h's sends).
+                hangwatch_gpu_send();
                 trackview_draw_mirror(&g_track);
                 FRAMEPROF_STAMP(FRAMEPROF_MIRROR);
-                // The envmap's faces and the mirror to the GPU, while the
-                // view is built (hangwatch.h's sends).
                 hangwatch_gpu_send();
                 C3D_RenderTargetClear(top, C3D_CLEAR_ALL,
                                       __builtin_bswap32(sky), 0);

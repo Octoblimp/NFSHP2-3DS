@@ -71,11 +71,13 @@ extern int32_t TunePreRaceSequence;         // gp-23108, 0
 // race (logwriter.h).
 extern int32_t ConfigDebugLog;              // 0
 
-// The port's own too: "GpuSends 1" has a race's frame go to the GPU in
-// parts as it is drawn (hangwatch_gpu_sends_begin) rather than whole at
-// C3D_FrameEnd. Off by default until a run has shown it draws the same
-// frames and never stops the GPU (2026-10-12).
-extern int32_t ConfigGpuSends;              // 0
+// The port's own too: a race's frame goes to the GPU in parts as it is
+// drawn (hangwatch_gpu_sends_begin) rather than whole at C3D_FrameEnd.
+// Opt-in from 2026-10-12, on by default since 2026-10-13 (TASKS 57):
+// the GPU-bound fire on track 11 waited for the CPU's whole draw first.
+// "GpuSends 0" sends the frame whole again, should the device's GPU
+// ever stop with it.
+extern int32_t ConfigGpuSends;              // 1
 
 // The port's own: "ClusterCull 0" draws every batch whole, as before the
 // clusters (geocull.h), for a timing run to compare (2026-10-12).
