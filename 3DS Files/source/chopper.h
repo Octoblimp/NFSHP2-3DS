@@ -20,9 +20,9 @@
 // HighLevelPlanning, CleverPursuitPlan and BombRunLogic. 12k-4a has the
 // flying under them, Think, and 12k-4b Fly, the moving and the dust.
 // 12k-7 has the chase's side, tPursuit's UpdateChopper and the manager's
-// requests, in pursuitchopper.c. The salvos (FireSalvo and the
-// munitions it launches, 12k-6, in chopperfire.c, after step 14b's
-// Smokeable) come after.
+// requests, in pursuitchopper.c. 12k-6 has the salvos: FireSalvo in
+// chopperfire.c, and the rockets, smoke bombs and spikes it launches in
+// munition.c, smokeables of their own.
 //
 // The ChopperSound is 14-7's, in choppersound.c; main.c sets
 // gCreateChopperSoundFn to choppersound_create. Without it the port

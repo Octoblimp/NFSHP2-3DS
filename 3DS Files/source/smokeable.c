@@ -1104,7 +1104,7 @@ static int32_t smokeable_motion_class(Smokeable *s)
 // momenta damped by 0.95 for a slowing smokeable and stopped for a
 // settled one, and the auxiliaries again after either. The stopped
 // momenta's w lanes are the stack's in the image, 0 here.
-static void smokeable_system_compute_auxiliaries(void *self)
+void smokeable_system_compute_auxiliaries(void *self)
 {
     Smokeable *s = (Smokeable *)self;
     RigidBody *rb;

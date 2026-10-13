@@ -168,6 +168,7 @@
 #include "avimovie.h"
 #include "mainloop.h"
 #include "mellowmover.h"
+#include "munition.h"
 #include "pausemenu.h"
 #include "endevent.h"
 #include "endgame.h"
@@ -4110,6 +4111,30 @@ static bool raceHoldsLoadingScreen(void)
 // stage, the world's clock, player 1's car and the view's camera; and a
 // camera zone's start and end as they come, as the jump cam's last a
 // second or two.
+// The helicopter's munitions (12k-6): those in flight, the most at once,
+// and the explosions still playing.
+static void logMunitions(const struct Chopper* h)
+{
+    const bNode* e;
+    int          effects = 0;
+
+    if (h == NULL || RocketSlotPool == NULL) return;
+    if (TheMunitionEffectsHandler != NULL) {
+        for (e = TheMunitionEffectsHandler->List.next;
+             e != &TheMunitionEffectsHandler->List; e = e->next)
+            effects++;
+    }
+    logLine("race: munitions: run %d plan %d salvos %d of %d, rockets %d "
+            "(most %d), smoke bombs %d (%d), spikes %d (%d), effects %d",
+            (int)h->BombRunType, (int)h->Plan, (int)h->NumSalvosReleased,
+            (int)h->TotalSalvos, (int)RocketSlotPool->numAllocatedSlots,
+            (int)RocketSlotPool->mostNumAllocatedSlots,
+            (int)SmokeBombSlotPool->numAllocatedSlots,
+            (int)SmokeBombSlotPool->mostNumAllocatedSlots,
+            (int)DroppedSpikesSlotPool->numAllocatedSlots,
+            (int)DroppedSpikesSlotPool->mostNumAllocatedSlots, effects);
+}
+
 static void logRaceState(void)
 {
     static int32_t next;
@@ -4318,10 +4343,14 @@ static void logRaceState(void)
                                       ? pCurrentWorld->Helicopter : NULL;
         int                   chases = 0;
 
+        // The first chase, or the first with the helicopter.
         for (n = pCopManager->PursuitList.Next;
              n != &pCopManager->PursuitList; n = n->Next) {
-            if (chases++ == 0)
-                first = (const tPursuit*)(const void*)n;
+            const tPursuit* q = (const tPursuit*)(const void*)n;
+
+            if (chases++ == 0
+                || (q->pChopper != NULL && first->pChopper == NULL))
+                first = q;
         }
         logLine("race: chases %d, first behaviours %08lx chopper state %d "
                 "timer %.1f; helicopter %s plan %d at %.0f %.0f %.0f, busy "
@@ -4334,6 +4363,7 @@ static void logRaceState(void)
                 h != NULL ? (double)h->CurrentPos.y : 0.0,
                 h != NULL ? (double)h->CurrentPos.z : 0.0,
                 (int)pCopManager->bChopperBusy);
+        logMunitions(h);
         if (p != NULL && p->MyCar != NULL) {
             // Player 0's pullover NIS (12l-2): playing or not, which NIS
             // and camera, when it ends, the next of each kind, and the
@@ -4351,6 +4381,14 @@ static void logRaceState(void)
                     (int)copmanager_get_num_tickets(pCopManager,
                                                     p->MyCar));
         }
+    } else if (pCurrentWorld != NULL && pCurrentWorld->Helicopter != NULL) {
+        // ForceChopper's helicopter in a race with no cops.
+        const struct Chopper* h = pCurrentWorld->Helicopter;
+
+        logLine("race: helicopter plan %d at %.0f %.0f %.0f", (int)h->Plan,
+                (double)h->CurrentPos.x, (double)h->CurrentPos.y,
+                (double)h->CurrentPos.z);
+        logMunitions(h);
     }
     if (pCurrentWorld != NULL) {
         // The cop cars, those with their lights on, and their red, blue
@@ -4523,6 +4561,49 @@ static void guardNote(FILE* f)
 // MainLoop's race half (0x0012f3c8 .. 0x0012f5fc), after the flow's
 // service: the coordinator, the world's step, and the cameras. The calls
 // the port does not have yet are named where they would be.
+// ForceChopper (configitems.h), the port's own test of the helicopter's
+// munitions with no chase. In an R-held race the helicopter egg is on
+// (eggIsOn below), so InitCars makes the helicopter even with no cops and
+// it follows the player's car (Chopper::DoTweakerTriggers); no chase can
+// take it (its word at 960). Each time it is back in PURSUIT this waits a
+// few seconds and starts a bombing run of the kind the item names. With
+// no cop manager (SkipFEMaxCops 0) a spike belt has no list for its strip
+// (DroppedSpikes::Explode), so the belt becomes a smoke bomb.
+static int32_t eggIsOn(int32_t n)
+{
+    return n == EGG_HELICOPTER && g_flow.skipFE && ConfigForceChopper > 0;
+}
+
+static void forceChopperTick(float dt)
+{
+    static const struct Chopper* last;
+    static float                 wait;
+    static int                   turn;
+    struct Chopper*              h;
+    ChopperAttackType            type;
+
+    if (!eggIsOn(EGG_HELICOPTER) || pCurrentWorld == NULL) return;
+    h = pCurrentWorld->Helicopter;
+    if (h == NULL || h->CurrentCar == NULL) return;
+    if (h != last) {
+        last = h;
+        wait = 5.0f;
+        turn = 0;
+    }
+    if (h->Plan != CHOPPLAN_PURSUIT) return;
+    wait -= dt;
+    if (wait > 0.0f) return;
+    wait = 4.0f;
+    if (ConfigForceChopper >= 5)
+        type = (ChopperAttackType)(turn++ % 4);
+    else
+        type = (ChopperAttackType)(ConfigForceChopper - 1);
+    if (type == CHOPATTACK_SPIKE_BELT && pCopManager == NULL)
+        type = CHOPATTACK_SMOKE_BOMB_1;
+    if (chopper_attack_car(h, type))
+        logLine("race: ForceChopper bombing run %d", (int)type);
+}
+
 static void raceFrame(void)
 {
     RaceCoordinator* rc = pRaceCoordinator;
@@ -4567,6 +4648,7 @@ static void raceFrame(void)
             GenerateJoyEvents();
             MainLoopTiming.GenerateJoyEvents = bGetTicker();
             frameMark("race: the world's step");
+            forceChopperTick(step);
             world_do_timestep(w, step);
         }
     }
@@ -5292,6 +5374,7 @@ int main(int argc, char** argv)
     realdriver_install_vtable();
     collisionbody_install_vtables();
     smokeable_install_vtables();
+    munition_install_vtables();
     carcollisionbody_install_vtable();
     aiaction_install_vtables();
     aiactions_install_vtables();
@@ -6169,6 +6252,13 @@ int main(int argc, char** argv)
     gSmokeableSpawnFn             = smokeable_spawn;
     gBarricadeDeleteBarrelFn      = barricade_delete_barrel_seam;
     gBarricadeMarkBodyFadingFn    = barricade_mark_body_fading_seam;
+    // The helicopter's munitions (12k-6): rockets, smoke bombs and
+    // spikes, smokeables of their own made with the world; their
+    // explosions play out in the handler the helicopter steps
+    // (munition.h, chopperfire.c).
+    gInitMunitionsFn              = init_munitions;
+    gCloseMunitionsFn             = close_munitions;
+    gMunitionEffectsDoTimestepFn  = munition_effects_do_timestep;
     // The race's cop drivers each get a car, in limbo -- unseen, parked,
     // not colliding -- until a radar trap or a roadblock calls it out
     // (copmgr.h).
@@ -6180,8 +6270,7 @@ int main(int argc, char** argv)
     // race, flown in World's step, asked for by each chase that may have
     // one and sent at its chased car (pursuitchopper.h), drawn with the
     // world objects. Be A Cop's requests ask for it and for a roadblock
-    // (playerinput.h). Its attacks drop nothing until its munitions
-    // (12k-6).
+    // (playerinput.h). Its attacks fire the munitions above (12k-6).
     gChopperCtorFn                      = chopper_construct;
     gChopperDestroyFn                   = chopper_destruct;
     gChopperFlyFn                       = chopper_fly;
@@ -6191,6 +6280,9 @@ int main(int argc, char** argv)
     gCopManagerBeACopRequestChopperFn   = tcopmanager_be_a_cop_request_chopper;
     gCopManagerBeACopRequestRoadBlockFn =
         tcopmanager_be_a_cop_request_road_block;
+    // The eggs (the cheats) are not ported; only ForceChopper's helicopter
+    // egg is ever on.
+    gEggIsOnFn                          = eggIsOn;
     // The pullovers (12l): a chase or a spike strip that stops its car pulls
     // it over, a ticket or an arrest, and the cop manager's think ends each
     // one when its hold runs out or its NIS finishes (pullover.h).

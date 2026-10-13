@@ -458,9 +458,11 @@ class Model(object):
         tc, pt, terr, nrm, found = (em.reg[r] & M32 for r in (4, 5, 6, 7, 8))
         fd, el, n = self.elevq.pop(0) if self.elevq else (
             1, 0x3f000000, (0, 0, 0x3f800000))
-        for i in range(3):
-            e.put32(nrm + 4 * i, n[i])
-        e.put32(found, fd)
+        if nrm:
+            for i in range(3):
+                e.put32(nrm + 4 * i, n[i])
+        if found:
+            e.put32(found, fd)
         self.emit("  elev %s%s terr %s -> %d %08x %08x %08x %08x" % (
             self.sym(tc), self.words(pt, 3), self.sym(terr), fd, el,
             n[0], n[1], n[2]))

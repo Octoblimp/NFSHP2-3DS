@@ -325,10 +325,13 @@ float topology_get_elevation(TopologyCoordinate *tc, const bVector3 *pt,
 
     if (elevq_i < elevq_n)
         a = elevq[elevq_i++];
-    normal->x = bf(a.n[0]);
-    normal->y = bf(a.n[1]);
-    normal->z = bf(a.n[2]);
-    *found = a.found;
+    if (normal != NULL) {
+        normal->x = bf(a.n[0]);
+        normal->y = bf(a.n[1]);
+        normal->z = bf(a.n[2]);
+    }
+    if (found != NULL)
+        *found = a.found;
     printf("  elev %s", sym(tc));
     words(pt, 3);
     printf(" terr %s -> %d %08x %08x %08x %08x\n", sym(terrain), (int)a.found,
@@ -925,8 +928,10 @@ void dynamiccollisionbody_set_position(CollisionBody *b, bVector3 *p)
 { (void)b; (void)p; DUMMY("dyn set_position"); }
 float dynamiccollisionbody_get_max_backup_time(CollisionBody *b)
 { (void)b; DUMMY("dyn get_max_backup_time"); return 0.0f; }
+#ifndef SMOKEABLE_TEST_EXTRA
 void dynamiccollisionbody_backup(CollisionBody *b, float t)
 { (void)b; (void)t; DUMMY("dyn backup"); }
+#endif
 void dynamiccollisionbody_interpolate(CollisionBody *b, bVector3 *pos,
                                       bMatrix4 *rot, float t)
 { (void)b; (void)pos; (void)rot; (void)t; DUMMY("dyn interpolate"); }
@@ -1443,12 +1448,24 @@ static const VtEntry *body_slot(void *b, int slot)
     return vt_slot(((CollisionBody *)b)->_vtable, slot);
 }
 
+// A harness that includes this one (munition_test.c) defines
+// SMOKEABLE_TEST_EXTRA and these two: its own ops, tried first, and what
+// it sets up after the tables.
+#ifdef SMOKEABLE_TEST_EXTRA
+static int  extra_op(char **a, int na);
+static void extra_init(void);
+#endif
+
 static void op(char **a, int na)
 {
     const char *o = a[0];
     static _Alignas(16) bVector3 v1, v2;
     static _Alignas(16) bMatrix4 mx;
 
+#ifdef SMOKEABLE_TEST_EXTRA
+    if (extra_op(a, na))
+        return;
+#endif
     if (!strcmp(o, "info")) {
         int k;
 
@@ -1859,6 +1876,9 @@ int main(int argc, char **argv)
     pCurrentWorld = (World *)(void *)tok_world;
     TheRaceParameters.NumPlayerCars = 1;
     smokeable_install_vtables();
+#ifdef SMOKEABLE_TEST_EXTRA
+    extra_init();
+#endif
     while (fgets(line, sizeof line, f) != NULL) {
         char *a[48], *s = line;
         int   na = 0;

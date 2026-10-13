@@ -81,6 +81,13 @@ extern int32_t ConfigGpuSends;              // 0
 // clusters (geocull.h), for a timing run to compare (2026-10-12).
 extern int32_t ConfigClusterCull;           // 1
 
+// The port's own: "ForceChopper N" sends the helicopter after the player
+// in an R-held (SkipFE) race and has it bomb every few seconds, for
+// testing its munitions (12k-6) with no chase: 1 rockets, 2 and 3 the
+// smoke bombs, 4 the spike belt, 5 each in turn (main.c,
+// forceChopperTick). Off by default (2026-10-12).
+extern int32_t ConfigForceChopper;          // 0
+
 // SkipFE as the image reads it, `lw -23220(gp)`: gameflow's skipFE
 // through gPlayerCamSkipFE, 0 while that is unset.
 int32_t config_skip_fe(void);

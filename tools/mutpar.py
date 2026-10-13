@@ -186,7 +186,8 @@ def _judge(name, rc, got_path, base, diff, equivalent):
 class Snapshot:
     """What a build of `sources` reads, copied out of the tree, and built
     once: each source's directory's headers (all of `3DS Files/source`'s,
-    at any depth) and the sources themselves."""
+    at any depth), the sources themselves, and any .c file a source
+    includes from beside it (a harness built on another's)."""
 
     def __init__(self, sources, build_name, flags=None):
         self._tmp = tempfile.TemporaryDirectory(prefix="mutpar-")
@@ -200,6 +201,12 @@ class Snapshot:
             dst = self._dir(src.parent) / src.name
             shutil.copyfile(src, dst)
             self.files[src] = dst
+            text = src.read_text(encoding="utf-8", errors="replace")
+            for inc in re.findall(r'^#include "([^"/]+\.c)"', text, re.M):
+                f = src.parent / inc
+                if f.is_file() and f.resolve() not in self.files:
+                    shutil.copyfile(f, self._dir(src.parent) / inc)
+                    self.files[f.resolve()] = self._dir(src.parent) / inc
         self.inc = [self._dir(hostbuild.SRC.resolve())]
         objs = self.dir / "obj"
         objs.mkdir()

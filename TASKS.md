@@ -2347,7 +2347,7 @@ phases.
           features (0a240000) have none of the bottom screen's items,
           as retail hides its whole HUD then. Left as it is; asked the
           user.
-39. [ ] **The helicopter's missiles.** Asked for on 2026-10-10, with a
+39. [x] **The helicopter's missiles.** Asked for on 2026-10-10, with a
         video of retail for reference: "NFS HP2 for PS2 dodging
         missiles" (https://www.youtube.com/watch?v=VAsYHOw5pyc, 2:18).
         This is 12k-6: FireSalvo (`0x001ea8c0`) is a placeholder in
@@ -2376,6 +2376,17 @@ phases.
           comes from the track's data: find where BombRunType is set
           and check that only the armed helicopter's tracks pick row
           kind 0.
+        Done in Session 87: `munition.c` ports Munition.obj whole (the
+        three classes, ExplodeWarhead, MakeSpikeBelt, the effects
+        handler) and `chopperfire.c` FireSalvo, which launches them.
+        No track picks the weapon: the chase's behaviours do (0x100
+        rockets at 3 or 4 roadblocks, 0x80 belts at 5 or more), and a
+        track decides only whether a helicopter comes and its model
+        (`docs/formats/munitions.md`). `ForceChopper N` sends it in a
+        SkipFE race; Azahar showed rockets, barrels with their smoke
+        and flash, a car thrown by a blast, and belts handed to the
+        cop manager. `tools/munition_check.py` runs retail's own: 262
+        ops, 1038 lines, 0 differ, and 175 of 175 mutations caught.
 40. [x] **The radar detection meter.** Asked for on 2026-10-10: the
         bar of lights under the rear-view mirror. The user's
         description: it fills as the car nears a cop, green first and
@@ -2656,6 +2667,28 @@ phases.
         or by "DebugMenu 1" in nfshp2_config.txt. It starts any track
         straight away with custom settings, unlocks everything, and
         gives NFS points. It comes after TASKS 39 (the munitions).
+54. [ ] **Text input on the 3DS keyboard.** Asked for on 2026-10-12.
+        Anything that asks for typed text uses the 3DS's built-in
+        software keyboard (libctru's swkbd applet) in place of a ported
+        letter grid. The first is the Options menu's Player Names, the
+        `NameEntry` screen (a plain screen in `kScreens[]` for now). Keep
+        retail's length limit and allowed characters. Cancel keeps the
+        old name. It comes after TASKS 53.
+55. [ ] **A crash dump when the game closes.** Reported on 2026-10-12:
+        closing the game from the HOME Menu, or turning the system off
+        while it runs, leaves a Luma ARM11 exception dump
+        (`3DS Files/crash_dump_00000002.dmp` and `..03.dmp`). The game
+        must leave cleanly both ways. It comes after TASKS 39.
+56. [ ] **NFS points are not kept.** Reported on 2026-10-12 with the
+        debug log (`3DS Files/nfshp2_debug.txt`): a race's NFS points
+        said they were saved, but the next run had none. The points
+        must add up across races and survive a save and a new boot.
+        It comes after TASKS 55.
+57. [ ] **The fire truck's track lags.** Reported on 2026-10-12: the
+        track with the fire truck, its fire, smoke and fog, is a bit
+        laggy. Find the track, profile it, and cut the cost there and
+        in places like it (TASKS 46's rules: lossless). It comes after
+        TASKS 56; then TASKS 53.
 
 ### The retail frontend
 

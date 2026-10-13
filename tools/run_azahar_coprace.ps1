@@ -418,12 +418,14 @@ Write-Host "=== race start and flow ==="
 $dbg | Where-Object { $_ -match "race start|  driver|flow (want|state|enter|leave)|race over|popup|not ported|track detached|abort|assert|fatal" } |
     Select-Object -Last 70 | ForEach-Object { Write-Host $_ }
 Write-Host ""
-Write-Host "=== chases and the player's NIS (changes) ==="
-$lastChase = ""; $lastNis = ""; $changes = @()
-foreach ($l in ($dbg | Where-Object { $_ -match "^race: (chases|player NIS)" })) {
+Write-Host "=== chases, the helicopter's munitions and the player's NIS (changes) ==="
+$lastChase = ""; $lastNis = ""; $lastMun = ""; $changes = @()
+foreach ($l in ($dbg | Where-Object { $_ -match "^race: (chases|munitions|player NIS)" })) {
     if ($l -match "^race: chases") {
         $k = $l -replace "timer [-0-9.]+", "" -replace "at [-0-9. ]+, busy", "busy"
         if ($k -ne $lastChase) { $changes += $l; $lastChase = $k }
+    } elseif ($l -match "^race: munitions") {
+        if ($l -ne $lastMun) { $changes += $l; $lastMun = $l }
     } elseif ($l -ne $lastNis) {
         $changes += $l; $lastNis = $l
     }

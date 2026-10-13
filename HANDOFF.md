@@ -21027,3 +21027,49 @@ The user's order of 2026-10-12: finish the save and load work in
   8. World Racing sets 7 AI. The port matches it.
 - **Next.** TASKS 39 (12k-6), the helicopter's munitions, to 100%. Then
   TASKS 53, the debug menu.
+
+## Session 87 -- 12k-6, the helicopter's munitions (TASKS 39)
+
+The user's order of 2026-10-12: one task at a time. The munitions to
+100%, then the exit crash dumps (TASKS 55), the NFS points (56), the
+fire truck track's lag (57), the debug menu (53) and the keyboard (54).
+
+- **Munition.obj.** `munition.{c,h}` port 0x001be4b8 .. 0x001bfea0 whole:
+  - Munition, DroppedBomb, SmokeBomb, DroppedSpikes and Rocket, each
+    with its own slot pool and its two tables
+    (`munition_install_vtables`);
+  - ExplodeWarhead's push on every car in range, and its wreck, e-brake
+    and zone camera;
+  - MakeSpikeBelt's strip for the cop manager;
+  - the rocket's homing;
+  - the MunitionEffectsHandler that plays the blasts out.
+  `chopperfire.c`'s FireSalvo (0x001ea8c0) launches them; until now it
+  only counted salvos. `docs/formats/munitions.md` has it all.
+- **Which tracks get missiles.** None picks them: the chase's behaviours
+  do (rockets at 3 or 4 roadblocks, belts at 5 or more, everything for
+  Be A Cop's call). A track decides whether a helicopter comes, and its
+  model.
+- **ForceChopper N** (`configitems.h`, off by default) sends the
+  helicopter in a SkipFE race, through retail's helicopter egg, and
+  starts a bombing run of kind N every 4 seconds of PURSUIT. On Azahar,
+  track 12, gas held:
+  - rockets, barrels with their smoke and flash, a car thrown by a
+    blast;
+  - with `SkipFEMaxCops 1`, two belts on the cop manager's list.
+  `run_azahar_coprace.ps1` prints the munitions log lines as they change.
+- **The checker.** `tools/munition_check.py` and
+  `tools/src/munition_test.c` are built on the smokeables' pair (the
+  harness includes `smokeable_test.c`, its pools renamed). The script
+  covers:
+  - nine cars for the warhead, including exactly at MinRange, just
+    inside it, and exactly at MaxRange;
+  - every belt branch;
+  - the rocket's clamps, impulse and timeout;
+  - the handler;
+  - the destructors.
+  Result: 262 ops, 1038 lines, 0 differ. Of 175 mutations, all are
+  caught and none is equivalent. `mutpar.Snapshot` now copies a `.c`
+  file a source includes from beside it. smokeable_check is unchanged:
+  1238 lines, 0 differ; 271 of 276 caught and 5 equivalent.
+- **Next.** TASKS 55, the Luma dumps on closing from HOME or powering
+  off.

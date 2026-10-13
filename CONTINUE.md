@@ -70,6 +70,15 @@ cop's HUD (hudcop.c, hudrender.c, hudscore.c), the setup screens
   R helicopter (ce58fac). Not seen: an arrest, which the gas-only
   script cannot make. TASKS 43 is done (3DS button icons).
 
+**Now (Session 87, 2026-10-12): TASKS 39 is done (12k-6). The
+helicopter's rockets, smoke bombs and dropped spikes are retail's
+(`munition.c`, FireSalvo in `chopperfire.c`; `docs/formats/munitions.md`).
+munition_check: 1038 lines, 0 differ, and 175 of 175 mutations caught
+(HANDOFF.md, "Session 87"). Next, one at a time: TASKS 55 (the Luma
+dumps on closing from HOME or powering off), 56 (NFS points kept and
+summed), 57 (the fire truck track's lag), then 53 (the debug menu) and
+54 (the keyboard).**
+
 **Now (Session 86, 2026-10-12): TASKS 52 is done, the profiles.
 Retail's `MemcardSaver`, `LoadSaveWrapper` and `Autosaver` are in
 `memcard.c`. The Options menu's Save/Load saves, loads and turns
@@ -811,7 +820,7 @@ pursuit.obj, on a 10 KB manager. Its slices:
   `0x00215098`: bMalloc(48) and the constructor `0x00214d68`; table
   `0x002bc2a8`) is a Sound3d, and no in-race sound is ported yet. Until
   then `gCreateChopperSoundFn` stays NULL and the helicopter is silent.
-- **12k-6 moves after step 14b.** FireSalvo's munitions are
+- **12k-6, done (Session 87; `docs/formats/munitions.md`).** FireSalvo's munitions are
   Smokeables: Munition (`0x001be6c8`) and DroppedBomb (`0x001beae0`)
   under Rocket (`0x001bf340`), SmokeBomb (`0x001beb90`) and
   DroppedSpikes (`0x001bee88`), with the MunitionEffectsHandler
@@ -5562,7 +5571,7 @@ each class shows what it reaches.
 | 13 | ~~The two-screen HUD, to the split decided below~~ done as 8m: 8m-1 to 8m-6c | 10 |
 | 13b | New 3DS mode in full and a steady 30 FPS race (task 28), right after step 13: the real clock and the pacing, a frame profiler, New 3DS mode checked part by part, then only the optimizations the New 3DS needs. Set by the user on 2026-10-03 | 4 |
 | 14 | The car and world sounds and the speech, and the ChopperSound (12k-5) | 12 (14-1, 14-2a, 14-2b, 14-3, 14-4, 14-5, 14-6, 14-7, 14-8a, 14-8b, 14-8c and 14-8d done) |
-| 14b | ~~The smokeables: FindSmokeableInfo, the spawner (`0x0021ed28`) and delete (`0x0021ef88`), Smokeable's Break and DeleteFarAway, and their collision~~ done (Session 85, `docs/formats/smokeable.md`). The roadblock's barrels use it; the helicopter's munitions (12k-6) come next | 1 |
+| 14b | ~~The smokeables: FindSmokeableInfo, the spawner (`0x0021ed28`) and delete (`0x0021ef88`), Smokeable's Break and DeleteFarAway, and their collision~~ done (Session 85, `docs/formats/smokeable.md`). The roadblock's barrels use it, and the helicopter's munitions (12k-6, Session 87) | 1 |
 | 15 | **A whole race with the AI and the cops.** Steps 10-14 add about 15-23 slices | |
 | 16 | The full frontend from retail: the 44 screens still plain or unregistered (`screen_registry.py --check-port`), the event tree (the career), the tourneys and the car selector | 6-10 |
 | 17 | Save data on the SD card in the memory card's place: Phils Load Save, the autosave, the boot autoload and the options (task 29) | 2-3 |
@@ -5573,7 +5582,7 @@ each class shows what it reaches.
 That was about 41-60 slices to the full game when the table was set.
 After 12k-7 (2026-10-09), about 22-35 are left, and the count has
 run low before:
-- step 12's: 12m (12n is done), with 12k-6 after step 14b, and the NIS
+- step 12's: 12m (12n and 12k-6 are done), and the NIS
   player;
 - steps 10, 14, 14b, 16, 17, 18 and 20.
 

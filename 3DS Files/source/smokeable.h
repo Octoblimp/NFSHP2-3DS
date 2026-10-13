@@ -339,6 +339,9 @@ int32_t   smokeable_is_blinking(CollisionBody *b);            // 0x00221fd8
 float     smokeable_get_bounciness(CollisionBody *b);         // 0x00221f10
 float     smokeable_get_friction(CollisionBody *b);           // 0x00221f00
 int32_t   smokeable_get_smoke_type(CollisionBody *b);         // 0x00222050
+// The PhysicsSystem table's ComputeAuxiliaries (0x002219f8), reached
+// through the second base; the munitions' tables share it.
+void      smokeable_system_compute_auxiliaries(void *self);
 void      smokeable_on_lifetime_end(CollisionBody *b);        // 0x002212d0
 
 // Smokeable::Break, through World::DoTimestepCollisions. main.c binds it
