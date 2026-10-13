@@ -2672,6 +2672,10 @@ phases.
         or by "DebugMenu 1" in nfshp2_config.txt. It starts any track
         straight away with custom settings, unlocks everything, and
         gives NFS points. It comes after TASKS 39 (the munitions).
+  - [ ] Session 89: designed, no code yet. FRONTB's Flailer chunk is
+        rebuilt at boot with a hidden main-menu item and a "Port Debug
+        Menu" screen copied from Be The Cop Setup (HANDOFF.md,
+        "Session 89").
 54. [ ] **Text input on the 3DS keyboard.** Asked for on 2026-10-12.
         Anything that asks for typed text uses the 3DS's built-in
         software keyboard (libctru's swkbd applet) in place of a ported

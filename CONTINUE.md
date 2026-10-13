@@ -86,6 +86,24 @@ road, walls and cars) is closed at the user's word with no fault
 found: the hull matches the body and no penetration showed (HANDOFF.md,
 "Session 87, continued -- TASKS 58").**
 
+**Now (Session 89, 2026-10-13): TASKS 53 (the debug menu) is designed
+but nothing is written. The session was stopped at the user's word
+before any code. The plan:**
+
+- **FRONTB rebuilt at boot.** A new `debugmenu.c` rebuilds FRONTB's
+  Flailer chunk with two things added:
+  - a hidden 4th main-menu item, "Debug Menu", with its mask;
+  - a new screen, "Port Debug Menu" (`0xd98ab71e`), copied from Be The
+    Cop Setup with bigger text rooms.
+- **Showing the item.** The L + R + D-Pad Up chord on the main menu,
+  or "DebugMenu 1" in the config, shows the item.
+- **The panel** starts any track with chosen settings, unlocks or
+  locks everything, and gives NFS points.
+
+**Every offset, hash and call is in HANDOFF.md, "Session 89". Read it
+first and write the code from it. Then do TASKS 54 (the keyboard). Ask
+the user for a log at the fire with the GpuSends build.**
+
 **Now (Session 88, 2026-10-13): TASKS 57 is done, waiting on the
 device's word. The fire is on track 11, where the user's log was
 GPU-bound at 13.8 FPS, with the GPU starting only after the CPU's whole

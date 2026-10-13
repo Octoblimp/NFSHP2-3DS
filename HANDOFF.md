@@ -21290,3 +21290,274 @@ Azahar, and ended at the user's word ("wrap up those GPU optimizations
   - The envmap a face a frame. That is the user's call, since the
     reflections would lag.
 - **Next:** TASKS 53 (the debug menu), then 54 (the keyboard).
+
+## Session 89 -- TASKS 53, the debug menu (designed, no code yet)
+
+The session picked up TASKS 53 after Session 88. It ended at the
+user's word ("Stop work, write up HANDOFF.MD etc."). Nothing in `3DS
+Files/source` was changed. The only modified file in the tree is
+`tools/run_azahar_coprace.ps1`, and only its line endings, from before
+this session. The design below is settled and ready to write.
+
+### What the user asked for (2026-10-12, verbatim)
+
+"implement a custom debug menu you enable by pressing L + R and up on
+the D-Pad at the same time on the main menu, or by setting "DebugMenu
+1" in the config document. It will be a custom debug menu panel on the
+main menu navigation. When you go into it, it lets you do things like
+just jump into custom tracks or wtv with custom settings, unlock all,
+give yourself NFS points, etc."
+
+### Retail's own debug menu (not reused)
+
+- INGAMEB has a "Debug Menu" screen, `d4742cd7`, with 19 objects.
+  Its rows are MENUITEM_1..11 at x 176, in FONT_HUD (`a2d444f6`) at
+  scale 0.6.
+- Its rows hold only 19 to 64 characters each, and they are in-race
+  toggles: finish position, collisions, mirror, env mapping, super
+  easy AI.
+- Its code is PauseDebugMenu:
+  - the constructor, `0x00173e30`;
+  - MenuCallback, `0x001740c0`;
+  - OnMenuItemScroll, `0x00174198`;
+  - the callback, `0x00174590`.
+
+  The decompile is in this session's scratchpad (`dbgmenu.c`). Rerun
+  `DecompileByAddr.java` with `DECOMPILE_ADDRS=00173e30,...` (no `0x`)
+  to get it again.
+- `pausemenu.c`'s `kPauseDebugMenuScreen` ("Debug Menu") is never
+  reached on the retail disc. Leave that name free.
+
+### The plan
+
+**1. FRONTB's Flailer chunk rebuilt at boot**, in a new
+`debugmenu.c`/`.h`.
+
+- **The call.** `debugmenu_patch_frontend(data, len, &outLen)` runs
+  in `main.c`'s `addBundle` for FRONTB only. It runs after
+  `uirender_add_bundle` and before `flailer_add_project`.
+- **The swap.** It does `bui_close(&b->ui)`, then
+  `bui_open(&b->ui, newBuf, 0, newLen)`.
+- **Keeping the buffer.** Add a `uint8_t* uiData` to `UIBundle`
+  (`uirender.h`) to hold the new buffer, and free it in
+  `uirender_free`. The bundle's own `data` stays as it is, so the
+  textures, fonts and `frontres_load` don't change.
+- **Why rebuild the bytes** rather than insert into the BUI's object
+  table: `flailer_object_index` (`flailer.c:95`) binary-searches the
+  payload addresses, so they must rise in file order. A rebuilt chunk
+  keeps that true.
+- **The chunk format** (`bchunk.c`) is `[u32 type][u32 size][payload]`,
+  little-endian, with no alignment. Every object size is a multiple of
+  4. `flailer_add_project` needs 4-aligned payloads, and a malloc'd
+  buffer gives that.
+- **The writer.** Write each container's header with size 0, then
+  patch the size once its children are written. Keep offsets, not
+  pointers, because `realloc` can move the buffer.
+- **What gets copied.** The project chunk (`0x00010213`) and every
+  screen container (`0x80010201`) go across in order. Padding chunks
+  (`0/0`) can be dropped.
+- **Retail object fields**, as offsets from the payload:
+  - NameHash +8, GroupHash +12, Name[24] +16;
+  - ObjectType +40, Visibility +41 (0 invisible, 1 visible), Z +42,
+    DirtyFlag +43;
+  - X +48, Y +52, ScaleX +56, ScaleY +60.
+- **Text fields:** FontHash +80, MaxChars +84, Format +88, Color +92,
+  LanguageID +96, and String at +100. The payload is
+  100 + roundup4(room).
+  - To make a text's room bigger, copy its first 100 bytes, set
+    MaxChars to the new room, and copy the old string.
+  - `flailertext_set_string` writes up to MaxChars, so MaxChars must
+    not be more than the chunk has.
+- **The screen definition** (`0x00010203`, 40 bytes): NameHash +8,
+  CallbackHash +12, HelpMenuHash +16 (set it to 0 on the copy),
+  ResX/ResY +24, NumObjects (u16) +28.
+
+**2. The main menu's 4th item.** Two objects are added to the end of
+NEW_MAIN_MENU, and its NumObjects goes up by 2.
+
+- **The label** is a copy of MENUITEM_3, at (152, 236): 55 below
+  Options, as 1, 2 and 3 are 55 apart. It has room 16, LanguageID 0,
+  string "Debug Menu", and MENUITEM_3's GroupHash, so it slides in with
+  the others.
+- **The mask** is a copy of MI_3_MASK, at (141, 238).
+- **Hidden until revealed.** Both start invisible, under dummy hashes:
+  `PORT_DEBUG_ITEM` `0xd988c438` and `PORT_DEBUG_MASK` `0xd98aa6b5`.
+  - bmenu only finds MENUITEM_n by hash, and bsel only finds the
+    masks by hash, so neither sees the item until then.
+  - The main menu's ctor already passes MI_4_MASK in
+    `kMainMenuMasks[5]`.
+- **The reveal** (`debugmenu_reveal`) writes MENUITEM_4 (`0x52e039f6`)
+  and MI_4_MASK (`0x75345d33`) into +8 of each and makes both visible.
+  `bui_find_object` and `flailer_find_object` read +8 every time, so
+  nothing is cached.
+- **The layout fits.** The dark filler `aa5d7d3f` at (141, 228),
+  scale 32 x 7.06, covers y 228 to 341, so the new row sits on it.
+- **"DebugMenu 1"** reveals the item at boot, straight after the patch.
+  - Add `ConfigDebugMenu` to `configitems.c`'s table (that file is
+    CRLF).
+  - Put its comment in `configitems.h` (LF), next to `ConfigForceChopper`.
+- **The chord**, in `main.c`'s `flowInput`:
+  - The test: `g_flow.screen->callback == bgf_new_main_menu_callback`,
+    with `hidKeysHeld()` having both KEY_L and KEY_R, and KEY_DUP in
+    `kDown`.
+  - The action: reveal, then `fesound_play(30, NULL)` (the Easter
+    egg's sound), and take KEY_DUP out of `flowDown`.
+  - Then `bgf_change_to_screen(&g_flow, "New Main Menu", 0)`. It is
+    synchronous: dtor, leaveScreen, openScreen, which now finds
+    MENUITEM_4, then ACTIVATE and enterScreen.
+  - Last, `bmenu_set_active_item(&g_boot.menu, 0x52e039f6)` to land on
+    the item.
+  - L and R are not in `kBinds`, so the menu never hears them.
+- **`gameflow.c`** (`mainMenuHighlight`, `mainMenuEvent`): a
+  MENUITEM_4 case, marked as the port's own.
+  - **HIGHLIGHT:** the brackets to MI_4_MASK, and a literal blurb
+    through `banim_blurb_new_text(a, &m->blurb, text)`. Add a new
+    gameflow hook, `setBlurbText(user, screen, const char*)`, next to
+    `setBlurb` (`gameflow.h:258`). In `main.c` it sets
+    SCROLLING_TEXT's LanguageID to 0 and calls `bui_set_text_string`.
+  - **SELECT:** `bgf_change_to_screen(gf, BGF_DEBUG_MENU_NAME, 1)`.
+    Pushing the main menu makes B come back to it.
+  - Add `BGF_ITEM_MENUITEM_4 0x52e039f6u` and
+    `BGF_DEBUG_MENU_NAME "Port Debug Menu"` to `gameflow.h`.
+  - Run `bootflow_check.py` after. It runs retail's main menu, and
+    none of its scenarios sends MENUITEM_4.
+
+**3. The debug screen.** "Port Debug Menu" uses hash `0xd98ab71e`,
+which is `bhash("PORT_DEBUG_MENU")`. It is a new screen container at
+the end of FRONTB's project. It copies Be The Cop Setup (`d1eadbca`,
+56 objects), which is retail's look for a settings list.
+
+- **What d1eadbca has:**
+  - labels MENUITEM_1..7 at x 153, y 71 + 37k, in `fb79e54c`;
+  - the values `69a2c757..5d`, centred at x 494, in FONT_STATS
+    `a9bfda04`;
+  - the masks MI_1..7_MASK at (141, 72 + 37k), scale 32 x 1.7, and
+    the separators;
+  - the left and right arrows `d1cda594` (388, 75) and `9345e4a7`
+    (583, 76);
+  - the scroll arrows `edf2e4ee` (up, (95, 78)) and `20d73d01` (down,
+    (99, 302)), both invisible;
+  - the brackets MI_OVERSCORE `c671680c` and MI_UNDERSCORE
+    `32c91dae`;
+  - the title `5e9f4683`;
+  - SCROLLING_TEXT (room 100), which is what the bottom panel shows:
+    `liveBlurb`, `main.c:4716`;
+  - the panel, the grids, Help and PANELMOVIE.
+- **Left out of the copy:** MENUITEM_8 `0x52e039fa`, value 8
+  `69a2c75e`, MI_8_MASK `0x7e88ffb7`, `ab671c9a`, `1042eac3`, and
+  the invisible `c67cfb4a`.
+- **Rooms made bigger:** labels to 24, values to 40, and the title to
+  16 with LanguageID 0 and "Debug Menu".
+- **Registering it.** Add it to `kScreens[]` with
+  `debugmenu_callback`. Also teach `tools/screen_registry.py
+  --check-port` a port-only list. Today it fails any name the ELF
+  doesn't register; its baseline is 7 reachable names unregistered,
+  "Debug Menu" among them.
+- **The bottom panel.** Its title is the flow's screen name in
+  capitals. Its hint line (`main.c:6950`) could get a debug-menu
+  version: "Left/Right change  A select  B back".
+
+**4. The callback.** It shows 7 slots over a longer list, and handles
+scrolling itself.
+
+- **Moving.**
+  - bmenu sends PAD_UP and PAD_DOWN to the callback first, and a
+    nonzero `data->param` eats them (`bmenu.c:250`). So at the edges
+    the callback scrolls, or wraps and calls
+    `bmenu_set_active_item`.
+  - A consumed move plays no sound, so call
+    `fesound_play(BSND_MENU_UP/DOWN, NULL)` directly.
+  - For PAD_LEFT and PAD_RIGHT, set `data->noise`; bmenu plays it
+    after the callback.
+- **On HIGHLIGHT:**
+  - every mask is visible except the current slot's (IndicatorMode 1's
+    look);
+  - the brackets go to the mask's box (under: bottom - 3, over:
+    top - 6);
+  - the left and right arrows go to the row's y + 4, shown only on
+    rows with a value;
+  - the scroll arrows show when there are rows above or below;
+  - the blurb gets the row's help line.
+- **Setting text:** `flailer_printf(DEBUGMENU_SCREEN, obj, ...)` and
+  `flailer_set_visibility(..., FLAILER_OBJECT_VISIBLE/INVISIBLE)`.
+  `printf` caps at 128 characters and sets LanguageID 0.
+- **Avoid apostrophes.** The fonts may not have one, so the mode is
+  "Be The Cop", not "You're The Cop".
+- **The rows:**
+
+  | Row | What it does |
+  |---|---|
+  | Start Race | A starts the race |
+  | Mode | Hot Pursuit (express, cops on), Single Race (express, cops off), or Be The Cop |
+  | Track | Every TrackNumber with `track_get_info`. Be The Cop leaves out Point2Point, as `isTrackUnavailable` does. The name is `gFredTranslateFn(TrackLanguageID)`, or ReverseTrackLanguageID when backwards, else `ti->Name`. The time of day comes from `kTODLang = {0xd6e0, 0xd6e1, 0xd6e2, 0xd6e3, 0xd70a}` (`btracksel.c:90`) when TimeOfDay != 0. |
+  | Direction | Forwards or backwards |
+  | Car | Types 0..63 whose UsageType is RACING, or COP for Be The Cop, with a GeometryFilename and skins (`fredrace.c`'s `next_car`). The name is `pCarSpecs->FullName` translated, else CarTypeName. |
+  | Colour | `cartypeinfo_get_skin_number(ct, i)`, with the PrettyName from `cartypeinfo_get_skin_info` |
+  | Opponents | Defaults: Hot Pursuit 3, Single Race 7, Be The Cop 4. The most is 7. |
+  | Laps | 1 to 10. Point2Point is 1, and Be The Cop has none. |
+  | Traffic | None, Light, Medium or Heavy: 0, 0.33, 0.667 or 1.0 |
+  | Difficulty | 0, 1 or 2: OpponentStrength and CopStrength |
+  | Gearbox | TransmissionType |
+  | Unlock Everything | See below |
+  | Lock Everything | See below |
+  | NFS Points | Shown with `nfs_format_points`. Left and right change it by 10,000; A adds 100,000. The points' rewards come at the end of the next race, as retail's do. |
+
+- **Unlock Everything:**
+  - `unlock_events()` (retail's UnlockEvents, which nothing calls);
+  - every `TaskRewardStates[10]` and `PointsRewardStates[18]` set to 1;
+  - `fred_make_challenge_cars_available(&Fred)`.
+
+  It is kept only if the user saves (Options' Save/Load, or the
+  autosave after a race).
+- **Lock Everything:** `lock_events()`, the states back to 0, and
+  MakeChallengeCarsAvailable.
+- **Start Race in Hot Pursuit or Single Race** is `start_quick_race`
+  (`quickrace.c`) with the choices in it:
+  - `Fred.MainMenuOpts[1] = cops`;
+  - GameType 2, one player;
+  - the track, its direction, TimeOfDay and Point2Point;
+  - NumAICars, with the player at NumAICars + 1;
+  - the cops' fields as in `start_quick_race`;
+  - the traffic, the difficulty, RaceType 1 and the laps.
+
+  Then:
+  - `fred_make_challenge_cars_available`;
+  - `fpi_set_car_availability(p0, CAR_STATUS_AVAILABLE, type, -1, 1)`;
+  - `fpi_assign_car_of_type(p0, 2, type, skin, 0)`;
+  - the transmission;
+  - stop the movie (`gQuickRaceStopMovieFn`);
+  - start the race through a hook that does `fred_start_race(&Fred)`
+    and then `logRaceStart()`, like `hookCarSelStartRace`
+    (`main.c:3363`).
+- **Start Race in Be The Cop:**
+  1. Set GameType 7, `NumPlayerCars` 1 and `MainMenuOpts[1]` 1, and
+     `TheRaceParameters.NumPlayerCars` 1 and `NFSRaceMode` 1, as
+     `beACopSelect` does.
+  2. Put the difficulty in `ChallengeScreenData[4]`.
+  3. Run MakeChallengeCarsAvailable and
+     `fred_setup_race_parameters_after_race_setup` (roadblocks,
+     choppers, the clock and the objective).
+  4. Override NumAICars, the start position and TrafficDensity.
+  5. Set the track: RaceType 1, NumLapsInRace 0, EventTreeRace 0.
+  6. Assign the cop car for mode 7, and start the race.
+- **The settings** stay in a static struct for the session.
+
+**5. The rest of the routine:**
+- the ARM build (`tools/build_cia.ps1` in PowerShell);
+- an Azahar run: the chord on the main menu, the panel, a race started
+  from it, and the "DebugMenu 1" boot;
+- a host check of the rebuilt chunk, optional but worth it. Patch
+  FRONTB on the host and open it with `bui.c`. Then check:
+  - NEW_MAIN_MENU has 33 objects;
+  - the new screen has its objects;
+  - every other object is byte-identical (`tools/hostbuild.py`, as
+    `bui_check.py` does);
+- `docs/formats/debug-menu.md`;
+- TASKS 53 marked done, then CONTINUE and HANDOFF;
+- the commit;
+- then TASKS 54.
+
+### Still open from Session 88
+
+Ask the user for a device log at the fire on track 11 with the
+GpuSends build ("DebugLog 1" on the card, nothing else).
