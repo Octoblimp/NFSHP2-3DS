@@ -532,10 +532,13 @@ class Flow(object):
             self.reset_stack()
             self.change_to_screen("New Main Menu", 1)
             return
+        # Retail's order (0x0016f950): BootAutoload pushed before the
+        # language screen, so the language comes first. The demo's is the
+        # other way round.
         stages = [("Title Screen", self.should_see_title_sequence),
                   ("Legal MumboJumbo", self.should_see_legal_mumbo_jumbo),
-                  ("Language Options Pre FE", self.should_see_language_select),
-                  ("BootAutoload", self.should_see_autoload)]
+                  ("BootAutoload", self.should_see_autoload),
+                  ("Language Options Pre FE", self.should_see_language_select)]
         for name, pred in stages:
             if pred():
                 self.push(name)
@@ -2189,7 +2192,7 @@ SCENARIOS = [
     dict(name="nolang", videoMode=1, currLanguage=-1, skipMovies=0,
          frontendLaunchType=1, demoModeStatus=0,
          haveIntroMovie=0, frames=BOOT60 + 40, dt=SIXTIETH,
-         input=[(BOOT60 + 10, "back"), (BOOT60 + 14, "item5")]),
+         input=[(10, "back"), (14, "item5")]),
     dict(name="skipmovies", videoMode=1, currLanguage=0, skipMovies=1,
          frontendLaunchType=1, demoModeStatus=0,
          haveIntroMovie=0, frames=BOOT60 + 30, dt=SIXTIETH, input=[]),
@@ -2252,24 +2255,25 @@ SCENARIOS = [
          haveIntroMovie=0, frames=BOOT60 + 30, dt=SIXTIETH, input=[]),
     dict(name="palselect", videoMode=0, currLanguage=0, skipMovies=0,
          frontendLaunchType=1, demoModeStatus=0,
-         haveIntroMovie=0, frames=BOOT60 + 30, dt=SIXTIETH, input=[(BOOT60 + 8, "item2")]),
+         haveIntroMovie=0, frames=BOOT60 + 30, dt=SIXTIETH, input=[(8, "item2")]),
     dict(name="palback", videoMode=0, currLanguage=0, skipMovies=0,
          frontendLaunchType=1, demoModeStatus=0,
          haveIntroMovie=0, frames=BOOT60 + 30, dt=SIXTIETH,
-         input=[(BOOT60 + 7, "hl4"), (BOOT60 + 8, "back")]),
+         input=[(7, "hl4"), (8, "back")]),
     dict(name="palall", videoMode=0, currLanguage=0, skipMovies=0,
          frontendLaunchType=1, demoModeStatus=0,
-         haveIntroMovie=0, frames=BOOT60 + 30, dt=SIXTIETH, input=[(BOOT60 + 8, "item7")]),
+         haveIntroMovie=0, frames=BOOT60 + 30, dt=SIXTIETH, input=[(8, "item7")]),
     dict(name="palsame", videoMode=0, currLanguage=0, skipMovies=0,
          frontendLaunchType=1, demoModeStatus=0,
-         haveIntroMovie=0, frames=BOOT60 + 30, dt=SIXTIETH, input=[(BOOT60 + 8, "item1")]),
+         haveIntroMovie=0, frames=BOOT60 + 30, dt=SIXTIETH, input=[(8, "item1")]),
     dict(name="palrevert", videoMode=0, currLanguage=1, skipMovies=0,
          frontendLaunchType=1, demoModeStatus=0,
-         haveIntroMovie=0, frames=BOOT60 + 30, dt=SIXTIETH, input=[(BOOT60 + 8, "item1")]),
+         haveIntroMovie=0, frames=BOOT60 + 30, dt=SIXTIETH, input=[(8, "item1")]),
 
     # BootAutoload's card, NTSC with the movies skipped, at a second a frame
     # unless the row says otherwise. See kScenarios[] for each.
     card_row("good", 20, currLanguage=1, card="good"),
+    card_row("palcard", 24, videoMode=0, card="good", input=[(4, "item2")]),
     card_row("badsum", 20, card="badsum"),
     card_row("loaderr", 20, card="loaderr"),
     card_row("nocard", 16, card="nocard", input=[(4, "select")]),

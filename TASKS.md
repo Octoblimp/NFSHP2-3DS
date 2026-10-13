@@ -2690,16 +2690,34 @@ phases.
         `main.c`. On Azahar the game leaves through the screen viewer
         and Azahar is back at its list within 3 s; the device is the
         check.
-56. [ ] **NFS points are not kept.** Reported on 2026-10-12 with the
+56. [x] **NFS points are not kept.** Reported on 2026-10-12 with the
         debug log (`3DS Files/nfshp2_debug.txt`): a race's NFS points
         said they were saved, but the next run had none. The points
         must add up across races and survive a save and a new boot.
         It comes after TASKS 55.
+        Done in Session 87: the save was loaded, then wiped. The
+        port pushed the boot screens in the demo's order (0x0016aa40),
+        BootAutoload over the language screen, so the card loaded
+        first, and choosing a language then ran
+        FrontendDatabase::InitWithDefaults on Fred. Retail's
+        LaunchFrontendMenus (0x0016f950) pushes BootAutoload before
+        the language screen, so the language comes first and the save
+        is copied over its defaults. `main.c`'s kBootStages now has
+        retail's order. bootflow_check: 96 scenarios, 0 differ, with a
+        new PAL row with a save (`palcard`). On Azahar the boot loaded
+        a save of 11,000 points, a cop race ended at 11,100, Quit
+        saved 11,100, and the next boot loaded that file. The user
+        saw the points kept on 2026-10-12.
 57. [ ] **The fire truck's track lags.** Reported on 2026-10-12: the
         track with the fire truck, its fire, smoke and fog, is a bit
         laggy. Find the track, profile it, and cut the cost there and
         in places like it (TASKS 46's rules: lossless). It comes after
-        TASKS 56; then TASKS 53.
+        TASKS 58; then TASKS 53.
+58. [ ] **The car goes through things.** Reported on 2026-10-12, while
+        watching a scripted cop race on Azahar: the car clips through
+        the road, through walls, rails and hills, and through other
+        cars. Find why, against retail's collision, and fix it. It
+        comes right after TASKS 56, before TASKS 57.
 
 ### The retail frontend
 

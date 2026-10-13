@@ -49,20 +49,24 @@ LOADING_FRONTEND
 LaunchFrontendMenus()
   push "Title Screen"            if ShouldSeeTitleSequence()
   push "Legal MumboJumbo"        if ShouldSeeLegalMumboJumbo()
-  push "Language Options Pre FE" if ShouldSeeLanguageSelectScreen()
   push "BootAutoload"            if ShouldSeeAutoloadScreen()
+  push "Language Options Pre FE" if ShouldSeeLanguageSelectScreen()
   ChangeToScreen(top of stack, popping it)
 
   each of those screens ends with MoveBackScreen(1), which pops the next
   one off the stack; an empty stack lands on "New Main Menu".
 ```
 
-So the on-disc boot order is **BootAutoload -> Language Options -> Legal
+So the retail boot order is **Language Options -> BootAutoload -> Legal
 MumboJumbo -> Title Screen (EA logo, NFS intro, PRESS START) -> New Main
-Menu**, with three of those five skipped in the shipped US PS2 build (see
-[The predicates](#the-predicates)). On the PAL retail disc the player sees
-LOADING first, before `MainLoop` runs, then the language screen, then the
-title's movies. See
+Menu**, with up to three of those five skipped (see
+[The predicates](#the-predicates)). The demo pushes the first two the other
+way round, so it loads the card before it asks for a language. Retail's
+order is the one that keeps a save: choosing a language at boot resets
+`Fred` to its defaults, so the load has to come after it (see
+[`LaunchFrontendMenus`](#launchfrontendmenus-retails-0x0016f950)). On the
+PAL retail disc the player sees LOADING first, before `MainLoop` runs, then
+the language screen, then the card's check, then the title's movies. See
 [Retail's `LOADING_FRONTEND`](#retails-loading_frontend-sles_50731).
 
 ## `main` (`0x0012da88`)
@@ -536,7 +540,7 @@ screen a `SCREEN_BACK_BUTTON` first (so it can veto), plays
 `FE_SOUND_MENU_CANCEL`, pops `n`, and changes to whatever it popped -- unless
 that name is empty, in which case it changes to nothing and returns 0.
 
-## `LaunchFrontendMenus` (`0x0016aa40`)
+## `LaunchFrontendMenus` (retail's `0x0016f950`)
 
 ```c
 void LaunchFrontendMenus(void)
@@ -548,8 +552,8 @@ void LaunchFrontendMenus(void)
     }
     if (ShouldSeeTitleSequence())        Push("Title Screen");
     if (ShouldSeeLegalMumboJumbo())      Push("Legal MumboJumbo");
-    if (ShouldSeeLanguageSelectScreen()) Push("Language Options Pre FE");
     if (ShouldSeeAutoloadScreen())       Push("BootAutoload");
+    if (ShouldSeeLanguageSelectScreen()) Push("Language Options Pre FE");
 
     name = GetCurrentScreenNameFromStack();   /* the top, i.e. the LAST push */
     PopScreens(1);
@@ -562,6 +566,23 @@ The push order is the reverse of the display order, which is the one thing
 here that reads backwards on a first pass: the stack is LIFO and the function
 immediately pops its own top. So the last predicate that fires is the first
 screen the player sees.
+
+**Retail swapped the last two pushes.** The demo's (`0x0016aa40`) pushes
+the language screen and then BootAutoload, so it shows BootAutoload first.
+Retail's (`0x0016f950`: `ShouldSeeAutoloadScreen` at `0x0016f9e8`, then
+`ShouldSeeLanguageSelectScreen` at `0x0016fa04`, pushing `0x002b2fb8`
+"BootAutoload" and `0x002b2fc8` "Language Options Pre FE") shows the
+language screen first. That order is what keeps a save:
+
+1. The language screen's `Chosen` runs `FrontendDatabase::InitWithDefaults`
+   on `Fred` when it is not the Options menu's copy.
+2. BootAutoload then loads the card, and `OverwriteFred` copies the save
+   over those defaults. It keeps the language just chosen at +372.
+
+The other way round, the defaults wipe the load: the points, the records,
+the cars, everything the save held. The port had the demo's order until
+TASKS 56. The user's save said "saved" after a race, and the next boot came
+back with no points.
 
 `"Legal MumboJumbo"` and `"View Event Tree"` are **not registered screens** --
 neither name appears in the 49-entry screen registry below. The first is
@@ -656,11 +677,11 @@ So the retail boot is one of two orders, differing by one screen:
 |-----------|-------|--------|
 | `ShouldSeeTitleSequence` | 1 | `Title Screen` pushed |
 | `ShouldSeeLegalMumboJumbo` | 0 | -- |
-| `ShouldSeeLanguageSelectScreen` | PAL only | `Language Options Pre FE` |
 | `ShouldSeeAutoloadScreen` | 1 | `BootAutoload` pushed |
+| `ShouldSeeLanguageSelectScreen` | PAL only | `Language Options Pre FE` |
 
 **BootAutoload -> Title Screen -> New Main Menu** on NTSC, and
-**BootAutoload -> Language Options Pre FE -> Title Screen -> New Main Menu**
+**Language Options Pre FE -> BootAutoload -> Title Screen -> New Main Menu**
 on PAL. `3DS Files/source/gameflow.c` defaults to NTSC and reaches the other
 by setting one field, and `tools/bootflow_check.py` runs both.
 
@@ -1933,12 +1954,13 @@ The boot is retail's, in retail's order:
    `eDisplayFrame` does: `LOADING_TRACK` on the top screen and a blank
    bottom screen. The `FRONTEND` and `INGAME` bundles decode after it, the
    slow part of the boot, so LOADING stays up while they do.
-2. **`BootAutoload`**, retail's (see [The memory card](#the-memory-card)).
+2. **The language screen.** `Language Options Pre FE` comes up. A picks a
+   language, and so does B on a highlighted language. `Fred` takes its
+   defaults.
+3. **`BootAutoload`**, retail's (see [The memory card](#the-memory-card)).
    It shows "Checking" for two seconds on the popup. With a save it then
-   shows "Loading" and "Loaded"; without one, "no save file". Then it moves
-   back.
-3. **The language screen.** `Language Options Pre FE` comes up. A picks a
-   language, and so does B on a highlighted language.
+   shows "Loading" and "Loaded", and the save is copied over the defaults;
+   without one, "no save file". Then it moves back.
 4. **The movies**, then the title.
 
 The memory card is the SD card. `main.c`'s `hookNewFileSys` hands the

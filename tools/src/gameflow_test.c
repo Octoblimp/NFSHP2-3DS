@@ -693,12 +693,12 @@ static const BScreenConfig kScreens[] = {
 };
 
 // LaunchFrontendMenus' push list. The last row that passes is the first
-// screen seen.
+// screen seen: retail's (0x0016f950), the language screen first.
 static const BBootStage kBootStages[] = {
     { "Title Screen",            bgf_should_see_title_sequence },
     { "Legal MumboJumbo",        bgf_should_see_legal_mumbo_jumbo },
-    { "Language Options Pre FE", bgf_should_see_language_select },
     { "BootAutoload",            bgf_should_see_autoload },
+    { "Language Options Pre FE", bgf_should_see_language_select },
 };
 
 static const BGameFlowStateInfo kGameFlowStates[BGF_NUM_STATES] = {
@@ -751,15 +751,15 @@ static const BGameFlowStateInfo kGameFlowStates[BGF_NUM_STATES] = {
 static const Scenario kScenarios[] = {
     // An NTSC console: no language screen.
     { "ntsc", 1, 0, 0, 1, 0, 0, 0, BOOT60 + 40, SIXTIETH, {{0,0}} },
-    // The shipped boot, PAL: BootAutoload, then Language Options Pre FE,
-    // which waits for a choice.
+    // The shipped boot, PAL: Language Options Pre FE, which waits for a
+    // choice, and BootAutoload after it.
     { "pal", 0, 0, 0, 1, 0, 0, 0, BOOT60 + 40, SIXTIETH, {{0,0}} },
     // No language at all: the first test in the predicate fires whatever
     // the video mode is. BACK there is vetoed and does nothing else, since
     // there is nothing to keep; Spanish is then chosen and the screen moves
-    // back to the title, whose movies are Spanish.
+    // back to BootAutoload, and then the title, whose movies are Spanish.
     { "nolang", 1, -1, 0, 1, 0, 0, 0, BOOT60 + 40, SIXTIETH,
-      {{BOOT60 + 10, "back"}, {BOOT60 + 14, "item5"}} },
+      {{10, "back"}, {14, "item5"}} },
     // SkipMovies: the title screen starts at rest, with no movie.
     { "skipmovies", 1, 0, 1, 1, 0, 0, 0, BOOT60 + 30, SIXTIETH, {{0,0}} },
     // A second visit to the frontend with a demo waiting: straight to the
@@ -898,25 +898,26 @@ static const Scenario kScenarios[] = {
     { "french", 1, 1, 0, 1, 0, 0, 0, BOOT60 + 30, SIXTIETH, {{0,0}} },
     // PAL, French chosen on the language screen: the table, the speech and
     // the LOADING art all change, the frontend takes its defaults, and the
-    // screen moves back to the title -- whose EA logo is EALOGO_FR.
+    // screen moves back to BootAutoload and then the title -- whose EA logo
+    // is EALOGO_FR.
     { "palselect", 0, 0, 0, 1, 0, 0, 0, BOOT60 + 30, SIXTIETH,
-      {{BOOT60 + 8, "item2"}} },
+      {{8, "item2"}} },
     // PAL, BACK on the language screen with Italian highlighted: BACK
     // chooses the highlighted language, as SELECT would.
     { "palback", 0, 0, 0, 1, 0, 0, 0, BOOT60 + 30, SIXTIETH,
-      {{BOOT60 + 7, "hl4"}, {BOOT60 + 8, "back"}} },
+      {{7, "hl4"}, {8, "back"}} },
     // PAL, Load All Languages. Hidden on this disc, and selected anyway:
     // the flag is set and the screen moves back with English kept.
     { "palall", 0, 0, 0, 1, 0, 0, 0, BOOT60 + 30, SIXTIETH,
-      {{BOOT60 + 8, "item7"}} },
+      {{8, "item7"}} },
     // PAL, English chosen when English is in: SetLanguage returns at once,
     // and the frontend still takes its defaults.
     { "palsame", 0, 0, 0, 1, 0, 0, 0, BOOT60 + 30, SIXTIETH,
-      {{BOOT60 + 8, "item1"}} },
+      {{8, "item1"}} },
     // PAL, French from the start and English chosen: the French LOADING art
     // is swapped back.
     { "palrevert", 0, 1, 0, 1, 0, 0, 0, BOOT60 + 30, SIXTIETH,
-      {{BOOT60 + 8, "item1"}} },
+      {{8, "item1"}} },
 
     // ------------------------------------------------ BootAutoload's card
     //
@@ -928,6 +929,12 @@ static const Scenario kScenarios[] = {
     // (French) kept over the file's (Italian).
     { .name = "good", .videoMode = 1, .currLanguage = 1, .skipMovies = 1,
       .frontendLaunchType = 1, .frames = 20, .dt = 1.0f, .card = "good" },
+    // PAL with that save (TASKS 56): French is chosen first, and the
+    // frontend's defaults it takes are then loaded over, so the save's
+    // points and the rest are kept, with the language just chosen.
+    { .name = "palcard", .videoMode = 0, .skipMovies = 1,
+      .frontendLaunchType = 1, .frames = 24, .dt = 1.0f, .card = "good",
+      .input = {{4, "item2"}} },
     // A checksum that does not hold, and a load the card fails: "Load
     // failed", the old message's dismissal clicking through, and on.
     { .name = "badsum", .videoMode = 1, .skipMovies = 1,

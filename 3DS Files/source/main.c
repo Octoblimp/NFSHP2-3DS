@@ -10,8 +10,8 @@
 //
 // kBootStages[] is this game's kVideoStages[]. It is pushed onto a LIFO and
 // entered from the top, so the LAST row whose predicate passes is the FIRST
-// screen the player sees -- on this disc BootAutoload, then the title
-// screen, then the main menu.
+// screen the player sees -- on this disc the language screen, then
+// BootAutoload, then the title screen, then the main menu.
 //
 // The screens themselves are real: source/bui.c parses the 0x80010200 tree
 // out of the bundles and source/uirender.c draws it through citro2d with the
@@ -418,13 +418,16 @@ static const BScreenConfig kScreens[] = {
 };
 #define NUM_SCREENS ((int)(sizeof(kScreens) / sizeof(kScreens[0])))
 
-// LaunchFrontendMenus (0x0016aa40), the boot sequence itself. Pushed in this
-// order, entered from the top.
+// LaunchFrontendMenus (retail's 0x0016f950), the boot sequence itself.
+// Pushed in this order, entered from the top. Retail pushes BootAutoload
+// before the language screen, the demo (0x0016aa40) after it: the language
+// screen resets Fred to its defaults when a language is chosen, so it has
+// to come first, and the card's load after it (TASKS 56).
 static const BBootStage kBootStages[] = {
     { "Title Screen",            bgf_should_see_title_sequence },
     { "Legal MumboJumbo",        bgf_should_see_legal_mumbo_jumbo },
-    { "Language Options Pre FE", bgf_should_see_language_select },
     { "BootAutoload",            bgf_should_see_autoload },
+    { "Language Options Pre FE", bgf_should_see_language_select },
 };
 #define NUM_BOOT_STAGES ((int)(sizeof(kBootStages) / sizeof(kBootStages[0])))
 

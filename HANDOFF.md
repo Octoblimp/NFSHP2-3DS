@@ -21117,3 +21117,45 @@ while it runs, leaves a Luma ARM11 dump
   through this same exit, so it needed this fix too. HOME's Close now
   does the same job cleanly; there is no Quit item yet.
 - **Next.** TASKS 56, the NFS points kept and summed.
+
+## Session 87, continued -- TASKS 56, the NFS points kept
+
+The user's report: a race's points said they were saved, but the next
+run had none (`3DS Files/nfshp2_debug.txt`).
+
+- **The log.** BootAutoload loaded the save ("flow fred loaded ...
+  7bd4f315"). Then "Language Options Pre FE" came up, and choosing a
+  language logged "fred defaults": FrontendDatabase::InitWithDefaults
+  on Fred, which wiped what was just loaded. That is everything the
+  save held, not only the points.
+- **The cause.** The port's boot stages had the demo's order.
+  - The demo's LaunchFrontendMenus (0x0016aa40) pushes the language
+    screen and then BootAutoload, so the card is checked first.
+  - Retail's (0x0016f950) pushes BootAutoload and then the language
+    screen (`ShouldSeeAutoloadScreen` at 0x0016f9e8, then
+    `ShouldSeeLanguageSelectScreen` at 0x0016fa04, pushing 0x002b2fb8
+    "BootAutoload" and 0x002b2fc8 "Language Options Pre FE").
+  The stack is LIFO, so retail asks for the language first.
+  OverwriteFred then copies the save over the defaults, and keeps the
+  language just chosen at +372, which only makes sense in that order.
+- **The fix.** `main.c`'s kBootStages and `gameflow_test.c`'s have
+  retail's order, and so does `bootflow_check`'s Python. The PAL rows'
+  inputs moved to the language screen's frames. A new row, `palcard`,
+  boots PAL with a save, chooses French and shows "frontend defaults",
+  then BootAutoload, then "fred loaded". 96 scenarios, 0 differ.
+  `run_azahar_test` now expects the language screen before
+  BootAutoload. boot-flow.md has retail's order, the demo's, and why
+  it matters.
+- **Seen on Azahar** (100%):
+  - run_azahar_coprace: the boot loaded the card's 11,000 points over
+    the defaults, and the cop race ended with "points 11100".
+  - Quit on the End Game Menu, Yes to the save: the card holds 11,100
+    with a good checksum (b3cbc847).
+  - run_azahar_test: PASS. The language screen, then BootAutoload
+    loaded b3cbc847, then the movies. Its "START was taken before
+    PRESS START" line is the log's lag: only one START reached the
+    title, after PRESS START was up.
+  The user saw the points kept.
+- **New, TASKS 58.** While watching the cop race, the user saw the car
+  clip through the road, walls, rails, hills and other cars. It comes
+  next, before TASKS 57.

@@ -180,8 +180,9 @@ function Shot([string]$tag) {
 }
 
 # --- the script the run follows -------------------------------------------
-# BootAutoload checks the card for six seconds, the title screen plays EALOGO_EN.AVI
-# (six seconds) and then NFSINTRO_EN.AVI (81). START stops the intro and the
+# The language screen waits for a choice, BootAutoload then checks the card
+# for six seconds, the title screen plays EALOGO_EN.AVI (six seconds) and
+# then NFSINTRO_EN.AVI (81). START stops the intro and the
 # title comes to rest -- retail's TitleScreen stays where it is -- and PRESS
 # START comes up four seconds later; START then goes to the main menu. With
 # no intro on the card the title comes to rest by itself and the same four
@@ -190,7 +191,8 @@ function Shot([string]$tag) {
 
 # LoadGlobalChunks puts LOADING up before anything else, and it stays up
 # while the frontend bundles decode. Then the Pre FE language screen; A
-# takes its first item, English, and the boot goes on to the movies.
+# takes its first item, English, and the boot goes on to BootAutoload and
+# the movies. Retail asks first and loads the card after (TASKS 56).
 $loading = Wait-ForLog "global chunks loaded" 60
 Write-Host ("  LOADING drawn: {0}" -f $loading)
 if ($loading) { Start-Sleep -Milliseconds 800; Shot "loading" }
@@ -200,9 +202,20 @@ $booted = Wait-ForLog "entering main loop" 60
 Write-Host ("  main loop: {0}" -f $booted)
 
 if ($booted) {
-    # BootAutoload first: two seconds of "Checking for Memory Card", then
-    # what it found -- on a card with no sdmc:/NFSHP2/SAVES/settings.db, that
-    # there are no saved settings -- for four more, then back.
+    $gotLang = Wait-ForLog "flow enter Language Options Pre FE" 20
+    Write-Host ("  language screen: {0}" -f $gotLang)
+    if ($gotLang) {
+        Start-Sleep -Milliseconds 1500
+        Shot "language"
+        if (Wait-ForLog "flow enter BootAutoload" 1) {
+            Write-Host "  FAIL: the card was checked before a language was chosen"
+        }
+        [Hp2Cap]::PressKey($hwnd, $VK_A)      # A, English
+    }
+
+    # Then BootAutoload: two seconds of "Checking for Memory Card", then
+    # what it found -- a save, loaded over the defaults the language took,
+    # or no sdmc:/NFSHP2/SAVES/settings.db -- for four more, then back.
     $gotAuto = Wait-ForLog "flow enter BootAutoload" 20
     Write-Host ("  BootAutoload: {0}" -f $gotAuto)
     if ($gotAuto) {
@@ -210,17 +223,9 @@ if ($booted) {
         Shot "autoload-checking"
         Start-Sleep -Milliseconds 2500
         Shot "autoload-result"
-    }
-
-    $gotLang = Wait-ForLog "flow enter Language Options Pre FE" 20
-    Write-Host ("  language screen: {0}" -f $gotLang)
-    if ($gotLang) {
-        Start-Sleep -Milliseconds 1500
-        Shot "language"
         if (Wait-ForLog "^movie open " 1) {
-            Write-Host "  FAIL: a movie opened before a language was chosen"
+            Write-Host "  FAIL: a movie opened before the card was checked"
         }
-        [Hp2Cap]::PressKey($hwnd, $VK_A)      # A, English
     }
 
     $gotMovie = Wait-ForLog "^movie open " 20
