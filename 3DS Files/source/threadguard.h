@@ -59,6 +59,12 @@ void threadguard_signal(LightEvent* wake, const char* where);
 // The workers' wait.
 int64_t threadguard_wait_ns(void);
 
+// Ends the guard's thread and waits for it; no other starts after. Before
+// exit() frees the heap its stack is in (main.c's atexit): a tick after
+// that was the data abort of crash_dump_00000002 and 3 (2026-10-12), on
+// closing from HOME and on powering off.
+void threadguard_stop(void);
+
 // main.c's: the game's state, for the report.
 extern void (*threadguard_note)(FILE* f);
 

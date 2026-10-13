@@ -26,6 +26,7 @@ static char       s_ring[RING_BYTES];
 static uint32_t   s_head;   // bytes put, ever; under s_lock
 static uint32_t   s_tail;   // bytes written, ever; under s_lock
 static bool       s_urgent; // write the tail as well; under s_lock
+static bool       s_quit;   // logwriter_stop; under s_lock
 static LightLock  s_lock;
 static LightEvent s_wake;   // something was put
 static LightEvent s_kick;   // write now: a drain, or the ring filling
@@ -40,17 +41,21 @@ static void writer_main(void *arg)
     (void)arg;
     for (;;) {
         uint32_t head, tail;
-        bool     urgent;
+        bool     urgent, quit;
 
         LightEvent_Wait(&s_wake);
         LightEvent_WaitTimeout(&s_kick, GATHER_NS);
         LightLock_Lock(&s_lock);
         head = s_head;
         tail = s_tail;
-        urgent = s_urgent;
+        quit = s_quit;
+        urgent = s_urgent || quit;
         s_urgent = false;
         LightLock_Unlock(&s_lock);
-        if (head == tail) continue;
+        if (head == tail) {
+            if (quit) break;
+            continue;
+        }
         // The file holds every byte put, in order, from offset 0, so a
         // byte's count is its offset in the file.
         if (!urgent && osGetTime() - lastMs < TAIL_MS) {
@@ -76,6 +81,7 @@ static void writer_main(void *arg)
         s_tail = tail;
         LightLock_Unlock(&s_lock);
         LightEvent_Signal(&s_room);
+        if (quit) break;
     }
 }
 
@@ -101,7 +107,7 @@ void logwriter_start(FILE *f)
     APT_CheckNew3DS(&n3ds);
     for (i = n3ds ? 0 : 1; i < 3 && s_thread == NULL; i++)
         s_thread = threadCreate(writer_main, NULL, 16 << 10, prio, kCores[i],
-                                true);
+                                false);
 }
 
 void logwriter_put(const char *s, size_t n)
@@ -165,4 +171,18 @@ void logwriter_drain(void)
         LightLock_Lock(&s_lock);
     }
     LightLock_Unlock(&s_lock);
+}
+
+void logwriter_stop(void)
+{
+    if (s_thread == NULL || threadGetCurrent() == s_thread) return;
+    LightLock_Lock(&s_lock);
+    s_quit = true;
+    LightLock_Unlock(&s_lock);
+    LightEvent_Signal(&s_kick);
+    LightEvent_Signal(&s_wake);
+    threadJoin(s_thread, U64_MAX);
+    threadFree(s_thread);
+    // Lines from here on are written in place (logwriter_put).
+    s_thread = NULL;
 }

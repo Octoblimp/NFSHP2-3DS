@@ -603,7 +603,7 @@ static void logOpen(void)
     // second's frame, and more while the card was slow.
     if (g_log) {
         logwriter_start(g_log);
-        atexit(logwriter_drain);
+        atexit(logwriter_stop);
         signal(SIGABRT, logOnAbort);
     }
     // stderr is where bMalloc and the other fatal paths say why they abort,
@@ -5350,6 +5350,13 @@ int main(int argc, char** argv)
     // a New 3DS XL drew a frame and stopped there.
     hangwatch_start(logLine);
     threadguard_note = guardNote;
+    // exit() frees the heap, and the stacks of the threads that made it
+    // with it, before it ends the process: a watcher that woke in between
+    // pushed onto unmapped memory, Luma's data abort on closing from HOME
+    // or powering off (crash_dump_00000002 and 3, 2026-10-12). atexit runs
+    // last first: the guard, the watchdog, then the log's writer above.
+    atexit(hangwatch_stop);
+    atexit(threadguard_stop);
 
     // The original runs every _GLOBAL_$I$ through __main before main()
     // does anything of its own; sinit_run() is that walk over the ported

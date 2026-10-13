@@ -21073,3 +21073,47 @@ fire truck track's lag (57), the debug menu (53) and the keyboard (54).
   1238 lines, 0 differ; 271 of 276 caught and 5 equivalent.
 - **Next.** TASKS 55, the Luma dumps on closing from HOME or powering
   off.
+
+## Session 87, continued -- TASKS 55, the Luma dumps on closing
+
+The user's report: closing the game from the HOME Menu, or powering off
+while it runs, leaves a Luma ARM11 dump
+(`3DS Files/crash_dump_00000002.dmp` and `..03.dmp`).
+
+- **The dumps.** Luma's format 1.3: an ARM11 data abort in "NFSHP2 3",
+  the same in both:
+  - pc 0x0021b818 and lr 0x001f02b4, sp 0x0807e728;
+  - DFSR 0x805, a write translation fault at FAR 0x0807e718 (sp - 16);
+  - the last word of the code dump is `push {r4, r5, r6, lr}`.
+  In the build's ELF (`3DS Files/build/NFSHP2-3DS.elf`, where the code
+  bytes sit at the same address) pc is LightLock_Lock and lr is
+  threadguard's `guard_main`. Its stack is in the heap (0x08xxxxxx).
+- **The cause.** The log shows the teardown ran to the slot pools, so
+  `main` returned. libctru's exit then frees the heap before it ends
+  the process. threadguard's thread (since 2026-10-12) wakes every 10 ms
+  above the game's priority, and nothing stopped it. Its next push hit
+  unmapped memory. hangwatch's watchdog (every 250 ms, detached) and the
+  log's writer (a 2 s timed wait, detached) could do the same.
+- **The fix.** `threadguard_stop`, `hangwatch_stop` and
+  `logwriter_stop` each end their thread and join it:
+  - the guard checks a flag after each tick;
+  - the watchdog waits on a stop event instead of sleeping;
+  - the writer writes everything left and quits.
+  The three threads are made joinable. `main.c` registers the stops
+  with atexit, so they run on every way out, before the heap goes. They
+  run last first: the guard, the watchdog, then the writer (in place of
+  the old atexit drain). The speech, jukebox and movie workers were
+  already joined in their closes, and the movie's waits have no
+  timeout.
+- **Seen on Azahar.** run_azahar_test, leaving through the screen
+  viewer: PASS, every line through the slot pools on the card, and
+  Azahar back at its game list 3 s after START, so the joins return.
+  Azahar's own log is cut when a run kills it, so the device is the
+  real check.
+- **Not changed.** An abort still ends through the same exit with the
+  threads up. It is a crash either way, and the reason is on the card
+  first.
+- **The user's idea of a Quit item** on the main menu would leave
+  through this same exit, so it needed this fix too. HOME's Close now
+  does the same job cleanly; there is no Quit item yet.
+- **Next.** TASKS 56, the NFS points kept and summed.

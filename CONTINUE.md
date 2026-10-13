@@ -74,10 +74,12 @@ cop's HUD (hudcop.c, hudrender.c, hudscore.c), the setup screens
 helicopter's rockets, smoke bombs and dropped spikes are retail's
 (`munition.c`, FireSalvo in `chopperfire.c`; `docs/formats/munitions.md`).
 munition_check: 1038 lines, 0 differ, and 175 of 175 mutations caught
-(HANDOFF.md, "Session 87"). Next, one at a time: TASKS 55 (the Luma
-dumps on closing from HOME or powering off), 56 (NFS points kept and
-summed), 57 (the fire truck track's lag), then 53 (the debug menu) and
-54 (the keyboard).**
+(HANDOFF.md, "Session 87"). TASKS 55 is done too: the Luma dumps
+on closing were threadguard's thread waking after exit() freed its
+stack; the three watcher threads are stopped and joined at atexit
+(HANDOFF.md, "Session 87, continued"). Next, one at a time: TASKS 56
+(NFS points kept and summed), 57 (the fire truck track's lag), then 53
+(the debug menu) and 54 (the keyboard).**
 
 **Now (Session 86, 2026-10-12): TASKS 52 is done, the profiles.
 Retail's `MemcardSaver`, `LoadSaveWrapper` and `Autosaver` are in

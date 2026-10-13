@@ -38,6 +38,7 @@ static const char kApt[] = "aptMainLoop: HOME, sleep or a suspend";
 
 static void (*s_log)(const char *fmt, ...);
 static Thread            s_thread;
+static LightEvent        s_quit;         // hangwatch_stop
 static volatile uint32_t s_frames;       // frames begun
 static volatile uint32_t s_beatMs;       // the last one's, in ms
 static volatile uint32_t s_marksAtBeat;
@@ -135,7 +136,8 @@ static void watch_main(void *arg)
         uint32_t f, m, since;
         bool     moving;
 
-        svcSleepThread(250LL * 1000 * 1000);
+        if (LightEvent_WaitTimeout(&s_quit, 250LL * 1000 * 1000) == 0)
+            break;
         f = s_frames;
         m = HangwatchMarks;
         moving = m != marks;
@@ -172,9 +174,19 @@ void hangwatch_start(void (*log)(const char *fmt, ...))
     s_log = log;
     svcGetThreadPriority(&prio, CUR_THREAD_HANDLE);
     if (prio > 0x18) prio--;
-    s_thread = threadCreate(watch_main, NULL, 16 << 10, prio, -2, true);
+    LightEvent_Init(&s_quit, RESET_STICKY);
+    s_thread = threadCreate(watch_main, NULL, 16 << 10, prio, -2, false);
     s_log("hangwatch: watchdog %s, priority 0x%lx", s_thread ? "up" : "failed",
           (unsigned long)prio);
+}
+
+void hangwatch_stop(void)
+{
+    if (!s_thread) return;
+    LightEvent_Signal(&s_quit);
+    threadJoin(s_thread, U64_MAX);
+    threadFree(s_thread);
+    s_thread = NULL;
 }
 
 bool hangwatch_main_loop(void)

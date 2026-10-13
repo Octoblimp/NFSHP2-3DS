@@ -41,4 +41,9 @@ void logwriter_flush_soon(void);
 // Waits until everything put so far is on the card. Not on the writer.
 void logwriter_drain(void);
 
+// Writes everything put so far, ends the writer and waits for it, before
+// exit() frees the heap its stack is in (main.c's atexit; threadguard.h
+// has the crash). Lines after are written in place. Not on the writer.
+void logwriter_stop(void);
+
 #endif

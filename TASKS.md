@@ -2674,11 +2674,22 @@ phases.
         `NameEntry` screen (a plain screen in `kScreens[]` for now). Keep
         retail's length limit and allowed characters. Cancel keeps the
         old name. It comes after TASKS 53.
-55. [ ] **A crash dump when the game closes.** Reported on 2026-10-12:
+55. [x] **A crash dump when the game closes.** Reported on 2026-10-12:
         closing the game from the HOME Menu, or turning the system off
         while it runs, leaves a Luma ARM11 exception dump
         (`3DS Files/crash_dump_00000002.dmp` and `..03.dmp`). The game
         must leave cleanly both ways. It comes after TASKS 39.
+        Done in Session 87: both dumps are one data abort, a push onto
+        unmapped memory by threadguard's thread (`guard_main` into
+        LightLock_Lock, pc 0x0021b818, its stack at 0x0807e728 in the
+        heap). exit() frees the heap, and the stacks of the threads
+        made from it, before it ends the process, and the guard wakes
+        every 10 ms. hangwatch's watchdog (every 250 ms) and the log's
+        writer (a 2 s wait) were exposed the same way. Each now has a
+        stop that ends and joins it, registered with atexit in
+        `main.c`. On Azahar the game leaves through the screen viewer
+        and Azahar is back at its list within 3 s; the device is the
+        check.
 56. [ ] **NFS points are not kept.** Reported on 2026-10-12 with the
         debug log (`3DS Files/nfshp2_debug.txt`): a race's NFS points
         said they were saved, but the next run had none. The points

@@ -35,6 +35,7 @@ static LightLock            s_lock;    // the list and every check
 static bool                 s_lockUp;
 static Thread               s_thread;
 static volatile bool        s_ticking;
+static volatile bool        s_stop;    // threadguard_stop
 static const char* volatile s_clean = "(none yet)";
 static uint32_t             s_hit;     // the first to see a run reports
 
@@ -187,6 +188,7 @@ static void guard_main(void* arg)
     (void)arg;
     for (;;) {
         svcSleepThread(GUARD_TICK);
+        if (s_stop) break;
         LightLock_Lock(&s_lock);
         scan("the guard's tick");
         for (int i = 0; i < GUARD_MAX; i++)
@@ -221,13 +223,23 @@ void threadguard_watch(const char* name, Thread t, LightEvent* wake)
 
     // Above the workers, which are one above the game's thread, on the
     // same core.
-    if (!s_thread) {
+    if (!s_thread && !s_stop) {
         s32 prio = 0x30;
         svcGetThreadPriority(&prio, CUR_THREAD_HANDLE);
         prio = prio > 0x1a ? prio - 2 : 0x18;
-        s_thread = threadCreate(guard_main, NULL, 8 << 10, prio, -2, true);
+        s_thread = threadCreate(guard_main, NULL, 8 << 10, prio, -2, false);
         s_ticking = s_thread != NULL;
     }
+}
+
+void threadguard_stop(void)
+{
+    s_stop = true;
+    if (!s_thread) return;
+    threadJoin(s_thread, U64_MAX);
+    threadFree(s_thread);
+    s_thread = NULL;
+    s_ticking = false;
 }
 
 void threadguard_forget(Thread t)

@@ -46,6 +46,10 @@
 // The watchdog, logging through `log` (main.c's logLine).
 void hangwatch_start(void (*log)(const char *fmt, ...));
 
+// Ends the watchdog and waits for it, before exit() frees the heap its
+// stack is in (main.c's atexit; threadguard.h has the crash).
+void hangwatch_stop(void);
+
 // The marks the main thread passed, the last HANGWATCH_TRAIL of them:
 // strings that live for the program.
 extern const char *volatile HangwatchTrail[HANGWATCH_TRAIL];
