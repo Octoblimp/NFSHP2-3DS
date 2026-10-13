@@ -81,9 +81,12 @@ stack; the three watcher threads are stopped and joined at atexit
 asked for the language after loading the card, and the language's
 defaults wiped the save; retail's order (language, then BootAutoload)
 keeps it, and points now add up across races and boots (HANDOFF.md,
-"Session 87, continued -- TASKS 56"). Next, one at a time: TASKS 58
-(the car clipping through the road, walls and cars), 57 (the fire
-truck track's lag), then 53 (the debug menu) and 54 (the keyboard).**
+"Session 87, continued -- TASKS 56"). TASKS 58 (the car through the
+road, walls and cars) is closed at the user's word with no fault
+found: the hull matches the body and no penetration showed (HANDOFF.md,
+"Session 87, continued -- TASKS 58"). Next, one at a time: TASKS 57
+(the fire truck track's lag), then 53 (the debug menu) and 54 (the
+keyboard).**
 
 **Now (Session 86, 2026-10-12): TASKS 52 is done, the profiles.
 Retail's `MemcardSaver`, `LoadSaveWrapper` and `Autosaver` are in

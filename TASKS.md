@@ -2713,11 +2713,32 @@ phases.
         laggy. Find the track, profile it, and cut the cost there and
         in places like it (TASKS 46's rules: lossless). It comes after
         TASKS 58; then TASKS 53.
-58. [ ] **The car goes through things.** Reported on 2026-10-12, while
+58. [x] **The car goes through things.** Reported on 2026-10-12, while
         watching a scripted cop race on Azahar: the car clips through
         the road, through walls, rails and hills, and through other
         cars. Find why, against retail's collision, and fix it. It
         comes right after TASKS 56, before TASKS 57.
+        Closed in Session 87 at the user's word (2026-10-12), with no
+        fault found and no code changed (HANDOFF.md, "Session 87,
+        continued -- TASKS 58"):
+        - The Crown Vic's `_CV` hull covers its body model to a few
+          centimetres. The model only reaches past it at the tyres,
+          the mirrors and the light bar.
+        - Car 0's hull was checked against its track polygons and
+          the cars near it every frame, and VClip was run again on
+          each of its witnesses. A 70 s gas-only race had no hull
+          inside a wall, floor or car, and VClip said "apart" for
+          every pair but one, which was out again within the second.
+        - Earlier runs flagged only the hull wrapping round the ends of
+          wall segments (3 cm), and a car landing behind a rail after a
+          jump at 189 km/h.
+        - The bumper and in-car views hide the car and draw no dash,
+          as retail's render_cars and drive camera do. Their NearZ of
+          0.5 and 0.4 m is the image's, so a wall or car within half a
+          metre of the eye is cut away there, as in retail.
+        If it comes back, the place to look is the rail meshes against
+        their wall polygons (retail data), where a scraping car's side
+        can show through a rail.
 
 ### The retail frontend
 

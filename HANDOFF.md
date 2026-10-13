@@ -21159,3 +21159,49 @@ run had none (`3DS Files/nfshp2_debug.txt`).
 - **New, TASKS 58.** While watching the cop race, the user saw the car
   clip through the road, walls, rails, hills and other cars. It comes
   next, before TASKS 57.
+
+## Session 87, continued -- TASKS 58, the car through things (closed)
+
+The user saw the car go through the road, walls, rails, hills and
+other cars in a scripted cop race on Azahar. The user closed the task
+on 2026-10-12 before a cause was found. No code changed, and the
+diagnostics below are not kept.
+
+- **The hull is the body's size.** CROWNVIC's `_CV` hull has 36
+  vertices and 68 faces. Back in model space (the hull is moved by
+  -CoG, 0.26 0 0.24), it spans x -2.41..2.45, y -0.90..0.95 and
+  z 0.18..1.33. The body model's box (carrenderinfo's AABB, less its
+  0.1) spans x -2.36..2.46, y -0.97..0.97 and z -0.02..1.69. Only the
+  tyres, the mirrors and the light bar reach past the hull.
+  GeometryPosition (Position - R CoG) matches the physics.
+- **No penetration found.** A logger in `main.c`, gated by DebugLog,
+  checked car 0 every frame:
+  - every hull vertex against the planes and edges of its
+    TrackPolygons;
+  - the hulls of the cars within 8 m;
+  - VClip again on a copy of each of its witnesses, counted by status.
+
+  The clip13 run (Coastal Parklands, Be A Cop, Crown Vic, gas only for
+  70 s) had depth 0.00 for walls, floors and cars every second. VClip
+  said "apart" for every pair, except one second with one unsettled
+  pair and one inside pair, which was out again within that second.
+  Earlier runs flagged two cases:
+  - clip12: the hull wrapping round the end of a wall segment. An
+    offline replay put the overlap at 3 cm.
+  - clip10: the car landing behind a rail after the user's jump at
+    189 km/h.
+- **Ruled out:**
+  - tunnelling through the floor (the lowest point stayed 0.3 to 0.5 m
+    over the ground);
+  - a missing `_CV` (it is found, so it is not CAR_BOX);
+  - junk in the rotation's w lanes;
+  - the walls' decode (their z of +/-508 is retail's, so they are
+    infinitely tall).
+- **The inside views.** POV_BUMPER and POV_INCAR set CarNotToRender.
+  render_cars skips that car, as retail's does. RenderDash is read only
+  by acidsys's particles, so retail draws no dash. NearZ is the image's
+  0.5, and 0.4 in the car. A wall or car within half a metre of the eye
+  is therefore cut away, as on the PS2.
+- **If it comes back:** compare the rail meshes with their wall
+  polygons, which are retail data. A car scraping a rail can show its
+  side through the rail (clip9's shot 35, at 2 km/h).
