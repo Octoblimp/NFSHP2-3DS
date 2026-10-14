@@ -246,6 +246,19 @@ The port is retail's code over bsnd.c. These things differ:
   -1 and the next region lookup never returns.
 - Play gives up when all 48 records are held. Retail asserts and carries
   on into a NULL voice. 48 locked runs cannot happen on 22 channels.
+- With no ndsp (no `sdmc:/3ds/dspfirm.cdc` on the card), main.c gives
+  `bsound_init` no driver. Then no driver call is made, since each one
+  would read through NULL. Retail's bSnd calls take no instance, so it
+  never had to ask. Without a driver there is no status and there are no
+  pools, so no region loads. A sample on its owner's storage gets no
+  patch (Initialize), no voice (LockVoice, Play), no channels for a patch
+  (GetChannels), a base pitch and patch volume of 0 (CalcPitch,
+  GetScaledVolume), and no chained part (ChainAdd). Everything that needs
+  a voice already stops at none. `bsound_check`'s no-driver run, which
+  has no model, does every op on such samples and on the bSound. It
+  passes only with no driver call and no voice. Before this fix, the
+  first wireless race on Azahar, whose copies had no firmware, read
+  through NULL in `bsnd_patch_id`.
 - The debug output is left out: bSound::Printf, the voice manager's
   allocation log, and the asserts.
 

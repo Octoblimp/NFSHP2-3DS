@@ -23,10 +23,15 @@
 # builds the race once every car is in; the setup taken on each client,
 # every copy's load held until the host's GO, and the race on one seed.
 #
+# With -NoDsp the copies' cards have no DSP firmware, so ndsp fails and the
+# game must run silent: each copy has to log "Sound: ndsp unavailable", and
+# still pass with no unmapped read (a driver call through NULL).
+#
 # Usage:
 #   powershell -File tools/run_azahar_lobby.ps1
 #   powershell -File tools/run_azahar_lobby.ps1 -Consoles 4
 #   powershell -File tools/run_azahar_lobby.ps1 -Consoles 2 -Race
+#   powershell -File tools/run_azahar_lobby.ps1 -Consoles 2 -Race -NoDsp
 #
 # Screenshots of each copy go to %TEMP%\nfshp2_lobby. Exit code 0 when
 # every copy reached Select Car from the lobby (with -Race: racing, every
@@ -36,6 +41,7 @@ param(
     [ValidateRange(2, 8)]
     [int]$Consoles = 2,           # the host and the rest
     [switch]$Race,                # on to a loaded race (37c)
+    [switch]$NoDsp,               # no DSP firmware on the cards: silent
     [int]$RunSeconds = 0,         # hard ceiling; 0 is 240 + 30 a console, + 300 with -Race
     [string]$AzaharDir = "C:\Program Files\Azahar",
     [string]$Target3dsx = "",
@@ -186,11 +192,20 @@ function LinkData([string]$user) {
         Copy-Item -Path (Join-Path $src "*") -Destination $saves -Recurse -Force
     }
     # ndsp's DSP firmware, where libctru looks for it; without it the game
-    # runs silent ("Sound: ndsp unavailable").
+    # runs silent ("Sound: ndsp unavailable"), which -NoDsp asks for.
+    $dspDir = Join-Path $user "sdmc\3ds"
+    $dspCopy = Join-Path $dspDir "dspfirm.cdc"
+    if ($NoDsp) {
+        if (Test-Path $dspCopy) {
+            if (IsJunction $dspDir) { throw "$dspDir is a junction; it must be the copy's own" }
+            Remove-Item -Path $dspCopy -Force
+        }
+        return
+    }
     $dsp = Join-Path $env:APPDATA "Azahar\sdmc\3ds\dspfirm.cdc"
     if (-not (Test-Path $dsp)) { throw "no $dsp to give the copies their sound" }
-    New-Item -ItemType Directory -Force -Path (Join-Path $user "sdmc\3ds") | Out-Null
-    Copy-Item -Path $dsp -Destination (Join-Path $user "sdmc\3ds\dspfirm.cdc") -Force
+    New-Item -ItemType Directory -Force -Path $dspDir | Out-Null
+    Copy-Item -Path $dsp -Destination $dspCopy -Force
 }
 
 # One portable copy: the install, a config with the room in it, its name,
@@ -562,7 +577,10 @@ foreach ($s in $sides) {
     Write-Host "--- $($s.Name) ($($s.Nick)): $($s.Log) ---"
     LogLines $s "lobby: |netrace: |race start:|flow state RACING|flow enter (Challenge|Local Wireless|Select Car|Select Track|Wireless Race)|wireless:" |
         Select-Object -First 80 | ForEach-Object { Write-Host "  $_" }
-    if (@(LogLines $s "^Sound: ndsp unavailable").Count -gt 0 -and -not $s.Failed) {
+    $silent = @(LogLines $s "^Sound: ndsp unavailable").Count -gt 0
+    if ($NoDsp) {
+        if (-not $silent -and -not $s.Failed) { $s.Failed = "sound up with -NoDsp" }
+    } elseif ($silent -and -not $s.Failed) {
         $s.Failed = "no sound: ndsp unavailable"
     }
     if (Test-Path $s.AzLog) {

@@ -1200,6 +1200,18 @@ def region_cases(sc):
     sc.op("unload", "NOREGION")
     sc.op("unload", "CARS")
     sc.op("unload", "_STREAMS")
+    # Stop clears the paused flag, a locked voice's too.
+    sc.op("get", 0, "common", "HORN")
+    sc.op("play", 0, F(1.0), F(0.0), F(0.0))
+    sc.op("pause", 0, 1)
+    sc.op("stop", 0)
+    sc.op("local", 1, 0)
+    sc.op("init", 1, "HORN", "common")
+    sc.op("lockvoice", 1)
+    sc.op("play", 1, F(1.0), F(0.0), F(0.0))
+    sc.op("pause", 1, 1)
+    sc.op("stop", 1)
+    sc.op("delete", 1)
 
 
 def calc_cases(sc, rng):
@@ -1360,6 +1372,79 @@ def random_cases(sc, rng, runs=30, steps=120):
         sc.op("__end__")
 
 
+def nodriver_cases(sc):
+    """The port's own run, with no model: with no ndsp, main.c gives
+    bsound_init no driver, and every driver call would read through NULL
+    on a 3DS (Session 98's copies with no DSP firmware). Without a driver
+    there are no pools, so the game's samples are its own storage: every
+    op on them, of each kind of bank, and on the bSound."""
+    sc.banks()
+    sc.op("arrive", "SPEECH")
+    sc.op("nodriver", "C", "0x00c0ffee")
+    sc.op("status")
+    sc.op("mode", 1)
+    sc.op("path", "host0:SOUND/")
+    sc.op("load", "common")
+    sc.op("update")
+    sc.op("unload", "common")
+    sc.op("new", 0, 0)                  # no pool: no sample
+    sc.op("chainnew", 1)
+    sc.op("get", 2, "common", "HORN")
+    for h, ty, name, bank in ((3, 0, "HORN", "common"),
+                              (4, 0, "eng_lo", "CARS"),
+                              (5, 0, "COP2", "SPEECH"),
+                              (6, 1, "MUSIC", "_STREAM"),
+                              (7, 1, "AMB", "_STREAMS"),
+                              (8, 0, "_MOVIE", "_MOVIE")):
+        sc.op("local", h, ty)
+        sc.op("init", h, name, bank)
+        sc.op("initcb", h, "A", "0x1234")
+        sc.op("cat", h, 3)
+        sc.op("setrate", h, 22050)
+        sc.op("channels", h)
+        sc.op("scaled", h)
+        sc.op("calcpitch", h, F(0.0))
+        sc.op("calcpitch", h, F(3.5))
+        sc.op("calcvol", h, F(0.5))
+        sc.op("calcpan", h, F(0.25))
+        sc.op("play", h, F(1.0), F(0.0), F(0.0))
+        sc.op("playn", h, "PART", 64, 128)
+        sc.op("isplaying", h)
+        sc.op("getvol", h)
+        sc.op("setvol", h, F(0.3))
+        sc.op("setscale", h, F(0.5))
+        sc.op("setpan", h, F(-0.4))
+        sc.op("setpitch", h, F(-1.5))
+        sc.op("setaz", h, 270)
+        sc.op("pause", h, 1)
+        sc.op("mute", h, 1)
+        sc.op("fade", h, F(0.0), 500)
+        sc.op("supdate", h)
+        sc.op("lockvoice", h)
+        sc.op("play", h, F(1.0), F(0.0), F(0.0))
+        sc.op("chain", h, "SPEECH.DAT", 48, 1000, 0)
+        sc.op("chain", h, "SPEECH.DAT", 1048, 1000, 1)
+        sc.op("catvol", 3, F(0.5))
+        sc.op("update")
+    sc.op("initcopy", 3, 4)
+    for h in range(3, 9):
+        sc.op("stop", h)
+        sc.op("delete", h)
+
+
+def nodriver_faults(lines):
+    """What the no-driver run did wrong: a driver call, a voice."""
+    bad = []
+    for ln in lines:
+        if ln.startswith("  snd ") and not ln.startswith("  snd st="):
+            bad.append("driver call: " + ln.strip())
+        elif ln.startswith("  -> V"):
+            bad.append("a voice: " + ln.strip())
+        elif " v=V" in ln:
+            bad.append("a sample with a voice: " + ln.strip()[:60])
+    return bad
+
+
 def script_runs():
     """Each run is a separate process in both the harness and the model:
     bSound is a singleton, and its pools are made once."""
@@ -1418,6 +1503,25 @@ def write_inputs(d):
         p.write_bytes((NL.join(lines) + NL).encode("latin-1"))
         paths.append(p)
     return runs, paths
+
+
+def write_nodriver(d):
+    sc = Script()
+    nodriver_cases(sc)
+    p = Path(d) / "nodriver.txt"
+    p.write_bytes((NL.join(sc.lines) + NL).encode("latin-1"))
+    return sc.lines, p
+
+
+def check_nodriver(exe, path, tmp):
+    """The no-driver run's output, and what it did wrong."""
+    o = Path(tmp) / "nodriver_out.txt"
+    rc = run_harness(exe, path, o)
+    lines = o.read_text(encoding="latin-1").splitlines()
+    bad = nodriver_faults(lines)
+    if rc != 0:
+        bad.append("harness exited %d" % rc)
+    return lines, bad
 
 
 def model_all(runs):
@@ -1577,12 +1681,13 @@ MUTATIONS = [
      "    s->voiceLock = 0;\n    bsample_stop(s);\n}",
      "    bsample_stop(s);\n}"),
     ("initialize _MOVIE", P,
-     "    if (strcmp(\"_MOVIE\", name) != 0)\n", ""),
+     "    if (strcmp(\"_MOVIE\", name) != 0 && drv() != NULL)\n",
+     "    if (drv() != NULL)\n"),
     ("initialize copy bank", P,
      "    bsample_set_bank_name(s, bsample_get_bank_name(other));\n", ""),
     ("lock voice locks", P,
-     "    s->voiceLock = 1;\n    ch = ",
-     "    s->voiceLock = 0;\n    ch = "),
+     "    s->voiceLock = 1;\n    if (drv() == NULL)",
+     "    s->voiceLock = 0;\n    if (drv() == NULL)"),
     ("lock voice channels", P,
      "    ch = bsnd_lock_channels(drv(), (uint16_t)bsample_get_channels(s));\n"
      "    s->voice = voice_mgr_get_voice(ch, s);\n}",
@@ -1740,8 +1845,8 @@ MUTATIONS = [
      "        if (strncmp(s->bankName, \"_MOVIE\", 7) == 0)\n            return 2;",
      "        if (strncmp(s->bankName, \"_MOVIE\", 7) == 0)\n            return 1;"),
     ("channels other stream", P,
-     "        return 0;\n    }\n    return bsnd_get_patch_channels",
-     "        return 1;\n    }\n    return bsnd_get_patch_channels"),
+     "        return 0;\n    }\n    if (drv() == NULL)",
+     "        return 1;\n    }\n    if (drv() == NULL)"),
     ("update needs fade", P,
      "    if (s->voice == NULL || s->fadeAdjust == 0.0f)\n        return;",
      "    if (s->voice == NULL)\n        return;"),
@@ -1804,6 +1909,31 @@ MUTATIONS = [
     ("get pitch is volume", P,
      "    return s->currentVolume;\n}\n\nvoid bsample_set_callback",
      "    return s->currentPitch;\n}\n\nvoid bsample_set_callback"),
+
+    # -- no driver (the port's; the no-driver run) -------------------------
+    ("nodriver init", P,
+     "    if (strcmp(\"_MOVIE\", name) != 0 && drv() != NULL)",
+     "    if (strcmp(\"_MOVIE\", name) != 0)"),
+    ("nodriver lock", P,
+     "    s->voiceLock = 1;\n    if (drv() == NULL)",
+     "    s->voiceLock = 1;\n    if (0)"),
+    ("nodriver pitch", P,
+     "        base = drv() != NULL ",
+     "        base = 1 "),
+    ("nodriver volume", P,
+     "        vol = drv() != NULL ",
+     "        vol = 1 "),
+    ("nodriver play", P,
+     "    if (d == NULL)                  // the port's, as bsample_initialize's\n"
+     "        return NULL;\n",
+     ""),
+    ("nodriver channels", P,
+     "    if (drv() == NULL)              // the port's, as bsample_initialize's\n"
+     "        return 0;\n    return bsnd_get_patch_channels",
+     "    return bsnd_get_patch_channels"),
+    ("nodriver chain", P,
+     "        return;\n    }\n    if (drv() == NULL)",
+     "        return;\n    }\n    if (0)"),
 ]
 
 EQUIVALENT = {
@@ -1849,21 +1979,30 @@ def mutate_pass(only=None, jobs=None):
             return 1
     indir = tempfile.TemporaryDirectory()
     runs, paths = write_inputs(indir.name)
+    _, ndpath = write_nodriver(indir.name)
     base_lines = model_all(runs)
     with tempfile.TemporaryDirectory() as tmp:
         exe = build_harness(tmp)
         t0 = time.monotonic()
         got, rc = harness_all(exe, paths, tmp)
+        nd, bad = check_nodriver(exe, ndpath, tmp)
         took = time.monotonic() - t0
         if diff(base_lines, got, quiet=True):
             print("base already differs -- fix that before mutating")
             return 1
+        if bad:
+            print("the no-driver run already fails -- fix that first")
+            return 1
         print("base: %d lines, 0 differ" % len(got), flush=True)
 
+    # The no-driver run has no model: the base harness's output, checked
+    # above, is what a mutant must give, so one that calls the driver or
+    # gets a voice differs.
+    base_lines = base_lines + ["== run %d" % len(paths)] + nd
     limit = mutpar.timeout_for(took)
     tally = mutpar.run_pass(todo, SOURCES, "bsound_test",
-                            run_all_exe(paths, limit), base_lines, diff,
-                            EQUIVALENT, jobs)
+                            run_all_exe(paths + [ndpath], limit), base_lines,
+                            diff, EQUIVALENT, jobs)
     indir.cleanup()
     return mutpar.summarize(todo, only, EQUIVALENT, tally)
 
@@ -1885,9 +2024,11 @@ def main():
 
     with tempfile.TemporaryDirectory() as tmp:
         runs, paths = write_inputs(tmp)
+        ndops, ndpath = write_nodriver(tmp)
         got = model_all(runs)
         exe = build_harness(tmp)
         harness, rc = harness_all(exe, paths, tmp)
+        nd, bad = check_nodriver(exe, ndpath, tmp)
 
     if args.dump:
         d = Path(args.dump)
@@ -1896,11 +2037,17 @@ def main():
                                            encoding="latin-1")
         d.with_suffix(".harness").write_text(NL.join(harness) + NL,
                                              encoding="latin-1")
+        d.with_suffix(".nodriver").write_text(NL.join(nd) + NL,
+                                              encoding="latin-1")
 
     n = diff(got, harness)
     print("%d runs, %d ops, %d lines, %d differ"
           % (len(runs), sum(len(r) for r in runs), len(harness), n))
-    sys.exit(1 if (n or rc) else 0)
+    for b in bad[:20]:
+        print("  " + b)
+    print("no driver: %d ops, %d lines, %d faults"
+          % (len(ndops), len(nd), len(bad)))
+    sys.exit(1 if (n or rc or bad) else 0)
 
 
 if __name__ == "__main__":

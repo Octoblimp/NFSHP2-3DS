@@ -10,6 +10,9 @@
 // script's own storage as L<handle>, regions as R<slot>, voice records as
 // V<index>, callbacks as A, B (a sample's) or C (the client's).
 //
+// "nodriver" is the port's own boot, with no driver (no ndsp): a run the
+// model has no part in, checked for making no driver call at all.
+//
 //     bsound_test script.txt > out.txt
 
 #include <stdint.h>
@@ -628,7 +631,7 @@ static int run(char** a, int n)
         && strcmp(o, "region") && strcmp(o, "arrive") && strcmp(o, "end")
         && strcmp(o, "near") && strcmp(o, "voices") && strcmp(o, "catvol")
         && strcmp(o, "getcatvol") && strcmp(o, "mode") && strcmp(o, "path")
-        && strcmp(o, "boot") && strcmp(o, "chvol")) {
+        && strcmp(o, "boot") && strcmp(o, "nodriver") && strcmp(o, "chvol")) {
         h = atoi(a[1]);
         s = gH[h];
     }
@@ -671,6 +674,14 @@ static int run(char** a, int n)
     if (strcmp(o, "boot") == 0) {
         printf("boot %s %s\n", a[1], a[2]);
         bsound_init(&gSound, &gDrv, cb_of(a[1]),
+                    (void*)(uintptr_t)strtoul(a[2], NULL, 0));
+        return 1;
+    }
+    if (strcmp(o, "nodriver") == 0) {
+        // The port's: no ndsp, so no driver (main.c's NULL). Every fake
+        // call above prints a "  snd " line; after this there must be none.
+        printf("nodriver %s %s\n", a[1], a[2]);
+        bsound_init(&gSound, NULL, cb_of(a[1]),
                     (void*)(uintptr_t)strtoul(a[2], NULL, 0));
         return 1;
     }

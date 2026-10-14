@@ -837,6 +837,19 @@ task 21 in `docs/formats/bchunk.md`, task 22 in `docs/formats/sound-bank.md`
            already raised. Azahar: `Sound: 34 patches in 24 voices`, a
            stereo pair per press at 22042 Hz, voices retired every frame --
            and the sounds were heard.
+    d. [x] No DSP firmware (Session 98). A card without
+           `sdmc:/3ds/dspfirm.cdc` has no ndsp, and main.c gives
+           `bsound_init` no driver; the race's sound setup then read
+           through NULL (`bsnd_patch_id`, unmapped reads on Azahar, a data
+           abort on a 3DS). `bsound.c` makes no driver call without one: no
+           patch, no voice, no channels, a base pitch and volume of 0, no
+           chained part. `bsound_check`'s no-driver run (212 ops, no model)
+           passes only with no driver call and no voice; 126 mutations,
+           124 caught, 2 equivalent, 0 unexplained.
+           On Azahar, `run_azahar_lobby.ps1 -Consoles 2 -Race -NoDsp`
+           (no firmware on either card): both copies logged "Sound: ndsp
+           unavailable, running silent" and PASS (racing), track 11 with
+           4 drivers, GO on seed ceab451a, no unmapped reads.
 23. [x] Camera (`Camera.obj`, `CameraMover.obj`)
         `camera.[ch]` is the whole of `Camera.obj`; `cammover.[ch]` is the
         base `CameraMover` plus `CM_ORBIT_CAR`, which is the one the car
@@ -2461,6 +2474,24 @@ phases.
                   run gave the 3 s timeout back at GO and each copy timed
                   the other out. 37d gives it back once every console's
                   frames come in.
+          - [ ] 37c-2: the CPU racers, the host's call (the user,
+                2026-10-14). In a race with no cop among the players,
+                the host's wireless setup chooses whether there are CPU
+                racers and how many: none, or 1 up to 8 less the players
+                in the room (8 cars at most).
+                - Each player already picks their own car and
+                  transmission on their own console (37c sends the
+                  ride and the settings, TransmissionType among them).
+                  The -Race run picked the same car and Automatic on
+                  both copies; it should pick different ones on each
+                  to show it.
+                - Today netrace_begin raises NumAICars to the consoles
+                  less two and the players past the second take AI
+                  racers' places, so the setup's Opponents row (retail's
+                  None / One / Full Grid, `bsetup.c`) does not say how
+                  many CPU racers there are. Done when the wireless
+                  setups' row counts CPU racers only (0 to 8 less the
+                  players) and the build adds the players on top.
           - [ ] 37d: the lockstep race. The host's step each frame and
                 both pads, with a frame or two of input delay; each
                 console's own view, mirror and HUD.
@@ -3069,6 +3100,11 @@ phases.
           side its player is on in the lobby, a cop console gets Be A
           Cop's HUD and buttons, a racer console the racer's, and a bust
           of a human racer counts on both.
+        - The user, 2026-10-14: when every player is a cop, CPU racers
+          are required, at least 2 and at most 8, the human cops not
+          counted in the 8. With no cop among the players, 37c-2's rule.
+          A race with both cops and racers among the players: not said
+          yet; ask when 61 comes.
         - Comes after 37's slices (37b-2 to 37f), which it builds on.
 
 ### The retail frontend

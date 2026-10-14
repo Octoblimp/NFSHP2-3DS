@@ -118,9 +118,10 @@ rest in AI racers' places) and sends every client what it made; each
 console holds at the end of its load until the host's GO, which carries
 the seed. netrace_check: 21 scenarios, faults 0; 158 mutations, 147
 caught, 11 equivalent. On Azahar two copies went from the lobby to a
-race on one seed. Next: the silent-sound fix (a NULL driver read when
-there is no DSP firmware), then 37d (the lockstep race), 37e, 37f, then
-TASKS 61.**
+race on one seed. The silent sound's NULL driver is fixed too (no DSP
+firmware, no driver call; `bsound_check`'s no-driver run). Next: 37c-2,
+the user's: the host chooses the CPU racers (none, or up to 8 less the
+players); then 37d (the lockstep race), 37e, 37f, then TASKS 61.**
 
 **Now (Session 97, 2026-10-14): TASKS 37b is done with 37b-2, the
 Local Wireless lobby. Players 2 on Challenge and its four setups reads

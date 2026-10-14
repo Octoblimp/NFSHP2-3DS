@@ -658,9 +658,16 @@ void bsample_initialize_callback(BSample* s, BSoundCallback cb, void* data)
 void bsample_initialize(BSample* s, const char* name, const char* bank)
 {
     // 0x002732c0. "_MOVIE" is the movies' sound, which has no patch.
+    //
+    // The port's: with no ndsp there is no driver (bsound_init's NULL), and
+    // no sample has a patch. Retail's bSnd calls take no instance, so it
+    // never needed to ask; here every driver call would read through NULL.
+    // So that none is made, a sample never gets a voice without a driver
+    // (bsample_lock_voice, bsample_play), and the calls that need no voice
+    // ask first.
     uint16_t id = VOICE_NONE;
 
-    if (strcmp("_MOVIE", name) != 0)
+    if (strcmp("_MOVIE", name) != 0 && drv() != NULL)
         id = bsnd_patch_id(drv(), bank, name);
     s->sampleId = id;
     bsample_set_name(s, name);
@@ -674,6 +681,8 @@ void bsample_lock_voice(BSample* s)
     uint16_t ch;
 
     s->voiceLock = 1;
+    if (drv() == NULL)              // the port's, as bsample_initialize's
+        return;
     ch = bsnd_lock_channels(drv(), (uint16_t)bsample_get_channels(s));
     s->voice = voice_mgr_get_voice(ch, s);
 }
@@ -737,7 +746,8 @@ uint32_t bsample_calc_pitch(const BSample* s, float pitch)
     uint32_t base;
 
     if (bsample_get_type(s) == 0)
-        base = bsnd_get_patch_pitch(drv(), s->bankName, s->name);
+        base = drv() != NULL        // the port's, as bsample_initialize's
+             ? bsnd_get_patch_pitch(drv(), s->bankName, s->name) : 0;
     else
         base = s->rate;
 
@@ -790,7 +800,8 @@ float bsample_get_scaled_volume(const BSample* s)
     float cat;
 
     if (bsample_get_type(s) == 0)
-        vol = bsnd_get_patch_volume(drv(), s->bankName, s->name);
+        vol = drv() != NULL         // the port's, as bsample_initialize's
+            ? bsnd_get_patch_volume(drv(), s->bankName, s->name) : 0;
     cat = s_instance != NULL
         ? bsound_get_category_volume(s_instance, s->category) : 1.0f;
     return ((float)vol * (cat * VOLUME_RECIPROCAL)) * s->scaleVolume;
@@ -849,6 +860,8 @@ BVoice* bsample_play(BSample* s, float volume, float pan, float pitch)
     int8_t p;
 
     if (s == NULL)                  // the port's, as bregion_sample's
+        return NULL;
+    if (d == NULL)                  // the port's, as bsample_initialize's
         return NULL;
     if (s->voice != NULL) {
         if (s->voice->id == VOICE_NONE)
@@ -983,6 +996,8 @@ uint32_t bsample_get_channels(const BSample* s)
             return 1;
         return 0;
     }
+    if (drv() == NULL)              // the port's, as bsample_initialize's
+        return 0;
     return bsnd_get_patch_channels(drv(), s->bankName, s->name);
 }
 
@@ -1070,6 +1085,8 @@ void bsample_chain_add(BSample* s, const char* path, uint32_t offset,
         bsample_play_named(s, path, offset, size);
         return;
     }
+    if (drv() == NULL)              // the port's, as bsample_initialize's
+        return;
     // CalcPitch, CalcVolume, CalcPan, in that order, at the sample's
     // current three; then the driver's 7-word overload, which lets it
     // choose the voice (0x00260d98).

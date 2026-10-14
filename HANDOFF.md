@@ -22359,3 +22359,51 @@ The silent-sound fix (no driver, no lookups), then 37d: the lockstep
 race. The leads from this session's survey are under 37d and 37e in
 TASKS.md. Then 37e, 37f, TASKS 61. Still to ask: TASKS 47's bridge,
 TASKS 52's popups.
+
+## Session 98, continued -- no DSP firmware, no NULL driver (done)
+
+The first wireless race's copies had no `sdmc:/3ds/dspfirm.cdc`, so no
+ndsp, and main.c gave the sound no driver (`sound_init`'s NULL, as it
+always has with no ndsp). bsound.c then called the driver through NULL:
+`bsnd_patch_id` from `bsample_initialize`, reading the bank slots at
+0x5e8 on. Azahar logs the reads and carries on; a 3DS would data-abort.
+Any player whose card lacks the firmware would have hit it at the race.
+
+### What changed
+
+- `bsound.c`: the port's guards, one comment at `bsample_initialize`
+  saying why. With no driver a sample gets no patch, no voice
+  (`bsample_lock_voice`, `bsample_play`), no channels for a patch, a base
+  pitch and patch volume of 0, and no chained part. Everything else
+  stops at no voice already; the bSound's own calls stop at status 0.
+- `tools/bsound_check.py`, `tools/src/bsound_test.c`: a no-driver run
+  ("nodriver", the port's boot with NULL), 212 ops over samples on their
+  own storage of each kind of bank, and the bSound's ops. No model: it
+  passes with no driver call and no voice, and its output is the base a
+  mutant must match. Seven new mutations, one per guard, all caught;
+  three old patterns moved with the guards. "stop unpauses" lived (no
+  script stopped a paused sample): region_cases now does, locked and not.
+- `tools/run_azahar_lobby.ps1 -NoDsp`: the copies' cards without the
+  firmware; each copy must log "Sound: ndsp unavailable" and pass with
+  no unmapped read.
+- `docs/formats/bsound.md`, "The port".
+
+### Checks
+
+- bsound_check: 33 runs, 8917 ops, 0 differ; no driver: 212 ops,
+  0 faults. `--mutate`: 126 mutations, 124 caught, 2 equivalent,
+  0 unexplained.
+- sound_check, enginesound_check, sedwedge_check, carsound_check:
+  0 differ.
+- On Azahar, `run_azahar_lobby.ps1 -Consoles 2 -Race -NoDsp`: neither
+  card had the firmware, both copies logged "Sound: ndsp unavailable,
+  running silent", and both PASS (racing). The host built track 11 with
+  4 drivers at 176 s, GO at 179-180 s on seed ceab451a, the race on at
+  187 s on each, and no unmapped read in either Azahar log (Azahar
+  flushes its errors as they come).
+
+### Next
+
+TASKS 37c-2 (the user's, 2026-10-14): the host chooses the CPU racers,
+none or up to 8 less the players; each player's own car and transmission
+shown on a -Race run with different picks. Then 37d.
