@@ -196,6 +196,11 @@ class Menu:
         for i in range(len(self.items)):
             self._send(UNACTIVATE, i, self.filter_port)
 
+    def close(self):
+        # ~FlailerMenuItem: Color = SavedColor, the whole word.
+        for it in self.items:
+            self.colors[it["obj"]] = it["saved"]
+
     def _item_joy(self, port, ev):
         table = {SCROLL_LEFT: (PAD_LEFT, 0), ANALOG_LEFT: (PAD_LEFT, 0),
                  SCROLL_RIGHT: (PAD_RIGHT, 0), ANALOG_RIGHT: (PAD_RIGHT, 0),
@@ -289,6 +294,14 @@ def run(out, screen, first):
 
     m.unactivate()
     m.dump("unactivate")
+
+    # A menu made again reads the chunk's Color as it was left.
+    m.set_enabled(m.items[-1]["id"], False)
+    m.dump("leftgray")
+    m.close()
+    m.dump("close")
+    for it in m.items:
+        out.append("reopen %d %08x" % (it["id"], m.colors[it["obj"]]))
 
 
 def py_lines(path):

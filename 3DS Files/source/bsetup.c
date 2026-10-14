@@ -4,6 +4,7 @@
 
 #include "bsetup.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "bmath.h"
@@ -607,6 +608,389 @@ static void beACopEvent(BSetup* s, BScreenMessage msg,
     }
 }
 
+// -------------------------------------------------------- ChallengeScreen
+
+#define ITEM_RACE_TYPE      BSCR_ITEM_MENUITEM(2)
+#define ITEM_CHAL_SKILL     BSCR_ITEM_MENUITEM(3)
+#define ITEM_CHAL_SETUP     BSCR_ITEM_MENUITEM(4)
+
+// 0x002b6680: MI_1_MASK .. MI_5_MASK. The screen has four items; the fifth
+// mask is not on it.
+static const uint32_t kChallengeMasks[5] = {
+    BSCR_MI_MASK(1), BSCR_MI_MASK(2), BSCR_MI_MASK(3), BSCR_MI_MASK(4),
+    BSCR_MI_MASK(5),
+};
+
+// ChallengeGameTypes (0x00313d88): Race Type's four, in its order.
+static const int32_t kChallengeGameTypes[4] = {
+    FRED_CHALLENGE_GAME_SINGLE_RACE, FRED_CHALLENGE_GAME_KNOCKOUT,
+    FRED_CHALLENGE_GAME_LAP_KNOCKOUT, FRED_CHALLENGE_GAME_FREE_RUN,
+};
+
+// ResyncChangeables (0x001b6a80): the race type's label, the count's (1 or
+// 2; any other leaves it), and the skill's. Free Run with the cops off has
+// no opponents, so Skill Level grays and its value goes; anything else
+// puts both back. Two players do not gray it here, as You're The Cop's do.
+static void challengeResync(BSetup* s, BChallengeScreen* c)
+{
+    int id = 0;
+
+    switch (c->data.challengeMode) {
+        case FRED_CHALLENGE_GAME_SINGLE_RACE: id = 20005; break;
+        case FRED_CHALLENGE_GAME_KNOCKOUT: id = 20007; break;
+        case FRED_CHALLENGE_GAME_LAP_KNOCKOUT: id = 20008; break;
+        case FRED_CHALLENGE_GAME_FREE_RUN: id = 20006; break;
+        default: break;
+    }
+    HOOK(s, setLanguageID, c->screen, BSETUP_OBJ_RACE_TYPE_VALUE, id);
+    if (c->data.numPlayers == 1)
+        HOOK(s, setLanguageID, c->screen, BSETUP_OBJ_PLAYERS_VALUE, 20003);
+    else if (c->data.numPlayers == 2)
+        HOOK(s, setLanguageID, c->screen, BSETUP_OBJ_PLAYERS_VALUE, 20004);
+    refreshOpponentSkillLevel(s, c->screen, c->data.skillLevel,
+                              BSETUP_OBJ_SKILL_VALUE);
+    if (c->data.challengeMode == FRED_CHALLENGE_GAME_FREE_RUN
+        && !s->gf->copsOn) {
+        HOOK(s, grayMenuItem, c->screen, ITEM_CHAL_SKILL, BSCR_GRAY_DISABLE);
+        HOOK(s, setVisible, c->screen, BSETUP_OBJ_SKILL_VALUE, 0);
+    } else {
+        HOOK(s, grayMenuItem, c->screen, ITEM_CHAL_SKILL, BSCR_GRAY_ENABLE);
+        HOOK(s, setVisible, c->screen, BSETUP_OBJ_SKILL_VALUE, 1);
+    }
+}
+
+// ResyncBlurb (0x001b6298), retail's, which takes the item: a line for
+// each. Skill Level's are the cops' with the cops on, the racers' off.
+static void challengeBlurb(BSetup* s, BChallengeScreen* c, uint32_t item)
+{
+    int id = 0;
+
+    switch (item) {
+        case ITEM_PLAYERS:
+            if (c->data.numPlayers == 1) id = 19000;
+            else if (c->data.numPlayers == 2) id = 19001;
+            break;
+        case ITEM_RACE_TYPE:
+            switch (c->data.challengeMode) {
+                case FRED_CHALLENGE_GAME_SINGLE_RACE: id = 20010; break;
+                case FRED_CHALLENGE_GAME_KNOCKOUT: id = 20013; break;
+                case FRED_CHALLENGE_GAME_LAP_KNOCKOUT: id = 20012; break;
+                case FRED_CHALLENGE_GAME_FREE_RUN: id = 20011; break;
+                default: break;
+            }
+            break;
+        case ITEM_CHAL_SKILL:
+            if (s->gf->copsOn) {
+                if (c->data.skillLevel == 0) id = 19006;
+                else if (c->data.skillLevel == 1) id = 19007;
+                else if (c->data.skillLevel == 2) id = 19008;
+            } else {
+                if (c->data.skillLevel == 0) id = 19002;
+                else if (c->data.skillLevel == 1) id = 19003;
+                else if (c->data.skillLevel == 2) id = 19004;
+            }
+            break;
+        case ITEM_CHAL_SETUP:
+            id = 19005;
+            break;
+        default:
+            break;
+    }
+    banim_blurb_new_text_id(clock(s), &c->blurb, id);
+}
+
+// MaybeChangeRaceType (0x001b6a00): nothing while You're The Cop is set.
+// Past either end of the four the index wraps to the other; a mode that is
+// already the one set is no change. A change resyncs here, and again in
+// OnPadLeftRight.
+static int maybeChangeRaceType(BSetup* s, BChallengeScreen* c, int32_t idx)
+{
+    int32_t mode;
+
+    if (fredGet(s, FRED_MAIN_MENU_BEACOP)) return 0;
+    if (!(-1 < idx)) idx = 3;
+    if (!(idx < 4)) idx = 0;
+    mode = kChallengeGameTypes[idx];
+    if (mode == c->data.challengeMode) return 0;
+    c->gameTypeIndex      = idx;
+    c->data.challengeMode = mode;
+    challengeResync(s, c);
+    return 1;
+}
+
+// The constructor (0x001b5e30), in its order. Fred's settings are copied
+// after the SelectionSet has its items; the race type's index is found
+// only with You're The Cop off, and the search does not stop at the match.
+// The help lines are the cops' only with the cops on. Last, Fred gets the
+// count and the race type, and the cars are made available and preloaded.
+static void challengeCtor(BSetup* s, uint32_t screen)
+{
+    BChallengeScreen* c = &s->challenge;
+    BAnim*            a = clock(s);
+    int               i;
+
+    memset(c, 0, sizeof(*c));
+    bsel_init(a, &c->sel, screen);
+    banim_blurb_init(a, &c->blurb, screen, BSCR_OBJ_SCROLLING_TEXT,
+                     BSCR_OBJ_SCROLLING_TEXT, BSCR_OBJ_WHITEOUT_BAR);
+    banim_slide_in_init(a, &c->slideIn, screen,
+                        topLeftX(s, screen, BSCR_MI_MASK(1)));
+    banim_highlight_init(a, &c->highlight, screen, 0xab671c9au,
+                         (int32_t)BANIM_BLOOM_COLOR);
+    banim_highlight_init(a, &c->change, screen, 0x1042eac3u, -1);
+    barrows_init(s, &c->arrows, screen, BSETUP_OBJ_LEFT_ARROW,
+                 BSETUP_OBJ_RIGHT_ARROW);
+    c->screen = screen;
+    bsel_set_indicator_mode(&c->sel, 1);
+    bsel_add_items(a, &c->sel, kChallengeMasks, 5);
+    if (s->gf->fred) bsetup_challenge_load(&c->data, s->gf->fred);
+    else bsetup_challenge_defaults(&c->data);
+    c->gameTypeIndex = -1;
+    if (!fredGet(s, FRED_MAIN_MENU_BEACOP))
+        for (i = 0; i < 4; i++)
+            if (c->data.challengeMode == kChallengeGameTypes[i])
+                c->gameTypeIndex = i;
+    makeJoystickArrowsRight(s, &c->data, &c->arrows);
+    challengeResync(s, c);
+    startTheRightMovie(s);
+    c->exitActive = 0;
+    HOOK(s, setHelpOverride, s->gf->copsOn ? kBeACopHelp : NULL);
+    fredSetGame(s, c->data.challengeMode, c->data.numPlayers);
+    HOOK0(s, makeChallengeCarsAvailable);
+    HOOK0(s, preloadCars);
+    c->live = 1;
+}
+
+// The destructor (0x001b6068): the exit animation first; the challenge's
+// cars, then Fred's count and settings -- not its game type -- and the help
+// override off; then the members in reverse.
+static void challengeDtor(BSetup* s)
+{
+    BChallengeScreen* c    = &s->challenge;
+    BAnim*            a    = clock(s);
+    uint8_t*          fred = s->gf->fred;
+
+    if (c->exitActive) banim_slide_release(a, &c->exit.slide);
+    HOOK0(s, makeChallengeCarsAvailable);
+    if (fred) {
+        put32(fred + FRED_NUM_PLAYER_CARS, c->data.numPlayers);
+        bsetup_challenge_save(&c->data, fred);
+    }
+    HOOK(s, setHelpOverride, NULL);
+    banim_slide_release(a, &c->slideIn);
+    banim_blurb_release(a, &c->blurb);
+    memset(c, 0, sizeof(*c));
+}
+
+// HandleScreenCallback's TICK (0x001b66c4): the four animations, then the
+// pads. On Players the arrows show only with both in; without them the
+// count falls back to one, and the line with it if it changed. Then, on
+// whatever item, without both pads the count goes to one again and the
+// labels resync.
+static void challengeTick(BSetup* s, BChallengeScreen* c)
+{
+    BAnim* a = clock(s);
+
+    banim_slide_animate(a, &c->slideIn);
+    banim_highlight_animate(a, &c->highlight);
+    banim_highlight_animate(a, &c->change);
+    banim_blurb_animate(a, &c->blurb);
+
+    if (c->current == ITEM_PLAYERS) {
+        if (joystickPluggedIn(s, 0) && joystickPluggedIn(s, 1)) {
+            barrows_set(s, &c->arrows, BSETUP_OBJ_PLAYERS_VALUE);
+        } else {
+            barrows_set(s, &c->arrows, 0);
+            if (maybeChangeNumPlayers(s, &c->data, 1)) {
+                challengeResync(s, c);
+                challengeBlurb(s, c, ITEM_PLAYERS);
+            }
+        }
+    }
+    if (joystickPluggedIn(s, 0) && joystickPluggedIn(s, 1)) return;
+    maybeChangeNumPlayers(s, &c->data, 1);
+    challengeResync(s, c);
+}
+
+// OnMenuitemHighlight (0x001b64e0). SetupHighlight (0x001b63f0) puts the
+// brackets round the item's own box, as You're The Cop's does; then the
+// item's bloom, the current item and the line; then the arrows, mask and
+// value bloom by item.
+static void challengeHighlight(BSetup* s, BChallengeScreen* c, uint32_t item)
+{
+    BAnim*  a      = clock(s);
+    int32_t box[4] = {0, 0, 0, 0};   // left, top, right, bottom
+
+    if (s->hooks.getBoundingBox)
+        s->hooks.getBoundingBox(s->hooks.user, c->screen, item, box);
+    HOOK(s, setTopLeftY, c->screen, BSCR_OBJ_MI_UNDERSCORE,
+         (int32_t)((float)box[3] + -3.0f));
+    HOOK(s, setTopLeftY, c->screen, BSCR_OBJ_MI_OVERSCORE,
+         (int32_t)((float)box[1] - 6.0f));
+    banim_highlight_set_item(a, &c->highlight, item);
+    c->current = item;
+    challengeBlurb(s, c, item);
+
+    switch (item) {
+        case ITEM_PLAYERS:
+            barrows_set(s, &c->arrows, BSETUP_OBJ_PLAYERS_VALUE);
+            makeJoystickArrowsRight(s, &c->data, &c->arrows);
+            bsel_set_current(a, &c->sel, BSCR_MI_MASK(1));
+            banim_highlight_set_item(a, &c->change, BSETUP_OBJ_PLAYERS_VALUE);
+            break;
+        case ITEM_RACE_TYPE:
+            barrows_set(s, &c->arrows, BSETUP_OBJ_RACE_TYPE_VALUE);
+            bsel_set_current(a, &c->sel, BSCR_MI_MASK(2));
+            banim_highlight_set_item(a, &c->change,
+                                     BSETUP_OBJ_RACE_TYPE_VALUE);
+            break;
+        case ITEM_CHAL_SKILL:
+            barrows_set(s, &c->arrows, BSETUP_OBJ_SKILL_VALUE);
+            bsel_set_current(a, &c->sel, BSCR_MI_MASK(3));
+            banim_highlight_set_item(a, &c->change, BSETUP_OBJ_SKILL_VALUE);
+            break;
+        case ITEM_CHAL_SETUP:
+            barrows_set(s, &c->arrows, 0);
+            bsel_set_current(a, &c->sel, BSCR_MI_MASK(4));
+            banim_highlight_set_item(a, &c->change, 0);
+            break;
+        default:
+            break;
+    }
+}
+
+// OnPadLeftRight (0x001b6158): left is -1 and right +1. A change blooms the
+// value, resyncs and rewrites the scrolled item's line, with the menu's
+// left or right sound; no change is silent. Setup has nothing to change.
+static void challengeScroll(BSetup* s, BChallengeScreen* c,
+                            BScreenMessage msg, BScreenCallbackData* data)
+{
+    int32_t  dir     = msg == BMSG_MENUITEM_PAD_LEFT ? -1 : 1;
+    int      changed = 0;
+    uint32_t object  = 0;
+
+    switch (data->itemHash) {
+        case ITEM_PLAYERS:
+            changed = maybeChangeNumPlayers(s, &c->data,
+                                            c->data.numPlayers + dir);
+            object  = BSETUP_OBJ_PLAYERS_VALUE;
+            break;
+        case ITEM_RACE_TYPE:
+            changed = maybeChangeRaceType(s, c, c->gameTypeIndex + dir);
+            object  = BSETUP_OBJ_RACE_TYPE_VALUE;
+            break;
+        case ITEM_CHAL_SKILL:
+            changed = maybeChangeOpponentSkillLevel(dir, &c->data.skillLevel);
+            object  = BSETUP_OBJ_SKILL_VALUE;
+            break;
+        default:
+            break;
+    }
+    if (!changed) {
+        data->noise = 0;
+        return;
+    }
+    if (msg == BMSG_MENUITEM_PAD_LEFT) data->noise = BSND_MENU_LEFT;
+    else if (msg == BMSG_MENUITEM_PAD_RIGHT) data->noise = BSND_MENU_RIGHT;
+    banim_highlight_set_item(clock(s), &c->change, object);
+    challengeResync(s, c);
+    challengeBlurb(s, c, data->itemHash);
+}
+
+// SELECT (0x001b682c, inline in HandleScreenCallback). One player takes
+// only the first pad's; two take either. Fred gets the settings, the count
+// and the game type -- the race type, or You're The Cop's -- and
+// TheRaceParameters the count and the race mode. Setup goes to the race
+// type's own setup screen; every other item to car select, the race set up
+// first. The exit animation takes the brackets with it.
+static void challengeSelect(BSetup* s, BChallengeScreen* c,
+                            BScreenCallbackData* data)
+{
+    const char* target = "";
+    BAnim*      a;
+    int32_t     numPlayers, gameType;
+
+    if (!((c->data.numPlayers == 1 && data->port == 0)
+          || c->data.numPlayers == 2))
+        return;
+    if (s->gf->fred) bsetup_challenge_save(&c->data, s->gf->fred);
+    numPlayers = c->data.numPlayers;
+    gameType   = fredGet(s, FRED_MAIN_MENU_BEACOP)
+                     ? FRED_CHALLENGE_GAME_BE_A_COP
+                     : c->data.challengeMode;
+    fredSetGame(s, gameType, numPlayers);
+    HOOK(s, setRaceParameters, numPlayers, c->data.raceMode);
+
+    if (data->itemHash == ITEM_CHAL_SETUP) {
+        // The jump table at 0x002b6740.
+        switch (gameType) {
+            case FRED_CHALLENGE_GAME_SINGLE_RACE:
+                target = "Single Race Setup";
+                break;
+            case FRED_CHALLENGE_GAME_KNOCKOUT: target = "Knockout Setup"; break;
+            case FRED_CHALLENGE_GAME_LAP_KNOCKOUT:
+                target = "Lap Knockout Setup";
+                break;
+            case FRED_CHALLENGE_GAME_FREE_RUN: target = "Free Run Setup"; break;
+            case FRED_CHALLENGE_GAME_BE_A_COP:
+                target = "Be The Cop Setup";
+                break;
+            default: break;
+        }
+    } else {
+        target = numPlayers == 2 ? "Select Car2P" : "Select Car";
+        HOOK0(s, setupRaceParametersAfterRaceSetup);
+    }
+
+    a = clock(s);
+    banim_exit_init(a, &c->exit, c->screen, target);
+    c->exitActive = 1;
+    banim_slide_add_group(a, &c->exit.slide, BSCR_GROUP_UNDERSCORE,
+                          BSCR_OBJ_MI_UNDERSCORE,
+                          topLeftX(s, c->screen, BSCR_OBJ_MI_UNDERSCORE),
+                          BANIM_OFFSCREEN_X, c->exit.slide.totalTime);
+}
+
+// HandleScreenCallback (0x001b6688). The arrows see every message, then a
+// TICK animates; while an exit runs it gets every message, and nothing
+// else does. BACK is not the screen's: the list goes back to whichever
+// Mode Select pushed it.
+static void challengeEvent(BSetup* s, BScreenMessage msg,
+                           BScreenCallbackData* data)
+{
+    BChallengeScreen* c = &s->challenge;
+
+    barrows_event(s, &c->arrows, msg);
+    if (msg == BMSG_SCREEN_TICK) challengeTick(s, c);
+    if (c->exitActive) {
+        int32_t param = data ? data->param : 0;
+        int32_t noise = data ? data->noise : 0;
+        // A finished exit changes screen, which unactivates this one and
+        // clears `c`. Nothing after this may touch it.
+        banim_exit_message(clock(s), &c->exit, (int)msg, &param, &noise);
+        if (data) {
+            data->param = param;
+            data->noise = noise;
+        }
+        return;
+    }
+    if (!data) return;
+    switch (msg) {
+        case BMSG_MENUITEM_HIGHLIGHT:
+            challengeHighlight(s, c, data->itemHash);
+            break;
+        case BMSG_MENUITEM_SELECT:
+            challengeSelect(s, c, data);
+            break;
+        case BMSG_MENUITEM_PAD_LEFT:
+        case BMSG_MENUITEM_PAD_RIGHT:
+            challengeScroll(s, c, msg, data);
+            break;
+        default:
+            break;
+    }
+}
+
 // ------------------------------------------------------ tScrollingMenuList
 
 // 0x0031cfa0, MI_1_MASK .. MI_7_MASK, which the static initialiser at
@@ -914,6 +1298,107 @@ static void refreshDamage(BSetup* s, BRaceSetup* r, int32_t value,
     refreshFrom(s, r, kOffOn, 2, value, text);
 }
 
+// The other four rows' tables: Opponents' None, One and Full Grid
+// (0x00313e18), and Random and Same, Opponent Type's (gp-18768) and
+// Tracks' (gp-18752) the same.
+static const int32_t kGrid[3]       = {30011, 30010, 30012};
+static const int32_t kRandomSame[2] = {30013, 30014};
+
+// MaybeChangeOpponentGrid (0x001b7748), by Fred's car count, whichever way
+// the pad went: one car goes between One and Full Grid, two between None
+// and Full Grid. Any other value, or count, stays.
+static int maybeChangeOpponentGrid(BSetup* s, BRaceSetup* r, int32_t dir,
+                                   int32_t* value)
+{
+    int32_t cars = fredGet(s, FRED_NUM_PLAYER_CARS);
+    int32_t old  = *value;
+    (void)r;
+    (void)dir;
+    if (cars == 1) {
+        if (old == 1) *value = 2;
+        else if (old == 2) *value = 1;
+    } else if (cars == 2) {
+        if (old == 0) *value = 2;
+        else if (old == 2) *value = 0;
+    }
+    return *value != old;
+}
+
+// MaybeChangeNumOpponents (0x001b77f0): 3 .. 7, or 2 .. 6 for two cars,
+// wrapping.
+static int32_t numOpponentsMax(BSetup* s)
+{
+    return fredGet(s, FRED_NUM_PLAYER_CARS) == 2 ? 6 : 7;
+}
+
+static int maybeChangeNumOpponents(BSetup* s, BRaceSetup* r, int32_t dir,
+                                   int32_t* value)
+{
+    int32_t old = *value;
+    int32_t lo  = fredGet(s, FRED_NUM_PLAYER_CARS) == 2 ? 2 : 3;
+    (void)r;
+    *value = valueChanger(old, dir, lo, numOpponentsMax(s));
+    return *value != old;
+}
+
+// MaybeChangeOpponentType (0x001b7908) and MaybeChangeTrackSetting
+// (0x001b7a10): 0 or 1, wrapping.
+static int maybeChangeOpponentType(BSetup* s, BRaceSetup* r, int32_t dir,
+                                   int32_t* value)
+{
+    int32_t old = *value;
+    (void)s;
+    (void)r;
+    *value = valueChanger(old, dir, 0, 1);
+    return *value != old;
+}
+
+static int maybeChangeTrackSetting(BSetup* s, BRaceSetup* r, int32_t dir,
+                                   int32_t* value)
+{
+    int32_t old = *value;
+    (void)s;
+    (void)r;
+    *value = valueChanger(old, dir, 0, 1);
+    return *value != old;
+}
+
+// RefreshOpponentGrid (0x001b77d0), RefreshOpponentType (0x001b7950) and
+// RefreshTrackSetting (0x001b7a58).
+static void refreshOpponentGrid(BSetup* s, BRaceSetup* r, int32_t value,
+                                uint32_t text)
+{
+    refreshFrom(s, r, kGrid, 3, value, text);
+}
+
+static void refreshOpponentType(BSetup* s, BRaceSetup* r, int32_t value,
+                                uint32_t text)
+{
+    refreshFrom(s, r, kRandomSame, 2, value, text);
+}
+
+static void refreshTrackSetting(BSetup* s, BRaceSetup* r, int32_t value,
+                                uint32_t text)
+{
+    refreshFrom(s, r, kRandomSame, 2, value, text);
+}
+
+// RefreshNumOpponents (0x001b7860): the most is Full Grid; any other count
+// clears the text's LanguageID and prints the number into it.
+static void refreshNumOpponents(BSetup* s, BRaceSetup* r, int32_t value,
+                                uint32_t text)
+{
+    char str[16];
+
+    if (value == numOpponentsMax(s)) {
+        HOOK(s, setLanguageID, r->screen, text, 30012);
+        return;
+    }
+    HOOK(s, setLanguageID, r->screen, text, 0);
+    snprintf(str, sizeof str, "%d", (int)value);
+    HOOK(s, printText, r->screen, text, str);
+}
+
 // FindChangeable (0x001b7ab0): the row on that item, or none.
 static BChangeable* findRow(BRaceSetup* r, uint32_t item)
 {
@@ -1167,7 +1652,6 @@ static void btcCtor(BSetup* s, uint32_t screen)
                     &r->btc.damage);
     raceSetupBuildMenu(s, r, "Be The Cop Setup");
     raceSetupResync(s, r);
-    r->live = 1;
 }
 
 // The destructor (0x001b9348): Fred gets the five words back, and the race
@@ -1182,27 +1666,204 @@ static void btcDtor(BSetup* s)
     raceSetupDtor(s, r);
 }
 
-// BaseCallback (0x001b7b20), which ACTIVATE news the screen on for (104 is
-// BeTheCopSetup), UNACTIVATE deletes, and everything else goes to
-// HandleMenuEvent -- in retail with pInstance unchecked.
-void bsetup_btc_callback(BGameFlow* gf, BScreenMessage msg,
-                         BScreenCallbackData* data)
+// ------------------------------------------------------ the other four
+
+// Fred's block in whole, to the screen's copy and back.
+static void raceSetupLoad(BSetup* s, BRaceSetup* r, uint32_t off, int n)
 {
-    BSetup* s = g_setup;
+    for (int i = 0; i < n; i++) r->data[i] = fredGet(s, off + 4 * i);
+}
+
+static void raceSetupSave(BSetup* s, const BRaceSetup* r, uint32_t off,
+                          int n)
+{
+    if (!s->gf->fred) return;
+    for (int i = 0; i < n; i++) put32(s->gf->fred + off + 4 * i, r->data[i]);
+}
+
+// SingleRaceSetup (0x001b87d0): the base, Fred's seven words, the rows,
+// the menu and their values. Opponents and Opponent Type ([2]) are one
+// car's, or two cars' without the cops. One car's Opponents is [1] with
+// the cops, and [0] without, where None becomes One; two cars' is [0],
+// where One becomes None. Then Catch-up [3], Traffic -- [5] with the cops,
+// [4] without -- and Damage [6].
+static void singleRaceCtor(BSetup* s, uint32_t screen)
+{
+    BRaceSetup* r = &s->race;
+    int32_t     cars, police;
+
+    raceSetupCtor(s, r, screen);
+    raceSetupLoad(s, r, FRED_SINGLE_RACE_SETUP, 7);
+    cars   = fredGet(s, FRED_NUM_PLAYER_CARS);
+    police = fredGet(s, FRED_MAIN_MENU_POLICE);
+    if (cars == 2 && !police) {
+        if (r->data[0] == 1) r->data[0] = 0;
+        raceSetupAttach(r, 30002, 30500, maybeChangeOpponentGrid,
+                        refreshOpponentGrid, &r->data[0]);
+        raceSetupAttach(r, 30003, 30501, maybeChangeOpponentType,
+                        refreshOpponentType, &r->data[2]);
+    } else if (cars == 1) {
+        if (!police && r->data[0] == 0) r->data[0] = 1;
+        raceSetupAttach(r, 30002, 30500, maybeChangeOpponentGrid,
+                        refreshOpponentGrid,
+                        police ? &r->data[1] : &r->data[0]);
+        raceSetupAttach(r, 30003, 30501, maybeChangeOpponentType,
+                        refreshOpponentType, &r->data[2]);
+    }
+    raceSetupAttach(r, 30005, 30502, maybeChangeCatchup, refreshCatchup,
+                    &r->data[3]);
+    raceSetupAttach(r, 30006, 30503, maybeChangeTraffic, refreshTraffic,
+                    police ? &r->data[5] : &r->data[4]);
+    raceSetupAttach(r, 30101, 30504, maybeChangeDamage, refreshDamage,
+                    &r->data[6]);
+    raceSetupBuildMenu(s, r, "Single Race Setup");
+    raceSetupResync(s, r);
+}
+
+// FreeRunSetup (0x001b8b20): Fred's three words; Traffic -- [1] with the
+// cops, [0] without -- and Damage [2].
+static void freeRunCtor(BSetup* s, uint32_t screen)
+{
+    BRaceSetup* r = &s->race;
+    int32_t     police;
+
+    raceSetupCtor(s, r, screen);
+    raceSetupLoad(s, r, FRED_FREE_RUN_SETUP, 3);
+    police = fredGet(s, FRED_MAIN_MENU_POLICE);
+    raceSetupAttach(r, 30006, 30503, maybeChangeTraffic, refreshTraffic,
+                    police ? &r->data[1] : &r->data[0]);
+    raceSetupAttach(r, 30101, 30504, maybeChangeDamage, refreshDamage,
+                    &r->data[2]);
+    raceSetupBuildMenu(s, r, "Free Run Setup");
+    raceSetupResync(s, r);
+}
+
+// LapKnockoutSetup (0x001b8cb8), six words, and TrackKnockoutSetup
+// (0x001b8f60), the race knockout's seven. Without the cops: one car's
+// Opponents, the number of them [0], and anyone's Opponent Type [1]. Then
+// Catch-up [2], Traffic -- [4] with the cops, [3] without -- the race
+// knockout's Tracks [5], and Damage last.
+static void knockoutCtor(BSetup* s, uint32_t screen, int race)
+{
+    BRaceSetup* r = &s->race;
+    int32_t     cars, police;
+
+    raceSetupCtor(s, r, screen);
+    if (race) raceSetupLoad(s, r, FRED_RACE_KNOCKOUT_SETUP, 7);
+    else raceSetupLoad(s, r, FRED_LAP_KNOCKOUT_SETUP, 6);
+    cars   = fredGet(s, FRED_NUM_PLAYER_CARS);
+    police = fredGet(s, FRED_MAIN_MENU_POLICE);
+    if (!police) {
+        if (cars == 1)
+            raceSetupAttach(r, 30002, 30500, maybeChangeNumOpponents,
+                            refreshNumOpponents, &r->data[0]);
+        raceSetupAttach(r, 30003, 30501, maybeChangeOpponentType,
+                        refreshOpponentType, &r->data[1]);
+    }
+    raceSetupAttach(r, 30005, 30502, maybeChangeCatchup, refreshCatchup,
+                    &r->data[2]);
+    raceSetupAttach(r, 30006, 30503, maybeChangeTraffic, refreshTraffic,
+                    police ? &r->data[4] : &r->data[3]);
+    if (race)
+        raceSetupAttach(r, 30007, 30505, maybeChangeTrackSetting,
+                        refreshTrackSetting, &r->data[5]);
+    raceSetupAttach(r, 30101, 30504, maybeChangeDamage, refreshDamage,
+                    race ? &r->data[6] : &r->data[5]);
+    raceSetupBuildMenu(s, r, race ? "Knockout Setup" : "Lap Knockout Setup");
+    raceSetupResync(s, r);
+}
+
+// Their destructors (0x001b8a58, 0x001b8c28, 0x001b8ea8, 0x001b9180): Fred
+// gets the block back and the race its parameters, whether or not SELECT
+// went. Unlike Be The Cop Setup's, no cars.
+static void raceSetupBlockDtor(BSetup* s, uint32_t off, int n)
+{
+    BRaceSetup* r = &s->race;
+
+    raceSetupSave(s, r, off, n);
+    HOOK0(s, setupRaceParametersAfterRaceSetup);
+    raceSetupDtor(s, r);
+}
+
+// BaseCallback (0x001b7b20). ACTIVATE news the class `kind` names on the
+// screen (over a live one, which retail leaks); UNACTIVATE deletes the
+// live one, whichever it is; everything else goes to HandleMenuEvent -- in
+// retail with pInstance unchecked.
+static void raceSetupCallback(BGameFlow* gf, BScreenMessage msg,
+                              BScreenCallbackData* data, int kind)
+{
+    BSetup*  s = g_setup;
+    uint32_t screen;
 
     if (!s || !gf->anim) return;
     s->gf = gf;
     switch (msg) {
         case BMSG_SCREEN_ACTIVATE:
-            btcCtor(s, data ? data->itemHash : BSETUP_SCREEN_BE_THE_COP_SETUP);
+            screen = data ? data->itemHash : BSETUP_SCREEN_RACE_SETUP;
+            switch (kind) {
+                case BSETUP_RACE_SINGLE: singleRaceCtor(s, screen); break;
+                case BSETUP_RACE_FREE_RUN: freeRunCtor(s, screen); break;
+                case BSETUP_RACE_LAP_KNOCKOUT:
+                    knockoutCtor(s, screen, 0);
+                    break;
+                case BSETUP_RACE_KNOCKOUT: knockoutCtor(s, screen, 1); break;
+                default: btcCtor(s, screen); break;
+            }
+            s->race.kind = kind;
+            s->race.live = 1;
             break;
         case BMSG_SCREEN_UNACTIVATE:
-            if (s->race.live) btcDtor(s);
+            if (!s->race.live) break;
+            switch (s->race.kind) {
+                case BSETUP_RACE_SINGLE:
+                    raceSetupBlockDtor(s, FRED_SINGLE_RACE_SETUP, 7);
+                    break;
+                case BSETUP_RACE_FREE_RUN:
+                    raceSetupBlockDtor(s, FRED_FREE_RUN_SETUP, 3);
+                    break;
+                case BSETUP_RACE_LAP_KNOCKOUT:
+                    raceSetupBlockDtor(s, FRED_LAP_KNOCKOUT_SETUP, 6);
+                    break;
+                case BSETUP_RACE_KNOCKOUT:
+                    raceSetupBlockDtor(s, FRED_RACE_KNOCKOUT_SETUP, 7);
+                    break;
+                default: btcDtor(s); break;
+            }
             break;
         default:
             if (s->race.live) raceSetupEvent(s, &s->race, msg, data);
             break;
     }
+}
+
+void bsetup_btc_callback(BGameFlow* gf, BScreenMessage msg,
+                         BScreenCallbackData* data)
+{
+    raceSetupCallback(gf, msg, data, BSETUP_RACE_BE_THE_COP);
+}
+
+void bsetup_single_race_callback(BGameFlow* gf, BScreenMessage msg,
+                                 BScreenCallbackData* data)
+{
+    raceSetupCallback(gf, msg, data, BSETUP_RACE_SINGLE);
+}
+
+void bsetup_free_run_callback(BGameFlow* gf, BScreenMessage msg,
+                              BScreenCallbackData* data)
+{
+    raceSetupCallback(gf, msg, data, BSETUP_RACE_FREE_RUN);
+}
+
+void bsetup_lap_knockout_callback(BGameFlow* gf, BScreenMessage msg,
+                                  BScreenCallbackData* data)
+{
+    raceSetupCallback(gf, msg, data, BSETUP_RACE_LAP_KNOCKOUT);
+}
+
+void bsetup_knockout_callback(BGameFlow* gf, BScreenMessage msg,
+                              BScreenCallbackData* data)
+{
+    raceSetupCallback(gf, msg, data, BSETUP_RACE_KNOCKOUT);
 }
 
 void bsetup_init(BSetup* s, BGameFlow* gf, const BSetupHooks* hooks)
@@ -1238,6 +1899,28 @@ void bsetup_beacop_callback(BGameFlow* gf, BScreenMessage msg,
             break;
         default:
             if (s->beACop.live) beACopEvent(s, msg, data);
+            break;
+    }
+}
+
+// ChallengeScreenCallback (0x001b6bd0): the same three ways, the instance
+// at gp-18788.
+void bsetup_challenge_callback(BGameFlow* gf, BScreenMessage msg,
+                               BScreenCallbackData* data)
+{
+    BSetup* s = g_setup;
+
+    if (!s || !gf->anim) return;
+    s->gf = gf;
+    switch (msg) {
+        case BMSG_SCREEN_ACTIVATE:
+            challengeCtor(s, data ? data->itemHash : BSETUP_SCREEN_CHALLENGE);
+            break;
+        case BMSG_SCREEN_UNACTIVATE:
+            if (s->challenge.live) challengeDtor(s);
+            break;
+        default:
+            if (s->challenge.live) challengeEvent(s, msg, data);
             break;
     }
 }

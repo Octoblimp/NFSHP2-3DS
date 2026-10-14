@@ -192,6 +192,11 @@ int32_t bui_next_in_group(const BUI* ui, const BUIScreen* screen,
 // into it rather than copying payloads.
 bool bui_set_text_color(BUI* ui, uint32_t index, uint32_t rgb);
 
+// The whole Color word, alpha too, with DirtyFlag left alone: the plain
+// store ~FlailerMenuItem (0x001697a0) makes to put back the colour it read
+// when the menu was made.
+bool bui_put_text_color(BUI* ui, uint32_t index, uint32_t color);
+
 // Repoints a text object at a different row of the language table --
 // tAnimatedBlurb::NewText (0x00232ef0), which is how the one blurb line on
 // a menu screen says something different about each item. Same caveat about

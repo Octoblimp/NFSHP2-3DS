@@ -196,6 +196,15 @@ void bmenu_unactivate(BMenu* m)
     }
 }
 
+// ~FlailerMenuItem (0x001697a0), for each item as ~FlailerMenu deletes the
+// list: the chunk's Color is set back to SavedColor, whole.
+void bmenu_close(BMenu* m)
+{
+    if (!m) return;
+    for (int i = 0; i < m->numItems; i++)
+        bui_put_text_color(m->ui, m->items[i].object, m->items[i].savedColor);
+}
+
 // JoyHandler__15FlailerMenuItem (0x001651d8): a jump table on event-5.
 // Everything not in it -- SELECT, CANCEL, BACK, HELP, L1/L2/R1/R2 -- falls
 // out of the bottom untouched.

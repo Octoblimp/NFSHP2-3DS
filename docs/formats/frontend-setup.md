@@ -1,24 +1,40 @@
 # The race setup screens
 
 Between a Mode Select and car select sits a setup screen: the few settings
-the chosen mode takes before the cars. Two are ported. The first is
-"You're The Cop", the screen Cops On Mode Select's second item opens
-([frontend-screens.md](frontend-screens.md#the-short-version)). The second
-is its Setup item's "Be The Cop Setup", the first of the
-`RaceSetupBaseClass` screens ([below](#be-the-cop-setup)). With them come
-the small classes every setup screen shares.
+the chosen mode takes before the cars. All seven are ported:
+
+- "You're The Cop", the screen Cops On Mode Select's second item opens
+  ([frontend-screens.md](frontend-screens.md#the-short-version));
+- "Challenge", the one both Mode Selects' Challenge item opens
+  ([below](#challenge));
+- the five `RaceSetupBaseClass` screens their Setup items open: "Be The
+  Cop Setup" from You're The Cop ([below](#be-the-cop-setup)), and from
+  Challenge, by its race type, "Single Race Setup", "Knockout Setup", "Lap
+  Knockout Setup" or "Free Run Setup" ([below](#the-other-four-setups)).
+
+With them come the small classes every setup screen shares.
 
 Everything here is from the retail image, SLES_507.31, disassembled with
 `tools/retaildis.py`; each rule cites its address. The port is
-`3DS Files/source/bsetup.c`. `tools/setup_check.py` runs You're The Cop
-next to retail's own code in `mipsemu` (359 ops, 2293 lines, 0 differ; see
-[the check](#the-check)), and `tools/racesetup_check.py` runs Be The Cop
-Setup (398 ops, 3420 lines, 0 differ).
+`3DS Files/source/bsetup.c`. Four checks run it next to retail's own code
+in `mipsemu` ([the check](#the-check)), each with 0 lines differing:
+
+| check | screens | ops | lines |
+|-------|---------|-----|-------|
+| `tools/setup_check.py` | You're The Cop | 359 | 2293 |
+| `tools/challenge_check.py` | Challenge | 620 | 3935 |
+| `tools/racesetup_check.py` | Be The Cop Setup | 398 | 3420 |
+| `tools/racesetups_check.py` | the other four | 3142 | 34498 |
 
 | class | address | what it is |
 |-------|---------|------------|
+| `ChallengeScreen` | `0x001b5e30` .. `0x001b6c68` | Challenge |
 | `BeACopChallengeSetup` | `0x001b6c68` .. `0x001b7748` | You're The Cop |
-| `RaceSetupBaseClass` | `0x001b7748` .. `0x001b9248` | every race setup screen's rows |
+| `RaceSetupBaseClass` | `0x001b7748` .. `0x001b87d0` | every race setup screen's rows |
+| `SingleRaceSetup` | `0x001b87d0` .. `0x001b8b20` | Single Race Setup |
+| `FreeRunSetup` | `0x001b8b20` .. `0x001b8cb8` | Free Run Setup |
+| `LapKnockoutSetup` | `0x001b8cb8` .. `0x001b8f60` | Lap Knockout Setup |
+| `TrackKnockoutSetup` | `0x001b8f60` .. `0x001b9248` | Knockout Setup |
 | `BeTheCopSetup` | `0x001b9248` .. `0x001b93e0` | Be The Cop Setup's three rows |
 | `tScrollingMenuList` | `0x00249c78` .. `0x0024a888` | a list that slides its items into view |
 | `tfeSineWave` | `0x0024a5c0` .. `0x0024a68c` | a value swinging between two bounds |
@@ -291,6 +307,60 @@ The port's is 0.
 `uirender_object_height` is `GetHeightFloat`; main.c's `hookSetup*` are the
 rest.
 
+## Challenge
+
+```
+Challenge (0x2d62cfe2)
+  1 Players      One Player / Two Players   left/right: 1 <-> 2, only with two pads
+  2 Race Type    Single Race / Knockout / Lap Knockout / Free Run   left/right: wrapping
+  3 Skill Level  Beginner / Advanced / Expert   left/right: 0..2, wrapping
+  4 Setup
+SELECT on 1, 2, 3 -> "Select Car" (one player) or "Select Car2P" (two)
+SELECT on 4       -> the race type's setup screen
+```
+
+`ChallengeScreen` is You're The Cop with a Race Type row, and most of what
+is above holds for it with the items one further down. It is 720 bytes too,
+with `pInstance` at gp-18788 and its callback `ChallengeScreenCallback`
+(`0x001b6bd0`). It works on the same `DataChallengeScreen` at Fred+8:
+`mChallengeMode` is the race type and `mSkillLevel` the skill, and
+You're The Cop's own skill word is not touched. The differences:
+
+- **Race Type** is `ChallengeGameTypes` (`0x00313d88`): 3 Single Race, 4
+  Knockout, 5 Lap Knockout, 6 Free Run, the `GameType` values. The screen
+  keeps an index into it (+24). The constructor finds `mChallengeMode` in
+  the table, but only with You're The Cop (Fred+28) clear; otherwise, or
+  for a mode not in it, the index is -1. `MaybeChangeRaceType`
+  (`0x001b6a00`) does nothing while You're The Cop is set, wraps the index
+  past either end, and calls a mode that is already set no change. From -1,
+  right asks for Single Race and left for Free Run.
+- **ResyncChangeables** (`0x001b6a80`): the race type's label (20005
+  Single Race, 20007 Knockout, 20008 Lap Knockout, 20006 Free Run, or 0),
+  the count's as You're The Cop's, then the skill's. Skill Level grays and
+  its value hides for Free Run with the cops off, which has no opponents.
+  Two players do not gray it.
+- **ResyncBlurb** (`0x001b6298`) takes the item: Players 19000/19001, Race
+  Type 20010 "First to the finish wins.", 20013 "Last place in each race
+  eliminated.", 20012 "Last place on each lap eliminated." or 20011 "Run
+  practice laps.", Skill Level 19006..19008 (Tough, Tougher, Toughest cops)
+  with the cops on and 19002..19004 off, Setup 19005.
+- **The constructor** (`0x001b5e30`) copies Fred's settings after the
+  `SelectionSet` has its items (MI_1..5_MASK, five for four items), and the
+  help override is You're The Cop's lines only with the cops on. Last, Fred
+  gets `GameType` = the race type and the count, then
+  `MakeChallengeCarsAvailable` and the preload.
+- **The destructor** (`0x001b6068`): the exit, the challenge cars, then
+  Fred's count and settings, but not `GameType`.
+- **SELECT** (`0x001b682c`) writes the settings back, then `GameType`: 7
+  with You're The Cop set, else the race type. On Setup the jump table at
+  `0x002b6740` names the setup screen by `GameType`, or none for one off it
+  (3..7: Single Race, Knockout, Lap Knockout, Free Run, Be The Cop Setup).
+  Every other item, even one the screen does not have, goes to car select
+  after `SetupRaceParametersAfterRaceSetup`.
+
+`HandleScreenCallback` (`0x001b6688`) gives the arrows every message
+first, then the TICK, then the exit; BACK is not the screen's.
+
 ## Be The Cop Setup
 
 ```
@@ -429,6 +499,65 @@ from the first item's Y to the last's, MENUITEM_1 and MENUITEM_7 here.
 The scroller's arrows and the clip poly are invisible on this screen, and
 three rows never scroll.
 
+## The other four setups
+
+The same Flailer screen as Be The Cop Setup, under four more names, with
+`RaceSetupBaseClass` and other rows. `BaseCallback` news the class by its
+id, 100 to 103; each has its own Fred block, read whole by the constructor
+and written back whole by the destructor:
+
+| id | screen | class | size | Fred | words | defaults |
+|----|--------|-------|------|------|-------|----------|
+| 100 | Single Race Setup | `SingleRaceSetup` | 792 | +36 | 7 | 2, 2, 0, 1, 3, 0, 1 |
+| 101 | Free Run Setup | `FreeRunSetup` | 776 | +84 | 3 | 3, 0, 1 |
+| 102 | Lap Knockout Setup | `LapKnockoutSetup` | 788 | +124 | 6 | 4, 0, 1, 3, 0, 1 |
+| 103 | Knockout Setup | `TrackKnockoutSetup` | 792 | +96 | 7 | 7, 0, 1, 3, 0, 1, 1 |
+| 104 | Be The Cop Setup | `BeTheCopSetup` | 784 | +64 | 5 | 2, 0, 1, 0, 1 |
+
+Which rows a screen has depends on Fred's `NumPlayerCars` and `mPolice` at
+the time the screen opens:
+
+| screen | rows |
+|--------|------|
+| Single Race | one car: Opponents ([1] with the cops, [0] without), Opponent Type [2]; two cars without the cops: Opponents [0], Opponent Type [2]; then Catch-up [3], Traffic ([5] with the cops, [4] without), Damage [6] |
+| Free Run | Traffic ([1] with the cops, [0] without), Damage [2] |
+| Lap Knockout, Knockout | without the cops: Opponents [0] (one car only), Opponent Type [1]; then Catch-up [2], Traffic ([4] with the cops, [3] without), Tracks [5] (Knockout only), Damage ([6] for Knockout, [5] for Lap Knockout) |
+
+Single Race's constructor (`0x001b87d0`) fixes one value first: two cars
+without the cops take Opponents' One to None, and one car without them
+None to One. The cops' and the racers' traffic are separate words, so
+each keeps its own setting.
+
+The new rows, with their labels and blurbs:
+
+| row | label, blurb | Change | values |
+|-----|--------------|--------|--------|
+| Opponents (Single Race) | 30002 Opponents, 30500 "Set the number of opponents." | `MaybeChangeOpponentGrid` (`0x001b7748`) | 30011 None, 30010 One, 30012 Full Grid (`0x00313e18`) |
+| Opponents (knockouts) | the same | `MaybeChangeNumOpponents` (`0x001b77f0`) | a number, or 30012 Full Grid |
+| Opponent Type | 30003 Opponent Type, 30501 "Set who you race against." | `MaybeChangeOpponentType` (`0x001b7908`) | 30013 Random, 30014 Same (gp-18768) |
+| Tracks | 30007 Tracks, 30505 "Set the sequence of tracks." | `MaybeChangeTrackSetting` (`0x001b7a10`) | Random, Same (gp-18752) |
+
+- **MaybeChangeOpponentGrid** ignores the direction. By Fred's car count,
+  one car goes between One and Full Grid and two between None and Full
+  Grid. Any other value, or any other count, stays, and the row is silent.
+- **MaybeChangeNumOpponents** is `ValueChanger(v, d, 3, 7)`, or `(v, d, 2,
+  6)` for two cars: the most is the grid less the players.
+  `RefreshNumOpponents` (`0x001b7860`) shows 30012 Full Grid at the most;
+  any other count sets the text's LanguageID to 0 and prints the number
+  into it with `FlailerPrintf` (`0x00143e70`, "%d"). The count is read
+  again each time, so a count changed under the screen moves the range.
+- **Opponent Type and Tracks** are `ValueChanger(v, d, 0, 1)`.
+
+The destructors (`0x001b8a58`, `0x001b8c28`, `0x001b8ea8`, `0x001b9180`)
+put the block back and call `SetupRaceParametersAfterRaceSetup`, SELECT or
+not; unlike Be The Cop Setup's, not `MakeChallengeCarsAvailable`. SELECT
+goes to "Select Car", or "Select Car2P" for two cars, as on Be The Cop
+Setup, and car select goes on to "Select Track" (`bcarsel.c`).
+
+`BaseCallback`'s UNACTIVATE deletes whatever `pInstance` holds through its
+virtual destructor, so any of the five callbacks deletes any of the five
+classes. An ACTIVATE over a live screen leaks it in retail.
+
 ## What the port does differently
 
 - `mPolice` is `gf->copsOn`, where bscreens.c keeps it, not Fred+32. Moving
@@ -437,7 +566,8 @@ three rows never scroll.
   the second player never appears.
 - `SetHelpOverride` is only logged: the help menu (`tHelpMenu`) is not
   ported yet.
-- The three car calls are traced, not run. Car select comes next.
+- The three car calls are main.c's hooks onto `fred.c` and `bcarsel.c`;
+  the checks trace them.
 - "Select Car2P" is registered with player one's screen, `0x18dc8e52`. Retail
   gives it one screen per pad (`0x18dc8e53` for port 1). The 3DS can't
   reach it.
@@ -459,6 +589,18 @@ Be The Cop Setup:
   - a message with no instance: the port ignores it.
 - Only one race setup screen is alive at a time, as with retail's
   `pInstance`, so the port keeps one `BRaceSetup`.
+
+The other four setups:
+
+- Each reads `mPolice` from Fred+32, as retail does. main.c's
+  `hookSetPolice` keeps `Fred.MainMenuOpts[1]` with `gf->copsOn`.
+- A value off its row's table is read past the end in retail: Tracks' 2 is
+  Damage's "Off", and Opponents' 3 and Opponent Type's 2 whatever follows
+  theirs. The port reads 0, as for Be The Cop Setup's rows.
+- `FlailerPrintf` is the `printText` hook, `hookAnimPrintText`, which sets
+  the text object's string.
+- The class is `BRaceSetup.kind`, not a vtable, and the block is
+  `BRaceSetup.data`, a union with Be The Cop Setup's.
 
 ## The check
 
@@ -537,10 +679,42 @@ row other than the first, a Catch-up flip over a value that is not 0 or
 1, and the highlight box's item. `rpoke` and the moved objects (`obj`'s
 tenth field) are there for them.
 
+`python tools/challenge_check.py` runs Challenge on the same harness (its
+`cmsg`/`cdump` ops), with `setup_check.py`'s stubs. The script covers every
+race type and two off the table, one player, two and others, skills in and
+off the table, the cops both ways and You're The Cop set and not, with
+either pad out; every item highlighted and scrolled through every wrap;
+SELECT on each item from both ports, with each race type on Setup; and
+every other message with and without an exit. `--mutate` runs 92
+mutations; one survives, `ctor-load-late`, which is equivalent: the
+`SelectionSet`'s indicator mode and items read neither the screen's copy
+nor Fred, so the copy taken either side of them shows nowhere.
+
+`python tools/racesetups_check.py` runs the other four, again on the same
+harness (`smsg`, `fredw`, `spoke` and `sdump`, which prints every block in
+Fred and the word after Lap Knockout's). It stubs `FlailerPrintf` too. The
+script covers:
+
+- each screen with one car and two, the cops on and off, and 0 and 3
+  cars, every row stepped both ways;
+- SELECT with one car and two, and every message during the exit;
+- Single Race's fix-ups, and grids that do not move, with the car count
+  changed under the screen;
+- values poked off their ranges;
+- the opponent count at the most, below it and off its range both ways,
+  and with the car count changed under the screen;
+- each screen's last row left changed when it goes, with the word after
+  Lap Knockout's block marked;
+- UNACTIVATE through another class's callback, over a leaked screen, and
+  with none.
+
+Its values stay on their tables, where retail reads past them. `--mutate`
+runs 74 mutations, and all are caught. The first pass missed two, the
+word counts of Single Race's and Lap Knockout's destructors: every row
+stepped back to where it started, so a block's last word was written back
+unchanged. The last-row case is there for them.
+
 ## What comes next
 
-- **The other race setups** (Single Race, Free Run, Lap KO, Track KO; 100
-  to 103 in `BaseCallback`) are `RaceSetupBaseClass` with other rows. They
-  wait: racing comes first.
-- **"Select Car"** is `SelectCarScreen`. The three car calls above belong to
-  it.
+- **The help menu** (`tHelpMenu`), for `SetHelpOverride`.
+- **Local wireless** joins the Players rows (TASKS 37b).

@@ -178,6 +178,12 @@ void bmenu_activate(BMenu* m, int startItem);
 // Sends MENUITEM_UNACTIVATE to every item and drops the highlight.
 void bmenu_unactivate(BMenu* m);
 
+// FlailerScreen::UnActivate deletes the menu after unactivating it, and
+// each item's destructor puts the label's authored colour back. Without
+// this a label grayed when its screen goes stays gray in the chunk, and the
+// next bmenu_open on the screen takes that gray for the authored colour.
+void bmenu_close(BMenu* m);
+
 // One pad event through all three levels. `pressed` false is ignored, as
 // every JoyHandler in the chain does. Returns true if anything acted on it.
 bool bmenu_joy(BMenu* m, int port, BJoyEvent ev, bool pressed);

@@ -290,13 +290,36 @@ already had it as `SCREEN_START_BUTTON`, unless the screen consumed it.
 
 `FlailerScreen::Activate` (`0x00165c20`):
 
-1. Build the `FlailerMenu` if `Menu` is still NULL. It is built once and
-   kept -- reactivating a screen does not rediscover its items.
+1. Build the `FlailerMenu` if `Menu` is NULL -- which it is every time,
+   because `UnActivate` deletes it (below). Each activation rediscovers the
+   items and reads each label's `SavedColor` afresh.
 2. Send `SCREEN_ACTIVATE` (11) with `Param = -1`. If the callback writes
    anything else into `Param`, that becomes `SavedMenuItemNumber`, which is
    how a screen picks which item starts highlighted.
 3. `MakeFrontendSound(data.Noise)`.
 4. `SetCurrentItemNumber(SavedMenuItemNumber)`, then `Menu->Activate()`.
+
+`FlailerScreen::UnActivate` (`0x00165d00`; `0x0016a940` in the retail
+image) undoes it:
+
+1. `SavedMenuItemNumber = Menu->GetCurrentItemNumber()`, so a screen whose
+   callback leaves `Param` at -1 comes back on the item it was left on.
+2. `Menu->UnActivate()`: the current item's `UnHighlight`, then
+   `MENUITEM_UNACTIVATE` to every item.
+3. `delete Menu` and `Menu = NULL`. `~FlailerMenu` (`0x001654e0`) deletes
+   the item list, and `~FlailerMenuItem` (`0x00164b88`; `0x001697a0`
+   retail) finds the item's text object and stores `SavedColor` back into
+   its `Color` -- the whole word, with no `SetColor` and no `DirtyFlag`.
+4. `SCREEN_UNACTIVATE` (12), then `MakeFrontendSound(data.Noise)`.
+
+Step 3 matters to any screen that grays a label and leaves with it gray.
+The race setups all run on one Flailer screen and each grays the rows past
+its own, so a setup with more rows reached after one with fewer -- Knockout
+Setup after Single Race -- has labels that were left gray. The chunk is
+shared by every activation: without the restore the new menu reads gray as
+the authored colour, and enabling the item recolours it gray. The port had
+exactly that until `bmenu_close`, which main.c's leaveScreen hook calls
+after `bmenu_unactivate`.
 
 ## The highlight bar is not moved by the menu system
 
@@ -337,15 +360,17 @@ looping and non-looping navigation, the three-level input routing, and the
 `AlignBar` geometry (opt-in, since the original never calls it).
 
 Because colours live in the chunk, `bmenu` writes them back through
-`bui_set_text_color`, which reproduces `SetColor`'s alpha-preserving mask.
-That is safe: `UIBundle::data` is a writable heap copy of the bundle, and
+`bui_set_text_color`, which reproduces `SetColor`'s alpha-preserving mask,
+and `bmenu_close` through `bui_put_text_color`, the whole word as the
+item destructor stores it. That is safe: `UIBundle::data` is a writable heap copy of the bundle, and
 `bui.c` keeps pointers into it rather than copying object payloads.
 
 `tools/bmenu_check.py` carries a second implementation of the same rules in
 Python and runs an identical event script over both, diffing the whole
 transcript -- every callback message, every item's state and live colour
-after every step. 3,234 lines on `FRONTB.BUN` and 1,783 on `INGAMEB.BUN`, 0
-differ. That catches a rule transcribed wrongly into C; it cannot catch a
+after every step, and last a label left gray, `bmenu_close` and the colours
+a second menu reads. 3,390 lines on `FRONTB.BUN` and 1,874 on `INGAMEB.BUN`,
+0 differ. That catches a rule transcribed wrongly into C; it cannot catch a
 rule read wrongly out of the disassembly, because both sides were written
 from the same notes. For that there is the picture:
 
@@ -366,6 +391,9 @@ is doubled.
 |--------|---------|------|
 | `__11FlailerMenu...` | `0x001653b8` | discovers `MENUITEM_0..15` |
 | `__15FlailerMenuItem...` | `0x00164b28` | `State = 1`, saves the colour |
+| `_$_15FlailerMenuItem` | `0x00164b88` | puts the saved colour back |
+| `_$_11FlailerMenu` | `0x001654e0` | deletes the item list |
+| `UnActivate__13FlailerScreen` | `0x00165d00` | saves the item, deletes the menu |
 | `Activate__13FlailerScreen` | `0x00165c20` | the only menu construction site |
 | `Activate__11FlailerMenu` | `0x001655a0` | activates items, highlights the first enabled one |
 | `SetMenuItemState__15FlailerMenuItem...` | `0x00164fb8` | set bits, recolour |

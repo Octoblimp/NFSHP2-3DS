@@ -314,10 +314,23 @@ static const BScreenConfig kScreens[] = {
     // made by bsetup_init().
     { "ChallengeBeACop",         BSETUP_SCREEN_BEACOP,
       bsetup_beacop_callback },
-    // Where You're The Cop's Setup goes: BeTheCopSetup, the one
-    // RaceSetupBaseClass screen ported.
+    // Where You're The Cop's Setup goes: BeTheCopSetup on
+    // RaceSetupBaseClass.
     { "Be The Cop Setup",        BSETUP_SCREEN_BE_THE_COP_SETUP,
       bsetup_btc_callback },
+    // Both Mode Selects' Challenge (ChallengeScreen), and the four its
+    // Setup goes to by race type -- the same RaceSetupBaseClass screen
+    // under four more names.
+    { "Challenge",               BSETUP_SCREEN_CHALLENGE,
+      bsetup_challenge_callback },
+    { "Single Race Setup",       BSETUP_SCREEN_RACE_SETUP,
+      bsetup_single_race_callback },
+    { "Knockout Setup",          BSETUP_SCREEN_RACE_SETUP,
+      bsetup_knockout_callback },
+    { "Lap Knockout Setup",      BSETUP_SCREEN_RACE_SETUP,
+      bsetup_lap_knockout_callback },
+    { "Free Run Setup",          BSETUP_SCREEN_RACE_SETUP,
+      bsetup_free_run_callback },
     // Options' Load/Save (memcard.c's LoadSaveWrapper): Save, Load, and
     // the Autosave line, onto settings.db in sdmc:/NFSHP2/SAVES.
     { "Phils Load Save",         0x9829bfabu,
@@ -337,8 +350,6 @@ static const BScreenConfig kScreens[] = {
     // own FlailerScreenConfigList points at -- is still to be written. The
     // hashes are the ELF's; `python tools/screen_registry.py --check-port`
     // checks every row of this table against it and lists what is left.
-    { "Challenge",               0x2d62cfe2u,   // ChallengeScreenCallback
-      bgf_plain_screen_callback },
     { "View Event Tree",         0x147f8a59u,   // tEventTreeView
       bgf_plain_screen_callback },
     { "Audio Options",           0xe116761cu,   // AudioOptionsScreen
@@ -1311,7 +1322,10 @@ static void hookLeaveScreen(void* user, const BScreenConfig* cfg)
 {
     Boot* b = (Boot*)user;
     (void)cfg;
-    if (b->hasMenu) bmenu_unactivate(&b->menu);
+    if (b->hasMenu) {
+        bmenu_unactivate(&b->menu);
+        bmenu_close(&b->menu);
+    }
     b->hasMenu = false;
     b->screen  = NULL;
     b->project = NULL;
@@ -6759,6 +6773,7 @@ int main(int argc, char** argv)
     setupHooks.getTopLeftX         = hookSetupTopLeftX;
     setupHooks.setLanguageID       = hookAnimSetLanguageID;
     setupHooks.setVisible          = hookAnimSetVisible;
+    setupHooks.printText           = hookAnimPrintText;
     setupHooks.grayMenuItem        = hookFlowGrayMenuItem;
     setupHooks.grayMenuItemNamed   = hookSetupGrayNamed;
     setupHooks.getTopLeftY         = hookSetupGetTopLeftY;

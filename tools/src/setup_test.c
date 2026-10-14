@@ -19,6 +19,15 @@
 //   rpoke|I|V          word I of Be The Cop Setup's live copy of the block
 //   rmsg|M|ITEM|PORT   Be The Cop Setup's callback, as msg
 //   rdump              its instance, rows, scroller and Fred's block
+//   beacop|N           Fred.MainMenuOpts.BeACop
+//   cmsg|M|ITEM|PORT   the Challenge screen's callback, as msg
+//   cdump              its instance, Fred and TheRaceParameters
+//   smsg|K|M|ITEM|PORT the RaceSetupBaseClass Callback BaseCallback's id K
+//                      names (100 .. 104), as msg
+//   fredw|OFF|V...     Fred's words from OFF
+//   spoke|I|V          word I of the live setup's copy of its block
+//   sdump              the live setup, as rdump, every block in Fred and
+//                      the word after Lap Knockout's
 //
 // An obj's tenth field, when there, is its top left Y (float bits);
 // SetTopLeftY(float) moves it, so the scroller reads back what it wrote.
@@ -40,7 +49,13 @@
 #define MAX_OBJECTS 32
 
 #define RETAIL_DCS              8
+#define RETAIL_BEACOP           28
+#define RETAIL_POLICE           32
+#define RETAIL_SINGLE_RACE      36
 #define RETAIL_BTC              64
+#define RETAIL_FREE_RUN         84
+#define RETAIL_RACE_KNOCKOUT    96
+#define RETAIL_LAP_KNOCKOUT     124
 #define RETAIL_GAME_TYPE        0x1072c
 #define RETAIL_NUM_PLAYER_CARS  0x10734
 
@@ -119,6 +134,8 @@ static const char* slideName(const BSlideAnim* s)
     if (s == &setup.beACop.exit.slide) return "exit";
     if (s == &setup.race.slideIn) return "slidein";
     if (s == &setup.race.exit.slide) return "exit";
+    if (s == &setup.challenge.slideIn) return "slidein";
+    if (s == &setup.challenge.exit.slide) return "exit";
     snprintf(buf, sizeof buf, "?%p", (const void*)s);
     return buf;
 }
@@ -129,6 +146,8 @@ static const char* hlName(const BHighlightAnim* h)
     if (h == &setup.beACop.change) return "hl2";
     if (h == &setup.race.highlight) return "hl1";
     if (h == &setup.race.change) return "hl2";
+    if (h == &setup.challenge.highlight) return "hl1";
+    if (h == &setup.challenge.change) return "hl2";
     return "?";
 }
 
@@ -367,6 +386,13 @@ static void h_vis(void* u, uint32_t screen, uint32_t object, int vis)
     printf("  vis %08x %08x %d\n", screen, object, vis);
 }
 
+static void h_print(void* u, uint32_t screen, uint32_t object,
+                    const char* str)
+{
+    (void)u;
+    printf("  printf %08x %08x %s\n", screen, object, str);
+}
+
 static void h_gray(void* u, uint32_t screen, uint32_t item, int mode)
 {
     (void)u;
@@ -474,6 +500,7 @@ static const BSetupHooks hooks = {
     .getTopLeftX = h_topx,
     .setLanguageID = h_lang,
     .setVisible = h_vis,
+    .printText = h_print,
     .grayMenuItem = h_gray,
     .grayMenuItemNamed = h_grayn,
     .getTopLeftY = h_gety,
@@ -519,9 +546,63 @@ static void dump(void)
     printf("  rp %d %d\n", rpNumPlayerCars, rpRaceMode);
 }
 
+// The Challenge screen: as dump, with its race type's index.
+static void cdump(void)
+{
+    const BChallengeScreen* c = &setup.challenge;
+    const uint8_t*          d = fred + RETAIL_DCS;
+
+    if (!c->live) {
+        printf("  inst 0\n");
+    } else {
+        printf("  inst 1 cur %08x data %d %d %d %d %d gti %d exit %d\n",
+               c->current, c->data.numPlayers, c->data.challengeMode,
+               c->data.raceMode, c->data.skillLevel, c->data.beACopSkill,
+               c->gameTypeIndex, c->exitActive);
+        printf("  arrows %d %d %08x wave %08x %08x %08x %08x\n",
+               c->arrows.hasLeft != 0, c->arrows.hasRight != 0,
+               c->arrows.follow, fbits(c->arrows.pulse.lo),
+               fbits(c->arrows.pulse.hi), fbits(c->arrows.pulse.rate),
+               fbits(c->arrows.pulse.phase));
+    }
+    printf("  fred dcs %d %d %d %d %d type %d cars %d\n", get32(d),
+           get32(d + 4), get32(d + 8), get32(d + 12), get32(d + 16),
+           get32(fred + RETAIL_GAME_TYPE),
+           get32(fred + RETAIL_NUM_PLAYER_CARS));
+    printf("  rp %d %d\n", rpNumPlayerCars, rpRaceMode);
+}
+
 // Be The Cop Setup: the instance, each row (its value by its place in the
 // block), the arrows, the scroller and each of its elements, and Fred's
 // block and car count.
+static void raceBody(const BRaceSetup* r, const int32_t* data)
+{
+    for (int i = 0; i < r->numRows; i++) {
+        const BChangeable* c = &r->rows[i];
+        printf("  row %08x %08x %d v%d=%d %d\n", c->menuItem,
+               c->changeText, c->languageID, (int)(c->value - data),
+               *c->value, c->blurbID);
+    }
+    printf("  arrows %d %d %08x wave %08x %08x %08x %08x\n",
+           r->arrows.hasLeft != 0, r->arrows.hasRight != 0,
+           r->arrows.follow, fbits(r->arrows.pulse.lo),
+           fbits(r->arrows.pulse.hi), fbits(r->arrows.pulse.rate),
+           fbits(r->arrows.pulse.phase));
+    const BScrollList* l = &r->scroller;
+    printf("  scroll mask %d top %08x bottom %08x n %d wave %08x %08x "
+           "%08x %08x arrows %08x %08x clip %08x\n", l->currentMask,
+           fbits(l->top), fbits(l->bottom), l->numMenuItemsToScroll,
+           fbits(l->arrowAnimator.lo), fbits(l->arrowAnimator.hi),
+           fbits(l->arrowAnimator.rate), fbits(l->arrowAnimator.phase),
+           l->upArrow, l->downArrow, l->clipPoly);
+    for (int i = 0; i < l->numElements; i++) {
+        const BMenuAnimElement* el = &l->elements[i];
+        printf("  el %08x saved %08x val %08x des %08x st %d\n",
+               el->object, fbits(el->savedY), fbits(el->yAnim.val),
+               fbits(el->yAnim.valDesired), el->yAnim.state);
+    }
+}
+
 static void rdump(void)
 {
     const BRaceSetup* r = &setup.race;
@@ -533,35 +614,57 @@ static void rdump(void)
         printf("  inst 1 cur %08x btc %d %d %d %d %d exit %d\n", r->current,
                r->btc.opponentGrid, r->btc.opponentType, r->btc.catchup,
                r->btc.traffic, r->btc.damage, r->exitActive);
-        for (int i = 0; i < r->numRows; i++) {
-            const BChangeable* c = &r->rows[i];
-            printf("  row %08x %08x %d v%d=%d %d\n", c->menuItem,
-                   c->changeText, c->languageID,
-                   (int)(c->value - &r->btc.opponentGrid), *c->value,
-                   c->blurbID);
-        }
-        printf("  arrows %d %d %08x wave %08x %08x %08x %08x\n",
-               r->arrows.hasLeft != 0, r->arrows.hasRight != 0,
-               r->arrows.follow, fbits(r->arrows.pulse.lo),
-               fbits(r->arrows.pulse.hi), fbits(r->arrows.pulse.rate),
-               fbits(r->arrows.pulse.phase));
-        const BScrollList* l = &r->scroller;
-        printf("  scroll mask %d top %08x bottom %08x n %d wave %08x %08x "
-               "%08x %08x arrows %08x %08x clip %08x\n", l->currentMask,
-               fbits(l->top), fbits(l->bottom), l->numMenuItemsToScroll,
-               fbits(l->arrowAnimator.lo), fbits(l->arrowAnimator.hi),
-               fbits(l->arrowAnimator.rate), fbits(l->arrowAnimator.phase),
-               l->upArrow, l->downArrow, l->clipPoly);
-        for (int i = 0; i < l->numElements; i++) {
-            const BMenuAnimElement* el = &l->elements[i];
-            printf("  el %08x saved %08x val %08x des %08x st %d\n",
-                   el->object, fbits(el->savedY), fbits(el->yAnim.val),
-                   fbits(el->yAnim.valDesired), el->yAnim.state);
-        }
+        raceBody(r, &r->btc.opponentGrid);
     }
     printf("  fred btc %d %d %d %d %d cars %d\n", get32(d), get32(d + 4),
            get32(d + 8), get32(d + 12), get32(d + 16),
            get32(fred + RETAIL_NUM_PLAYER_CARS));
+}
+
+// Any of the five: as rdump, the instance's class by BaseCallback's id
+// and its block by the class's length, and then every block in Fred.
+static int blockWords(int kind)
+{
+    switch (kind) {
+        case 100: return 7;
+        case 101: return 3;
+        case 102: return 6;
+        case 103: return 7;
+        case 104: return 5;
+        default: return 0;
+    }
+}
+
+static void fredWords(const char* name, uint32_t off, int n)
+{
+    printf(" %s", name);
+    for (int i = 0; i < n; i++) {
+        printf(" %d", get32(fred + off + 4 * i));
+    }
+}
+
+static void sdump(void)
+{
+    const BRaceSetup* r = &setup.race;
+
+    if (!r->live) {
+        printf("  inst 0\n");
+    } else {
+        printf("  inst 1 kind %d cur %08x data", r->kind, r->current);
+        for (int i = 0; i < blockWords(r->kind); i++) {
+            printf(" %d", r->data[i]);
+        }
+        printf(" exit %d\n", r->exitActive);
+        raceBody(r, r->data);
+    }
+    printf("  fred");
+    fredWords("sr", RETAIL_SINGLE_RACE, 7);
+    fredWords("btc", RETAIL_BTC, 5);
+    fredWords("fr", RETAIL_FREE_RUN, 3);
+    fredWords("rk", RETAIL_RACE_KNOCKOUT, 7);
+    fredWords("lk", RETAIL_LAP_KNOCKOUT, 6);
+    fredWords("next", RETAIL_LAP_KNOCKOUT + 24, 1);
+    printf(" cars %d\n", get32(fred + RETAIL_NUM_PLAYER_CARS));
 }
 
 static void put32(uint8_t* p, uint32_t v)
@@ -638,7 +741,9 @@ int main(int argc, char** argv)
             printf("  wave phase %08x val %08x int %d\n", fbits(wave.phase),
                    fbits(bsine_val(&wave)), bsine_val_int(&wave));
         } else if (!strcmp(op, "police")) {
+            // Both, as the flow's setPolice hook keeps them.
             flow.copsOn = (int)num(arg[1]);
+            put32(fred + RETAIL_POLICE, num(arg[1]));
         } else if (!strcmp(op, "elapsed")) {
             flow.realElapsed = bitsf(num(arg[1]));
         } else if (!strcmp(op, "msg")) {
@@ -659,6 +764,44 @@ int main(int argc, char** argv)
             data.noise = 0x5b;
             bsetup_btc_callback(&flow, (BScreenMessage)num(arg[1]), &data);
             printf("  data %d %d\n", data.param, data.noise);
+        } else if (!strcmp(op, "cmsg")) {
+            BScreenCallbackData data;
+            memset(&data, 0, sizeof data);
+            data.itemHash = num(arg[2]);
+            data.port = (int32_t)num(arg[3]);
+            data.param = 0x5a;
+            data.noise = 0x5b;
+            bsetup_challenge_callback(&flow, (BScreenMessage)num(arg[1]),
+                                      &data);
+            printf("  data %d %d\n", data.param, data.noise);
+        } else if (!strcmp(op, "smsg")) {
+            BScreenCallbackData data;
+            memset(&data, 0, sizeof data);
+            data.itemHash = num(arg[3]);
+            data.port = (int32_t)num(arg[4]);
+            data.param = 0x5a;
+            data.noise = 0x5b;
+            BScreenMessage m = (BScreenMessage)num(arg[2]);
+            switch (num(arg[1])) {
+                case 100: bsetup_single_race_callback(&flow, m, &data); break;
+                case 101: bsetup_free_run_callback(&flow, m, &data); break;
+                case 102: bsetup_lap_knockout_callback(&flow, m, &data); break;
+                case 103: bsetup_knockout_callback(&flow, m, &data); break;
+                default: bsetup_btc_callback(&flow, m, &data); break;
+            }
+            printf("  data %d %d\n", data.param, data.noise);
+        } else if (!strcmp(op, "fredw")) {
+            for (int i = 2; i < n; i++) {
+                put32(fred + num(arg[1]) + 4 * (i - 2), num(arg[i]));
+            }
+        } else if (!strcmp(op, "spoke")) {
+            setup.race.data[num(arg[1]) % 7] = (int32_t)num(arg[2]);
+        } else if (!strcmp(op, "sdump")) {
+            sdump();
+        } else if (!strcmp(op, "beacop")) {
+            put32(fred + RETAIL_BEACOP, num(arg[1]));
+        } else if (!strcmp(op, "cdump")) {
+            cdump();
         } else if (!strcmp(op, "dump")) {
             dump();
         } else if (!strcmp(op, "rdump")) {

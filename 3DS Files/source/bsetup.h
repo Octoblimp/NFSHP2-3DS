@@ -25,12 +25,20 @@
 //   tScrollingMenuList  0x0024a888 on  the rows' Y animations and the up and
 //                                      down arrows, a window of seven rows
 //
+// The third is Cops Off's Challenge, retail's ChallengeScreen (0x001b5f38
+// .. 0x001b6c68): Players, Race Type, Skill Level and Setup. Its Setup leads
+// to the other four on RaceSetupBaseClass -- SingleRaceSetup (0x001b87d0),
+// FreeRunSetup (0x001b8b20), LapKnockoutSetup (0x001b8cb8) and
+// TrackKnockoutSetup (0x001b8f60), "Knockout Setup" -- all on the one
+// Flailer screen Be The Cop Setup has.
+//
 // Addresses are retail's, SLES_507.31. Written up in
 // docs/formats/frontend-setup.md. Like bscreens.c this is free of <3ds.h>:
 // every Flailer call goes out through BSetupHooks under the name of the
 // function retail calls, and the animation kit is banim.c, so
-// tools/setup_check.py and tools/racesetup_check.py can run retail's code
-// in mipsemu next to this.
+// tools/setup_check.py, tools/racesetup_check.py, tools/challenge_check.py
+// and tools/racesetups_check.py can run retail's code in mipsemu next to
+// this.
 
 // FlailerScreenConfig's hash for "ChallengeBeACop", and the objects on it.
 #define BSETUP_SCREEN_BEACOP       0xe55f1297u
@@ -47,12 +55,18 @@
 // is new, and You're The Cop's skill level moved into it. The demo's
 // InitWithDefaults sets the first four; retail's also clears the fifth.
 #define FRED_CHALLENGE_SCREEN   8        // DataChallengeScreen, 20 bytes
+#define FRED_MAIN_MENU_BEACOP   28       // MainMenuOpts.BeACop
 #define FRED_MAIN_MENU_POLICE   32       // MainMenuOpts.mPolice
 #define FRED_GAME_TYPE          0x1072c  // GameType
 #define FRED_NUM_PLAYER_CARS    0x10734  // NumPlayerCars
 
-// GameTypes, the .mdebug enum. The Mode Selects write the others.
-#define FRED_CHALLENGE_GAME_BE_A_COP  7
+// GameTypes, the .mdebug enum: the challenge's race types, and You're The
+// Cop's. The Mode Selects write the others.
+#define FRED_CHALLENGE_GAME_SINGLE_RACE   3
+#define FRED_CHALLENGE_GAME_KNOCKOUT      4
+#define FRED_CHALLENGE_GAME_LAP_KNOCKOUT  5
+#define FRED_CHALLENGE_GAME_FREE_RUN      6
+#define FRED_CHALLENGE_GAME_BE_A_COP      7
 
 typedef struct BChallengeData {
     int32_t numPlayers;       // +0   mNumPlayers, 1 or 2
@@ -87,6 +101,15 @@ void bsetup_btc_defaults(BBeTheCopData* d);
 // Fred's two setup blocks at their defaults, as InitWithDefaults leaves
 // them before a memory card loads over it: Fred+8 and Fred+64.
 void bsetup_fred_defaults(uint8_t* fred);
+
+// The other four setups' blocks, fred.h's SingleRaceSetupData (7 words),
+// FreeRunSetupData (3), RaceKnockoutSetupData (7) and LapKnockoutSetupData
+// (6); fred.c sets their defaults. Each screen copies its block in whole
+// and writes it back whole.
+#define FRED_SINGLE_RACE_SETUP    36
+#define FRED_FREE_RUN_SETUP       84
+#define FRED_RACE_KNOCKOUT_SETUP  96
+#define FRED_LAP_KNOCKOUT_SETUP   124
 
 // Everything the setup screens do outside the animation kit. Every hook is
 // optional: a missing one does nothing and answers 0.
@@ -126,6 +149,10 @@ typedef struct BSetupHooks {
                           int languageID);
     void (*setVisible)(void* user, uint32_t screen, uint32_t object,
                        int visible);
+    // FlailerPrintf (0x00143e70), already formatted: the text object's
+    // string. The opponent count's "%d" (0x00330f98).
+    void (*printText)(void* user, uint32_t screen, uint32_t object,
+                      const char* str);
     // GrayMenuItem (0x0016d198), whose arguments retail passes as (item,
     // mode, screen). BScrGrayMode's modes: 1 enables, 0 grays, 2 hides.
     void (*grayMenuItem)(void* user, uint32_t screen, uint32_t item,
@@ -244,6 +271,31 @@ typedef struct BBeACopSetup {
     BArrows        arrows;       // +688
 } BBeACopSetup;
 
+// ------------------------------------------------------- ChallengeScreen
+
+// "Challenge" (0x001b5e30 .. 0x001b6c68), which both Mode Selects' Challenge
+// items open: Players, Race Type (Single Race, Knockout, Lap Knockout, Free
+// Run), Skill Level and Setup. Retail's is 720 bytes, the demo's 688: the
+// data grew to 20 bytes, and the two arrow bitmaps became the arrows class.
+#define BSETUP_SCREEN_CHALLENGE      0x2d62cfe2u
+#define BSETUP_OBJ_RACE_TYPE_VALUE   0x15dd325eu   // "Single Race" .. "Free Run"
+
+typedef struct BChallengeScreen {
+    int            live;
+    BChallengeData data;           // +0, a copy of Fred's
+    uint32_t       screen;         // +20, ScreenHash
+    int32_t        gameTypeIndex;  // +24, into ChallengeGameTypes; -1 none
+    uint32_t       current;        // +28, CurrentMenuItem
+    BSelSet        sel;            // +32, MenuSelectionSet
+    BBlurb         blurb;          // +180, mBlurbyText
+    BSlideAnim     slideIn;        // +600, mSlideIn
+    BHighlightAnim highlight;      // +620, mHighlightAnimation
+    BHighlightAnim change;         // +652, mSelectionChangeAnimation
+    BExitAnim      exit;           // +684, mExitScreenAnimation (a pointer)
+    int            exitActive;
+    BArrows        arrows;         // +688
+} BChallengeScreen;
+
 // ------------------------------------------------------ tScrollingMenuList
 
 // A menu longer than its window: every item and value object is an
@@ -303,15 +355,27 @@ typedef struct BChangeable {
 // Retail's BuildMenu fills eight rows at most: its three tables are eight.
 #define BRACESETUP_MAX_ROWS 8
 
-// The screen hashes, and the objects every setup screen names.
+// The screen hash -- all five setups are the one Flailer screen, under five
+// names -- and the objects every setup screen names.
 #define BSETUP_SCREEN_BE_THE_COP_SETUP 0xd1eadbcau
+#define BSETUP_SCREEN_RACE_SETUP       0xd1eadbcau
 #define BSETUP_OBJ_UP_ARROW            0xedf2e4eeu
 #define BSETUP_OBJ_DOWN_ARROW          0x20d73d01u
 #define BSETUP_OBJ_CLIP_POLY           0xc67cfb4au
 
-// RaceSetupBaseClass (0x001b8390), 764 bytes in retail, and BeTheCopSetup
-// on it (0x001b9248, 784: the data at +764). Only one is alive at a time
-// -- the class's static pInstance (gp-18780) -- so the port keeps one.
+// The id each class's Callback passes BaseCallback (0x001b7b20), which
+// news that class on ACTIVATE.
+#define BSETUP_RACE_SINGLE        100   // SingleRaceSetup, 792 bytes
+#define BSETUP_RACE_FREE_RUN      101   // FreeRunSetup, 776
+#define BSETUP_RACE_LAP_KNOCKOUT  102   // LapKnockoutSetup, 788
+#define BSETUP_RACE_KNOCKOUT      103   // TrackKnockoutSetup, 792
+#define BSETUP_RACE_BE_THE_COP    104   // BeTheCopSetup, 784
+
+// RaceSetupBaseClass (0x001b8390), 764 bytes in retail, and the five on it,
+// each with its Fred block copied in at +764. Only one is alive at a time
+// -- the class's static pInstance (gp-18780) -- so the port keeps one, and
+// `kind` says which, for the destructor UNACTIVATE calls through the
+// vtable.
 typedef struct BRaceSetup {
     int            live;
     uint32_t       screen;         // +0
@@ -327,14 +391,19 @@ typedef struct BRaceSetup {
     BScrollList    scroller;       // +252, mMenuScroller
     BArrows        arrows;         // +308
     BBlurb         blurb;          // +340
-    BBeTheCopData  btc;            // +764, BeTheCopSetup's Data
+    int            kind;           // BSETUP_RACE_*
+    union {
+        BBeTheCopData btc;         // +764, BeTheCopSetup's Data
+        int32_t       data[7];     // +764, the other four's Fred block
+    };
 } BRaceSetup;
 
 struct BSetup {
-    BGameFlow*   gf;
-    BSetupHooks  hooks;
-    BBeACopSetup beACop;
-    BRaceSetup   race;
+    BGameFlow*       gf;
+    BSetupHooks      hooks;
+    BBeACopSetup     beACop;
+    BChallengeScreen challenge;
+    BRaceSetup       race;
 };
 
 // Installs `s` as the module's instance and clears it. `hooks` may be NULL.
@@ -348,7 +417,23 @@ BSetup* bsetup_instance(void);
 void bsetup_beacop_callback(BGameFlow* gf, BScreenMessage msg,
                             BScreenCallbackData* data);
 
+// ChallengeScreenCallback (0x001b6bd0), for kScreens[].
+void bsetup_challenge_callback(BGameFlow* gf, BScreenMessage msg,
+                               BScreenCallbackData* data);
+
 // BeTheCopSetup::Callback (0x001b93d8), BaseCallback (0x001b7b20) with 104:
 // "Be The Cop Setup", for kScreens[].
 void bsetup_btc_callback(BGameFlow* gf, BScreenMessage msg,
                          BScreenCallbackData* data);
+
+// The other four Callbacks, BaseCallback with 100 .. 103: "Single Race
+// Setup" (0x001b8ae8), "Free Run Setup" (0x001b8c98), "Lap Knockout Setup"
+// (0x001b8f30) and "Knockout Setup" (0x001b9210), for kScreens[].
+void bsetup_single_race_callback(BGameFlow* gf, BScreenMessage msg,
+                                 BScreenCallbackData* data);
+void bsetup_free_run_callback(BGameFlow* gf, BScreenMessage msg,
+                              BScreenCallbackData* data);
+void bsetup_lap_knockout_callback(BGameFlow* gf, BScreenMessage msg,
+                                  BScreenCallbackData* data);
+void bsetup_knockout_callback(BGameFlow* gf, BScreenMessage msg,
+                              BScreenCallbackData* data);

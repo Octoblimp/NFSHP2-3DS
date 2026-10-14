@@ -2384,6 +2384,22 @@ phases.
           - [ ] 37b: the lobby. Players 2 on the mode screens becomes
                 local wireless: Host or Join, the hosts listed by
                 console name, and a lost link handled.
+                - [x] 37b-1: where Players lives. Both Mode Selects'
+                  Challenge (ChallengeScreen) and the four setups its
+                  Setup goes to -- Single Race, Knockout, Lap Knockout,
+                  Free Run -- on RaceSetupBaseClass, in bsetup.c.
+                  challenge_check (620 ops, 92 mutations, 1 equivalent)
+                  and racesetups_check (3142 ops, 74 of 74) against
+                  retail; run_azahar_challenge.ps1 walks all four and on
+                  to Select Car. Retail's ~FlailerMenuItem puts each
+                  label's saved colour back when a screen goes; the port
+                  now does too (bmenu_close), which fixed Knockout's
+                  Damage drawn gray after Single Race. Left: retail
+                  brings a screen back on the item it was left on when
+                  its callback answers -1; the port starts at 0
+                  (gameflow.h activateItem).
+                - [ ] 37b-2: Players' Local Wireless, the lobby popups,
+                  an N-copy Azahar test, and portlang.c.
           - [ ] 37c: the setup. The client's car to the host; the
                 host's race parameters, seeds and start to the client;
                 both load, then a barrier before the race.

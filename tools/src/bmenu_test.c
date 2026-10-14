@@ -8,6 +8,7 @@
 //     item <itemID> <itemHash> <objectIndex> <savedColor>
 //     msg  <message> <itemHash> <port> <noise>
 //     step <label> <current> <id:state:color> ...
+//     reopen <itemID> <savedColor>     (a second menu, after bmenu_close)
 //
 // tools/bmenu_check.py prints the same from an independent Python model
 // built on tools/flailer_dump.py and diffs the two. The point is the same
@@ -133,6 +134,18 @@ static void run(BUI* ui, BUIScreen* screen)
 
     bmenu_unactivate(&m);
     dump(&m, "unactivate");
+
+    // A label grayed as its screen goes: the item destructors put each
+    // saved colour back, and a menu made on the screen again reads those.
+    bmenu_set_item_enabled(&m, m.items[m.numItems - 1].itemID, false);
+    dump(&m, "leftgray");
+    bmenu_close(&m);
+    dump(&m, "close");
+    BMenu again;
+    if (bmenu_open(&again, ui, screen, trace, NULL))
+        for (int i = 0; i < again.numItems; i++)
+            printf("reopen %d %08x\n", again.items[i].itemID,
+                   again.items[i].savedColor);
 }
 
 int main(int argc, char** argv)

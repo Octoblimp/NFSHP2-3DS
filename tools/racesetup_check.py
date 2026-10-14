@@ -367,6 +367,39 @@ class Model(sc.Model):
 
     # ---- ops
 
+    def body(self, b, data):
+        """The rows (each value by its place in `data`), the arrows, the
+        scroller and each of its elements."""
+        g = self.e.u32
+        head = b + 4
+        n = g(head)
+        while n != head:
+            v = g(n + 20)
+            self.emit("  row %08x %08x %d v%d=%d %d" % (
+                g(n + 8), g(n + 12), s32(g(n + 16)),
+                s32(v - data) // 4, s32(g(v)), s32(g(n + 40))))
+            n = g(n)
+        a = b + 308
+        self.emit("  arrows %d %d %08x wave %08x %08x %08x %08x" % (
+            1 if g(a + 4) else 0, 1 if g(a + 8) else 0, g(a + 12),
+            g(a + 16), g(a + 20), g(a + 24), g(a + 28)))
+        sl = b + 252
+        self.emit("  scroll mask %d top %08x bottom %08x n %d wave %08x "
+                  "%08x %08x %08x arrows %08x %08x clip %08x" % (
+                      s32(g(sl + 20)), g(sl + 12), g(sl + 16),
+                      s32(g(sl + 52)), g(sl + 24), g(sl + 28),
+                      g(sl + 32), g(sl + 36), g(sl + 40), g(sl + 44),
+                      g(sl + 48)))
+        head = sl + 4
+        n = g(head)
+        while n != head:
+            st = struct.unpack("<h", struct.pack(
+                "<H", g(n + 56) & 0xffff))[0]
+            self.emit("  el %08x saved %08x val %08x des %08x st %d" % (
+                self.chunk_name(g(n + 60))[1], g(n + 8), g(n + 12),
+                g(n + 20), st))
+            n = g(n)
+
     def rdump(self):
         g = self.e.u32
         b = g(PINSTANCE)
@@ -377,34 +410,7 @@ class Model(sc.Model):
             self.emit("  inst 1 cur %08x btc %d %d %d %d %d exit %d" % (
                 (g(b + 12),) + tuple(s32(g(data + 4 * i)) for i in range(5))
                 + (1 if g(b + 248) else 0,)))
-            head = b + 4
-            n = g(head)
-            while n != head:
-                v = g(n + 20)
-                self.emit("  row %08x %08x %d v%d=%d %d" % (
-                    g(n + 8), g(n + 12), s32(g(n + 16)),
-                    s32(v - data) // 4, s32(g(v)), s32(g(n + 40))))
-                n = g(n)
-            a = b + 308
-            self.emit("  arrows %d %d %08x wave %08x %08x %08x %08x" % (
-                1 if g(a + 4) else 0, 1 if g(a + 8) else 0, g(a + 12),
-                g(a + 16), g(a + 20), g(a + 24), g(a + 28)))
-            sl = b + 252
-            self.emit("  scroll mask %d top %08x bottom %08x n %d wave %08x "
-                      "%08x %08x %08x arrows %08x %08x clip %08x" % (
-                          s32(g(sl + 20)), g(sl + 12), g(sl + 16),
-                          s32(g(sl + 52)), g(sl + 24), g(sl + 28),
-                          g(sl + 32), g(sl + 36), g(sl + 40), g(sl + 44),
-                          g(sl + 48)))
-            head = sl + 4
-            n = g(head)
-            while n != head:
-                st = struct.unpack("<h", struct.pack(
-                    "<H", g(n + 56) & 0xffff))[0]
-                self.emit("  el %08x saved %08x val %08x des %08x st %d" % (
-                    self.chunk_name(g(n + 60))[1], g(n + 8), g(n + 12),
-                    g(n + 20), st))
-                n = g(n)
+            self.body(b, data)
         self.emit("  fred btc %d %d %d %d %d cars %d" % (
             tuple(s32(g(FRED + 64 + 4 * i)) for i in range(5))
             + (s32(g(FRED + 0x10734)),)))
@@ -622,8 +628,8 @@ MUTATIONS = [
     ("ctor-no-clip", S, "    HOOK(s, setClipToPoly, screen, "
      "BSETUP_OBJ_RIGHT_ARROW," + NL + "         BSETUP_OBJ_CLIP_POLY);",
      "    (void)0;"),
-    ("ctor-no-resync", S, "    raceSetupResync(s, r);" + NL
-     + "    r->live = 1;", "    r->live = 1;"),
+    ("ctor-no-resync", S, "\"Be The Cop Setup\");" + NL
+     + "    raceSetupResync(s, r);", "\"Be The Cop Setup\");"),
     ("ctor-no-load", S, "if (s->gf->fred) btcLoad(&r->btc, s->gf->fred);",
      "if (0) btcLoad(&r->btc, s->gf->fred);"),
     ("dtor-no-save", S, "    if (s->gf->fred) btcSave(&r->btc, s->gf->fred);",
@@ -700,11 +706,12 @@ MUTATIONS = [
     ("tick-no-blurb", S, "        case BMSG_SCREEN_TICK:" + NL
      + "            banim_blurb_animate(a, &r->blurb);", "        case "
      "BMSG_SCREEN_TICK:"),
-    ("cb-screen", S, "btcCtor(s, data ? data->itemHash : "
-     "BSETUP_SCREEN_BE_THE_COP_SETUP);", "btcCtor(s, "
-     "BSETUP_SCREEN_BE_THE_COP_SETUP);"),
-    ("cb-unactivate-twice", S, "            if (s->race.live) btcDtor(s);",
-     "            btcDtor(s);"),
+    ("cb-screen", S, "screen = data ? data->itemHash : "
+     "BSETUP_SCREEN_RACE_SETUP;", "screen = BSETUP_SCREEN_RACE_SETUP;"),
+    ("cb-unactivate-twice", S, "            if (!s->race.live) break;",
+     "            (void)0;"),
+    ("cb-dtor-default", S, "                default: btcDtor(s); break;",
+     "                default: break;"),
 ]
 
 EQUIVALENT = {

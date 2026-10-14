@@ -256,6 +256,14 @@ bool bui_set_text_color(BUI* ui, uint32_t index, uint32_t rgb)
     return true;
 }
 
+bool bui_put_text_color(BUI* ui, uint32_t index, uint32_t color)
+{
+    uint8_t* p = writable(ui, index, 76, NULL);
+    if (!p || (int8_t)p[16] != BUI_TYPE_TEXT) return false;
+    bchunk_put_u32(p + 68, color);
+    return true;
+}
+
 bool bui_set_text_language(BUI* ui, uint32_t index, uint32_t languageID)
 {
     uint8_t* p = writable(ui, index, 76, NULL);
