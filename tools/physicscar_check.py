@@ -126,6 +126,7 @@ SOURCES_PORT = [
     "3DS Files/source/physicscar.c",
     "3DS Files/source/race.c",
     "3DS Files/source/cardamage.c",
+    "3DS Files/source/estripdata.c",
     "3DS Files/source/joystick.c",
     "3DS Files/source/car.c",
     "3DS Files/source/world.c",

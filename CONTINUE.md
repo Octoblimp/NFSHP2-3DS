@@ -86,6 +86,19 @@ road, walls and cars) is closed at the user's word with no fault
 found: the hull matches the body and no penetration showed (HANDOFF.md,
 "Session 87, continued -- TASKS 58").**
 
+**Now (Session 93, 2026-10-14): TASKS 51c (the vertices) is done. The
+walk and DamageVertexFunction dent and darken a car's vertices and show
+its scuffs, and the car's editable mesh is refreshed at its next draw
+(`geobake.c`, `georender_refresh`; `docs/formats/car-damage.md`, "The
+renderer's vertices"). The user saw the player's cop car drawn black, or
+only as wheels and a shadow. Its body (CROWNVIC_A2) failed to bake: the
+bake's working buffers came from the main heap, whose largest free
+block is 64 KB in a race. They come from the linear heap now, and the
+race's stats line counts failed bakes (HANDOFF.md, "Session 93"). SkipFE
+and Quick Race run with damage off; a You're The Cop race has it on.
+Next, one at a time: 51d (Car::DamageAbove), then TASKS 37 (multi-card
+multiplayer).**
+
 **Now (Session 92, 2026-10-13): TASKS 51a (the damage logic) is done.
 `cardamage.c` ports BodyDamage and CarDamage whole, and `main.c` binds
 every seam but the vertex walk, DamageAbove and TriggerEffect: each

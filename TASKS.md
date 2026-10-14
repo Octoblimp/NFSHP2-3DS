@@ -2668,10 +2668,23 @@ phases.
         (`geo_strip_flags`) from the engine's own entry table, which
         `esolid_set_environment_mapping` writes. On Azahar the race
         draws as before, at 30 FPS and Speed 100%.
-  - [ ] 51c: the vertices. DamageVertexFunction dents each vertex by its
-        key, darkens it, and shows the scuff strips. The port's solids
-        are GPU meshes, so the walk is a seam
-        (`gBodyDamageVertexWalkFn`, skipped while NULL).
+  - [x] 51c: the vertices. DamageVertexFunction dents each vertex by its
+        key, darkens it, and shows the scuff strips. The walk
+        (`0x00104100`) and eStripData's accessors are in `estripdata.c`,
+        and DamageVertexFunction is in `cardamage.c`. The walk ends with
+        `gESolidVerticesChangedFn`, which marks each mesh baked from that
+        solid dirty. A car's solid that BodyDamage walks bakes editable
+        (`geobake.c`), and a dirty one is refreshed at its first draw of
+        a frame (`georender_refresh`). cardamage_check: 30,452 lines, 0
+        differ, 181 of 184 mutations caught, 3 equivalent. geobake_check
+        bakes the 44 cars' 518 solids and changes 1,325,799 vertices
+        over 2,072 refreshes with 0 faults; 22 of 23 mutations caught, 1
+        equivalent. The bake's working buffers moved to the linear heap:
+        on the main heap the player's cop car (CROWNVIC_A2) failed to
+        bake in a race and drew as a black shadow (the user's report of
+        2026-10-14). On Azahar a You're The Cop race shows the cop car
+        whole, "refreshed 4 damaged meshes in 10.9 ms" and 0 bakes
+        failed.
   - [ ] 51d: Car::DamageAbove (`0x00135280`, `gCarDamageAboveFn`).
 52. [x] **Profiles: save, load, and a save prompt after each race.**
         Asked for on 2026-10-12. The profile is retail's one save,

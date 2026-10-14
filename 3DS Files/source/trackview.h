@@ -148,6 +148,7 @@ typedef struct {
     float     (*centre)[3];     // per batch, the centre of its box
     bool        baked;
     bool        failed;
+    bool        dirty;          // trackview_solid_changed since the bake
 } TrackSolid;
 
 // A batch the frame holds back for the attach loops' order: its texture is
@@ -328,10 +329,15 @@ typedef struct {
     // longest one's: what a race makes after trackview_prepare is a
     // hitch, and its line says what each second made (2026-10-08).
     int      bakes;
+    int      bakesFailed;       // never drawn: a car with none of its body
     int      uploads;
     uint64_t bakeTicks;
     uint64_t uploadTicks;
     uint64_t worstTicks;
+    // The editable meshes made to match their solids after CarDamage's
+    // walk (trackview_solid_changed), and the time they took.
+    int      refreshes;
+    uint64_t refreshTicks;
     // trackview_prepare's: the models it went over, the textures it
     // uploaded past theirs, and the ones it left for want of room.
     int  preparedModels;
@@ -411,8 +417,17 @@ void trackview_forget_later(TrackView* v);
 void trackview_free_later(TrackView* v);
 
 // Call it after C3D_FrameBegin, which waits for the GPU, and before
-// anything draws: what forget_later and free_later put off happens here.
+// anything draws: what forget_later and free_later put off happens here,
+// and a changed solid that did not bake editable is let go, to bake
+// again as it is now when it next draws.
 void trackview_frame_begun(TrackView* v);
+
+// CarDamage's walk changed `solid`'s strips (estripdata.h's
+// gESolidVerticesChangedFn): an other solid baked from it is dirty. An
+// editable one (georender_bake_editable) is refreshed as it next draws;
+// any other bakes again after the next trackview_frame_begun. A car's
+// solid that BodyDamage walks bakes editable.
+void trackview_solid_changed(TrackView* v, const void* solid);
 
 // The frontend's eDisplayFrame (0x00112a38) for view 1 into the bound
 // render target, which must have a depth buffer and has had its Flailer

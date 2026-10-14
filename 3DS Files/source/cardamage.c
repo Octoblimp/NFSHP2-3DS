@@ -13,10 +13,12 @@
 #include "collisionsound.h"
 #include "eefpu.h"
 #include "epositionmarker.h"
+#include "estripdata.h"
 #include "race.h"
 
 #define ZONE_SCALE      0.0078125f      // `lui at,0x3c00`, 1/128
 #define TOTAL_SCALE     0.000244140625f // `lui at,0x3980`, 2^-12
+#define DENT_SCALE      0.02f           // gp-29028, 0x0032e78c
 #define APPLY_TOLERANCE 0.02f           // gp-29024, 0x0032e790
 #define MIN_HIT         0.05f           // gp-29020, 0x0032e794
 #define MIN_BREAK       0.2f            // gp-29016, 0x0032e798
@@ -26,8 +28,6 @@
 // (0x001b5440); a constant initialiser does the same.
 bNode BodyDamageInfoList = { &BodyDamageInfoList, &BodyDamageInfoList };
 bNode BodyDamageList = { &BodyDamageList, &BodyDamageList };
-
-void (*gBodyDamageVertexWalkFn)(BodyDamageModel *m);
 
 // 0x00313b80, as the disc has it. The levels' thresholds are the zone's
 // visible damage; the effects are CarEffect's BREAK_* from the side
@@ -125,6 +125,77 @@ static int32_t model_num_vertices(const eModel *m)
     return s != NULL ? s->NumVerts : 0;
 }
 
+// BodyDamageModel::DamageVertexFunction, 0x001b48d0, which the walk calls
+// through the static 0x001b48b0. The vertex's key is the info's KeyNum-th,
+// and RepeatCount counts the vertices that have had it; the key's low
+// three bits are how many more. The zone's damage since the last walk
+// moves the vertex by the key's dent and steps its colour, each of R, G
+// and B, by the key's step: both by the difference, so a repair takes them
+// back. The dent is in fiftieths. The colour's step is in eighths, each
+// whole one 0x421 off the halfword, which can carry from one channel into
+// the next and wraps. A scuff's alpha is on above half the zone's damage,
+// whatever the difference, and the vertex shows with any damage at all.
+static int32_t model_damage_vertex(BodyDamageModel *m, bVector3 *pos,
+                                   uint16_t *colour, int32_t polys)
+{
+    BodyDamage *b = m->pBodyDamage;
+    uint32_t    key = m->pBodyDamageInfo->pKeys[m->KeyNum];
+    int32_t     zone;
+    float       applied, visible, delta;
+
+    if ((int32_t)(key & 7u) == m->RepeatCount) {
+        m->RepeatCount = 0;
+        m->KeyNum++;
+    } else {
+        m->RepeatCount++;
+    }
+    zone = (int32_t)((key & 0xffu) >> 3);
+    applied = (float)b->CompressedAppliedDamageAmounts[zone] * ZONE_SCALE;
+    visible = bodydamage_get_visible_damage_amount(b, zone);
+    delta = visible - applied;
+    if (delta != 0.0f && m->DamagePolysOnly == 0) {
+        int32_t step;
+
+        if ((key & 0xffffc000u) != 0) {
+            pos->x += (float)((int32_t)(key << 12) >> 26) * DENT_SCALE * delta;
+            pos->y += (float)((int32_t)(key << 6) >> 26) * DENT_SCALE * delta;
+            pos->z += (float)((int32_t)key >> 26) * DENT_SCALE * delta;
+        }
+        step = ((int32_t)(key << 18) >> 26) * 8;
+        if (step != 0) {
+            int32_t d = (ee_trunc_w((float)step * visible) >> 3)
+                        - (ee_trunc_w((float)step * applied) >> 3);
+
+            if (d != 0)
+                *colour = (uint16_t)(*colour - (uint32_t)d * 0x421u);
+        }
+    }
+    if (polys != 0) {
+        int32_t a = ee_trunc_w(visible * 256.0f);
+
+        if (255 < a)
+            a = 255;
+        if (a < 0)
+            a = 0;
+        if (a < 129)
+            *colour = (uint16_t)(*colour & 0x7fffu);
+        else
+            *colour = (uint16_t)(*colour | 0x8000u);
+    }
+    return visible != 0.0f;
+}
+
+// 0x001b48b0: the walk's function, which passes all but the vertex's
+// number and the NULL on.
+static int32_t damage_vertex_function(void *user, int32_t vertex,
+                                      bVector3 *pos, uint16_t *colour,
+                                      float *unused, int32_t polys)
+{
+    (void)vertex;
+    (void)unused;
+    return model_damage_vertex((BodyDamageModel *)user, pos, colour, polys);
+}
+
 // BodyDamageModel::CallDamageVertexFunction. GetModelNumVertices is
 // called and not kept.
 static void model_call_vertex_function(BodyDamageModel *m)
@@ -133,8 +204,8 @@ static void model_call_vertex_function(BodyDamageModel *m)
         return;
     m->RepeatCount = 0;
     m->KeyNum = 0;
-    if (gBodyDamageVertexWalkFn != NULL)
-        gBodyDamageVertexWalkFn(m);
+    ecall_damage_vertex_function_for_every_vertex(m->pModel, m,
+                                                  damage_vertex_function);
 }
 
 static void model_init(BodyDamageModel *m, BodyDamage *b, eModel *model,
@@ -183,6 +254,25 @@ void bodydamage_destruct(BodyDamage *b)
     bodydamage_repair_all(b);
     b->Node.prev->next = b->Node.next;
     b->Node.next->prev = b->Node.prev;
+}
+
+int32_t bodydamage_walks_solid(const eSolid *s)
+{
+    bNode *n;
+    int32_t i;
+
+    for (n = BodyDamageList.next; n != &BodyDamageList; n = n->next) {
+        const BodyDamage *b = (const BodyDamage *)(const void *)n;
+
+        for (i = 0; i < b->NumBodyDamageModels && i < BODYDAMAGE_MODELS; i++) {
+            const BodyDamageModel *m = &b->BodyDamageModels[i];
+
+            if (m->pBodyDamageInfo != NULL && m->pModel != NULL
+                && m->pModel->Solid == (const void *)s)
+                return 1;
+        }
+    }
+    return 0;
 }
 
 void bodydamage_set_alevel_info(BodyDamage *b, const char *name)

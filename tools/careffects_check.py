@@ -48,7 +48,8 @@ NL = chr(10)
 HARNESS = "tools/src/careffects_test.c"
 CFX = "3DS Files/source/careffects.c"
 SOURCES = [HARNESS, CFX] + ["3DS Files/source/" + f for f in (
-    "car.c", "carstate.c", "cardamage.c", "terraintypetab.c", "bvector.c",
+    "car.c", "carstate.c", "cardamage.c", "estripdata.c",
+    "terraintypetab.c", "bvector.c",
     "bmath.c", "bmathtab.c", "bmatrix.c", "emath.c", "vtable.c", "world.c",
     "graph.c", "table.c")]
 

@@ -29,6 +29,9 @@
 #include "beltmover.h"
 #include "car.h"
 #include "cardamage.h"
+#include "carrenderinfo.h"
+#include "collisionsound.h"
+#include "epositionmarker.h"
 #include "collision.h"
 #include "collisionbody.h"
 #include "copdriver.h"
@@ -428,6 +431,35 @@ float topology_get_elevation(TopologyCoordinate *tc, const bVector3 *pt,
 void topology_clear_interest_bbox(TopologyCoordinate *tc)
 {
     printf("clearbbox tc=%s\n", label(tc));
+}
+
+// cardamage.c's ApplyDamage calls these when an item's level changes.
+// Nothing here breaks one, so reaching either is a harness bug.
+void carrenderinfo_update_car_replacement_textures(CarRenderInfo *ri)
+{
+    (void)ri;
+    printf("update_car_replacement_textures reached\n");
+}
+
+void emodel_set_environment_mapping(eModel *m, uint32_t hash, int32_t on)
+{
+    (void)m; (void)hash; (void)on;
+    printf("set_environment_mapping reached\n");
+}
+
+void collision_sound_play_glass(const bVector3 *pos)
+{
+    (void)pos;
+    printf("play_glass reached\n");
+}
+
+// And its item parts call this; no car here is built with a CarDamage.
+ePositionMarker *eFindPositionMarker(uint32_t name_hash, uint32_t type_hash,
+                                     ePositionMarker *prev)
+{
+    (void)name_hash; (void)type_hash; (void)prev;
+    printf("eFindPositionMarker reached\n");
+    return NULL;
 }
 
 // cartrack.c's BeginMovement calls these two. Nothing here runs it --

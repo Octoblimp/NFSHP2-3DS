@@ -11,6 +11,7 @@
 #include "acidsys.h"
 #include "bchunk.h"
 #include "bchunkload.h"
+#include "cardamage.h"
 #include "carrenderinfo.h"
 #include "eefpu.h"
 #include "eenvmap.h"
@@ -835,8 +836,12 @@ static void bake_solid(TrackView* v, int index)
     }
     t0 = svcGetSystemTick();
     v->bakes++;
-    if (!georender_bake(&v->solid[index], &r->mesh)) {
+    if (!(index >= v->numSolids
+          && bodydamage_walks_solid((const eSolid*)v->solid[index].header)
+              ? georender_bake_editable(&v->solid[index], &r->mesh)
+              : georender_bake(&v->solid[index], &r->mesh))) {
         r->failed = true;
+        v->bakesFailed++;
         add_ticks(v, &v->bakeTicks, t0);
         return;
     }
@@ -1427,6 +1432,18 @@ static int model_solid(TrackView* v, eModel* m)
         if (!r->baked) {
             return -1;
         }
+    }
+    // The walk's changes, which the draws this frame all see: the GPU runs
+    // none of them before C3D_FrameEnd.
+    if (r->dirty && r->mesh.edit != NULL) {
+        uint64_t t0 = svcGetSystemTick();
+
+        georender_refresh(&v->solid[i], &r->mesh);
+        free(r->centre);
+        batch_centres(r);
+        r->dirty = false;
+        v->refreshes++;
+        v->refreshTicks += svcGetSystemTick() - t0;
     }
     if (m->pReplacementTextureTable != NULL) {
         emodel_apply_replacement_texture_table(m);
@@ -3751,18 +3768,42 @@ void trackview_free_later(TrackView* v)
 
 void trackview_frame_begun(TrackView* v)
 {
-    if (!v->loaded || !v->frontend) {
+    int i;
+
+    if (!v->loaded) {
         return;
     }
-    if (v->freePending || v->forgetPending) {
+    if (v->frontend && (v->freePending || v->forgetPending)) {
         forget_all(v);
         v->forgetPending = false;
     }
-    if (v->freePending) {
+    if (v->frontend && v->freePending) {
         free(v->solid);
         free(v->info);
         free(v->texture);
         memset(v, 0, sizeof *v);
+        return;
+    }
+    for (i = v->numSolids; i < v->numSolids + v->numOther; i++) {
+        if (v->info[i].dirty && v->info[i].mesh.edit == NULL) {
+            forget_solid(&v->info[i]);
+        }
+    }
+}
+
+void trackview_solid_changed(TrackView* v, const void* solid)
+{
+    int i;
+
+    if (!v->loaded || v->info == NULL) {
+        return;
+    }
+    for (i = v->numSolids; i < v->numSolids + v->numOther; i++) {
+        if (v->solid[i].header == (const uint8_t*)solid
+            && other_is(&v->solid[i], (const eSolid*)solid)
+            && v->info[i].baked) {
+            v->info[i].dirty = true;
+        }
     }
 }
 

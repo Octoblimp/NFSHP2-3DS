@@ -5,15 +5,22 @@
 // and model; this host has 8-byte pointers, so each is built here with the
 // host's structs from the same numbers. What CarDamage calls out of its
 // object -- eFindPositionMarker, PlayGlass, Car::TriggerEffect,
-// UpdateCarReplacementTextures, eModel::SetEnvironmentMapping, the walk
-// over a model's vertices and the delete -- is a stand-in here and a stub
-// in the model, and both print the call.
+// UpdateCarReplacementTextures, eModel::SetEnvironmentMapping and the
+// delete -- is a stand-in here and a stub in the model, and both print the
+// call. The walk over a model's vertices is estripdata.c's here and the
+// image's in the model, over the strips the script lays out, and the
+// port's seam at its end prints what the model's hook on the walk's
+// epilogue does.
 //
 // A pointer prints as what it is: iK (info K) and iK.keys (the words after
 // it), IH and BH (the two lists' heads), cN (car N), cN.pos (its
 // position), riN (its render info), dN (its damage), dN.b (the body
 // damage), dN.mI (its I-th model slot), sN (solid N), mN (model N), pN
 // (marker N), 0 for NULL and ? for anything else.
+//
+// A strip's packet is 1,024 bytes of the script's seed: each word a float,
+// (k - 1000) / 64 for k the generator's next bits 16 up mod 2001, and then
+// each vertex's colour the next bits 16 up, where the colours are.
 //
 //     cardamage_test script.txt > out.txt
 
@@ -33,6 +40,7 @@
 #include "emodel.h"
 #include "epositionmarker.h"
 #include "esolid.h"
+#include "estripdata.h"
 #include "race.h"
 
 // race.c's and carrace.c's, which the harness does not link.
@@ -44,6 +52,8 @@ CarTriggerEffectFn gCarTriggerEffectFn;
 #define NSOLID  16
 #define NMODEL  16
 #define NMARK   48
+#define NSTRIP  16              // a solid's strips at most
+#define PACKET  1024            // a strip's packet's bytes
 
 static uint8_t         *info_chunk[NINFO];
 static BodyDamageInfo  *infos[NINFO];
@@ -179,9 +189,41 @@ static void fake_effect(Car *c, CarEffect fx, float scale, int32_t where,
            (int)fx, (unsigned)bf(scale), (int)where, label(pos));
 }
 
-static void fake_walk(BodyDamageModel *m)
+static void changed(const eSolid *s)
 {
-    printf("  walk %s model=%s\n", label(m), label(m->pModel));
+    printf("  changed %s\n", label(s));
+}
+
+// ---------------------------------------------------------------- strips
+
+static uint32_t lcg(uint32_t *state)
+{
+    *state = *state * 1103515245u + 12345u;
+    return *state;
+}
+
+// Where vertex i's colour is in a packet of n vertices, worked out apart
+// from estripdata.c so that its mistakes show.
+static size_t colour_at(int32_t n, int32_t i)
+{
+    size_t p = 28 + (size_t)n * 12 + 4;
+
+    if (n % 4 != 0 && n >= 4)
+        p += 4;
+    p += (size_t)n * 8 + 4;
+    if (n % 2 != 0 && n >= 2)
+        p += 4;
+    return p + 4 + (size_t)i * 2;
+}
+
+static uint32_t fnv(const uint8_t *p, size_t n)
+{
+    uint32_t h = 2166136261u;
+    size_t   i;
+
+    for (i = 0; i < n; i++)
+        h = (h ^ p[i]) * 16777619u;
+    return h;
 }
 
 // ---------------------------------------------------------------- dumps
@@ -365,13 +407,68 @@ static void op_car(void)
     dump_bodies();
 }
 
-// solid|s|nverts: only its vertex count is read.
+// solid|s|nverts: no strips yet, room for NSTRIP.
 static void op_solid(void)
 {
     eSolid *s = (eSolid *)calloc(1, sizeof(eSolid));
 
     s->NumVerts = (int16_t)I(2);
+    s->StripEntryTable = calloc(NSTRIP, sizeof(eStripEntry));
     solids[I(1)] = s;
+}
+
+// strip|s|nverts|flags|seed: one more strip on solid s.
+static void op_strip(void)
+{
+    eSolid      *s = solids[I(1)];
+    eStripEntry *e = (eStripEntry *)s->StripEntryTable + s->NumStrips;
+    uint8_t     *d = (uint8_t *)calloc(1, PACKET);
+    uint32_t     state = U(4);
+    int32_t      n = I(2), i;
+
+    for (i = 0; i < PACKET / 4; i++) {
+        float f = (float)((int32_t)((lcg(&state) >> 16) % 2001u) - 1000)
+                  / 64.0f;
+
+        memcpy(d + 4 * i, &f, 4);
+    }
+    d[4] = (uint8_t)n;
+    for (i = 0; i < n; i++) {
+        uint16_t c = (uint16_t)(lcg(&state) >> 16);
+
+        memcpy(d + colour_at(n, i), &c, 2);
+    }
+    e->Data = d;
+    e->DataQWordSize = PACKET / 16;
+    e->Flags = (uint16_t)U(3);
+    e->NumVerts = (uint8_t)n;
+    s->NumStrips++;
+}
+
+// verts|s: each strip's flags and packet, and each vertex as the
+// accessors read it.
+static void op_verts(void)
+{
+    eSolid *s = solids[I(1)];
+    int32_t j, v;
+
+    printf("verts s%d\n", (int)I(1));
+    for (j = 0; j < s->NumStrips; j++) {
+        eStripEntry *e = (eStripEntry *)s->StripEntryTable + j;
+
+        printf("  s%d.%d flags=%04x sum=%08x\n", (int)I(1), (int)j,
+               (unsigned)e->Flags, (unsigned)fnv(e->Data, PACKET));
+        for (v = 0; v < e->NumVerts; v++) {
+            float    x, y, z;
+            uint16_t c;
+
+            estripdata_get_xyz(e->Data, v, &x, &y, &z);
+            memcpy(&c, e->Data + estripdata_element_rgba(e->Data, v), 2);
+            printf("  s%d.%d.%d %08x %08x %08x %04x\n", (int)I(1), (int)j,
+                   (int)v, (unsigned)bf(x), (unsigned)bf(y), (unsigned)bf(z),
+                   (unsigned)c);
+        }
+    }
 }
 
 static void call_op(void)
@@ -402,6 +499,12 @@ static void call_op(void)
         op_car();
     } else if (strcmp(o, "solid") == 0) {
         op_solid();
+    } else if (strcmp(o, "strip") == 0) {
+        op_strip();
+    } else if (strcmp(o, "verts") == 0) {
+        op_verts();
+    } else if (strcmp(o, "key") == 0) {
+        ((uint32_t *)(void *)(infos[c] + 1))[I(2)] = U(3);
     } else if (strcmp(o, "model") == 0) {
         models[c].Solid = I(2) < 0 ? NULL : solids[I(2)];
     } else if (strcmp(o, "marker") == 0) {
@@ -413,8 +516,8 @@ static void call_op(void)
         m->Position[0] = F(3);
         m->Position[1] = F(4);
         m->Position[2] = F(5);
-    } else if (strcmp(o, "walker") == 0) {
-        gBodyDamageVertexWalkFn = I(1) ? fake_walk : NULL;
+    } else if (strcmp(o, "seam") == 0) {
+        gESolidVerticesChangedFn = I(1) ? changed : NULL;
     } else if (strcmp(o, "alevel") == 0) {
         printf("alevel d%d %s\n", c, fields[2]);
         bodydamage_set_alevel_info(&dmg[c]->TheBodyDamage, fields[2]);
@@ -537,7 +640,7 @@ int main(int argc, char **argv)
         return 2;
     }
     gCarTriggerEffectFn = fake_effect;
-    gBodyDamageVertexWalkFn = fake_walk;
+    gESolidVerticesChangedFn = changed;
     reset();
     while (fgets(line, sizeof line, fh) != NULL) {
         line[strcspn(line, "\r\n")] = 0;

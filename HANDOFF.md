@@ -21872,3 +21872,78 @@ log at the fire (TASKS 46), TASKS 47's bridge, TASKS 52's popups.
 - **Next.** 51c, the vertices: DamageVertexFunction's dents, colours
   and scuffs, through `gBodyDamageVertexWalkFn`, on meshes that live
   on the GPU.
+
+## Session 93 -- 51c, the vertices (done)
+
+`docs/formats/car-damage.md` ("The renderer's vertices", "The check")
+has the whole of it; this is the short form.
+
+### What the user said on 2026-10-14 (verbatim)
+
+"STOP THE CAR, BROKEN TEXTURES", with a shot of the player's cop car
+drawn black in a You're The Cop race on Coastal Parklands, and then
+"BRO JUST MAKE THE VEHICLES LOOK FINE, WHY IS IT LIKE THIS HOLY", with
+the black car and a car of only wheels and a shadow.
+
+### What is where
+
+- `estripdata.c`/`.h` (new): eStripData's accessors and
+  CallDamageVertexFunctionForEveryVertex (`0x00104100`). The walk ends
+  with `gESolidVerticesChangedFn`.
+- `cardamage.c`: DamageVertexFunction (`0x001b48d0`) and the model's
+  init that calls the walk. `bodydamage_walks_solid` says which solids
+  a BodyDamageModel with an info walks.
+- `geobake.c`/`.h` (new): the bake, moved out of `georender.c`, with
+  the editable bake (`georender_bake_editable`) and the refresh
+  (`georender_refresh`). An editable mesh keeps which mesh vertex each
+  strip vertex became, and each scuff strip's indices.
+- `trackview.c`: a car's solid that BodyDamage walks bakes editable.
+  `trackview_solid_changed` marks the meshes baked from a solid dirty;
+  a dirty editable mesh is refreshed at its first draw of a frame, and
+  any other dirty mesh is let go at `trackview_frame_begun`.
+- `main.c` binds `gESolidVerticesChangedFn` for the race's view and the
+  frontend's, and logs "race: refreshed N damaged meshes in T ms".
+- `tools/geobake_check.py`, `tools/src/geobake_test.c` (new).
+  `cardamage_check` gained the vertices. The carmode and mellowmover
+  harnesses gained the stand-ins `cardamage.c` now needs (they failed
+  to link).
+
+### What bit
+
+- **The black cop car.** It was not the textures. The player's car is
+  vertex-damageable, so its body is a duplicated solid, CROWNVIC_A2,
+  and it bakes at its first draw, in the race. The bake's working
+  buffers (a few hundred KB for a body) came from the main heap, whose
+  largest free block was 64 KB by then. CROWNVIC_A, CROWNVIC_A2 and
+  TS50_A failed to bake, a failed solid never draws, and what was left
+  was the hull's shadow and the wheels. The fly-by uses the small _D
+  bodies, which bake, so the car looked right until the race. The
+  buffers and the edit now come from the linear heap (`scratch_alloc`
+  in `geobake.c`, about 11 MB free in a race), and the race's stats
+  line counts the bakes that fail ("0 bakes failed").
+- SkipFE and Quick Race run with DamageEnabled 0, so a SkipFE run never
+  walks a car. `run_azahar_coprace.ps1` reaches You're The Cop, which
+  has it on. The script lands in a quick race about half the time (the
+  A press reaches Cops On Mode Select before the Down); run it again.
+
+### Checks
+
+- cardamage_check: 3,206 ops, 30,452 lines, 0 differ; 184 mutations,
+  181 caught, 3 equivalent.
+- geobake_check: 44 cars, 518 solids, 16,789 strips; 1,325,799
+  vertices changed over 2,072 refreshes, 0 faults; 23 mutations, 22
+  caught, 1 equivalent (georender_free's leak).
+- geosolid_check: 0 faults.
+- careffects, loadertable, physicscar, carmode, mellowmover, carrender,
+  carrenderinfo, carinit, collisionbody, cop, munition, playercop and
+  positionmarker: 0 differ.
+- Azahar (AC power, Speed 100%): a You're The Cop race on track 11 at
+  30 FPS. The cop car draws whole (body, light bar,
+  plate), the racers and traffic draw, a bust landed, "refreshed 4
+  damaged meshes in 10.9 ms" and 0 bakes failed.
+
+### Next
+
+51d, Car::DamageAbove (`0x00135280`, `gCarDamageAboveFn`). Then TASKS
+37 (multi-card multiplayer). Still to ask the user: a device log at the
+fire (TASKS 46), TASKS 47's bridge, TASKS 52's popups.

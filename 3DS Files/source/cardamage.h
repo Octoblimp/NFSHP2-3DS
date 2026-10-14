@@ -20,6 +20,7 @@
 //   LoaderBodyDamage / Unloader            0x001b4760 / 0x001b47b0
 //   FindBodyDamageInfo                     0x001b47e8
 //   BodyDamageModel::Init                  0x001b4820
+//   DamageVertexFunction, and its wrapper  0x001b48d0, 0x001b48b0
 //   BodyDamageModel::CallDamageVertexFunction  0x001b4b50
 //   BodyDamage::BodyDamage / ~BodyDamage   0x001b4ba0 / 0x001b4c10
 //   SetALevelBodyDamageInfo, AddModel      0x001b4cd8, 0x001b4d10
@@ -37,11 +38,13 @@
 //   RethinkDamage, ApplyDamage             0x001b5a78, 0x001b5aa8
 //   the wreck (new), RepairAll (new)       0x001b5bc8, 0x001b5c20
 //
-// Not here: the replay's DoSnapshot (no ReplayManager yet), and the
-// vertices. DamageVertexFunction dents and darkens the body's vertices and
-// shows the scuffs; the port's solids are baked into GPU meshes, so the
-// walk over a model's vertices is a seam (gBodyDamageVertexWalkFn),
-// skipped while NULL.
+// The vertices: ApplyDamage walks each model's (estripdata.h), and
+// DamageVertexFunction dents and darkens the body's by each zone's damage
+// since the last walk and shows the scuffs where there is any. The walk
+// changes the solid's packet and strip flags; the port's renderer bakes
+// meshes from them and takes the change after the walk (trackview.c).
+//
+// Not here: the replay's DoSnapshot (no ReplayManager yet).
 //
 // Cross-check: tools/cardamage_check.py. Write-up:
 // docs/formats/car-damage.md.
@@ -176,13 +179,6 @@ BodyDamageInfo *find_body_damage_info(uint32_t name_hash);
 
 // ------------------------------------------------------- the body damage
 
-// The walk over a model's vertices (CallDamageVertexFunctionForEvery-
-// Vertex with DamageVertexFunction): each vertex dented by its zone's
-// damage since the last walk, its colour darkened, and the scuff strips
-// shown where their zone is damaged. The renderer's (task 51's vertex
-// slice); NULL skips it.
-extern void (*gBodyDamageVertexWalkFn)(BodyDamageModel *m);
-
 void  bodydamage_construct(BodyDamage *b, const char *name);
 void  bodydamage_destruct(BodyDamage *b);
 
@@ -192,9 +188,14 @@ void  bodydamage_set_alevel_info(BodyDamage *b, const char *name);
 // The next of BodyDamageModels (no bound, as retail has none): this body
 // damage, the model, `polys_only`, and its solid's vertex count. With
 // vertices, the info named `name` if its count is the same, and then the
-// walk once.
+// walk once, which hides the scuffs. With `polys_only` the walk leaves the
+// positions and colours alone and does only the scuffs' alpha and flags.
 void  bodydamage_add_model(BodyDamage *b, eModel *m, const char *name,
                            int32_t polys_only);
+
+// Port's, for the renderer: whether a model of a body damage on
+// BodyDamageList walks `s`, having an info.
+int32_t bodydamage_walks_solid(const eSolid *s);
 
 // The zone's byte to `amount` clamped to 0..1, times 128 and truncated,
 // and the total by the difference.

@@ -10,16 +10,19 @@ environment mapping. The vertices of the body follow the zones' damage:
 they dent, darken, and show the scuffs.
 
 Retail has it in BodyDamage.obj and CarDamage.obj, `0x001b4760` ..
-`0x001b5c50`. The port has it in `cardamage.{c,h}`; eSolid's environment
-mapping is in `esolid.c` and eModel's in `emodel.c`.
+`0x001b5c50`. The port has it in `cardamage.{c,h}`. eSolid's environment
+mapping is in `esolid.c`, and eModel's is in `emodel.c`. The walk over a
+model's vertices and eStripData's accessors are in `estripdata.c`.
 `tools/cardamage_check.py` runs retail's code against the port, and
 `tools/loadertable_check.py` runs the environment mapping.
+`tools/geobake_check.py` checks the renderer's side of the vertices.
 
 | function | retail |
 |---|---|
 | LoaderBodyDamage / UnloaderBodyDamage (slot 17) | `0x001b4760` / `0x001b47b0` |
 | FindBodyDamageInfo | `0x001b47e8` |
 | BodyDamageModel::Init / CallDamageVertexFunction | `0x001b4820` / `0x001b4b50` |
+| DamageVertexFunction, and the static that calls it | `0x001b48d0`, `0x001b48b0` |
 | BodyDamage::BodyDamage / ~BodyDamage | `0x001b4ba0` / `0x001b4c10` |
 | SetALevelBodyDamageInfo / AddModel | `0x001b4cd8` / `0x001b4d10` |
 | SetDamage / RepairAllDamage | `0x001b4d48` / `0x001b4dc0` |
@@ -34,6 +37,8 @@ mapping is in `esolid.c` and eModel's in `emodel.c`.
 | RethinkDamage / ApplyDamage | `0x001b5a78` / `0x001b5aa8` |
 | the wreck (new) / RepairAll (new) | `0x001b5bc8` / `0x001b5c20` |
 | eSolid::SetEnvironmentMapping / eModel's | `0x00104070` / `0x0010cae0` |
+| CallDamageVertexFunctionForEveryVertex | `0x00104100` |
+| eStripData's GetElementXYZ, GetElementRGBA, GetNumVerts, GetXYZ, SetXYZ | `0x0011bf98`, `0x0011c180`, `0x0011c248`, `0x0011c2b8`, `0x0011c338` |
 
 "New" marks code the demo does not have. The demo found the items by
 marker on every hit. Retail finds them once, when the car is built, and
@@ -191,6 +196,40 @@ later cars of a type draw copies of the solids (`eDuplicateSolid`), each
 with its own strip table, so one car's broken window leaves the other
 cars' alone.
 
+## The vertices
+
+**The walk** (`CallDamageVertexFunctionForEveryVertex`, `0x00104100`)
+goes over the model's solid strip by strip, and over each strip's
+vertices in order. It uses eStripData's accessors (`0x0011bf98` ..
+`0x0011c398`), which find a vertex's x, y, z and RGBA where the VIF's
+unpacks keep them in the strip's VU1 packet. So the walk changes the
+packet the renderer draws from. For each vertex it reads the position
+and calls the function with:
+- the caller's pointer and the vertex's number over the whole solid;
+- the position (a copy, written back after the call) and the colour in
+  the packet;
+- a NULL, and the strip's Flags & `0x800`.
+
+A scuff strip (Flags `0x800`) with any vertex that shows loses `0x400`,
+the flag RenderStrips skips a strip by. A scuff strip with none gets it.
+A strip of no vertices still has its flags handled, and a model with no
+solid is skipped. The vertex counter is reset once for each walk.
+
+**DamageVertexFunction** (`0x001b48d0`, called through `0x001b48b0`).
+The vertex's key is the info's KeyNum-th. RepeatCount counts the
+vertices that have had it, up to the key's low three bits. The zone's
+damage since the last walk (visible less applied) does two things:
+- It moves the vertex by the key's dent: each of x, y and z by its six
+  bits times 0.02 times the difference.
+- It steps the colour. R, G and B each go down by trunc(8 step ×
+  visible) / 8 less the same of the applied, which is a whole step of
+  `0x421` off the halfword. The subtraction can carry into the next
+  channel, and it wraps.
+
+A repair takes both back, and with `DamagePolysOnly` neither happens. A
+scuff's alpha is on above half the zone's damage (trunc(256 v) ≥ 129).
+The vertex shows with any damage at all.
+
 ## The wreck, the repair and the destructor
 
 The wreck (`0x001b5bc8`, what a munition's blast or a cop's wreck does)
@@ -223,14 +262,44 @@ opened over the engine's own table (`geo_open_in_place` on
 Every strip of a batch has the batch's texture, and SetEnvironmentMapping
 changes every strip of a texture, so one strip speaks for the batch.
 
-Still to come (TASKS 51):
-- **The vertices** (51c). DamageVertexFunction dents each vertex by its
-  key, darkens it, and shows the scuff strips. The port's solids are GPU
-  meshes, so the walk is a seam, `gBodyDamageVertexWalkFn`, skipped
-  while NULL. The walk's position in each model (RepeatCount, KeyNum)
-  is still reset as retail does.
-- **Car::DamageAbove** (`0x00135280`, `gCarDamageAboveFn`), skipped
-  while NULL.
+**The renderer's vertices** (51c). The walk and DamageVertexFunction are
+in `estripdata.c` and `cardamage.c`. The port draws a solid from one
+indexed mesh baked out of its packet (`geobake.c`), so after a walk the
+mesh has to be made to match again:
+- **The bake.** A car's solid that a BodyDamageModel with an info walks
+  (`bodydamage_walks_solid`) bakes editable (`georender_bake_editable`).
+  The mesh keeps which of its vertices each strip vertex became, and each
+  scuff strip's indices. A scuff strip hidden at the bake (all 711 are,
+  on the disc) is baked as triangles of one vertex, which draw nothing.
+- **The seam.** The walk ends with `gESolidVerticesChangedFn`. main.c
+  binds it to `trackview_solid_changed` for the race's view and the
+  frontend's, which marks each mesh baked from that solid dirty.
+- **The refresh.** A dirty editable mesh is refreshed at its first draw
+  of a frame (`georender_refresh`):
+  - every strip vertex's position and colour is read back out of the
+    packet;
+  - each scuff strip's indices are put back, or emptied, by its Flags;
+  - the batches' boxes are made again.
+  C3D_FrameBegin has waited for the GPU by then, and the frame's sends
+  and C3D_FrameEnd flush the linear heap. Any other dirty mesh is let go
+  at the frame's start (`trackview_frame_begun`), and bakes again when it
+  next draws.
+- **The merged vertices.** The bake keeps one vertex for strip vertices
+  that are the same byte for byte. On the disc's 115 solids with a
+  BodyDamageInfo, the 107,961 strip vertices it merges have the same key
+  and scuff flag as the vertex they merge with. The walk changes them
+  alike, so one mesh vertex can stand for all of them.
+- **The heap.** A car's body is baked at its first draw, in the race.
+  By then the main heap's largest free block can be 64 KB, and a body's
+  bake needs a few hundred KB of working buffers. Before Session 93's
+  fix, CROWNVIC_A, its copy CROWNVIC_A2 and TS50_A failed to bake, so
+  the player's cop car drew only its shadow and wheels. The working
+  buffers and the edit now come from the linear heap (`scratch_alloc`),
+  which has about 11 MB free in a race. The race's stats line counts
+  the bakes that fail ("N bakes failed"); a failed solid never draws.
+
+Still to come (TASKS 51): **Car::DamageAbove** (`0x00135280`,
+`gCarDamageAboveFn`), skipped while NULL.
 
 `Car::TriggerEffect` (`0x0011e2b8`, `gCarTriggerEffectFn`) is not
 ported, so the effects are skipped (TASKS 60). The replay's DoSnapshot
@@ -245,8 +314,14 @@ them, and the image's own item table, window-less types and effect
 scales. What CarDamage calls out of the object is stubbed in the model
 and stood in for in the harness (`tools/src/cardamage_test.c`), and both
 print the call: eFindPositionMarker, PlayGlass, TriggerEffect,
-UpdateCarReplacementTextures, eModel::SetEnvironmentMapping, the vertex
-walk and the delete.
+UpdateCarReplacementTextures, eModel::SetEnvironmentMapping and the
+delete. The walk and eStripData's accessors are retail's own on one side
+and `estripdata.c` on the other. Each strip's packet is the same 1,024
+seeded bytes on both, and both dump each vertex and each packet's bytes
+through retail's GetXYZ and GetElementRGBA. The port's
+`gESolidVerticesChangedFn` prints the solid in the harness. The model
+prints it from the walk's epilogue (`0x00104260`), from where the walk
+keeps it at 44(sp), which it stores before its test for no solid.
 
 The script covers:
 - the list over loads, unloads and finds;
@@ -260,10 +335,20 @@ The script covers:
 - items found and missing, and a hit on a car with no info;
 - each zone stepped through every threshold in 128ths;
 - the wreck, the repair and the destructor;
-- 700 random hits, zones and repairs over five cars.
+- 700 random hits, zones and repairs over five cars;
+- the vertices:
+  - strips of every count from none to 30, in and past the groups of
+    four, scuff strips and a hidden one, under a body and a polys-only
+    model;
+  - keys with dents and without, colour steps up and down that wrap, and
+    each repeat count;
+  - zones at the alpha's 64 and 65 of 128 and full, with the damage on
+    and off, the repair, and the seam off;
+  - then random keys and strips under random damage.
 
-It runs 2,446 ops for 13,349 lines, 0 differ. Of its 135 mutations, 132
-are caught and 3 are equivalent:
+The vertex dumps see 1,160 positions, 1,887 colours, 161 alphas alone and
+69 strips' flags change. It runs 3,206 ops for 30,452 lines, 0 differ. Of
+its 184 mutations, 181 are caught and 3 are equivalent:
 - the unread 0 threshold;
 - an item with no zone reading the byte before the zones, which is a
   pointer's top byte and 0 on both machines;
@@ -277,3 +362,21 @@ on, a texture the bus has none of, a hash that names nothing, a model
 with no solid, and a solid of four strips of one texture are all
 covered, and the original solids stay as they were. Of its 7 new
 mutations, 6 are caught and 1 is equivalent (a texture number past 127).
+
+`tools/geobake_check.py` builds `geobake.c` on the host with
+`geometry.c`, `geocull.c` and `estripdata.c` (`tools/src/geobake_test.c`).
+It bakes every solid of the 44 cars' `GEOMETRY.BIN`, 518 solids and
+16,789 strips:
+- With every scuff strip shown, the editable bake is the plain bake, byte
+  for byte, and a refresh before any change changes nothing.
+- Then, three times over, it moves and recolours each strip vertex in the
+  packet by a hash of what it holds, so merged vertices change alike, and
+  shows or hides each scuff strip at random. After the refresh the mesh
+  must draw what an editable bake of the changed solid draws, at each
+  index the same vertex, in the same batches, with the same boxes.
+- The triangles it draws (none of whose corners share an index) must be
+  the plain bake's, in order and vertex for vertex.
+
+It changes 1,325,799 vertices over 2,072 refreshes, with 0 faults. Of its
+23 mutations, 22 are caught. The last, georender_free not freeing the
+edit, is a leak the harness cannot see.

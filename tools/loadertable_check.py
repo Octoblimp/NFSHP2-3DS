@@ -160,7 +160,7 @@ SOURCES = [HARNESS, STUBS, BCL, ESC, EMC] + ["3DS Files/source/" + f for f in (
     "suspension.c", "steering.c", "rigidbody.c", "table.c", "elight.c",
     "helisheet.c", "copmgr.c", "cop.c", "copmanager.c", "timer.c",
     "epositionmarker.c", "nisinfo.c", "soundscape.c", "eventtree.c",
-    "smokeableinfo.c", "cardamage.c")]
+    "smokeableinfo.c", "cardamage.c", "estripdata.c")]
 
 HARNESS_TIMEOUT = 600
 EXTRACTED = ROOT / "extracted"

@@ -22,53 +22,9 @@
 
 #include <citro3d.h>
 
+#include "geobake.h"
 #include "geocull.h"
 #include "geometry.h"
-
-// One vertex as the PICA reads it. 28 bytes.
-//
-// The field order IS the attribute layout: the PICA walks one vertex by
-// consuming the AttrInfo_AddLoader() calls in the order they were made, so
-// the struct has to be in that order too and there is nothing that checks
-// it. Three floats of position, two of ST, four unsigned bytes of colour,
-// three signed bytes of normal, and a pad byte to round the stride to 28.
-// The loader takes the normal and the pad as four bytes: the PICA freezes
-// when a loader's attributes do not fill its stride.
-//
-// Both byte fields reach the shader as the plain integer value, 0..255 and
-// -128..127 -- the PICA does not normalise an integer attribute -- so the
-// colour is scaled by 1/255 and the normal by 1/127, in the uniforms the
-// CPU makes for geosolid.v.pica (geosolidunif.c). The colour is what the VIF's V4-5 unpack gave VU1, each
-// five bits shifted up three, so 0..248, and the alpha 255 or 0 for the
-// unpack's 0x80 or 0.
-typedef struct {
-    float   pos[3];
-    float   st[2];
-    uint8_t colour[4];
-    int8_t  normal[3];
-    uint8_t pad;
-} GeoRenderVertex;
-
-// A run of triangles sharing one texture, one eStripEntry Flags and one
-// LightMaterialIndex. Strips are sorted by the three when a solid is baked,
-// so a solid draws in as many calls as it has distinct ones -- 1 to 34
-// across the disc, usually fewer than 12. Within a solid the flags and the
-// material never differ between strips of one texture, so the split costs
-// nothing. The flags are the bake's: eSolid::SetEnvironmentMapping changes
-// 0x100 on every strip of a texture afterwards (CarDamage, when a window
-// breaks), so the draw reads `strip`'s as they are now (geometry.h's
-// geo_strip_flags).
-typedef struct {
-    int      first;             // first index in the mesh's ibo
-    int      count;             // indices, three a triangle
-    int      texture;           // index into the solid's texture table, or -1
-    int      strip;             // its first strip in the solid's entry table
-    uint16_t flags;             // eStripEntry's: 0x80 lit, 0x100 env mapped
-    int8_t   lightMaterial;     // the solid's LightMaterialTable index, or -1
-    int      cluster;           // its boxes in the mesh's clusters (geocull.h)
-} GeoBatch;
-
-#define GEO_MAX_BATCHES 64
 
 // How a strip's colour meets the frame's. The GS blends with its ALPHA_1
 // register, which CreateTextureContext (0x00109f48) takes whole from
@@ -112,39 +68,10 @@ typedef struct {
     GeoPass  pass;              // georender_draw_mask's; georender_draw's is fixed
 } GeoTexture;
 
-typedef struct {
-    GeoRenderVertex* vbo;               // linearAlloc'd; georender_free owns it
-    uint16_t*        ibo;               // in vbo's block, after the vertices
-    int              numVerts;
-    int              numIndices;
-    GeoBatch         batch[GEO_MAX_BATCHES];
-    int              numBatches;
-    int              numTris;
-    int              skippedStrips;     // strips geometry.c could not decode
-    float            aabbMin[3];
-    float            aabbMax[3];
-    // Each batch's boxes, geocull_count(count) from its `cluster`, in vbo's
-    // block after the indices; NULL draws every batch whole.
-    const GeoCluster* clusters;
-} GeoMesh;
-
 // Loads the shader and describes the vertex layout. Call once, after
 // C3D_Init. Safe to call again; the second call is a no-op.
 bool georender_init(void);
 void georender_exit(void);
-
-// Decodes every strip of `solid` into one indexed mesh on the linear heap:
-// each distinct vertex once, 28 bytes, then three 16-bit indices a
-// triangle, then the batches' boxes (geocull.h). This is the expensive call -- it replays every VIF packet in
-// the solid -- so it belongs at load time, not in a frame.
-//
-// The disc's largest solid, 911TURBO_A (4,138 triangles), is 4,255
-// vertices and 141 KB, where a triangle list took 348 KB.
-//
-// Returns false only if the allocation fails; a solid whose strips will not
-// decode still bakes, with the bad ones counted in skippedStrips.
-bool georender_bake(const GeoSolid* solid, GeoMesh* out);
-void georender_free(GeoMesh* mesh);
 
 // Both matrices, because the shader lights in view space and so needs the
 // view-space position as well as the clip-space one.

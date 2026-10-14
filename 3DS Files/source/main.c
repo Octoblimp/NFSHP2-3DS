@@ -78,6 +78,7 @@
 #include "bsetup.h"
 #include "carcontroller.h"
 #include "cardamage.h"
+#include "estripdata.h"
 #include "cardriver.h"
 #include "carinfo.h"
 #include "carinit.h"
@@ -4518,10 +4519,12 @@ static void logRaceState(void)
             (double)RealTimer * 0.00025, (double)WorldTimeSeconds,
             (double)RealTimeElapsed, (long)FrameCounter,
             (unsigned long)eFrameCounter);
-    logLine("race: other solids %d (%d failed, %d dropped), textures %d "
+    logLine("race: other solids %d (%d failed, %d dropped), %d bakes "
+            "failed, textures %d "
             "(%d missing, %d reduced, %d unchained, %d evicted), deferred "
             "%d dropped; strips %d (%d dropped); %lu KB linear free",
             g_track.numOther, g_track.otherFailed, g_track.otherDropped,
+            g_track.bakesFailed,
             g_track.numTextures, g_track.missingTextures,
             g_track.reducedTextures, g_track.unchainedTextures,
             g_track.evictedTextures,
@@ -4640,8 +4643,8 @@ static void logRaceState(void)
     {
         // What the race baked and uploaded since the last line: after
         // trackview_prepare, each one is a hitch.
-        static int      lastBakes, lastUploads;
-        static uint64_t lastBakeTicks, lastUploadTicks;
+        static int      lastBakes, lastUploads, lastRefreshes;
+        static uint64_t lastBakeTicks, lastUploadTicks, lastRefreshTicks;
 
         if (g_track.bakes < lastBakes || g_track.uploads < lastUploads) {
             // Another race's view: trackview_free starts the counts again.
@@ -4658,6 +4661,17 @@ static void logRaceState(void)
                     ticksMs(g_track.worstTicks), g_track.lateNames);
         }
         g_track.lateNames[0] = '\0';
+        if (g_track.refreshes < lastRefreshes) {
+            lastRefreshes = 0;
+            lastRefreshTicks = 0;
+        }
+        if (g_track.refreshes != lastRefreshes) {
+            logLine("race: refreshed %d damaged meshes in %.1f ms",
+                    g_track.refreshes - lastRefreshes,
+                    ticksMs(g_track.refreshTicks - lastRefreshTicks));
+        }
+        lastRefreshes      = g_track.refreshes;
+        lastRefreshTicks   = g_track.refreshTicks;
         lastBakes          = g_track.bakes;
         lastUploads        = g_track.uploads;
         lastBakeTicks      = g_track.bakeTicks;
@@ -5556,6 +5570,13 @@ static void car_damage_repair_all_seam(void* damage)
     cardamage_repair_all((CarDamage*)damage);
 }
 
+// The walk changed a car's solid: both views' meshes of it are dirty.
+static void solid_vertices_changed(const eSolid* s)
+{
+    trackview_solid_changed(&g_track, s);
+    trackview_solid_changed(&g_feView, s);
+}
+
 // tAICop::ClearPursuit drops RemoveCopFromPursuit's answer.
 static void pursuit_remove_cop_seam(tPursuit* p, tCop* c)
 {
@@ -6092,6 +6113,7 @@ int main(int argc, char** argv)
     gCarDamageAddDamageFn      = cardamage_add_damage;
     gCarDamageWreckFn          = car_damage_wreck_seam;
     gCarDamageRepairAllFn      = car_damage_repair_all_seam;
+    gESolidVerticesChangedFn   = solid_vertices_changed;
 
     // The two calls Suspension makes into Wheel go through pointers, left
     // NULL until something says Wheel is linked -- which, in the game,
@@ -7130,6 +7152,7 @@ int main(int argc, char** argv)
             // The GPU is done with the last frame: what the frontend's view
             // let go of since can be freed, and the slideshow's pictures.
             trackview_frame_begun(&g_feView);
+            trackview_frame_begun(&g_track);
             trackSelSyncPictures(&ui);
             frameprof_begin_draw(syncTick, gpuTick, drawTick);
             lastSync = C3D_FrameCounter(0);

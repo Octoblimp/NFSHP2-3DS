@@ -5,12 +5,16 @@ run in mipsemu. eModel's environment mapping is loadertable_check.py's.
 
 **The model** is retail's own code: LoaderBodyDamage and its unloader,
 FindBodyDamageInfo, BodyDamageModel::Init and CallDamageVertexFunction,
-BodyDamage's constructor, destructor, SetALevelBodyDamageInfo, AddModel,
-SetDamage, RepairAllDamage, the zone of a point, GetDamageAmount, the
-GetVisible* and GetCompressed* getters, ApplyDamage and
-SetEnvironmentMapping; CarDamage's constructor, destructor, item parts,
-AddDamage, item levels, the damage to one zone, RethinkDamage,
-ApplyDamage, the wreck and RepairAll; GetModelNumVertices and bStringHash,
+DamageVertexFunction and its wrapper, BodyDamage's constructor,
+destructor, SetALevelBodyDamageInfo, AddModel, SetDamage,
+RepairAllDamage, the zone of a point, GetDamageAmount, the GetVisible*
+and GetCompressed* getters, ApplyDamage and SetEnvironmentMapping;
+CarDamage's constructor, destructor, item parts, AddDamage, item levels,
+the damage to one zone, RethinkDamage, ApplyDamage, the wreck and
+RepairAll; CallDamageVertexFunctionForEveryVertex (0x00104100) and
+eStripData's GetNumVerts, GetElementXYZ, GetXYZ, SetXYZ and
+GetElementRGBA, which the harness takes from estripdata.c; and
+GetModelNumVertices and bStringHash,
 over BodyDamageInfoList (gp-18832) and
 BodyDamageList (gp-18824), which the script empties as retail's static
 constructor does, and TheRaceParameters.DamageEnabled (0x0031a8d8). The
@@ -23,14 +27,19 @@ call: eFindPositionMarker (0x001a7f78, which answers from the script's
 markers by name and type), collision_sound::PlayGlass (0x001e5660),
 Car::TriggerEffect (0x0011e2b8; the port's gCarTriggerEffectFn),
 UpdateCarReplacementTextures (0x0011ff60), eModel::SetEnvironmentMapping
-(0x0010cae0), CallDamageVertexFunctionForEveryVertex (0x00104100; the
-port's gBodyDamageVertexWalkFn) and
-__builtin_delete (0x00114e98; the port's bFree). bMemSet is native.
+(0x0010cae0) and __builtin_delete (0x00114e98; the port's bFree). bMemSet
+is native. The port's own seam, gESolidVerticesChangedFn at the end of
+the walk, prints the solid in the harness; the model hooks the walk's
+epilogue (0x00104260) and prints the solid it kept at 44(sp), which the
+walk stores before its test for none.
 
 **The layouts.** The script gives each info chunk, car, solid, model and
 marker by its numbers; the model lays them out as the image does (a Car's
 CarTypeInfo at 12, RideInfo at 16, position at 96 and render info at
-1200) and the harness builds the host's structs. A pointer prints as what
+1200; an eSolid's NumStrips at 52 and StripEntryTable at 176, and an
+eStripEntry's Data at 8, Flags at 14 and NumVerts at 29) and the harness
+builds the host's structs. A strip's packet is 1,024 bytes from a seed
+(see the harness), the same bytes on both sides. A pointer prints as what
 it is (see the harness).
 
 **The script**: the loader's guard and the list over loads, unloads and
@@ -44,8 +53,14 @@ markers, missing ones and ones of another car; hits on a car without an
 info, below 0.05, below 0.2, and above, the zone change undone, levels
 rising and falling, each zone at exactly the thresholds, the glass, the
 effects, the textures and the windows' environment mapping; the wreck,
-the repair, the destructor with and without the delete; and random hits,
-zones and repairs over five cars.
+the repair, the destructor with and without the delete; random hits,
+zones and repairs over five cars; and the vertices: strips of every
+count from none to 30, in and past the groups of four, scuff strips and
+a hidden one, under a body and a polys-only model, keys with dents and
+without, colour steps up and down that wrap, each repeat count, zones at
+the alpha's 64 and 65 of 128 and full, with the damage on and off, the
+repair and the seam off; then random keys and strips under random damage,
+each vertex and each packet's bytes dumped as it goes.
 
     python tools/cardamage_check.py
     python tools/cardamage_check.py --mutate [--only a,b]
@@ -73,7 +88,8 @@ NL = chr(10)
 
 HARNESS = "tools/src/cardamage_test.c"
 CDC = "3DS Files/source/cardamage.c"
-SOURCES = [HARNESS, CDC]
+ESD = "3DS Files/source/estripdata.c"
+SOURCES = [HARNESS, CDC, ESD]
 HARNESS_TIMEOUT = 120
 
 GP = retail_model.RETAIL_GP
@@ -100,12 +116,15 @@ S_GLASS = 0x001e5660
 S_EFFECT = 0x0011e2b8
 S_TEXTURES = 0x0011ff60
 S_ENVMAP = 0x0010cae0
-S_WALK = 0x00104100
+W_END = 0x00104260
+F_GETXYZ, F_GETRGBA = 0x0011c2b8, 0x0011c180
 S_DELETE = 0x00114e98
 S_MEMSET = 0x00250340
 
 INFO = 84
 CAR_SIZE = 2400
+NSTRIP = 16
+PACKET = 1024
 
 
 def fbits(f):
@@ -136,7 +155,7 @@ class Model(object):
                                                % self.label(e.reg[4])))
         e.stub(S_ENVMAP, lambda e: self.emit("  envmap %s %08x %d" % (
             self.label(e.reg[4]), e.reg[5] & M32, s32(e.reg[6]))))
-        e.stub(S_WALK, self.walk)
+        e.hook(W_END, self.walked)
         e.stub(S_DELETE, lambda e: self.emit("  delete %s"
                                              % self.label(e.reg[4])))
 
@@ -165,10 +184,10 @@ class Model(object):
             self.label(e.reg[4]), s32(e.reg[5]), e.fpr[12] & M32,
             s32(e.reg[6]), self.label(e.reg[7])))
 
-    def walk(self, e):
-        if self.walker:
-            self.emit("  walk %s model=%s" % (self.label(e.reg[5]),
-                                              self.label(e.reg[4])))
+    def walked(self, e):
+        s = e.u32((e.reg[29] & M32) + 44)
+        if s != 0 and self.seam:
+            self.emit("  changed %s" % self.label(s))
 
     # ---- the objects
 
@@ -183,7 +202,8 @@ class Model(object):
         self.info, self.car, self.dmg = {}, {}, {}
         self.solid, self.model = {}, {}
         self.marks = []
-        self.walker = True
+        self.seam = True
+        self.scratch = e.alloc(16, align=16)
 
     def name(self, label, addr):
         for a in [a for a, v in self.lab.items()
@@ -340,8 +360,38 @@ class Model(object):
             s = e.alloc(192, align=16)
             e.write(s, bytes(192))
             struct.pack_into("<h", e.mem, s + 56, I(2))
+            t = e.alloc(64 * NSTRIP, align=16)
+            e.write(t, bytes(64 * NSTRIP))
+            e.put32(s + 176, t)
             self.solid[c] = s
             self.name("s%d" % c, s)
+        elif o == "strip":
+            s = self.solid[c]
+            n = struct.unpack_from("<h", e.mem, s + 52)[0]
+            ent = e.u32(s + 176) + 64 * n
+            d = e.alloc(PACKET, align=16)
+            e.write(d, packet(I(2), U(4)))
+            e.put32(ent + 8, d)
+            struct.pack_into("<HH", e.mem, ent + 12, PACKET // 16, U(3) & 0xffff)
+            e.mem[ent + 29] = I(2) & 0xff
+            struct.pack_into("<h", e.mem, s + 52, n + 1)
+        elif o == "verts":
+            s = self.solid[c]
+            self.emit("verts s%d" % c)
+            sc = self.scratch
+            for j in range(struct.unpack_from("<h", e.mem, s + 52)[0]):
+                ent = e.u32(s + 176) + 64 * j
+                d = e.u32(ent + 8)
+                self.emit("  s%d.%d flags=%04x sum=%08x" % (
+                    c, j, e.u16(ent + 14), fnv(e.read(d, PACKET))))
+                for v in range(e.u8(ent + 29)):
+                    e.call(F_GETXYZ, d, v, sc, sc + 4, sc + 8)
+                    e.call(F_GETRGBA, d, v, sc + 12)
+                    self.emit("  s%d.%d.%d %08x %08x %08x %04x" % (
+                        c, j, v, e.u32(sc), e.u32(sc + 4), e.u32(sc + 8),
+                        e.u16(e.u32(sc + 12))))
+        elif o == "key":
+            e.put32(self.info[c] + 8 + INFO + 4 * I(2), U(3))
         elif o == "model":
             if c not in self.model:
                 m = e.alloc(32, align=16)
@@ -358,8 +408,8 @@ class Model(object):
                 e.put32(m + 16 + 4 * j, U(3 + j))
             self.name("p%d" % len(self.marks), m)
             self.marks.append((m, U(1), U(2)))
-        elif o == "walker":
-            self.walker = bool(I(1))
+        elif o == "seam":
+            self.seam = bool(I(1))
         elif o == "alevel":
             self.emit("alevel d%d %s" % (c, a[2]))
             b = self.dmg[c] + 8
@@ -438,6 +488,42 @@ class Model(object):
             raise ValueError(o)
 
 
+def lcg(state):
+    return (state * 1103515245 + 12345) & M32
+
+
+def colour_at(n, i):
+    """Where vertex i's colour is in a packet of n vertices."""
+    p = 28 + n * 12 + 4
+    if n % 4 and n >= 4:
+        p += 4
+    p += n * 8 + 4
+    if n % 2 and n >= 2:
+        p += 4
+    return p + 4 + 2 * i
+
+
+def packet(n, seed):
+    """A strip's packet of n vertices, as the harness makes it."""
+    d = bytearray(PACKET)
+    st = seed & M32
+    for i in range(PACKET // 4):
+        st = lcg(st)
+        struct.pack_into("<f", d, 4 * i, (((st >> 16) % 2001) - 1000) / 64.0)
+    d[4] = n & 0xff
+    for i in range(n):
+        st = lcg(st)
+        struct.pack_into("<H", d, colour_at(n, i), (st >> 16) & 0xffff)
+    return bytes(d)
+
+
+def fnv(data):
+    h = 2166136261
+    for x in data:
+        h = ((h ^ x) * 16777619) & M32
+    return h
+
+
 def model(lines):
     m = Model()
     for ln in lines:
@@ -473,6 +559,13 @@ class Script(object):
 
     def solid(self, k, nverts):
         self.op("solid", k, nverts)
+
+    def strip(self, k, nverts, flags, seed):
+        self.op("strip", k, nverts, X(flags), X(seed))
+
+    def keys(self, k, keys):
+        for i, v in enumerate(keys):
+            self.op("key", k, i, X(v))
 
     def hit(self, c, x, y, z, amount):
         self.op("hit", c, H(x), H(y), H(z), H(amount))
@@ -543,9 +636,9 @@ def model_cases(sc):
     sc.op("add", 0, 4, "VIPER_A", 1)               # no solid
     sc.op("add", 1, 3, "VIPER_A", 1)               # no vertices
     sc.op("add", 1, 6, "NOPE", 0)                  # no info
-    sc.op("walker", 0)
+    sc.op("seam", 0)
     sc.op("add", 1, 0, "VIPER_A", 0)
-    sc.op("walker", 1)
+    sc.op("seam", 1)
     sc.info(5, "ZERO_A", 0)
     sc.op("load", 5)
     sc.op("add", 1, 3, "ZERO_A", 0)               # none, and an info of none
@@ -775,6 +868,151 @@ def random_cases(sc, rng):
     sc.op("lists")
 
 
+def key(rep, zone, step=0, dx=0, dy=0, dz=0):
+    """A BodyDamageInfo key: the repeat count, the zone, the colour step
+    and the dent, each field as DamageVertexFunction takes it apart."""
+    return ((rep & 7) | (zone & 31) << 3 | (step & 63) << 8 | (dx & 63) << 14
+            | (dy & 63) << 20 | (dz & 63) << 26)
+
+
+def cover(keys, n, rng):
+    """`keys`, and random ones after them, for n vertices exactly."""
+    out, have = [], 0
+    for k in keys:
+        if have >= n:
+            break
+        r = min(k & 7, n - have - 1)
+        out.append((k & ~7) | r)
+        have += r + 1
+    while have < n:
+        r = min(rng.randrange(8), n - have - 1)
+        out.append(key(r, rng.randrange(32), rng.randrange(-32, 32),
+                       *(rng.choice((0, 0, rng.randrange(-32, 32)))
+                         for _ in range(3))))
+        have += r + 1
+    return out
+
+
+def damage(sc, c, zones):
+    for z, n in zones:
+        sc.setdmg(c, z, n / 128.0)
+
+
+def vertex_cases(sc, rng):
+    sc.op("reset")
+    body = ((4, 0), (7, 0), (1, 0), (13, 0), (0, 0), (2, 0x400), (3, 0x800),
+            (30, 0x80), (5, 0), (8, 0x800), (6, 0))
+    scuffs = ((5, 0x800), (3, 0xc00), (0, 0x800), (6, 0x800), (4, 0),
+              (1, 0x400))
+    nb = sum(n for n, _ in body)
+    ns = sum(n for n, _ in scuffs)
+    kb = cover([key(0, 0), key(1, 1, step=5), key(2, 2, step=-7),
+                key(0, 3, dx=31, dy=-32, dz=1), key(3, 4, step=31, dx=-1),
+                key(1, 5, step=-32, dz=-32), key(0, 6, dy=1),
+                key(7, 7, step=1, dx=5, dy=5, dz=5), key(4, 31, step=-1),
+                key(2, 16, step=2, dx=-32, dy=31, dz=-1), key(5, 8, step=-3),
+                key(0, 24, step=31, dx=31, dy=31, dz=31),
+                key(6, 9, step=-32, dx=-32, dy=-32, dz=-32)], nb, rng)
+    ks = cover([key(1, 1), key(0, 2, step=4, dx=3), key(2, 3),
+                key(3, 4, step=-6), key(0, 5)], ns, rng)
+    sc.info(0, "BODY_A", nb, nkeys=len(kb))
+    sc.info(1, "SCUFF_A", ns, nkeys=len(ks))
+    sc.keys(0, kb)
+    sc.keys(1, ks)
+    sc.op("load", 0)
+    sc.op("load", 1)
+    sc.solid(0, nb)
+    for j, (n, f) in enumerate(body):
+        sc.strip(0, n, f, 0x5eed0000 + j)
+    sc.solid(1, ns)
+    for j, (n, f) in enumerate(scuffs):
+        sc.strip(1, n, f, 0x5cff0000 + j)
+    sc.op("model", 0, 0)
+    sc.op("model", 1, 1)
+    sc.op("verts", 0)
+    sc.op("verts", 1)
+    sc.car(0, 1, "VIPER")
+    sc.op("add", 0, 0, "BODY_A", 0)
+    sc.op("add", 0, 1, "SCUFF_A", 1)
+    sc.op("verts", 0)
+    sc.op("verts", 1)
+    # Each step's zones: the alpha either side of half, full, and a
+    # change below the walk's 0.02 that ApplyDamage lets pass.
+    steps = (
+        ((1, 64), (2, 65), (3, 128), (4, 1), (5, 100), (6, 127), (7, 50),
+         (8, 33), (9, 90), (16, 70), (24, 128), (31, 20), (0, 128)),
+        ((1, 65), (2, 64), (3, 0), (4, 128), (5, 3), (7, 0), (16, 0),
+         (24, 64), (31, 128), (0, 0)),
+        ((1, 66),),
+        ((1, 128), (2, 128), (3, 128), (4, 128), (5, 128), (6, 128),
+         (7, 128), (8, 128), (9, 128)),
+    )
+    for zones in steps:
+        damage(sc, 0, zones)
+        sc.op("bapply", 0)
+        sc.op("verts", 0)
+        sc.op("verts", 1)
+    sc.op("enabled", 0)
+    sc.op("bapply", 0)
+    sc.op("verts", 0)
+    sc.op("verts", 1)
+    sc.op("enabled", 1)
+    sc.op("bapply", 0)
+    sc.op("verts", 0)
+    sc.op("seam", 0)
+    sc.op("brepair", 0)
+    sc.op("seam", 1)
+    sc.op("verts", 0)
+    sc.op("verts", 1)
+    sc.op("wreck", 0)
+    sc.op("verts", 0)
+    sc.op("verts", 1)
+    sc.op("repair", 0)
+    sc.op("verts", 0)
+    sc.op("verts", 1)
+
+
+def random_vertex_cases(sc, rng):
+    sc.op("reset")
+    for c in range(3):
+        strips = [(rng.choice((0, 1, 2, 3, 4, 5, 8, 11, 16, 29, 30)),
+                   rng.choice((0, 0, 0x800, 0xc00, 0x80, 0x400)))
+                  for _ in range(rng.randrange(1, NSTRIP + 1))]
+        n = sum(v for v, _ in strips)
+        ks = cover([], n, rng)
+        sc.info(c, "RAND%d_A" % c, n, nkeys=len(ks), box=(-1.0, -2.5, 1.0, 2.5))
+        sc.keys(c, ks)
+        sc.op("load", c)
+        sc.solid(c, n)
+        for j, (v, f) in enumerate(strips):
+            sc.strip(c, v, f, rng.randrange(1 << 32))
+        sc.op("model", c, c)
+        sc.car(c, 1, "VIPER")
+        sc.op("alevel", c, "RAND%d_A" % c)
+        sc.op("add", c, c, "RAND%d_A" % c, rng.choice((0, 0, 1)))
+        sc.op("verts", c)
+    for _ in range(90):
+        c = rng.randrange(3)
+        r = rng.random()
+        if r < 0.6:
+            damage(sc, c, [(rng.randrange(32), rng.randrange(129))
+                           for _ in range(rng.randrange(1, 12))])
+            sc.op("bapply", c)
+        elif r < 0.75:
+            sc.hit(c, rng.uniform(-1.5, 1.5), rng.uniform(-3.0, 3.0), 0.0,
+                   rng.uniform(0.0, 1.5))
+        elif r < 0.82:
+            sc.op("repair", c)
+        elif r < 0.86:
+            sc.op("wreck", c)
+        elif r < 0.92:
+            sc.op("enabled", rng.choice((0, 1, 1)))
+            sc.op("bapply", c)
+        else:
+            sc.op("brepair", c)
+        sc.op("verts", c)
+
+
 def script():
     sc = Script()
     list_cases(sc)
@@ -783,6 +1021,8 @@ def script():
     setdamage_cases(sc)
     item_cases(sc)
     random_cases(sc, random.Random(0x1b4760))
+    vertex_cases(sc, random.Random(0x104100))
+    random_vertex_cases(sc, random.Random(0x1b48d0))
     return sc.lines
 
 
@@ -893,12 +1133,100 @@ MUTATIONS = [
       "m->DamagePolysOnly = 0;"),
     M("cd-model-null-info", "    m->pBodyDamageInfo = NULL;\n    m->pBodyDamage",
       "    m->pBodyDamage"),
-    M("cd-call-repeat", "m->RepeatCount = 0;", "m->RepeatCount = 2;"),
+    M("cd-call-repeat", "    m->RepeatCount = 0;\n    m->KeyNum = 0;",
+      "    m->RepeatCount = 2;\n    m->KeyNum = 0;"),
     M("cd-call-key", "m->KeyNum = 0;", "m->KeyNum = 1;"),
     M("cd-call-null", "    if (m->pBodyDamageInfo == NULL)\n        return;\n"
       "    m->RepeatCount", "    m->RepeatCount"),
-    M("cd-call-walk-null", "if (gBodyDamageVertexWalkFn != NULL)",
-      "if (gBodyDamageVertexWalkFn != NULL && m->DamagePolysOnly)"),
+    # -- DamageVertexFunction
+    M("cd-dent-scale", "DENT_SCALE      0.02f", "DENT_SCALE      0.021f"),
+    M("cd-vf-repeat", "if ((int32_t)(key & 7u) == m->RepeatCount) {",
+      "if ((int32_t)(key & 3u) == m->RepeatCount) {"),
+    M("cd-vf-keynum", "m->KeyNum++;", "m->KeyNum += 2;"),
+    M("cd-vf-repcount", "m->RepeatCount++;", "m->RepeatCount += 2;"),
+    M("cd-vf-zone", "zone = (int32_t)((key & 0xffu) >> 3);",
+      "zone = (int32_t)((key & 0x7fu) >> 3);"),
+    M("cd-vf-applied", "applied = (float)b->CompressedAppliedDamageAmounts[zone]",
+      "applied = (float)b->CompressedDamageAmounts[zone]"),
+    M("cd-vf-visible", "visible = bodydamage_get_visible_damage_amount(b, zone);",
+      "visible = (float)b->CompressedDamageAmounts[zone] * ZONE_SCALE;"),
+    M("cd-vf-polys-only", "if (delta != 0.0f && m->DamagePolysOnly == 0) {",
+      "if (delta != 0.0f && m->DamagePolysOnly != 0) {"),
+    M("cd-vf-dent-mask", "if ((key & 0xffffc000u) != 0) {",
+      "if ((key & 0xfff00000u) != 0) {"),
+    M("cd-vf-dent-x", "(int32_t)(key << 12) >> 26", "(int32_t)(key << 13) >> 26"),
+    M("cd-vf-dent-y", "(int32_t)(key << 6) >> 26", "(int32_t)(key << 7) >> 26"),
+    M("cd-vf-dent-z", "(float)((int32_t)key >> 26)",
+      "(float)((int32_t)(key >> 26))"),
+    M("cd-vf-dent-delta", "* DENT_SCALE * delta;\n            pos->y",
+      "* DENT_SCALE * visible;\n            pos->y"),
+    M("cd-vf-step", "step = ((int32_t)(key << 18) >> 26) * 8;",
+      "step = ((int32_t)(key << 18) >> 26) * 4;"),
+    M("cd-vf-step-shift", "(ee_trunc_w((float)step * visible) >> 3)",
+      "(ee_trunc_w((float)step * visible) / 8)"),
+    M("cd-vf-step-applied", "- (ee_trunc_w((float)step * applied) >> 3);",
+      "- (ee_trunc_w((float)step * visible) >> 3);"),
+    M("cd-vf-colour-step", "(uint32_t)d * 0x421u", "(uint32_t)d * 0x420u"),
+    M("cd-vf-colour-add", "*colour = (uint16_t)(*colour - (uint32_t)d",
+      "*colour = (uint16_t)(*colour + (uint32_t)d"),
+    M("cd-vf-polys", "    if (polys != 0) {\n        int32_t a",
+      "    if (polys == 0) {\n        int32_t a"),
+    M("cd-vf-alpha-scale", "a = ee_trunc_w(visible * 256.0f);",
+      "a = ee_trunc_w(visible * 254.0f);"),
+    M("cd-vf-alpha-half", "if (a < 129)", "if (a < 128)"),
+    M("cd-vf-alpha-off", "*colour = (uint16_t)(*colour & 0x7fffu);",
+      "*colour = (uint16_t)(*colour & 0x3fffu);"),
+    M("cd-vf-alpha-on", "*colour = (uint16_t)(*colour | 0x8000u);",
+      "*colour = (uint16_t)(*colour | 0xc000u);"),
+    M("cd-vf-shows", "return visible != 0.0f;", "return delta != 0.0f;"),
+    M("cd-call-walk", "    ecall_damage_vertex_function_for_every_vertex(m->pModel, m,\n"
+      "                                                  damage_vertex_function);\n",
+      ""),
+    # -- the walk and eStripData (estripdata.c)
+    M("esd-num-verts", "return d[4];", "return d[5];", rel=ESD),
+    M("esd-full", "int32_t full = n >> 2;", "int32_t full = n >> 3;", rel=ESD),
+    M("esd-in-group", "if (i < full << 2) {", "if (i <= full << 2) {", rel=ESD),
+    M("esd-group-size", "        p += (size_t)((i >> 2) * 48 + 4);\n        off[0]",
+      "        p += (size_t)((i >> 2) * 44 + 4);\n        off[0]", rel=ESD),
+    M("esd-group-word", "        p += (size_t)((i >> 2) * 48 + 4);\n        off[0]",
+      "        p += (size_t)((i >> 2) * 48);\n        off[0]", rel=ESD),
+    M("esd-group-y", "off[1] = p + (size_t)(lane * 4 + 16);",
+      "off[1] = p + (size_t)(lane * 4 + 12);", rel=ESD),
+    M("esd-group-z", "off[2] = p + (size_t)(lane * 4 + 32);",
+      "off[2] = p + (size_t)(lane * 4 + 36);", rel=ESD),
+    M("esd-tail-full", "    if (full != 0)\n        p +=", "    if (1)\n        p +=",
+      rel=ESD),
+    M("esd-tail-word", "    p += 4;\n    off[0]", "    off[0]", rel=ESD),
+    M("esd-tail-y", "off[1] = p + (size_t)((rem + lane) * 4);",
+      "off[1] = p + (size_t)((rem + lane + 1) * 4);", rel=ESD),
+    M("esd-tail-z", "off[2] = p + (size_t)((rem * 2 + lane) * 4);",
+      "off[2] = p + (size_t)((rem * 3 + lane) * 4);", rel=ESD),
+    M("esd-rgba-xyz", "p += (size_t)(n * 12 + 4);", "p += (size_t)(n * 12 + 8);",
+      rel=ESD),
+    M("esd-rgba-xyz-word", "if ((n >> 2) << 2 < n && (n >> 2) != 0)",
+      "if ((n >> 2) << 2 < n)", rel=ESD),
+    M("esd-rgba-st", "p += (size_t)(n * 8 + 4);", "p += (size_t)(n * 8 + 8);",
+      rel=ESD),
+    M("esd-rgba-st-word", "if ((n >> 1) << 1 < n && (n >> 1) != 0)",
+      "if ((n >> 1) << 1 < n)", rel=ESD),
+    M("esd-rgba-end", "return p + 4 + (size_t)(i * 2);",
+      "return p + (size_t)(i * 2);", rel=ESD),
+    M("esd-set-z", "    memcpy(d + off[2], &z, 4);\n", "", rel=ESD),
+    M("esd-strips", "for (i = 0; i < n; i++) {", "for (i = 0; i < n - 1; i++) {",
+      rel=ESD),
+    M("esd-verts", "for (v = 0; v < nv; v++) {", "for (v = 1; v < nv; v++) {",
+      rel=ESD),
+    M("esd-polys", "int32_t      polys = e->Flags & ESTRIP_SCUFFS;",
+      "int32_t      polys = e->Flags & 0x0c00u;", rel=ESD),
+    M("esd-any", "any |= fn(", "any = fn(", rel=ESD),
+    M("esd-set-back", "            estripdata_set_xyz(d, v, pos.x, pos.y, pos.z);\n",
+      "", rel=ESD),
+    M("esd-flags", "        if (polys != 0) {\n            if (any != 0)",
+      "        if (1) {\n            if (any != 0)", rel=ESD),
+    M("esd-show", "if (any != 0)\n                e->Flags", "if (any == 0)\n"
+      "                e->Flags", rel=ESD),
+    M("esd-seam", "if (gESolidVerticesChangedFn != NULL)",
+      "if (gESolidVerticesChangedFn != NULL && n > 0)", rel=ESD),
     # -- the body damage
     M("cd-bd-tail", "    BodyDamageList.prev = &b->Node;\n", ""),
     M("cd-bd-total", "    b->CompressedTotalDamage = 0;\n"
