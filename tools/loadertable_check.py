@@ -90,7 +90,11 @@ one area after the loader and none after the unloader. Smokeables' two
 itself, or of two spawners, the unloader's loaded first: the list must
 hold just the record, its child found and its emitter lists empty, after
 the loader and nothing after the unloader, and the spawners must be the
-chunk's two, then none. An unported slot
+chunk's two, then none. BodyDamage's two (slot 17) are called on a
+chunk of one info, the unloader's loaded first, with an info already on
+the list: the list must hold that one and then the chunk's, its keys after
+it and its vertex indices NULL, after the loader and just the first after
+the unloader. An unported slot
 must also hand the chunk it takes to gUnportedLoaderFn, once, with its
 slot and table.
 
@@ -156,7 +160,7 @@ SOURCES = [HARNESS, STUBS, BCL, ESC, EMC] + ["3DS Files/source/" + f for f in (
     "suspension.c", "steering.c", "rigidbody.c", "table.c", "elight.c",
     "helisheet.c", "copmgr.c", "cop.c", "copmanager.c", "timer.c",
     "epositionmarker.c", "nisinfo.c", "soundscape.c", "eventtree.c",
-    "smokeableinfo.c")]
+    "smokeableinfo.c", "cardamage.c")]
 
 HARNESS_TIMEOUT = 600
 EXTRACTED = ROOT / "extracted"
@@ -221,6 +225,7 @@ SYM = dict(
     mall="ReconnectAllModels__Fv",
     dup="eDuplicateSolid__FPCcT0",
     deldup="eDeleteAllDuplicatedSolids__Fv",
+    menv="SetEnvironmentMapping__6eModelUii",
 )
 
 # MemoryUsedByDuplicatedSolids, the demo's (retail gp-24928, 0x0032f790).
@@ -274,8 +279,8 @@ CLAIMS = {
     30: [0x00039100, 0x00039101, 0x00039102],
 }
 TAKER = {t: k for k, ts in CLAIMS.items() for t in ts}
-PORTED = {0, 1, 2, 4, 5, 6, 8, 9, 11, 13, 14, 16, 18, 19, 21, 22, 23,
-          24, 25, 26, 28, 29}
+PORTED = {0, 1, 2, 4, 5, 6, 8, 9, 11, 13, 14, 16, 17, 18, 19, 21, 22,
+          23, 24, 25, 26, 28, 29}
 
 # Retail's: the demo's without PhysPredict, slot 20, and HeliSheet (23) a
 # container. The rest of the guards are the demo's.
@@ -305,7 +310,7 @@ RETAIL_TABLES = Tables(RNSLOTS, RCLAIMS, RTAKER, RPORTED)
  OP_SET, OP_DUMP, OP_MNEW, OP_MINIT, OP_MUNINIT, OP_MDELETE, OP_MRECON,
  OP_MRTT, OP_MAPPLY, OP_MALL, OP_MPOKE, OP_MDUMP, OP_REPL, OP_RENT,
  OP_FIND, OP_MATRIX, OP_RAMP, OP_RAMPDUMP, OP_SEED, OP_MARK,
- OP_RELEASE, OP_DUP, OP_DELDUP) = range(37)
+ OP_RELEASE, OP_DUP, OP_DELDUP, OP_MENV) = range(38)
 
 ARGS = {OP_TAG: 1, OP_BUF: 1, OP_BULK: 2, OP_OPEN: 1, OP_CLOSE: 0,
         OP_BUFEND: 0, OP_CLAIMS: 0, OP_CLAIM: 3, OP_SWAP: 1,
@@ -314,7 +319,7 @@ ARGS = {OP_TAG: 1, OP_BUF: 1, OP_BULK: 2, OP_OPEN: 1, OP_CLOSE: 0,
         OP_MRECON: 1, OP_MRTT: 1, OP_MAPPLY: 1, OP_MALL: 0, OP_MPOKE: 3,
         OP_MDUMP: 1, OP_REPL: 2, OP_RENT: 8, OP_FIND: 1, OP_MATRIX: 4,
         OP_RAMP: 3, OP_RAMPDUMP: 1, OP_SEED: 1, OP_MARK: 0, OP_RELEASE: 0,
-        OP_DUP: 2, OP_DELDUP: 0}
+        OP_DUP: 2, OP_DELDUP: 0, OP_MENV: 3}
 
 (K_S, K_SE, K_SD, K_TT, K_TR, K_LF, K_RA, K_LM, K_HD, K_DS, K_DSE,
  K_DSD) = range(12)
@@ -628,6 +633,11 @@ def scenario_matrix(sc, files, tables):
                     # A size-0 sound scape loads as an empty one, so the
                     # slot gets an area and the count is checked.
                     mode = 6
+                elif t == 0x00034030:
+                    # A size-0 body damage chunk's unloader unlinks a
+                    # record never linked, so the slot gets one info and
+                    # the list is checked.
+                    mode = 8
                 elif t in (0x00034026, 0x00034027):
                     # A size-0 info chunk's count wraps, so the slot gets
                     # one record, or two spawners, and the list or the
@@ -839,9 +849,11 @@ def scenario_duplicates(sc, files):
     later car of a type, over the Viper's and the bus's lists in one
     buffer: each body half and the scuffs for instances 1 and 7, the bus's
     scuffs that are not there, a copy's copy, a name copied twice; the
-    finds, models on three copies, eFixUpTables with the solids dirty, and
-    the delete, a second delete with nothing left, a copy after it and its
-    delete, and the lists unloaded."""
+    finds, models on three copies, eFixUpTables with the solids dirty, the
+    windows' environment mapping (eModel::SetEnvironmentMapping, which
+    CarDamage calls) off and on over the copies and on a model with no
+    solid, the delete, a second delete with nothing left, a copy after it
+    and its delete, and the lists unloaded."""
     got = dict(files)
     viper = got.get("CARS/VIPERGTS/GEOMETRY.BIN")
     bus = got.get("CARS/BUS/GEOMETRY.BIN")
@@ -878,7 +890,22 @@ def scenario_duplicates(sc, files):
     sc.op(OP_SET, 1, 1)
     sc.op(OP_FIXUP, 0)
     sc.op(OP_DUMP)
-    for i in range(3):
+    # CarDamage's windows (items 8 to 13) are the Viper's textures by the
+    # same names; the bus has none, and the last hash names nothing. Model
+    # 203 has no solid; 204's solid is 4 strips of the one texture, so its
+    # last strip is one.
+    sc.op(OP_MNEW, 203)
+    sc.op(OP_MINIT, 203, bhash.bhash("NOSUCHSOLID"))
+    sc.op(OP_MNEW, 204)
+    sc.op(OP_MINIT, 204, 0x0b742e2e)
+    for i, h, on in ((0, 0x7b220ddf, 0), (0, 0x1b0763a0, 0),
+                     (1, 0xe7e4ef49, 0), (1, 0x60f8b13c, 0), (2, 0x7b220ddf, 0),
+                     (0, 0x7b220ddf, 1), (1, 0xbd1f0e0a, 1), (1, 0x60f8b13c, 2),
+                     (0, 0x12345678, 0), (3, 0x7b220ddf, 0),
+                     (4, 0x1cb373f8, 0)):
+        sc.op(OP_MENV, 200 + i, h, on)
+    sc.op(OP_DUMP)
+    for i in range(5):
         sc.op(OP_MDELETE, 200 + i, 3)
     sc.op(OP_DELDUP)
     sc.op(OP_DUMP)
@@ -1843,6 +1870,8 @@ class Model(object):
                 else:
                     parts.append(" " + L(x))
             self.emit("   sd" + "".join(parts))
+            self.emit("   sf" + "".join(" %04x" % e.u16(se + 64 * i + 14)
+                                        for i in range(nstrips)))
 
     def dump_model(self, m):
         e, L = self.e, self.label
@@ -2111,6 +2140,8 @@ class Model(object):
                 self.dup(sc.tags[a[0]], sc.tags[a[1]])
             elif code == OP_DELDUP:
                 self.deldup()
+            elif code == OP_MENV:
+                self.call("menv", self.models[a[0]], s32(a[1]), s32(a[2]))
             else:
                 raise ValueError("op %d" % code)
         return self.out
@@ -2162,6 +2193,21 @@ MUTATIONS = [
     ("slot-8-loader-is-null", BCL, "    loader_position_markers,        //  8",
      "    loader_null,                    //  8"),
     ("unloader-14-loads", BCL, "    unloader_sun,", "    loader_sun,"),
+    ("slot-17-unloader-loads", BCL, "    unloader_body_damage,           // 17",
+     "    loader_body_damage,             // 17"),
+    ("slot-17-loader-is-null", BCL, "    loader_body_damage,             // 17",
+     "    loader_null,                    // 17"),
+    ("body-damage-head", "3DS Files/source/cardamage.c",
+     "    last = BodyDamageInfoList.prev;\n    last->next = &info->Node;\n"
+     "    info->Node.prev = last;\n    BodyDamageInfoList.prev = &info->Node;\n"
+     "    info->Node.next = &BodyDamageInfoList;",
+     "    last = BodyDamageInfoList.next;\n    last->prev = &info->Node;\n"
+     "    info->Node.next = last;\n    BodyDamageInfoList.next = &info->Node;\n"
+     "    info->Node.prev = &BodyDamageInfoList;"),
+    ("body-damage-indices-kept", "3DS Files/source/cardamage.c",
+     "    info->pVertexIndices = NULL;\n    return 1;", "    return 1;"),
+    ("body-damage-unload-no-unlink", "3DS Files/source/cardamage.c",
+     "    info->Node.prev->next = info->Node.next;\n", ""),
     ("unloader-16-takes-none", BCL, "    return unloader_car_info(c);",
      "    return 0;"),
     ("unloader-29-loads", BCL, "    unloader_weather_man,",
@@ -2604,9 +2650,26 @@ MUTATIONS = [
      "            continue;\n        if (s->StripEntryDataStart != NULL)",
      "            continue;\n        next = &SolidList;\n"
      "        if (s->StripEntryDataStart != NULL)"),
+    # ---- the windows' environment mapping
+    ("env-other-bit", ESC, "e->Flags |= 0x100;", "e->Flags |= 0x200;"),
+    ("env-clears-more", ESC, "e->Flags &= (uint16_t)~0x100u;",
+     "e->Flags &= (uint16_t)~0x180u;"),
+    ("env-other-names", ESC, "].NameHash != hash)", "].NameHash == hash)"),
+    ("env-on-inverted", ESC, "        if (on)\n            e->Flags |= 0x100;",
+     "        if (!on)\n            e->Flags |= 0x100;"),
+    ("env-last-strip", ESC, "for (i = 0; i < s->NumStrips; i++, e++) {",
+     "for (i = 0; i < s->NumStrips - 1; i++, e++) {"),
+    ("env-unsigned-texture", ESC, "table[(int8_t)(uint8_t)e->TextureNumber]",
+     "table[(uint8_t)e->TextureNumber]"),
+    ("menv-no-solid", EMC,
+     "    if (m->Solid != NULL)\n        esolid_set_environment_mapping",
+     "    esolid_set_environment_mapping"),
 ]
 
 EQUIVALENT = {
+    "env-unsigned-texture":
+        "a strip's texture number past 127 would read before the table, "
+        "and no solid on the disc has more than 13 textures",
     "load-size0":
         "a walk from the start to the start takes nothing, so the size's "
         "own test only saves the call",

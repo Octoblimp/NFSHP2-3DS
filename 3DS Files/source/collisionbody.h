@@ -775,15 +775,16 @@ int32_t cbwitness_does_witness_exist(const CollisionBody *a,
 extern int32_t BoringAIForCameraTuningOn;
 extern int32_t WilliamsAITuningMode;
 
-// What an impulse reaches that the port does not have yet. The damage, the
-// pursuit and the driver's animation change what happens next, so a NULL
-// seam that is reached aborts, as car.h's AnimatedDriver seams do; nothing
-// sets pCarDamage or pAnimatedDriver yet. The rumble and the force
-// feedback are only felt, so a NULL one is skipped.
+// What an impulse reaches through a seam. The damage, the pursuit and the
+// driver's animation change what happens next, so a NULL seam that is
+// reached aborts, as car.h's AnimatedDriver seams do; main.c binds the
+// damage to cardamage.c (task 51), and nothing sets pAnimatedDriver yet.
+// The rumble and the force feedback are only felt, so a NULL one is
+// skipped.
 //
 //   CarDamage::AddDamage           0x001aba30  BodyDamage, the markers, the
 //                                              glass, the effects, and
-//                                              ApplyDamage
+//                                              ApplyDamage: cardamage.c
 //   tCopManager::MonitorImpact     0x00213ff0  the pursuit: copmgr.c's
 //                                              copmgr_car_impact
 //   AnimatedDriver::BeginCollision 0x0019fa20  the render path (task 29)

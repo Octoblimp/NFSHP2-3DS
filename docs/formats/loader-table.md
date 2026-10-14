@@ -124,7 +124,7 @@ and "R-TB12" retail's, whose 279 top-level chunks all have a taker.
 | 14 | 14 | Sun | `34202` | 1 | 1 | 1 | `sun.c` |
 | 15 | 15 | Cops | `80034500` | 1 | 1 | 1 | `copmgr.c` ([cop-manager](cop-manager.md)) |
 | 16 | 16 | CarInfo | `34600`, `34601` | 1, 1 | 0 | 0 | `carinfo.c` |
-| 17 | 17 | BodyDamage | `34030` | 52 | 0 | 0 | -- |
+| 17 | 17 | BodyDamage | `34030` | 52 | 0 | 0 | `cardamage.c` ([car-damage](car-damage.md)) |
 | 18 | 18 | TrackRoutes | `34121` routes, `34122` signposts | 1, 1 | 2 | 2 | `trackroute.c` |
 | 19 | 19 | TrackPath | `80034147` | 1 | 1 | 1 | `trackpath.c` |
 | -- | 20 | PhysPredict | `34700` | 1 | 0 | -- | gone in retail |

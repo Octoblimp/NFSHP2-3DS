@@ -22,6 +22,7 @@
 #include "bchunkload.h"
 #include "bmath.h"
 #include "bslotpool.h"
+#include "cardamage.h"
 #include "eframe.h"
 #include "emodel.h"
 #include "eview.h"
@@ -94,7 +95,7 @@ enum {
     OP_SET, OP_DUMP, OP_MNEW, OP_MINIT, OP_MUNINIT, OP_MDELETE, OP_MRECON,
     OP_MRTT, OP_MAPPLY, OP_MALL, OP_MPOKE, OP_MDUMP, OP_REPL, OP_RENT,
     OP_FIND, OP_MATRIX, OP_RAMP, OP_RAMPDUMP, OP_SEED, OP_MARK, OP_RELEASE,
-    OP_DUP, OP_DELDUP
+    OP_DUP, OP_DELDUP, OP_MENV
 };
 
 enum {
@@ -814,7 +815,7 @@ static int unported_slot(int k)
 {
     return !(k == 0 || k == 1 || k == 2 || k == 4 || k == 5 || k == 6
              || k == 8 || k == 9 || k == 11 || k == 13 || k == 14 || k == 16
-             || k == 15 || k == 18 || k == 19 || k == 20 || k == 21
+             || k == 15 || k == 17 || k == 18 || k == 19 || k == 20 || k == 21
              || k == 22 || k == 23 || k == 24 || k == 25 || k == 27
              || k == 28);
 }
@@ -895,6 +896,10 @@ static void dump_solid(const eSolid *s)
             else
                 printf(" %s", L(e[i].Data));
         }
+        printf("\n");
+        printf("   sf");
+        for (i = 0; i < s->NumStrips; i++)
+            printf(" %04x", (unsigned)e[i].Flags);
         printf("\n");
     }
 }
@@ -1115,7 +1120,13 @@ static uint8_t *chunk_ptr(int32_t idx)
 // whose first child is itself, and the list after the call must hold just
 // it, its child found and its emitter lists empty (the loader), or nothing
 // (the unloader); or two spawners, and the spawners after the call must
-// be the chunk's two (the loader) or none (the unloader).
+// be the chunk's two (the loader) or none (the unloader); 8 is a body
+// damage chunk of one info, loaded first for the unloader, and the list
+// after the call must hold an info already there and then it, its keys
+// after it and no vertex indices (the loader), or just the one already
+// there (the unloader).
+static bNode first_info;
+
 static void matrix(int table, int slot, uint32_t type, int mode)
 {
     static uint8_t raw[512];
@@ -1163,6 +1174,16 @@ static void matrix(int table, int slot, uint32_t type, int mode)
         memcpy(c, w, sizeof w);
         if (table)
             (void)smokeable_loader(c);
+    } else if (mode == 8) {
+        uint32_t w[2] = { BODY_DAMAGE_ID, 8 + (uint32_t)sizeof(BodyDamageInfo) };
+
+        memcpy(c, w, sizeof w);
+        memset(c + 8 + offsetof(BodyDamageInfo, pVertexIndices), 0x5a,
+               sizeof(int32_t *));
+        BodyDamageInfoList.next = BodyDamageInfoList.prev = &first_info;
+        first_info.next = first_info.prev = &BodyDamageInfoList;
+        if (table)
+            (void)loader_body_damage(c);
     } else if (mode == 2) {
         uint32_t w[4] = { 0x80034000u, 60, 0x00034001u, 52 };
 
@@ -1232,6 +1253,22 @@ static void matrix(int table, int slot, uint32_t type, int mode)
             printf("  spawners wrong\n");
         pSmokeableSpawners = NULL;
         NumSmokeableSpawners = 0;
+    }
+    if (mode == 8) {
+        BodyDamageInfo *bi = (BodyDamageInfo *)(void *)(c + 8);
+        bNode *h = &BodyDamageInfoList, *f = &first_info;
+        int ok = table ? h->next == f && h->prev == f && f->next == h
+                         && f->prev == h
+                       : h->next == f && f->next == &bi->Node
+                         && h->prev == &bi->Node && bi->Node.next == h
+                         && bi->Node.prev == f
+                         && bi->pKeys == (uint32_t *)(void *)(bi + 1)
+                         && bi->pVertexIndices == NULL;
+
+        if (!ok)
+            printf("  body damage wrong\n");
+        h->next = h;
+        h->prev = h;
     }
     if (unported_slot(slot) && r) {
         if (seam_rec.set != 1 || seam_rec.slot != slot
@@ -1575,6 +1612,14 @@ int main(int argc, char **argv)
         case OP_DELDUP:
             deldup();
             break;
+        case OP_MENV: {
+            int32_t idx = next();
+            uint32_t hash = (uint32_t)next();
+
+            emodel_set_environment_mapping((eModel *)(void *)models[idx], hash,
+                                           next());
+            break;
+        }
         case OP_MARK:
         case OP_RELEASE:
             // The model's heap, given back after a disc file; this host

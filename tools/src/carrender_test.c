@@ -26,6 +26,7 @@
 #include "emodel.h"
 #include "eview.h"
 #include "eviewmatrix.h"
+#include "frameprof.h"
 #include "gameflow.h"
 #include "realtime.h"
 #include "scenery.h"
@@ -325,6 +326,15 @@ void esolid_replace_light_material(eSolid *s, uint32_t old_hash,
 void emodel_reconnect_texture_table(eModel *m)
 {
     printf("  rtt %s\n", label(m));
+}
+
+// The frame profiler's (frameprof.c, bticker.c): the draw counts its cars
+// and times its parts, which nothing here reads.
+FrameProfTicks FrameProfDraw;
+
+uint32_t bGetTicker(void)
+{
+    return 0;
 }
 
 SkinInfo *cartypeinfo_get_skin_info(int32_t car_type, int32_t skin_number,

@@ -159,6 +159,12 @@ void emodel_replace_light_material(eModel *m, uint32_t old_hash,
     esolid_replace_light_material(s, old_hash, get_light_material(new_hash));
 }
 
+void emodel_set_environment_mapping(eModel *m, uint32_t hash, int32_t on)
+{
+    if (m->Solid != NULL)
+        esolid_set_environment_mapping((eSolid *)m->Solid, hash, on);
+}
+
 void emodel_get_bounding_box(const eModel *m, bVector3 *mn, bVector3 *mx)
 {
     const eSolid *s = (const eSolid *)m->Solid;

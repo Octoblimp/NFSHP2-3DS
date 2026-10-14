@@ -21779,3 +21779,70 @@ the profiles and the debug menu. Still open:
 - TASKS 47's bridge: what it looked like;
 - TASKS 52's popups, which still say "Memory Card (PS2)";
 - TASKS 59, stereoscopic 3D, for later.
+
+## Session 92 -- TASKS 51a, the damage logic (done)
+
+`docs/formats/car-damage.md` has the whole of it; this is the short
+form.
+
+### What the user asked for on 2026-10-13 (verbatim)
+
+"When you're 100% done on damage, I want you to work on multi-card
+multiplayer support. Make a note of this." -- TASKS 37 (Local Wireless)
+comes after all of TASKS 51; a bullet in TASKS 37 and the memory say so.
+
+"How close are you to finishing the damage stuff? What's slice count,
+percentage overall etc." -- answered: 51a about 90% then, 51b small to
+medium, 51c big (the meshes are on the GPU), 51d small; about 35%
+overall.
+
+### What is where
+
+- `cardamage.c`/`.h` (LF): BodyDamage and CarDamage (`0x001b4760` ..
+  `0x001b5c50`). Loader slot 17 (`loader_body_damage`, in
+  `bchunkload.c`'s table), the zones, AddDamage, the damage to one
+  zone, the item levels, ApplyDamage, the wreck, RepairAll and the
+  destructor.
+- `esolid.c`/`.h`: `esolid_set_environment_mapping` (`0x00104070`),
+  moved from `emodel.c` so the checkers link it alone. `emodel.c` keeps
+  eModel's (`0x0010cae0`).
+- `main.c`: `gCarDamageCtorFn`, `gCarDamageFindItemPartsFn`,
+  `gCarDamageDestroyFn`, `gBodyDamageSetALevelInfoFn`,
+  `gBodyDamageAddModelFn`, `gCarDamageAddDamageFn`, and the wreck and
+  repair through two `void *` shims.
+- Still NULL: `gBodyDamageVertexWalkFn` (51c), `gCarDamageAboveFn`
+  (51d), `gCarTriggerEffectFn` (TASKS 60).
+- `tools/cardamage_check.py`, `tools/src/cardamage_test.c` (new).
+  `loadertable_check.py` gained OP_MENV and the strips' flags (`sf`) in
+  each solid dump. The careffects, carrender, carrenderinfo, physicscar
+  and loadertable harnesses gained the stand-ins cardamage.c now needs.
+  carrender's had an older break (`bGetTicker`, `FrameProfDraw`).
+
+### What bit
+
+- RetailEmu's registers are 64-bit and `lw` sign-extends. A hash
+  above `0x7fffffff` passed unsigned never matched; the script passes
+  them signed (`I()`).
+- Linking `emodel.c` into the checker pulled in the renderer. Moving
+  eSolid's function to `esolid.c` and standing in for eModel's on both
+  sides kept it small.
+
+### Checks
+
+- cardamage_check: 2,446 ops, 13,349 lines, 0 differ; 135 mutations,
+  132 caught, 3 equivalent (the unread 0 threshold, the byte before the
+  zones, FindItemParts' reset).
+- loadertable_check: demo 1,617 lines, retail 52,950, 0 differ; 7 new
+  mutations, 6 caught, 1 equivalent.
+- careffects, carinit, carrender, carrenderinfo, collisionbody, cop,
+  munition, physicscar, playercop, positionmarker: 0 differ.
+- Azahar (AC power, Speed 100%): `run_azahar_race.ps1 -HoldKeys 65`
+  reached RACING and ran 66 s at 28-30 FPS with no abort. After a crash
+  into the trees the brake lights look darker, as broken ones do.
+
+### Next
+
+51b: the renderer reads strip flag `0x100`, so a broken window loses
+its environment map. Then 51c (the vertices) and 51d (DamageAbove),
+then TASKS 37 (multi-card multiplayer). Still to ask the user: a device
+log at the fire (TASKS 46), TASKS 47's bridge, TASKS 52's popups.

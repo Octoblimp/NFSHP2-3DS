@@ -284,6 +284,23 @@ void esolid_change_name(eSolid *s, const char *name)
     s->NameHash = bchunk_hash(name);
 }
 
+void esolid_set_environment_mapping(eSolid *s, uint32_t hash, int32_t on)
+{
+    eStripEntry *e = (eStripEntry *)s->StripEntryTable;
+    const eTextureTable *table = (const eTextureTable *)s->pTextureTable;
+    int i;
+
+    for (i = 0; i < s->NumStrips; i++, e++) {
+        // `lb` of the entry's first byte.
+        if (table[(int8_t)(uint8_t)e->TextureNumber].NameHash != hash)
+            continue;
+        if (on)
+            e->Flags |= 0x100;
+        else
+            e->Flags &= (uint16_t)~0x100u;
+    }
+}
+
 void eduplicate_solid(const char *from, const char *to)
 {
     eSolid *src = (eSolid *)eFindSolid(bchunk_hash(from));

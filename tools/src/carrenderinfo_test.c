@@ -324,6 +324,17 @@ static void fix_strip(eSolid *s)
     printf("  FixStripSTs %s\n", lab(s));
 }
 
+// esolid.c's, which emodel.c's environment mapping calls; CarDamage calls
+// that, and nothing here does.
+void esolid_set_environment_mapping(eSolid *s, uint32_t hash, int32_t on)
+{
+    (void)s;
+    (void)hash;
+    (void)on;
+    fprintf(stderr, "esolid_set_environment_mapping reached\n");
+    exit(3);
+}
+
 static void assign_drv(Car *c, const char *name)
 {
     printf("  AssignAnimatedDriver %s %s\n", lab(c), name);

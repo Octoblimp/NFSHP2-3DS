@@ -77,6 +77,7 @@
 #include "nfsrewards.h"
 #include "bsetup.h"
 #include "carcontroller.h"
+#include "cardamage.h"
 #include "cardriver.h"
 #include "carinfo.h"
 #include "carinit.h"
@@ -5543,6 +5544,18 @@ static int flowInput(u32 kDown)
     return redraw;
 }
 
+// The wreck and the repair, whose seams take the damage as void * (cop.h,
+// copmgr.h).
+static void car_damage_wreck_seam(void* damage)
+{
+    cardamage_wreck((CarDamage*)damage);
+}
+
+static void car_damage_repair_all_seam(void* damage)
+{
+    cardamage_repair_all((CarDamage*)damage);
+}
+
 // tAICop::ClearPursuit drops RemoveCopFromPursuit's answer.
 static void pursuit_remove_cop_seam(tPursuit* p, tCop* c)
 {
@@ -6066,6 +6079,19 @@ int main(int argc, char** argv)
     carrenderinfo_init_slot_pools();
     gCarInitRenderInfoFn    = car_init_render_info;
     gCarRenderInfoDestroyFn = carrenderinfo_delete;
+
+    // CarDamage (task 51): a racer's damage built after its render info,
+    // its items found on the model's markers, its body's models added by
+    // InitRenderInfo, the hits from CarCollisionBody, the wreck the
+    // munitions and the bust make, and the cop manager's repair.
+    gCarDamageCtorFn           = cardamage_construct;
+    gCarDamageFindItemPartsFn  = cardamage_find_item_parts;
+    gCarDamageDestroyFn        = cardamage_destroy;
+    gBodyDamageSetALevelInfoFn = bodydamage_set_alevel_info;
+    gBodyDamageAddModelFn      = bodydamage_add_model;
+    gCarDamageAddDamageFn      = cardamage_add_damage;
+    gCarDamageWreckFn          = car_damage_wreck_seam;
+    gCarDamageRepairAllFn      = car_damage_repair_all_seam;
 
     // The two calls Suspension makes into Wheel go through pointers, left
     // NULL until something says Wheel is linked -- which, in the game,

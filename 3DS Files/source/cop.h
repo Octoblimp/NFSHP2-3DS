@@ -282,11 +282,11 @@ int32_t get_zone_from_sub_state(eLogicSubState s, float side);
 // tCopManager::nDifficultyLevel, the inertia scaled to match.
 extern float fCopMassTable[3];
 
-// Not ported yet, NULL until they are. Each aborts where retail would
-// call it: tPursuit::RemoveCopFromPursuit (0x0022c740) and
-// RemovePrimarySpeaker (0x0022c990), and CarDamage's wreck-everything
-// (0x001b5bc8: all 32 parts by 1.0, then RethinkDamage), which no port
-// car reaches while gCarDamageCtorFn is NULL.
+// tPursuit::RemoveCopFromPursuit (0x0022c740) and RemovePrimarySpeaker
+// (0x0022c990) are not ported yet, NULL until they are, and each aborts
+// where retail would call it. CarDamage's wreck-everything (0x001b5bc8:
+// all 32 parts by 1.0, then RethinkDamage) is cardamage.c's
+// cardamage_wreck, which main.c binds (task 51).
 extern void (*gPursuitRemoveCopFromPursuitFn)(tPursuit *p, tCop *c);
 extern void (*gPursuitRemovePrimarySpeakerFn)(tPursuit *p, int32_t b);
 extern void (*gCarDamageWreckFn)(void *damage);

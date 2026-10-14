@@ -14,8 +14,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "bmem.h"
 #include "car.h"
 #include "cardamage.h"
+#include "carrenderinfo.h"
+#include "collisionsound.h"
+#include "epositionmarker.h"
 #include "carstate.h"
 #include "engine.h"
 #include "physicscar.h"
@@ -33,6 +37,46 @@ int32_t WorldLoopCounter = 0;
 ReplayManager *pReplayManager;
 RaceParameters TheRaceParameters;
 CarTriggerEffectFn gCarTriggerEffectFn;
+
+// cardamage.c's write side calls these; nothing this harness runs takes a
+// hit, so each is a link stand-in that stops the run if reached.
+static void unreached(const char *what)
+{
+    fprintf(stderr, "%s reached\n", what);
+    exit(3);
+}
+
+ePositionMarker *eFindPositionMarker(uint32_t name_hash, uint32_t type_hash,
+                                     ePositionMarker *prev)
+{
+    (void)name_hash; (void)type_hash; (void)prev;
+    unreached("eFindPositionMarker");
+    return NULL;
+}
+
+void collision_sound_play_glass(const bVector3 *pos)
+{
+    (void)pos;
+    unreached("collision_sound_play_glass");
+}
+
+void carrenderinfo_update_car_replacement_textures(CarRenderInfo *ri)
+{
+    (void)ri;
+    unreached("carrenderinfo_update_car_replacement_textures");
+}
+
+void emodel_set_environment_mapping(eModel *m, uint32_t hash, int32_t on)
+{
+    (void)m; (void)hash; (void)on;
+    unreached("emodel_set_environment_mapping");
+}
+
+void bFree(void *p)
+{
+    (void)p;
+    unreached("bFree");
+}
 
 static Car        car;
 static CarDamage  cdmg;

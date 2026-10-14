@@ -2104,17 +2104,18 @@ The tail is `j` to the bNode destructor, which frees on bit 0.
 
 ### The seams
 
-Everything the constructor and destructor reach that is not ported yet
-is a seam:
+Everything the constructor and destructor reach through a function
+pointer is a seam. The right-hand column says what an unset one does,
+or which file `main.c` binds it to:
 
 ```
 sound::CreatePlayerCarSound(Car *)   0x0018eb28  skipped
 sound::CreateAICarSound(Car *)       0x0018eb70  skipped
 sound::CreateAICopCarSound(Car *)    0x0018ebb8  skipped
 BaseCarSound's destructor            vptr 28     aborts
-CarDamage::CarDamage(Car *)          0x001b54b0  skipped
-CarDamage, the parts                 0x001b5598  aborts
-CarDamage::~CarDamage                0x001b5538  aborts
+CarDamage::CarDamage(Car *)          0x001b54b0  cardamage.c
+CarDamage, the parts                 0x001b5598  cardamage.c
+CarDamage::~CarDamage                0x001b5538  cardamage.c
 Car::InitRenderInfo(RideInfo *)      0x0011dc80  skipped
 CarRenderInfo::~CarRenderInfo        0x0011fac0  aborts
 emAddHandler(fn, mask)               0x001ba2d0  skipped

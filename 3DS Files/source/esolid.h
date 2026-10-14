@@ -204,6 +204,12 @@ extern int32_t MemoryUsedByDuplicatedSolids;
 // and NameHash the name's bStringHash.
 void esolid_change_name(eSolid *s, const char *name);
 
+// eSolid::SetEnvironmentMapping(unsigned int, int), retail 0x00104070:
+// each strip whose texture (by the strip's first byte, signed) is named
+// `hash` gets Flags bit 0x100, environment mapped, with `on`, and loses it
+// without.
+void esolid_set_environment_mapping(eSolid *s, uint32_t hash, int32_t on);
+
 // eDuplicateSolid(const char *, const char *), retail 0x00103bf0: a copy
 // of the solid named `from`, named `to`, for the second car of a type
 // (trackflow.h's gEDuplicateSolidFn). Nothing when there is no such solid.

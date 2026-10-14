@@ -67,7 +67,7 @@ python tools/chunk_loader_table.py "PS2 Files/NFSHP2.ELF"
 | `0x80034015` | `LoaderLightList`         | container |
 | `0x80034020` | `LoaderCollisionVolumes`  | container |
 | `0x00034026` | `LoaderSmokeables`        | |
-| `0x00034030` | `LoaderBodyDamage`        | |
+| `0x00034030` | `LoaderBodyDamage`        | `cardamage.c`; see `car-damage.md` |
 | `0x80034100` | `LoaderScenery`           | container |
 | `0x00034121` | `LoaderTrackRoutes`       | Phase 3 task 24; also takes `0x00034122` |
 | `0x80034147` | `LoaderTrackPath`         | container |

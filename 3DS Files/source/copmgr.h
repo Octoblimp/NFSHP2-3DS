@@ -142,8 +142,8 @@ extern void (*gAICopDisableMyCarFn)(tCop *cop, int32_t b);
 // its fCarDamage 0, fTractionBoostOverride 1, its CarDamage repaired, and
 // a player's RealDriver let off its e-brake stop. The repair is
 // CarDamage's 0x001b5c20 (BodyDamage::RepairAllDamage, then
-// RethinkDamage), not ported: gCarDamageRepairAllFn, which aborts NULL
-// where retail would call it. No port car has a CarDamage yet.
+// RethinkDamage), cardamage.c's cardamage_repair_all through
+// gCarDamageRepairAllFn, which main.c binds (task 51).
 void copmanager_reset_all_damage(tCopManager *m, struct Car *car);
 extern void (*gCarDamageRepairAllFn)(void *damage);
 

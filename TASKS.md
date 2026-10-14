@@ -2320,6 +2320,8 @@ phases.
           two-player cars) are where the second player would come in,
           driven by the other console's packets.
         - Not started. It comes after the single-player race is whole.
+        - 2026-10-13: the user asked for it next, once task 51 (the
+          damage) is 100% done.
 38. [x] **BUSTED! is flat and static.** The user's Azahar shot of
         2026-10-09: in the bust NIS, BUSTED! sits squashed, its top cut
         off, and never animates. Retail scales it from 5 down to ScaleX
@@ -2642,20 +2644,31 @@ phases.
         sixteen buttons are joyhid's DualShock 2 buttons, so a code is
         entered with the 3DS keys mapped to them.
 51. [ ] **The damage system (CarDamage).** Found on 2026-10-12 with
-        TASKS 39. `cardamage.h` has only the layouts and
-        GetVisibleTotalDamage: nothing makes a CarDamage
-        (`gCarDamageCtorFn` is NULL), so `pCarDamage` is NULL on every
-        car. The munitions' ExplodeWarhead wrecks a car hit harder than
-        0.8 of MaxStrength through `gCarDamageWreckFn`, which it skips
-        for a NULL `pCarDamage`. On Azahar a blast throws the car as
-        retail's does, but the car is never wrecked. The other seams
-        waiting on it: `gCarDamageAddDamageFn` (collisions),
-        `gCarDamageAboveFn` (the render's DamageAbove),
-        `gCarDamageRepairAllFn` (the cop manager) and
-        `gCarDamageFindItemPartsFn` / `gCarDamageDestroyFn` (car init).
-        Port the damage models, the breakable items and the wreck with
-        a checker, after the user's order of 2026-10-12 (profiles, then
-        the debug menu).
+        TASKS 39. Nothing made a CarDamage, so `pCarDamage` was NULL on
+        every car: no hit dented a car, broke a light or a window, or
+        derated the engine, and a munition's blast never wrecked one.
+        `docs/formats/car-damage.md` has the whole of it.
+  - [x] 51a: the logic. `cardamage.c` ports BodyDamage and CarDamage
+        whole: loader slot 17 (`0x34030`), the zones, AddDamage, the item
+        levels, ApplyDamage, the environment mapping
+        (`esolid_set_environment_mapping`, eModel's), the wreck, the
+        repair and the destructor. `main.c` binds the constructor, the
+        item parts, the destructor, the A level info, AddModel,
+        AddDamage, the wreck and RepairAll. `cardamage_check` runs
+        retail's code: 2,446 ops, 13,349 lines, 0 differ, and 132 of 135
+        mutations caught, 3 equivalent. `loadertable_check` runs the
+        environment mapping on the Viper's and the bus's duplicated
+        solids: 6 of 7 new mutations caught, 1 equivalent. On Azahar a
+        race ran 66 s at 100% and 28-30 FPS, and the brake lights went
+        dark after a crash into the trees.
+  - [ ] 51b: the renderer reads strip flag `0x100`. The port's GeoBatch
+        flags are baked when the car's meshes are built, so a broken
+        window keeps its environment map.
+  - [ ] 51c: the vertices. DamageVertexFunction dents each vertex by its
+        key, darkens it, and shows the scuff strips. The port's solids
+        are GPU meshes, so the walk is a seam
+        (`gBodyDamageVertexWalkFn`, skipped while NULL).
+  - [ ] 51d: Car::DamageAbove (`0x00135280`, `gCarDamageAboveFn`).
 52. [x] **Profiles: save, load, and a save prompt after each race.**
         Asked for on 2026-10-12. The profile is retail's one save,
         `settings.db` in `sdmc:/NFSHP2/SAVES` (the folder is made on
@@ -2825,6 +2838,14 @@ phases.
         "just a task", for later, when it matters less than what is in
         hand. Mind the frame time: two views of the race at 30 FPS on
         New 3DS.
+60. [ ] **The car's particle effects (Car::TriggerEffect).** Found on
+        2026-10-13 with TASKS 51a. `gCarTriggerEffectFn` is never set, so
+        `Car::TriggerEffect` (`0x0011e2b8`) is skipped: a broken light,
+        window or mirror throws no glass, and a radiator hit or a blown
+        tire shows nothing. `cardamage.c` calls it with a `CarEffect` and
+        a scale (0.1, 0.4 or 1 for an item's level), `careffects.c` with
+        its per-frame effects, and `carrace.c` for each blown tire. Port
+        it with a checker, over the particle system it starts.
 
 ### The retail frontend
 

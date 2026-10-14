@@ -146,6 +146,11 @@ void emodel_replace_light_material(eModel *m, uint32_t old_hash,
 // corners, whose fourth words are left alone. Without one, nothing.
 void emodel_get_bounding_box(const eModel *m, bVector3 *mn, bVector3 *mx);
 
+// eModel::SetEnvironmentMapping(unsigned int, int), retail 0x0010cae0:
+// esolid.h's esolid_set_environment_mapping on the model's solid, if it
+// has one. CarDamage takes a window's off when it breaks.
+void emodel_set_environment_mapping(eModel *m, uint32_t hash, int32_t on);
+
 // ReconnectAllModels, 0x0010b7b0: every model on ModelList gets its solid
 // and its replacements again, and its solid's STs fixed.
 void emodel_reconnect_all_models(void);

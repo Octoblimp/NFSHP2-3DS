@@ -5,7 +5,8 @@
 // soundscape.c, slot 21's: its loader reads records and calls nothing,
 // and its unloader deletes only samples an update made. eventtree.c,
 // slot 24's, deals its trees' state out of Fred and reads the rest only
-// for the questions the check never asks.
+// for the questions the check never asks. cardamage.c, slot 17's: its
+// loader and unloader only link and unlink the info.
 
 #include <stdint.h>
 #include <stdio.h>
@@ -15,6 +16,8 @@
 #include "bsound.h"
 #include "car.h"
 #include "carinit.h"
+#include "carrenderinfo.h"
+#include "collisionsound.h"
 #include "collision.h"
 #include "collisionbody.h"
 #include "configitems.h"
@@ -41,6 +44,7 @@ FrontendDatabase    Fred;
 const char       *(*gFredTranslateFn)(int32_t id);
 EggIsOnFn           gEggIsOnFn;
 int32_t             bVersionE3;
+CarTriggerEffectFn  gCarTriggerEffectFn;
 
 static void unreached(const char *f)
 {
@@ -399,6 +403,18 @@ struct Camera **get_active_cameras(void)
 {
     unreached("get_active_cameras");
     return NULL;
+}
+
+void collision_sound_play_glass(const bVector3 *pos)
+{
+    (void)pos;
+    unreached("collision_sound_play_glass");
+}
+
+void carrenderinfo_update_car_replacement_textures(CarRenderInfo *ri)
+{
+    (void)ri;
+    unreached("carrenderinfo_update_car_replacement_textures");
 }
 
 void basecarsound_scale_road_noise(BaseCarSound *s, float f)
