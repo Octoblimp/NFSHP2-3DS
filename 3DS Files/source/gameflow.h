@@ -31,6 +31,7 @@
 
 #define BGF_STACK_DEPTH 12
 #define BGF_NAME_LEN    32
+#define BGF_MAX_SCREENS 128   // rows of the screen table that save an item
 
 // GameFlowState, verbatim from the .mdebug type info, less its last state,
 // EXIT_DEMO_DISC (9), which only the demo disc's DemoDiscManager::EndDemo
@@ -153,9 +154,15 @@ typedef struct {
     // item of it (LanguageOptionsScreenBase does). `enterScreen` comes
     // after: that is where the menu takes its current item and sends the
     // opening highlight, to a screen object that exists by then.
+    // UnActivate (0x0016a940) is the other way round: `closeMenu` comes
+    // BEFORE SCREEN_UNACTIVATE -- the menu's UnActivate, its UNHIGHLIGHT
+    // and MENUITEM_UNACTIVATEs to a screen still there, then the delete,
+    // which puts each label's colour back. It returns the current item's
+    // place in the list (GetCurrentItemNumber), or -1 with no menu.
     // `leaveScreen` fires after SCREEN_UNACTIVATE. See bgf_change_to_screen.
     void (*openScreen)(void* user, const BScreenConfig* cfg);
     void (*enterScreen)(void* user, const BScreenConfig* cfg);
+    int  (*closeMenu)(void* user, const BScreenConfig* cfg);
     void (*leaveScreen)(void* user, const BScreenConfig* cfg);
 
     // GrayMenuItem (0x0016d2a8): item `item` of the menu on the Flailer
@@ -387,11 +394,15 @@ struct BGameFlow {
 
     BScreenStack         stack;
     const BScreenConfig* screen;   // FlailerScreenList::pCurrent, +412
-    // FlailerScreen's +12 as Activate (0x0016a858) leaves it: the item the
-    // menu starts on, which the enterScreen hook takes. SCREEN_ACTIVATE's
-    // Param, sent as -1, sets it to Param - 1 when the callback writes it.
-    // Retail otherwise keeps the item its UnActivate saved, so a screen
-    // comes back on the item it was left on; the port starts at 0.
+    // FlailerScreen's +12, SavedMenuItemNumber, one for each row of the
+    // screen table. The constructor zeroes it, and InitFlailerMenuSystem
+    // builds the screens once at boot, so it lasts the session. UnActivate
+    // (0x0016a940) stores the item the menu was on; Activate (0x0016a858)
+    // stores SCREEN_ACTIVATE's Param - 1 when the callback answers the -1
+    // it is sent with, and starts the menu on it either way. So a screen
+    // comes back on the item it was left on unless its callback says.
+    int savedItem[BGF_MAX_SCREENS];
+    // The entered screen's savedItem, which the enterScreen hook takes.
     int activateItem;
     // FlailerScreenList's panel movie. +460, PANELMOVIE's texture, is found
     // by StartMovie and forgotten by StopMovie, and is the gate all three

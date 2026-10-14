@@ -190,6 +190,9 @@ class Flow(object):
         self.pending = []                 # loads in flight: (what, callback)
         self.loader_due = LOADER_FRAMES   # nothing lands before this frame
         self.active_item = ITEM_MENUITEM_1
+        # FlailerScreen +12 by screen name: zeroed by the constructor, once
+        # at boot (InitFlailerMenuSystem)
+        self.saved_item = {}
         self.replays_left = sc.get("replays", 0)
         self.replay_due = 0
         self.in_game = 0                  # InGameFlag
@@ -383,6 +386,14 @@ class Flow(object):
             self.screen_visible(old[1], 0)
             if push_current:
                 self.push(old[0])
+            # FlailerScreen::UnActivate (0x0016a940): SavedMenuItemNumber
+            # from GetCurrentItemNumber, the menu unactivated and deleted
+            # (GetActiveMenuItem reads 0 after), then SCREEN_UNACTIVATE.
+            item = self.active_item - ITEM_MENUITEM_1
+            self.say("ui close %08x %d" % (old[1], item))
+            if item >= 0:
+                self.saved_item[old[0]] = item
+            self.active_item = 0
             self.send(SCREEN_UNACTIVATE, {"itemHash": old[1], "port": 0,
                                           "param": 0, "noise": 0})
             self.say("ui leave %08x" % old[1])
@@ -405,8 +416,14 @@ class Flow(object):
                 data = {"itemHash": found[1], "port": 0, "param": -1,
                         "noise": 0}
                 self.send(SCREEN_ACTIVATE, data)
+                # Param - 1 when the callback wrote one, kept as the
+                # screen's +12; else the item it was last left on.
+                if data["param"] != -1:
+                    self.saved_item[found[0]] = data["param"] - 1
+                start = self.saved_item.get(found[0], 0)
                 self.sound(data["noise"])
-                self.say("ui enter %08x" % found[1])
+                self.active_item = ITEM_MENUITEM_1 + start
+                self.say("ui enter %08x %d" % (found[1], start))
         return 1 if self.screen else 0
 
     # MoveToPreviousScreen (0x0016c670). The block is memset, so ItemHash
@@ -2869,7 +2886,8 @@ MUTATIONS += [
      + "            memset(&data, 0, sizeof(data));" + NL
      + "            data.itemHash = n->hash;" + NL
      + "            // The reply: a Param other than -1 puts the menu on item" + NL
-     + "            // Param - 1 (Select Track answers its time of day's item)." + NL
+     + "            // Param - 1 (Select Track answers its time of day's item) and" + NL
+     + "            // is kept; -1 leaves the item the screen was last left on." + NL
      + "            // The noise is played after the callback, as BACK's is." + NL
      + "            data.param = -1;" + NL
      + "            bgf_send(gf, BMSG_SCREEN_ACTIVATE, &data);",
@@ -2878,6 +2896,36 @@ MUTATIONS += [
      + "            data.param = -1;" + NL
      + "            bgf_send(gf, BMSG_SCREEN_ACTIVATE, &data);" + NL
      + "            HOOK_VOID(gf, openScreen, n);"),
+    # FlailerScreen::UnActivate's: the menu goes before SCREEN_UNACTIVATE,
+    # and SavedMenuItemNumber is kept for the next Activate.
+    ("menu-after-unactivate", GF,
+     "        if (gf->hooks.closeMenu) {" + NL
+     + "            int item = gf->hooks.closeMenu(gf->hooks.user, old);" + NL
+     + "            int row  = (int)(old - gf->screens);" + NL
+     + "            if (item >= 0 && row >= 0 && row < BGF_MAX_SCREENS)" + NL
+     + "                gf->savedItem[row] = item;" + NL
+     + "        }" + NL
+     + "        memset(&data, 0, sizeof(data));" + NL
+     + "        data.itemHash = old->hash;" + NL
+     + "        bgf_send(gf, BMSG_SCREEN_UNACTIVATE, &data);",
+     "        memset(&data, 0, sizeof(data));" + NL
+     + "        data.itemHash = old->hash;" + NL
+     + "        bgf_send(gf, BMSG_SCREEN_UNACTIVATE, &data);" + NL
+     + "        if (gf->hooks.closeMenu) {" + NL
+     + "            int item = gf->hooks.closeMenu(gf->hooks.user, old);" + NL
+     + "            int row  = (int)(old - gf->screens);" + NL
+     + "            if (item >= 0 && row >= 0 && row < BGF_MAX_SCREENS)" + NL
+     + "                gf->savedItem[row] = item;" + NL
+     + "        }"),
+    ("saved-item-not-kept", GF,
+     "                gf->savedItem[row] = item;",
+     "                (void)item;"),
+    ("saved-item-param-not-kept", GF,
+     "if (data.param != -1 && ok) gf->savedItem[row] = data.param - 1;",
+     "(void)ok;"),
+    ("saved-item-ignored", GF,
+     "                                 : ok ? gf->savedItem[row] : 0;",
+     "                                 : 0;"),
 ]
 
 MC = "3DS Files/source/memcard.c"
@@ -2975,8 +3023,10 @@ MUTATIONS += [
      + "    cfg.button[1]      = PROMPT_YES;"),
     # The loader's states, 0x002bee80.
     ("mc-check-new-card-refused", MC,
-     "    } else if (err == BMC_OK || err == BMC_NEW_CARD) {",
-     "    } else if (err == BMC_OK) {"),
+     "        loaderLeaveQuietly(l, MSG_UNFORMATTED);" + NL
+     + "    } else if (err == BMC_OK || err == BMC_NEW_CARD) {",
+     "        loaderLeaveQuietly(l, MSG_UNFORMATTED);" + NL
+     + "    } else if (err == BMC_OK) {"),
     ("mc-refused-check-goes-on", MC,
      "        if (!testerCheckForSavegameFile(t)) l->state = BMC_LOADER_DONE;",
      "        (void)testerCheckForSavegameFile(t);"),
@@ -3576,12 +3626,12 @@ MUTATIONS += [
      "BGF_BLURB_MENUITEM_1);" + NL
      + "        case BGF_ITEM_MENUITEM_2:"),
     ("main-menu-highlight-default-moves", GF,
-     "BGF_BLURB_MENUITEM_3);" + NL
-     + "            break;" + NL
+     "            break;" + NL
+     + "        }" + NL
      + "        default:" + NL
      + "            break;",
-     "BGF_BLURB_MENUITEM_3);" + NL
-     + "            break;" + NL
+     "            break;" + NL
+     + "        }" + NL
      + "        default:" + NL
      + "            mainMenuHighlightItem(gf, BGF_MI_1_MASK, "
      + "BGF_BLURB_MENUITEM_1);" + NL
@@ -3741,8 +3791,12 @@ MUTATIONS += [
 # hidden and a popup is up, which takes every button (popup-joy-passes-on),
 # so the only message that reaches the menu's half is TICK -- and the bloom
 # it animates is on the hidden screen and traced once per item.
+# saved-item-param-not-kept: Activate keeps Param - 1 as the screen's +12,
+# but UnActivate overwrites +12 with the menu's item before any later
+# Activate can read it, and a screen with no menu has no item to start on.
 EQUIVALENT = {"back-names-screen", "mc-loadfailed-quiet",
-              "mc-autoload-plays-on", "lsw-menu-live-while-saving"}
+              "mc-autoload-plays-on", "lsw-menu-live-while-saving",
+              "saved-item-param-not-kept"}
 
 
 def mutate_pass(only=None):

@@ -2394,10 +2394,13 @@ phases.
                   to Select Car. Retail's ~FlailerMenuItem puts each
                   label's saved colour back when a screen goes; the port
                   now does too (bmenu_close), which fixed Knockout's
-                  Damage drawn gray after Single Race. Left: retail
+                  Damage drawn gray after Single Race. Then the flow:
+                  retail closes the menu before SCREEN_UNACTIVATE and
                   brings a screen back on the item it was left on when
-                  its callback answers -1; the port starts at 0
-                  (gameflow.h activateItem).
+                  its callback answers -1. The port had the menu after
+                  the message and always started at 0; it now keeps
+                  SavedMenuItemNumber per screen (gameflow.h savedItem)
+                  and the order (the closeMenu hook).
                 - [ ] 37b-2: Players' Local Wireless, the lobby popups,
                   an N-copy Azahar test, and portlang.c.
           - [ ] 37c: the setup. The client's car to the host; the
@@ -2979,6 +2982,18 @@ phases.
         a scale (0.1, 0.4 or 1 for an item's level), `careffects.c` with
         its per-frame effects, and `carrace.c` for each blown tire. Port
         it with a checker, over the particle system it starts.
+61. [ ] **Cops and racers in one wireless race.** Asked for on 2026-10-14,
+        for later or next: over task 37's local wireless, one or more
+        players drive cops and the others race, all in the same race.
+        - First find what retail's own two-player modes allow, whether
+          one player can be a cop and the other a racer, and how a
+          human cop's car, controls (Be A Cop's: X target, L roadblock,
+          R helicopter), HUD and busts work then. Port that as it is.
+        - Then the rest over the same lockstep: each console says which
+          side its player is on in the lobby, a cop console gets Be A
+          Cop's HUD and buttons, a racer console the racer's, and a bust
+          of a human racer counts on both.
+        - Comes after 37's slices (37b-2 to 37f), which it builds on.
 
 ### The retail frontend
 

@@ -22141,3 +22141,69 @@ asked for.
 37b, the lobby, as before, with up to 8. Retail's race has 8 cars, two
 of them players. A third to eighth human takes an AI racer's car,
 driven by its console's pad, and 37c and 37d work that out.
+
+## Session 96 -- 37b-1, Challenge and the four setups (done)
+
+37b needs the place Players lives first: both Mode Selects' Challenge
+and the race setups it leads to. 37b-1 ports them; 37b-2 is the lobby.
+
+### What changed
+
+- `bsetup.c`/`.h`: ChallengeScreen (Fred+8; Players, Race Type, Skill
+  Level, Setup; race types 3 Single, 4 Knockout, 5 Lap Knockout, 6 Free
+  Run) and SingleRaceSetup, FreeRunSetup, LapKnockoutSetup and
+  TrackKnockoutSetup on RaceSetupBaseClass, with their Fred blocks (SR
+  +36, FR +84, RK +96, LK +124) and rows. All five setups share Flailer
+  screen 0xd1eadbca; `main.c` registers the four names on it.
+- `bmenu_close` (`bmenu.c`) and `bui_put_text_color` (`bui.c`):
+  ~FlailerMenuItem (0x001697a0) stores each label's SavedColor back,
+  the whole word. The port never did, so a label left gray stayed gray
+  in the chunk and the next menu read it as the authored colour:
+  Knockout Setup's Damage drew gray after Single Race had grayed the
+  rows past its own.
+- The flow (`gameflow.c`, 10f0e44's follow-up): FlailerScreen::
+  UnActivate (0x0016a940) saves the menu's item, unactivates and deletes
+  the menu, and only then sends SCREEN_UNACTIVATE. The port had the
+  menu after the message (an early misreading) and always started a
+  menu on item 0. Now the `closeMenu` hook runs first, and
+  `BGameFlow::savedItem` is SavedMenuItemNumber per screen row: zeroed
+  once at boot, as InitFlailerMenuSystem makes the screens once, set by
+  the close and by an answered Param, read by the next Activate. So
+  Challenge comes back on Setup after B, as retail's does.
+- `run_azahar_challenge.ps1`: boot, World Racing (or Hot Pursuit with
+  `-CopsOn`), Challenge, each setup in turn, and on to Select Car.
+
+### What bit
+
+- The debug log's lag made re-presses go too far (START twice on the
+  title is Hot Pursuit). Enter-Screen waits 20 s for the screen's enter
+  line and its first HIGHLIGHT before anything else.
+- Free Run with the cops off grays Skill Level, and the menu steps over
+  it: one down to Setup, not two.
+- Two bootflow mutations had gone stale before today
+  (`main-menu-highlight-default-moves` after the debug menu's item 4,
+  `mc-check-new-card-refused` not unique); both are fixed.
+
+### Checks
+
+- challenge_check: 620 ops, 0 differ; 92 mutations, 1 equivalent
+  (`ctor-load-late`).
+- racesetups_check: 3142 ops, 0 differ; 74 of 74 caught.
+- bmenu_check: FRONTB 3390 lines, INGAMEB 1874, 0 differ (a label left
+  gray, the close, and what a second menu reads).
+- bootflow_check: 96 scenarios, 56665 lines, 0 differ. bscreens_check:
+  17 scenarios, 1277 lines, 0 differ.
+- bootflow_check --mutate: 299 mutations, 294 caught, 5 equivalent, 0
+  unexplained. Four of them are new: the menu after SCREEN_UNACTIVATE,
+  the item not kept, the kept item ignored, and an answered Param not
+  kept (`saved-item-param-not-kept`, equivalent: UnActivate overwrites
+  the item before any later Activate reads it).
+- Azahar (AC, 100%): PASS, all four setups and Select Car; Knockout's
+  Damage drawn normal; Challenge back on Setup each time.
+
+### Next
+
+37b-2: Players' Local Wireless, the lobby popups, an N-copy Azahar test,
+and portlang.c with the langtab hook. Then 37c to 37f, then TASKS 61
+(cops and racers in one wireless race, asked for 2026-10-14). TASKS 46
+is still the user's. Still to ask: TASKS 47's bridge, TASKS 52's popups.

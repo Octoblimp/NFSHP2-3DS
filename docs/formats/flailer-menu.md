@@ -318,8 +318,22 @@ its own, so a setup with more rows reached after one with fewer -- Knockout
 Setup after Single Race -- has labels that were left gray. The chunk is
 shared by every activation: without the restore the new menu reads gray as
 the authored colour, and enabling the item recolours it gray. The port had
-exactly that until `bmenu_close`, which main.c's leaveScreen hook calls
-after `bmenu_unactivate`.
+exactly that until `bmenu_close`.
+
+The port keeps UnActivate's order. gameflow.c's `bgf_change_to_screen`
+calls the `closeMenu` hook (main.c: the item, `bmenu_unactivate`,
+`bmenu_close`) before it sends `SCREEN_UNACTIVATE`; until 2026-10-14 the
+menu went after the message, from a misreading that had the menu built by
+the screen's constructor. A gray or a `GetActiveMenuItem` from the
+screen's `SCREEN_UNACTIVATE` finds no menu, as `GrayMenuItem`
+(`0x0016d2a8`) and `GetActiveMenuItem` (`0x0016d3f0`) do with `Menu` NULL.
+`BGameFlow::savedItem` is `SavedMenuItemNumber`, one per row of the screen
+table: zeroed by `bgf_init` (retail's screens are made once, by
+`InitFlailerMenuSystem` at boot), set from `closeMenu`'s item and from an
+answered `Param`, and read by the next activation. So Challenge, whose
+constructor answers nothing, comes back on Setup after B, as retail's
+does. `bootflow_check` covers both (`menu-after-unactivate`,
+`saved-item-not-kept`, `saved-item-ignored`).
 
 ## The highlight bar is not moved by the menu system
 

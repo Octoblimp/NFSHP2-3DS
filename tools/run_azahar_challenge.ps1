@@ -175,9 +175,10 @@ function Shot([string]$tag) {
 # or Hot Pursuit (A), and Challenge, the Mode Select's next item down on
 # World Racing and two down on Hot Pursuit. On Challenge, down to Setup and
 # A; on each setup, a right on the first row and on the second, then B.
-# Back on Challenge the menu is on Players again: down to Race Type, right
-# for the next one, down twice to Setup (once for Free Run with the cops
-# off, whose Skill Level is grayed), A.
+# Back on Challenge the menu is on Setup again, the item it was left on
+# (FlailerScreen's SavedMenuItemNumber): up twice to Race Type, right for
+# the next one, down twice to Setup (once for Free Run with the cops off,
+# whose Skill Level is grayed), A.
 #
 # The debug log lands up to ~7 s late, and a second press is not harmless:
 # START twice on the title is Hot Pursuit picked. So a press that changes
@@ -282,7 +283,7 @@ for ($i = 0; $atChallenge -and $i -lt $setups.Count; $i++) {
         Shot "challenge"
         Press $VK_G; Press $VK_G; Press $VK_G       # down to Setup
     } else {
-        Press $VK_G                                 # down, Race Type
+        Press $VK_T; Press $VK_T                    # up from Setup, Race Type
         Press $VK_H                                 # right, the next type
         Start-Sleep -Milliseconds 800
         Shot ("challenge-type{0}" -f $i)

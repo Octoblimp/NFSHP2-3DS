@@ -42,10 +42,23 @@ static void wOpenScreen(void* user, const BScreenConfig* cfg)
     printf("ui open %08x\n", (unsigned)cfg->hash);
 }
 
+// The menu starts on the item the flow saved for the screen, and nothing
+// here moves it, so that is the item it is closed on.
+static BGameFlow* g_flowp;
+static int        g_menuItem;
+
 static void wEnterScreen(void* user, const BScreenConfig* cfg)
 {
     (void)user;
-    printf("ui enter %08x\n", (unsigned)cfg->hash);
+    g_menuItem = g_flowp->activateItem;
+    printf("ui enter %08x %d\n", (unsigned)cfg->hash, g_menuItem);
+}
+
+static int wCloseMenu(void* user, const BScreenConfig* cfg)
+{
+    (void)user;
+    printf("ui close %08x %d\n", (unsigned)cfg->hash, g_menuItem);
+    return g_menuItem;
 }
 
 static void wLeaveScreen(void* user, const BScreenConfig* cfg)
@@ -441,11 +454,13 @@ static void runScenario(const Scenario* sc)
     hooks.trace            = wTrace;
     hooks.openScreen       = wOpenScreen;
     hooks.enterScreen      = wEnterScreen;
+    hooks.closeMenu        = wCloseMenu;
     hooks.leaveScreen      = wLeaveScreen;
     hooks.setScreenVisible = wSetScreenVisible;
     hooks.setObjectVisible = wSetObjectVisible;
     hooks.sound            = wSound;
 
+    g_flowp = &gf;
     bgf_init(&gf, kStates, BGF_NUM_STATES,
              kScreens, (int)(sizeof(kScreens) / sizeof(kScreens[0])),
              NULL, 0, &hooks);

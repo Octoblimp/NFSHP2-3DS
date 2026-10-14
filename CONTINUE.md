@@ -110,6 +110,17 @@ on the 15.5 FPS of an earlier run: that was the fire on track 11, and
 TASKS 46 must reach a steady 30 there and in every place like it.
 Next: TASKS 37 (multi-card multiplayer).**
 
+**Now (Session 96, 2026-10-14): TASKS 37b-1 is done (10f0e44 and its
+follow-up). Both Mode Selects' Challenge and the four race setups it
+leads to are ported (`bsetup.c`), checked against retail
+(challenge_check, racesetups_check), and walked on Azahar by
+`tools/run_azahar_challenge.ps1`. `bmenu_close` puts each label's colour
+back as a screen goes, and the flow now closes the menu before
+SCREEN_UNACTIVATE and brings each screen back on the item it was left
+on (`gameflow.h` savedItem). Next: 37b-2, Players' Local Wireless and
+the lobby; then 37c to 37f; then TASKS 61 (cops and racers in one
+wireless race).**
+
 **Now (Session 95, 2026-10-14): TASKS 37a (the local wireless link) is
 done. `wlproto.c` is the protocol: a CRC on each packet, reliable
 messages acked and resent, and unreliable ones. `wireless.c` puts it on

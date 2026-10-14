@@ -251,6 +251,15 @@ int bgf_change_to_screen(BGameFlow* gf, const char* name, int pushCurrent)
         // The push happens between hiding and unactivating, and pushes the
         // OUTGOING screen's name -- that is what makes BACK come back here.
         if (pushCurrent) bgf_push_screen(gf, old->name);
+        // FlailerScreen::UnActivate (0x0016a940): the item the menu is on,
+        // kept for the next Activate; the menu unactivated and deleted;
+        // and only then SCREEN_UNACTIVATE, to a screen with no menu.
+        if (gf->hooks.closeMenu) {
+            int item = gf->hooks.closeMenu(gf->hooks.user, old);
+            int row  = (int)(old - gf->screens);
+            if (item >= 0 && row >= 0 && row < BGF_MAX_SCREENS)
+                gf->savedItem[row] = item;
+        }
         memset(&data, 0, sizeof(data));
         data.itemHash = old->hash;
         bgf_send(gf, BMSG_SCREEN_UNACTIVATE, &data);
@@ -279,17 +288,23 @@ int bgf_change_to_screen(BGameFlow* gf, const char* name, int pushCurrent)
             // hides its Languages item on NTSC. The opening
             // MENUITEM_HIGHLIGHT is after, so it reaches a screen object that
             // exists: sent first, the brackets and the blurb stay where the
-            // bundle authored them until the player moves. leaveScreen is
-            // after SCREEN_UNACTIVATE for the same reason.
+            // bundle authored them until the player moves.
             HOOK_VOID(gf, openScreen, n);
             memset(&data, 0, sizeof(data));
             data.itemHash = n->hash;
             // The reply: a Param other than -1 puts the menu on item
-            // Param - 1 (Select Track answers its time of day's item).
+            // Param - 1 (Select Track answers its time of day's item) and
+            // is kept; -1 leaves the item the screen was last left on.
             // The noise is played after the callback, as BACK's is.
             data.param = -1;
             bgf_send(gf, BMSG_SCREEN_ACTIVATE, &data);
-            gf->activateItem = data.param != -1 ? data.param - 1 : 0;
+            {
+                int row = (int)(n - gf->screens);
+                int ok  = row >= 0 && row < BGF_MAX_SCREENS;
+                if (data.param != -1 && ok) gf->savedItem[row] = data.param - 1;
+                gf->activateItem = data.param != -1 ? data.param - 1
+                                 : ok ? gf->savedItem[row] : 0;
+            }
             makeSound(gf, data.noise);
             HOOK_VOID(gf, enterScreen, n);
         }

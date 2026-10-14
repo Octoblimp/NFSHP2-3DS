@@ -1318,14 +1318,28 @@ static void hookEnterScreen(void* user, const BScreenConfig* cfg)
     if (b->hasMenu) bmenu_activate(&b->menu, g_flow.activateItem);
 }
 
+// FlailerScreen::UnActivate's menu half, before SCREEN_UNACTIVATE: the
+// item the menu is on, its UnActivate, and the delete that puts each
+// label's colour back. A gray or an active-item read after this finds no
+// menu, as retail's do.
+static int hookCloseMenu(void* user, const BScreenConfig* cfg)
+{
+    Boot* b    = (Boot*)user;
+    int   item = -1;
+    (void)cfg;
+    if (b->hasMenu) {
+        item = b->menu.current >= 0 ? b->menu.current : 0;
+        bmenu_unactivate(&b->menu);
+        bmenu_close(&b->menu);
+    }
+    b->hasMenu = false;
+    return item;
+}
+
 static void hookLeaveScreen(void* user, const BScreenConfig* cfg)
 {
     Boot* b = (Boot*)user;
     (void)cfg;
-    if (b->hasMenu) {
-        bmenu_unactivate(&b->menu);
-        bmenu_close(&b->menu);
-    }
     b->hasMenu = false;
     b->screen  = NULL;
     b->project = NULL;
@@ -6321,6 +6335,7 @@ int main(int argc, char** argv)
     hooks.setGroupVisible  = hookSetGroupVisible;
     hooks.openScreen       = hookOpenScreen;
     hooks.enterScreen      = hookEnterScreen;
+    hooks.closeMenu        = hookCloseMenu;
     hooks.leaveScreen      = hookLeaveScreen;
     hooks.grayMenuItem     = hookFlowGrayMenuItem;
     hooks.activeMenuItem   = hookActiveMenuItem;
@@ -7703,12 +7718,9 @@ int main(int argc, char** argv)
             ui.numTextures, ui.missingTextures, ui.missingFonts);
 
     // Leave through the flow rather than reaching past it into its menu.
-    // ChangeToScreen(NULL) hides the screen, sends it SCREEN_UNACTIVATE and
-    // only then calls leaveScreen, which is where the menu is torn down --
-    // so the screen hears about its own exit in the order it would in the
-    // original. Closing the menu directly delivered an UNHIGHLIGHT and a
-    // run of UNACTIVATEs to a screen that had never been told it was
-    // going away. The viewer's menu is nobody's, so it just closes.
+    // ChangeToScreen(NULL) hides the screen, closes its menu (closeMenu)
+    // and then sends it SCREEN_UNACTIVATE, the order FlailerScreen::
+    // UnActivate has. The viewer's menu is nobody's, so it just closes.
     bgf_change_to_screen(&g_flow, NULL, 0);
     if (vHasMenu) bmenu_unactivate(&vMenu);
     geoview_free(&g_geo);

@@ -316,10 +316,23 @@ static void wOpenScreen(void* user, const BScreenConfig* cfg)
     printf("ui open %08x\n", (unsigned)cfg->hash);
 }
 
+// The menu goes on the item the flow saved for the screen.
 static void wEnterScreen(void* user, const BScreenConfig* cfg)
 {
-    (void)user;
-    printf("ui enter %08x\n", (unsigned)cfg->hash);
+    World* w = (World*)user;
+    w->activeItem = BGF_ITEM_MENUITEM_1 + (unsigned)w->gf->activateItem;
+    printf("ui enter %08x %d\n", (unsigned)cfg->hash, w->gf->activateItem);
+}
+
+// GetCurrentItemNumber: the highlighted item's place, MENUITEM_1 first.
+// With the menu deleted GetActiveMenuItem reads 0.
+static int wCloseMenu(void* user, const BScreenConfig* cfg)
+{
+    World* w    = (World*)user;
+    int    item = (int)(w->activeItem - BGF_ITEM_MENUITEM_1);
+    printf("ui close %08x %d\n", (unsigned)cfg->hash, item);
+    w->activeItem = 0;
+    return item;
 }
 
 static void wLeaveScreen(void* user, const BScreenConfig* cfg)
@@ -1239,6 +1252,7 @@ static void runScenario(const Scenario* sc)
     hooks.changeTexture           = wChangeTexture;
     hooks.openScreen              = wOpenScreen;
     hooks.enterScreen             = wEnterScreen;
+    hooks.closeMenu               = wCloseMenu;
     hooks.leaveScreen             = wLeaveScreen;
     hooks.activeMenuItem          = wActiveMenuItem;
     hooks.movieOpen               = wMovieOpen;
