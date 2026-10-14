@@ -655,6 +655,11 @@ int netrace_place(void)
     return R->race.place;
 }
 
+const LobbyRace* netrace_race(void)
+{
+    return &R->race;
+}
+
 int netrace_driver(int p)
 {
     return p >= 0 && p < WIRELESS_MAX_CONSOLES ? R->driver[p] : -1;

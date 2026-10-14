@@ -318,6 +318,22 @@ extern int32_t        PlayerNumPlayers;
 extern struct Player *PlayerPlayersByNumber[2];
 extern struct Player *PlayerPlayersByIndex[2];
 
+// The port's (TASKS 37d). A wireless race runs both players on every
+// console, the same race, and each console shows only its own, as a race
+// of one shows its player: the view, the mirror, the HUD and the sound.
+// PlayerNetLocal is that player's number, 0 or 1, or -1 to show every
+// player, as retail does. Where only what is shown reads a count of
+// players, PLAYER_SHOWN_COUNT stands in for it, and player_shown(i) for
+// PlayerPlayersByIndex[i].
+extern int32_t PlayerNetLocal;
+#define PLAYER_SHOWN_COUNT(n) (PlayerNetLocal >= 0 ? 1 : (n))
+#define PLAYER_NUM_SHOWN()    PLAYER_SHOWN_COUNT(PlayerNumPlayers)
+static inline struct Player *player_shown(int32_t i)
+{
+    return PlayerNetLocal >= 0 ? PlayerPlayersByNumber[PlayerNetLocal]
+                               : PlayerPlayersByIndex[i];
+}
+
 // Player::GetSpeedRatio, 0x001811e8: the mean of pAverageSpeedRatio.
 static inline float player_get_speed_ratio(const struct Player *p)
 {

@@ -37,6 +37,8 @@ int               CameraStopUpdating;
 BGameFlow        *gTrackFlowGameFlow;
 World            *pCurrentWorld;
 struct Player    *PlayerPlayersByIndex[2];
+struct Player    *PlayerPlayersByNumber[2];
+int32_t           PlayerNetLocal = -1;
 
 void camera_init(Camera *c)
 {

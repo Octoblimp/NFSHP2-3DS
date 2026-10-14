@@ -160,6 +160,10 @@ NetRaceStage netrace_stage(void);
 int netrace_place(void);
 int netrace_driver(int p);
 
+// The race as the lobby's Start handed it on: the consoles, their peers
+// and this console's place.
+const LobbyRace* netrace_race(void);
+
 // Each frame, after the link's pump, wherever the flow is: what came in,
 // the setup moved on, and "Wireless Race"'s popup kept up.
 void netrace_frame(BGameFlow* gf);

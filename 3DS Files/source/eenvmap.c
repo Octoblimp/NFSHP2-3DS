@@ -380,8 +380,8 @@ void update_environment_map_cameras(void)
 
             car = (Car *)m->vtbl->GetCarToFollow(m);
         }
-        if (car == NULL && PlayerPlayersByIndex[0] != NULL)
-            car = PlayerPlayersByIndex[0]->MyCar;
+        if (car == NULL && player_shown(0) != NULL)
+            car = player_shown(0)->MyCar;
         // Retail takes CarList's first without asking whether there is
         // one.
         if (car == NULL

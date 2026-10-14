@@ -9,6 +9,7 @@
 int32_t        PlayerNumPlayers;          // gp-20920
 struct Player *PlayerPlayersByNumber[2];  // gp-20936
 struct Player *PlayerPlayersByIndex[2];   // gp-20928
+int32_t        PlayerNetLocal = -1;
 
 // The mover is read again after GetCameraInfo, as the image does.
 int32_t player_is_camera_pov_in_car(const struct Player *p)

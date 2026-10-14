@@ -258,6 +258,11 @@ void eview_unattach_camera_mover(eView *v, bNode *mover);
 // else 0.
 void eUpdateViewMode(void);
 
+// The port's (TASKS 37d): nonzero in a wireless race, whose console shows
+// view 1 alone, its own player's, whatever mover view 2 has (player.h,
+// PlayerNetLocal). eUpdateViewMode then never answers 3.
+extern int32_t eViewShowOne;
+
 // MaybeChangeViewMode (0x00107310): once the mode to draw differs from the
 // one the targets were cut for, waits for the GS and cuts players 1 and
 // 2's targets and the mirror's out of MainDraw0Context's scissor, and sets

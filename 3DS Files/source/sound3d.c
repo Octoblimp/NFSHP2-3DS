@@ -39,8 +39,11 @@ struct Camera **get_active_cameras(void)
 {
     int i;
 
+    // A wireless race's console hears its own player's view alone
+    // (player.h): view 1's.
     for (i = 0; i < 2; i++)
         ActiveCameras[i] = PlayerPlayersByIndex[i] != NULL
+                           && i < PLAYER_SHOWN_COUNT(2)
                            ? eGetView(i + 1)->pCamera : NULL;
     return ActiveCameras;
 }
@@ -154,7 +157,7 @@ uint16_t sound3d_compute_azimuth(const bVector3 *pos)
     float x, y, len, dirX, dirY;
     uint16_t az;
 
-    if (PlayerNumPlayers >= 2) {
+    if (PLAYER_NUM_SHOWN() >= 2) {
         struct Camera **cams = get_active_cameras();
         int32_t n = PlayerNumPlayers;
         float best = 9e9f;                      // gp-27648

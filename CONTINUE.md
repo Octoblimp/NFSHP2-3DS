@@ -110,6 +110,25 @@ on the 15.5 FPS of an earlier run: that was the fire on track 11, and
 TASKS 46 must reach a steady 30 there and in every place like it.
 Next: TASKS 37 (multi-card multiplayer).**
 
+**Now (Session 101, 2026-10-14): TASKS 37d is done: a wireless race
+runs in lockstep (`netstep.c`, `docs/formats/netstep.md`). Each console
+sends its pad 3 frames ahead, the host builds each frame's record with
+its step, and every console runs the frame on that record alone; each
+shows its own car, mirror and HUD. On Azahar two copies raced with
+every logged checksum matching through frame 1200, 28 FPS each.
+Next: TASKS 62 (wireless off message), then 37e, 37f, 37g, then TASKS
+61, 46, 60 and 59.**
+
+**Now (Session 100, 2026-10-14): TASKS 37d, the lockstep race, is in
+progress, and nothing of it is committed. `netstep.c` (the lockstep
+core) and its check are done: netstep_check runs 20 scenarios with
+faults 0, and catches 104 of 107 mutations (3 equivalent). Each
+console showing its own player (`PlayerNetLocal`, `player_shown`,
+`eViewShowOne`) is edited in but not built. main.c's half waits in
+`tools/main_lockstep_37d.py`, not run yet. HANDOFF.md, "Session 100",
+lists the seven steps left. Then TASKS 62, 37e, 37f and 37g, then
+TASKS 61, 46, 60 and 59.**
+
 **Now (Session 99, 2026-10-14): TASKS 37c-2 is done: the host's CPU
 racers. Where the race setup has AI racers, the host's lobby list ends
 with "CPU racers: n" (the setup's Opponents, never more than 8 less the

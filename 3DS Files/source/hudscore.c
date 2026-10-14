@@ -108,7 +108,7 @@ void player_start_score_animation(struct Player *p, const bVector2 *pos,
     bVector2 at = *pos, d = *dpos, d2 = *dpos2;
     HudAnimator *a;
 
-    if (PlayerNumPlayers >= 2) {
+    if (PLAYER_NUM_SHOWN() >= 2) {
         if (p->PlayerNumber == 0) {
             at.y = at.y * 0.5f;
             d.y = d.y * 0.5f;

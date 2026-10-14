@@ -4,7 +4,7 @@ The port's own. The lobby (`docs/formats/lobby.md`) leaves every console
 on its way to "Select Car" with the link up and a place each: the
 host's 0, the clients' 1 on. `netrace.c` takes it from there to a race
 loaded on every console and started on the same seed. Racing it
-together, frame by frame, is 37d's.
+together, frame by frame, is 37d's (`docs/formats/netstep.md`).
 
 - `netrace.c` has no `<3ds.h>`. The link comes in through `NetRaceNet`
   and what of the game it does not reach through globals through
@@ -31,7 +31,7 @@ together, frame by frame, is 37d's.
 | `NR_WAIT` | "Wireless Race" | The host: every car in, the build. A client: the whole setup in. BACK: `NR_CARS`. |
 | `NR_LOADING` | The load, retail's own | Its end: `NR_HOLD` (`netrace_hold`). |
 | `NR_HOLD` | The loading screen, held | The host: every console racing has loaded. A client: GO. |
-| `NR_RACING` | The race | 37d's. |
+| `NR_RACING` | The race, in lockstep (`netstep.c`) | 37f's. |
 | `NR_OFF` | No wireless race | `netrace_begin`. |
 
 ### The cars
@@ -137,8 +137,8 @@ console's loop for seconds, and so does the race's first frame, whose
 drawing prepares the track and the cars (8.9 s on Azahar). The first
 run on Azahar put the link's own 3 s timeout back at GO, and each
 console timed the other out during that frame. The patience now stays
-through GO. The race (37d) gives the link its own timeout back once
-every console's frames come in, and going back to the lobby does too.
+through GO. The race (37d, `docs/formats/netstep.md`) gives the link
+its own timeout back once every console's frames come in, and going back to the lobby does too.
 
 ## The messages
 

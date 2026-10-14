@@ -2511,12 +2511,15 @@ phases.
                   199 s on seed ced6d9c3, both racing; each Starting
                   Grid has the CPU racers 1 and 2, the host 3, the
                   client 4.
-          - [ ] 37d: the lockstep race. The host's step each frame and
+          - [x] 37d: the lockstep race. The host's step each frame and
                 both pads, with a frame or two of input delay; each
                 console's own view, mirror and HUD.
                 - Give the link its own timeout back (setPatience(0))
                   once every console's race frames come in (37c keeps
                   NETRACE_PATIENCE_MS past GO).
+                - A frame whose record is not in yet waits without
+                  blocking the loop: it draws and pumps the link, and
+                  the race does not step (for 37g's pause).
                 - Leads (Session 98's survey): dt is wall-clock
                   (`realtime.c` PrepareRealTimestep), so the host's
                   quantised step goes with the pads; the joylog's event
@@ -2528,10 +2531,41 @@ phases.
                   mirror and HUD follow player 0 / view 1 in
                   `trackview.c`, `sundraw.c`, `eenvmap.c` and main.c's
                   bottom screen.
+                - Done in Sessions 100 and 101
+                  (`docs/formats/netstep.md`). `netstep.c` is the
+                  lockstep core: the input delay is 3 frames, and
+                  the host builds each frame's record from every
+                  live place's pad and its own step. main.c runs a
+                  frame only once its record is in, waiting up to
+                  8 ms and else drawing without stepping; each port
+                  reads its place's pad from the record
+                  (`joyhid_from_wire`), and the flow's presses go
+                  to each place's port (retail's
+                  SetScreenFilterPort). Each console shows its own
+                  player (`PlayerNetLocal`, `player_shown`,
+                  `eViewShowOne`). netstep_check: 20 scenarios,
+                  faults 0, 104 of 107 mutations caught (3
+                  equivalent); joyhid_check's round trip over every
+                  set of keys; every harness 0 differ.
+                - On Azahar (`run_azahar_lobby.ps1 -Consoles 2
+                  -Race`, which now holds the gas on both for 30 s):
+                  both PASS. Every checksum logged matched on both
+                  copies, frame 0 to 1200, with no "differs"; each
+                  copy showed its own car, mirror and HUD, the same
+                  places and minimap, at 28 FPS. Not tried: the
+                  pause from either console, which goes to 37f.
+                - 37d-2: places past the two players' show player
+                  0's view, and their cars are AI for now.
           - [ ] 37e: determinism. The per-frame hashes (cars, cops,
                 traffic, seeds, the race coordinator) compared, each
                 part's hash logged at a mismatch, and every source of
                 drift fixed.
+                - 37d's first run (track 11, no cops, gas only) had
+                  no drift through frame 1200, though the clocks at
+                  GO differed. The world's checksum reads only the
+                  cars' x + y and WorldTimer, so 37e needs a wider
+                  one (each part's) and harder runs: cops, traffic,
+                  steering, crashes, a whole race.
                 - Leads: `world_calculate_debug_checksum` (worldstep.c)
                   is a per-frame hash already. The world's own seed is
                   drawn from bDefaultSeed in `world_init`, during the
@@ -2542,6 +2576,30 @@ phases.
           - [ ] 37f: the end. Results and points on each console, back
                 to the lobby or a rematch, and a player leaving
                 mid-race.
+          - [ ] 37g: a console lost mid-race. The user, 2026-10-14:
+                when a console disconnects, the whole race pauses and
+                tries to reconnect it. The lost console rejoins the
+                way it joined before the race (Local Wireless, Join,
+                the host's game), and the host knows it by something
+                unique to that 3DS and gives it its place back.
+                - Lockstep pauses by itself: no record is built
+                  without the lost place's pad. 37d keeps the loop
+                  drawing and pumping the link while a frame waits,
+                  so a pause screen can stand over it.
+                - A console that kept its race (only the link
+                  dropped) goes on from its last frame. One that
+                  restarted needs the race again: the setup, the
+                  load, then the records from frame 0 run fast, or
+                  a snapshot. Find which.
+                - The ID: candidates are CFGU_GenHashConsoleUnique
+                  and UDS's node info (its friend code seed), as
+                  long as the Azahar copies differ in it.
+                - The user, 2026-10-14: if it has not reconnected
+                  after 1 minute 30 seconds, the race goes on and the
+                  lost player's car is driven by the CPU, as a racer
+                  or as a cop, whichever it was. The record the host
+                  first builds without the place (its live bit gone)
+                  is the frame every console hands that car to the AI.
 38. [x] **BUSTED! is flat and static.** The user's Azahar shot of
         2026-10-09: in the bust NIS, BUSTED! sits squashed, its top cut
         off, and never animates. Retail scales it from 5 down to ScaleX
@@ -3125,6 +3183,16 @@ phases.
           A race with both cops and racers among the players: not said
           yet; ask when 61 comes.
         - Comes after 37's slices (37b-2 to 37f), which it builds on.
+62. [ ] **A message when wireless communication is off.** Asked for on
+        2026-10-14: hosting or joining a Local Wireless game with the
+        3DS's wireless communication turned off (from the Home Menu)
+        shows an error saying it is disabled and must be turned on to
+        use the feature.
+        - First find how the system tells it: what udsInit, the scan
+          or the network's creation return then, or a system state to
+          read before trying; and whether Azahar can turn it off for a
+          run.
+        - Comes right after 37d and before 37e: one task at a time.
 
 ### The retail frontend
 

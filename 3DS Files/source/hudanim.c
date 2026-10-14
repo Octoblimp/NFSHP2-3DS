@@ -376,7 +376,7 @@ void player_hud_start_wrong_way(struct Player *p)
     to.x = to.x + from.x;
     scale_from.x = scale_from.y = 1.0f;
     scale_to.x = scale_to.y = 0.3f;     // gp-30372
-    if (PlayerNumPlayers >= 2) {
+    if (PLAYER_NUM_SHOWN() >= 2) {
         scale_from.x = scale_from.y = 0.5f;
         scale_to.x = scale_to.y = 0.25f;
         if (p->PlayerNumber == 0) {

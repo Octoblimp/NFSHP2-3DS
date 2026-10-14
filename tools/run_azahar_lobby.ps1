@@ -33,6 +33,12 @@
 # odd, Automatic where even; the first handling. Each client's car and
 # transmission must reach the host as it chose them.
 #
+# With -Race the race runs in lockstep (TASKS 37d, netstep.h): once every
+# copy is racing, each holds A, the gas, for -Drive seconds (30 unless
+# said; never the brake), a shot of each every 10 s, and every copy must
+# log the lockstep's start and its frames flowing. A checksum that differs
+# between copies is shown and counted, not failed: that is 37e's.
+#
 # With -NoDsp the copies' cards have no DSP firmware, so ndsp fails and the
 # game must run silent: each copy has to log "Sound: ndsp unavailable", and
 # still pass with no unmapped read (a driver call through NULL).
@@ -55,6 +61,7 @@ param(
     [switch]$NoDsp,               # no DSP firmware on the cards: silent
     [ValidateRange(-1, 7)]
     [int]$Cpu = 2,                # the host's CPU racers; -1 as shown
+    [int]$Drive = 30,             # -Race: seconds of gas once all race
     [int]$RunSeconds = 0,         # hard ceiling; 0 is 240 + 30 a console, + 300 with -Race
     [string]$AzaharDir = "C:\Program Files\Azahar",
     [string]$Target3dsx = "",
@@ -127,6 +134,14 @@ public class Hp2Lb {
     public static void PressKey(IntPtr h, int vk) {
         PostMessage(h, 0x0100, (IntPtr)vk, IntPtr.Zero);   // WM_KEYDOWN
         System.Threading.Thread.Sleep(140);
+        PostMessage(h, 0x0101, (IntPtr)vk, IntPtr.Zero);   // WM_KEYUP
+    }
+    // A key held: posted again every 150 ms by the caller, as
+    // run_azahar_race.ps1's are, so a press Azahar drops does not end it.
+    public static void KeyDown(IntPtr h, int vk) {
+        PostMessage(h, 0x0100, (IntPtr)vk, IntPtr.Zero);   // WM_KEYDOWN
+    }
+    public static void KeyUp(IntPtr h, int vk) {
         PostMessage(h, 0x0101, (IntPtr)vk, IntPtr.Zero);   // WM_KEYUP
     }
     public static void CaptureToFile(IntPtr h, string path) {
@@ -645,6 +660,24 @@ try {
             Shot $s "timeout"
         }
     }
+    # -Race: the gas on every copy at once, the race in lockstep.
+    if ($Race -and $Drive -gt 0 -and @($sides | Where-Object { $_.Failed }).Count -eq 0) {
+        Write-Host ("  [{0,5:N0}s] driving: A held on every copy for {1} s" -f (Elapsed), $Drive)
+        $driveEnd = (Get-Date).AddSeconds($Drive)
+        $nextShot = (Get-Date).AddSeconds(10)
+        $n = 0
+        while ((Get-Date) -lt $driveEnd) {
+            foreach ($s in $sides) { if (Alive $s) { [Hp2Lb]::KeyDown($s.Hwnd, $VK_A) } }
+            if ((Get-Date) -ge $nextShot) {
+                $n++
+                foreach ($s in $sides) { Shot $s "drive-$n" }
+                $nextShot = $nextShot.AddSeconds(10)
+            }
+            Start-Sleep -Milliseconds 150
+        }
+        foreach ($s in $sides) { if (Alive $s) { [Hp2Lb]::KeyUp($s.Hwnd, $VK_A) } }
+        foreach ($s in $sides) { if (-not (Alive $s) -and -not $s.Failed) { $s.Failed = "Azahar exited while driving" } }
+    }
     # The log's last lines land up to ~7 s late.
     Start-Sleep -Seconds 8
 } finally {
@@ -707,6 +740,22 @@ if ($Race) {
         Write-Host "Host: $cpuRun CPU racers, $n drivers"
         if ($n -ne $Consoles + $cpuRun -and -not $h.Failed) {
             $h.Failed = "$n drivers for $Consoles consoles and $cpuRun CPU racers"
+        }
+    }
+
+    # The lockstep (37d): started and flowing on every copy; checksums
+    # that differ are 37e's, shown and counted.
+    foreach ($s in $sides) {
+        Write-Host "--- $($s.Name) netstep ---"
+        $ns = @(LogLines $s "netstep: |clocks at GO")
+        $ns | Select-Object -First 24 | ForEach-Object { Write-Host "  $_" }
+        if ($ns.Count -gt 24) { Write-Host "  ... $($ns.Count - 24) more" }
+        $differ = @($ns | Where-Object { $_ -match "differs from place" }).Count
+        if ($differ -gt 0) { Write-Host "  $differ checksum differences (37e)" }
+        if (@($ns | Where-Object { $_ -match "netstep: start, place" }).Count -ne 1 -and -not $s.Failed) {
+            $s.Failed = "no lockstep start"
+        } elseif ($Drive -gt 0 -and @($ns | Where-Object { $_ -match "netstep: frames flow" }).Count -eq 0 -and -not $s.Failed) {
+            $s.Failed = "lockstep frames never flowed"
         }
     }
 

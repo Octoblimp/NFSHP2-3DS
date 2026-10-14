@@ -62,6 +62,7 @@
 RaceParameters  TheRaceParameters;
 int32_t         PlayerNumPlayers;
 struct Player  *PlayerPlayersByNumber[2];
+int32_t         PlayerNetLocal = -1;
 Race           *pCurrentRace;
 RaceCoordinator *pRaceCoordinator;
 int32_t         RealTimeFrames;

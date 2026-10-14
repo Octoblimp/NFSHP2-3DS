@@ -22486,3 +22486,201 @@ player drives their own car and transmission. `docs/formats/lobby.md`,
 37d: the lockstep race. Then 37e, 37f, then TASKS 61 (cops and racers
 wireless, with the all-cops rule: 2 to 8 CPU racers). Still to ask:
 TASKS 47's bridge, TASKS 52's popups.
+
+## Session 100 -- 37d, the lockstep race (finished in Session 101)
+
+The user asked to wrap up partway through 37d. Nothing of 37d is
+committed: the working tree has it all, beside the many unrelated
+modified files git status always shows (`git diff --ignore-cr-at-eol
+--stat` lists the real ones). The user also asked this session for
+TASKS 62 (a message when the 3DS's wireless is off) and for 37g's
+reconnect (the race pauses, the lost console rejoins as it joined, and
+after 1 min 30 s its car goes to the CPU); both are written into
+TASKS.md, uncommitted. They asked whether the multi-card play was meant
+to be Download Play: it is multi-card over UDS, as Download Play cannot
+send 2,291 MB.
+
+### Done and checked on the host: the lockstep core
+
+- `3DS Files/source/netstep.c`/`.h` (new): every console runs both
+  players' race, frame by frame, on the same inputs. Each frame's record
+  carries every live place's pad and the host's quantised step `q`. The
+  input delay is NETSTEP_DELAY, 3 frames; frames 0 to 2 are built
+  locally, q 120 and every pad at rest. A pad is 8 bytes: the DS2
+  buffer's bytes 2 to 7 and a u16 of the flow's presses (`menu`).
+  PADS (0x16, place to host) and FRAMES (0x17, host to all) are
+  unreliable, with a 15-byte header, each repeating what the other side
+  still needs, resent every 16 ms. The link's own timeout comes back
+  (setPatience(0)) once D + 30 frames are built. Each side keeps a ring
+  of the world's checksums and compares a frame once both have it. API:
+  netstep_bind, init, start, stop, on, put, poll, current, done, frame,
+  rest. Place p's pad is port p's (`r->pad[port]`).
+- `tools/src/netstep_test.c`, `tools/netstep_check.py` (new): 20
+  scenarios, faults 0, among them a slow link, one slower than the
+  delay, the client's GO late, a checksum differing with the host
+  slower, and netrace's messages on the same link. `--mutate`: 107
+  mutations, 104 caught, 3 equivalent (named in the check).
+
+### Done, not built yet: each console shows its own player
+
+Retail is unchanged while `PlayerNetLocal` is -1, which is every race
+but a wireless one.
+
+- `player.h`/`.c`: `PlayerNetLocal` (-1, or this console's player, 0 or
+  1), `PLAYER_SHOWN_COUNT(n)`, `PLAYER_NUM_SHOWN()`, `player_shown(i)`.
+- `playerinit.c`: in a wireless race of two the local player gets view
+  1, mirror 3, the HUD's SINGLE screen and the NIS overlay; the other
+  player gets view 2, no mirror, no HUD and no NIS.
+- `eview.c`/`.h`: `eViewShowOne`; eUpdateViewMode then never answers 3,
+  so the mode is 2 (view 1 and the mirror).
+- `playerhud.c` (12 places), `hudanim.c`, `hudscore.c`, `sound3d.c`
+  (the active cameras and the azimuth) and `eenvmap.c` (the fallback
+  car) read the players shown.
+- Left retail on purpose, being simulation or content: carmove,
+  traffictele, aicarcontroller, aiactions, playerinput, playerupdate,
+  playerzone, playernis, racespeech, trackmap's 2P draw, cameracoord,
+  hudrender's tickets and places, warp, cardamageabove and rendercars.
+
+### Not applied yet: main.c
+
+`tools/main_lockstep_37d.py` holds main.c's half as exact replacements.
+A dry run found every one of them in main.c as it stands. It has not
+been run, and main.c is unchanged. It adds:
+
+- `gJoypadRead = joypadRead`: in a lockstep frame each port reads its
+  place's pad from the record (`joyhid_from_wire`), else joyhid_read.
+- `netRaceGoRacing` as netrace's goRacing: the racing places' mask, then
+  netstep_start, then port 0's last ring entry set to a pad at rest, so
+  the first frame's edges are the same on every console. It logs the
+  clocks at GO, then calls trackflow_go_racing.
+- `lockFrame`, at the loop's top. It measures the step, puts this
+  console's pad and q with the flow's presses since the last begin, and
+  waits up to LOCK_SPIN_MS (8) for the record, pumping the link. A
+  record later than that leaves the loop drawing without stepping; the
+  next loop asks again. On its record's arrival it sets the frame's
+  step from `q`.
+- The clocks advance only after a lockstep frame ran (`g_lockRan`).
+  bgf_frame, raceFrame, uiTimer and the flow's presses run only on a
+  frame that steps; the presses are the record's, each place's on its
+  port (`lockFlowInput`).
+- `flowInput(kDown, port)` and the screen filter ports: retail's
+  SetScreenFilterPort (0x0016d4c8), bound as gSetScreenFilterPortFn. The
+  menu takes the port when made; START and BACK filter on it.
+- `netstep_done(world checksum)` after each frame. netstep_stop runs
+  once the coordinator is gone, but only after a lockstep frame ran with
+  it up (`g_lockRaced`, added in the review).
+- `PlayerNetLocal` from netrace's place once its stage reaches
+  NR_LOADING (place 1 is player 1, every other place player 0), back to
+  -1 once the coordinator is gone, and `eViewShowOne` with it.
+- The bottom screen's HUD features and track map, the sound's players
+  and joyhid's race layout read the player shown.
+
+The review also added a forward declaration of flowInput, as joypadRead
+and lockFlowInput sit above it.
+
+### Left for 37d, in order
+
+1. `joyhid.c`/`.h`: `void joyhid_from_wire(const uint8_t six[6],
+   uint8_t buf[32])`. It clears buf, sets buf[1] to 0x79 and copies the
+   six bytes to buf + 2. Then, for each kMap entry with a pressure byte
+   (not P_NONE) whose button is down (active low), it sets
+   buf[8 + pressure] to 255. Add a joyhid_test check that
+   from_wire(build's bytes 2 to 7) gives build back.
+2. `netrace.c`/`.h`: `const LobbyRace* netrace_race(void)`, returning
+   `&R->race`.
+3. Run `python tools/main_lockstep_37d.py` from the repo root, read the
+   diff, then delete the script.
+4. Every host harness that defines the player globals itself and
+   compiles a file edited above needs `int32_t PlayerNetLocal = -1;`
+   (and `eViewShowOne` where eview.c is not linked). Likely ones are
+   hudanim, hudscore, hudfeatures, hudcop, sound3d, eenvmap, raceinit /
+   racecoord and eview. Build every check and fix what fails to link;
+   each must still report 0 differ.
+5. Run tools/build_cia.ps1 in PowerShell, then check that a race of one
+   on Azahar is unchanged.
+6. `tools/run_azahar_lobby.ps1 -Consoles 2 -Race`. Both copies should
+   race in lockstep, each showing its own car, mirror and HUD. Read the
+   logs' netstep lines and the checksum compare. Log drift but do not fix
+   it: that is 37e, and RealTimer and WorldTimer already differ at GO.
+7. Write `docs/formats/netstep.md` and TASKS 37d's notes. Commit only
+   37d's files: netstep.c/.h, netstep_test.c, netstep_check.py, the
+   presentation files above, main.c, joyhid.c/.h, netrace.c/.h, the
+   harness fixes and TASKS.md.
+
+### To watch
+
+- The coordinator should exist after the GO loop's bgf_frame: bgf_service
+  in the same iteration ends the load (EndGameFlowLoadingTrackSpecific
+  makes it). This is read from the code, not run.
+- The GO iteration skips its clock advance. RealTimer and WorldTimer may
+  differ between consoles at GO; both are logged, and they are 37e's.
+- Places 2 and up show player 0's view and their cars are AI (37d-2).
+- joyhid's type detection needs 32 matching reads, and port 1 reads 0xff
+  until lockstep serves it. player_update_non_game_state pauses for an
+  unplugged port only in RACE_IN_PROGRESS, and the countdown is longer
+  than 32 frames.
+
+### Next
+
+Finish 37d as above, then TASKS 62, then 37e, 37f and 37g, then TASKS
+61, 46, 60 and 59. Still to ask the user: TASKS 47's bridge and 52's
+popups.
+
+## Session 101 -- 37d, the lockstep race (done)
+
+Session 100's seven steps, finished. `docs/formats/netstep.md` has the
+whole of it.
+
+### What changed
+
+- `joyhid.c`/`.h`: `joyhid_from_wire(six, buf)`, the DualShock buffer
+  again from its bytes 2 to 7, each pressure 255 where its button is
+  down. joyhid_check's new round trip builds every set of the 14 keys
+  in each layout with three stick readings and gets the buffer back
+  byte for byte.
+- `netrace.c`/`.h`: `netrace_race()`, the LobbyRace the race began with.
+- `main.c`: Session 100's script run as written, then deleted
+  (`tools/main_lockstep_37d.py`). Its review found nothing more.
+- `sound3d.c`: get_active_cameras took `i < PLAYER_NUM_SHOWN()`, which
+  dropped view 2 where retail keeps it (a second player's pointer with
+  PlayerNumPlayers 1); sound3d_check showed 30 differ. It is now
+  `i < PLAYER_SHOWN_COUNT(2)`, which is always true when PlayerNetLocal
+  is -1.
+- Harnesses: `PlayerNetLocal = -1` in hudanim, hudfeatures, hudrender,
+  hudscore, sound3d and envsample's tests (envsample's also
+  PlayerPlayersByNumber).
+- `tools/run_azahar_lobby.ps1`: with -Race, once every copy races, A
+  (the gas, never the brake) is held on all for `-Drive` seconds (30), a
+  shot of each every 10 s; the verdict prints each copy's netstep lines
+  and fails a copy with no lockstep start or no frames flowing.
+  Checksums that differ are counted, not failed (37e's).
+- `docs/formats/netstep.md` (new); `netrace.md` points to it.
+
+### Checks
+
+- Every harness that compiles a file 37d touched: carmode, player,
+  shake, world, camera, eview, scenerycull, hudanim, hudfeatures,
+  hudrender, hudscore, sound3d, envsample, fredrace: 0 differ;
+  helpglyph and joyhid ok; netrace, netstep, lobby: faults 0.
+- tools/build_cia.ps1: built, relocations and shaders OK.
+- A SkipFE race of one on Azahar: unchanged (mirror, HUD, map, 30 FPS).
+- `run_azahar_lobby.ps1 -Consoles 2 -Race`: both PASS (racing). Track
+  11, 2 laps, 2 CPU racers, 4 drivers, GO on seed 793ca5cb at 204 s.
+  The clocks at GO differed (real 731666 and 723683), yet every
+  checksum logged matched, frame 0 (bae8) to 1200 (323a), and neither
+  copy logged a difference. Frames flowed from frame 32 and the link's
+  own 3 s timeout came back. The shots: the host its red Opel Speedster
+  4th, the client its Vauxhall VX220 3rd, each with its own mirror and
+  HUD, the same places list and minimap, 28 FPS each.
+
+### Not tried
+
+- The pause from either console (flowInput's ports, the screens'
+  filter port). It goes to 37f with the results.
+- Places 2 and up are AI-driven and show player 0's view (37d-2).
+
+### Next
+
+TASKS 62 (a message when the 3DS's wireless is off), then 37e, 37f and
+37g, then TASKS 61, 46, 60 and 59. Still to ask the user: TASKS 47's
+bridge and 52's popups.

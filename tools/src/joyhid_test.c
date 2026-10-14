@@ -538,6 +538,43 @@ int main(void)
         }
     }
 
+    // A pad sent over the wire (bytes 2 to 7) comes back as built, for
+    // every set of keys, each layout and a few stick readings.
+    {
+        static const uint32_t keys[] = {
+            JOYHID_A, JOYHID_B, JOYHID_SELECT, JOYHID_START, JOYHID_DRIGHT,
+            JOYHID_DLEFT, JOYHID_DUP, JOYHID_DDOWN, JOYHID_R, JOYHID_L,
+            JOYHID_X, JOYHID_Y, JOYHID_ZL, JOYHID_ZR,
+        };
+        static const int32_t sticks[][4] = {
+            { 0, 0, 0, 0 }, { 156, -156, 40, 90 }, { -73, 12, -144, 144 },
+        };
+        int wrong = 0;
+
+        for (uint32_t set = 0; set < 1u << 14; set++) {
+            JoyHidState s;
+            uint8_t built[32];
+            uint8_t back[32];
+
+            memset(&s, 0, sizeof s);
+            for (size_t k = 0; k < 14; k++)
+                if (set & 1u << k)
+                    s.keys |= keys[k];
+            s.race = (int32_t)(set % 4);
+            s.cx = sticks[set % 3][0];
+            s.cy = sticks[set % 3][1];
+            s.sx = sticks[set % 3][2];
+            s.sy = sticks[set % 3][3];
+            joyhid_build(&s, built);
+            joyhid_from_wire(built + 2, back);
+            if (memcmp(built, back, 32) != 0 && wrong++ == 0) {
+                printf("FAIL from_wire: keys %#x layout %d differ\n",
+                       (unsigned)s.keys, (int)s.race);
+                failures++;
+            }
+        }
+    }
+
     CloseJoystick();
     if (failures) {
         printf("%d failed\n", failures);

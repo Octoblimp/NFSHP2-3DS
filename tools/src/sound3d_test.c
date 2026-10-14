@@ -24,6 +24,7 @@
 int32_t        SoundEnabled = 1;
 int32_t        PlayerNumPlayers;
 struct Player *PlayerPlayersByIndex[2];
+int32_t        PlayerNetLocal = -1;
 float          WorldTimeElapsed;
 
 static uint32_t bits(float f)

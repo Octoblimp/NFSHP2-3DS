@@ -98,6 +98,7 @@
 #include "lobby.h"
 #include "nameentry.h"
 #include "netrace.h"
+#include "netstep.h"
 #include "wireless.h"
 #include "wirelesstest.h"
 #include "cop.h"
@@ -847,13 +848,15 @@ static int sndRaceState(void* c)
         ? (int)racecoordinator_get_current_state(pRaceCoordinator) : -1;
 }
 
-static int sndNumPlayers(void* c) { (void)c; return PlayerNumPlayers; }
+// The players shown: a wireless race's console hears its own alone
+// (player.h).
+static int sndNumPlayers(void* c) { (void)c; return PLAYER_NUM_SHOWN(); }
 
 static void sndPlayerZone(void* c, int i, int* muffle, int* zone,
                           float* volume)
 {
     // gp-20928: by index, the order they were made.
-    const struct Player* p = PlayerPlayersByIndex[i];
+    const struct Player* p = player_shown(i);
     (void)c;
     if (p == NULL) return;          // the port's; retail reads it untested
     *muffle = p->bZoneMuffleSound;
@@ -1139,7 +1142,8 @@ static void sndCarSoundMute(void* c, void* sound, int on)
 // as well (the user's mapping of 2026-10-11).
 static int32_t joyhidRaceLayout(void)
 {
-    const struct Player *p = PlayerPlayersByNumber[0];
+    // This console's player: in a wireless race the pad read here is its.
+    const struct Player *p = player_shown(0);
     const tCop *cop;
 
     if (pRaceCoordinator == NULL)
@@ -1303,6 +1307,43 @@ static const JBHost kNoJukeboxHost = {
     NULL, NULL, NULL, jbSoundDown, NULL,
 };
 
+// SetScreenFilterPort (0x0016d4c8): only `port` drives the screen `name`
+// from then on. Retail keeps it on the FlailerScreen, which lives as long
+// as its pack; the port keeps it here, by the screen's hash, until set
+// again. The screen's menu takes it when it is made (FlailerMenu's
+// FilterPort is the screen's), and the screen's own START and BACK filter
+// on it (FlailerScreen::JoyHandler). The pause sets it for its eight
+// screens, so only the pad that paused drives them.
+#define SCREEN_FILTERS 16
+static struct {
+    uint32_t hash;
+    int32_t  port;
+} g_screenFilter[SCREEN_FILTERS];
+static int g_screenFilters;
+
+static int32_t screenFilterPort(uint32_t hash)
+{
+    for (int i = 0; i < g_screenFilters; i++)
+        if (g_screenFilter[i].hash == hash) return g_screenFilter[i].port;
+    return -1;
+}
+
+static void hookSetScreenFilterPort(const char* name, JoystickPort port)
+{
+    const BScreenConfig* cfg = bgf_find_screen(&g_flow, name);
+    int i;
+
+    if (cfg == NULL) return;
+    for (i = 0; i < g_screenFilters; i++)
+        if (g_screenFilter[i].hash == cfg->hash) break;
+    if (i == g_screenFilters) {
+        if (g_screenFilters == SCREEN_FILTERS) return;
+        g_screenFilters++;
+    }
+    g_screenFilter[i].hash = cfg->hash;
+    g_screenFilter[i].port = port;
+}
+
 // FlailerScreen::Activate (0x0016a858) builds the screen's FlailerMenu
 // before its Callback hears SCREEN_ACTIVATE, and activates it after: the
 // Callback can gray items the menu already has -- the language screen hides
@@ -1318,6 +1359,7 @@ static void hookOpenScreen(void* user, const BScreenConfig* cfg)
         && bmenu_open(&b->menu, b->project, b->screen, menuCallback, NULL)
         && b->menu.numItems > 0) {
         b->menu.sound = fesound_play;      // MakeFrontendSound
+        b->menu.filterPort = screenFilterPort(cfg->hash);
         b->hasMenu = true;
     }
 }
@@ -2776,6 +2818,28 @@ static void lobbyLog(const char* line)
     logLine("%s", line);
 }
 
+// A wireless race's frames (netstep.h): unreliable, each message
+// repeating what the other side still needs.
+static int netStepSend(int i, uint8_t type, const void* data, size_t n)
+{
+    WlLink* l = wireless_peer_link(i);
+    return l ? wl_link_send(l, type, data, n, 0) : 0;
+}
+
+static const NetStepNet kNetStepNet = {
+    .peerAlive   = wireless_peer_alive,
+    .send        = netStepSend,
+    .recv        = lobbyNetRecv,
+    .setPatience = wireless_set_patience,
+};
+
+// The lockstep frame (lockFrameBegin): begun, its pad put and its record
+// awaited; and whether the last loop ran one, whose clocks then advance.
+static bool g_lockWaiting;
+static bool g_lockRan;
+static bool g_lockRaced;    // a lockstep frame ran with the coordinator up
+static u32  g_lockMenu;     // the flow's presses since the last begin
+
 static const LobbyNet kLobbyNet = {
     .start      = lobbyNetStart,
     .stop       = wireless_stop,
@@ -2844,12 +2908,41 @@ static void netRaceStartLoading(void)
                               : BGF_LOADING_TRACK_COMMON, BGF_NONE);
 }
 
+// GO: the race runs in lockstep from its first frame (netstep.h), every
+// place with a car racing. The pad each console's port 0 last read, its
+// own, was this console's alone: the first frame's edges are read against
+// a pad at rest instead, the same on every console. Port 1 has read
+// nothing on every console.
+static void netRaceGoRacing(void)
+{
+    const LobbyRace* r = netrace_race();
+    uint8_t          racing = 0;
+    NetStepPad       rest;
+    uint8_t*         last = (uint8_t*)PadRingData[0][
+        (JoystickRingBufferBottom - 1) & (JOYPAD_RING - 1)].ThePadData;
+
+    for (int p = 0; p < r->consoles && p < NETSTEP_MAX; p++)
+        if (netrace_driver(p) >= 0) racing |= (uint8_t)(1u << p);
+    racing |= (uint8_t)(1u << r->place);
+    netstep_start(r->place, r->consoles, r->peer, racing);
+    netstep_rest(&rest);
+    joyhid_from_wire(rest.ds2, last);
+    g_lockWaiting = false;
+    g_lockRan = false;
+    g_lockRaced = false;
+    g_lockMenu = 0;
+    logLine("netstep: clocks at GO: real %ld frames %ld, world %ld frames "
+            "%ld", (long)RealTimer, (long)RealTimeFrames, (long)WorldTimer,
+            (long)WorldTimeFrames);
+    trackflow_go_racing();
+}
+
 static const NetRaceGame kNetRaceGame = {
     .startRace     = netRaceStartRace,
     .selectedRide  = netRaceSelectedRide,
     .characterInfo = get_character_info,
     .startLoading  = netRaceStartLoading,
-    .goRacing      = trackflow_go_racing,
+    .goRacing      = netRaceGoRacing,
 };
 
 // SetHelpOverride (0x0016d448). The help menu (tHelpMenu) is not ported;
@@ -5048,6 +5141,75 @@ static void raceFrame(void)
     logRaceState();
 }
 
+static int flowInput(u32 kDown, int port);
+
+// gJoypadRead: in a lockstep frame each port reads its place's pad from
+// the frame's record (netstep.h), as the DualShock joyhid builds; else the
+// console's own buttons on port 0.
+static int32_t joypadRead(int32_t port, uint8_t* buf)
+{
+    const NetStepFrame* r = netstep_current();
+
+    if (r == NULL) return joyhid_read(port, buf);
+    joyhid_from_wire(r->pad[port].ds2, buf);
+    return 1;
+}
+
+// A wireless race's frame in lockstep (netstep.h), at the top of the loop
+// where the real step is measured. A frame begins by putting this
+// console's pad and its step -- from the last frame's begin to this one's
+// -- for the frame NETSTEP_DELAY on; it runs once its record is in, on the
+// record's step. A record a few milliseconds late is waited for here; one
+// later than that, the loop draws and pumps the link without stepping, and
+// asks again on the next. 1 when the frame runs.
+#define LOCK_SPIN_MS 8
+
+static bool lockFrame(uint32_t* ticker)
+{
+    const NetStepFrame* r;
+
+    if (!g_lockWaiting) {
+        NetStepPad pad;
+        uint8_t    buf[32];
+
+        prepare_real_timestep_from_ticker(ticker);
+        if (joyhid_read(0, buf))
+            memcpy(pad.ds2, buf + 2, NETSTEP_PAD_BYTES);
+        else
+            netstep_rest(&pad);
+        pad.menu = (uint16_t)g_lockMenu;
+        g_lockMenu = 0;
+        netstep_put(&pad, (uint8_t)RealTimeElapsedQuantized);
+        g_lockWaiting = true;
+    }
+    for (int tries = 0;; tries++) {
+        uint32_t now = (uint32_t)osGetTime();
+
+        if (wireless_state() != WIRELESS_OFF) wireless_pump(now);
+        if (netstep_poll(now)) break;
+        if (tries == LOCK_SPIN_MS) return false;
+        svcSleepThread(1000000LL);
+    }
+    r = netstep_current();
+    RealTimeElapsedQuantized = r->q;
+    RealTimeElapsed = GetRealTimeElapsedFromQuantized(r->q);
+    g_lockWaiting = false;
+    return true;
+}
+
+// The record's presses for the flow, each place's on its port: the two
+// players' (a third place's on, 37d-2).
+static int lockFlowInput(void)
+{
+    const NetStepFrame* r = netstep_current();
+    int                 redraw = 0;
+
+    for (int p = 0; r != NULL && p < JOYSTICK_PORTS; p++)
+        if ((r->live >> p) & 1)
+            redraw |= flowInput(r->pad[p].menu, p);
+    return redraw;
+}
+
 static void devLog(int slot, const char* fmt, ...)
 {
     static char last[DEV_SLOTS][192];
@@ -5620,9 +5782,11 @@ static void raceSoundMute(int32_t on)
     logLine("sound mute %d", (int)on);
 }
 
-// FlailerScreenList::JoyHandler and FlailerMenu's: this frame's presses to
-// the popups, the screen up and its menu. Nonzero when one went anywhere.
-static int flowInput(u32 kDown)
+// FlailerScreenList::JoyHandler and FlailerMenu's: this frame's presses on
+// `port` to the popups, the screen up and its menu. Nonzero when one went
+// anywhere. Port 0 is the console's; a wireless race's second player's
+// come on port 1 (netstep.h).
+static int flowInput(u32 kDown, int port)
 {
     int redraw = 0;
 
@@ -5645,18 +5809,19 @@ static int flowInput(u32 kDown)
         };
         for (int i = 0; i < NUM_BINDS; i++)
             if ((listDown & kBinds[i].key)
-                && bpopup_joy(&g_flow, 0, kBinds[i].ev, 1))
+                && bpopup_joy(&g_flow, port, kBinds[i].ev, 1))
                 flowDown &= ~kBinds[i].key;
         for (int i = 0; i < 2; i++)
             if ((listDown & kPopupBinds[i].key)
-                && bpopup_joy(&g_flow, 0, kPopupBinds[i].ev, 1))
+                && bpopup_joy(&g_flow, port, kPopupBinds[i].ev, 1))
                 flowDown &= ~kPopupBinds[i].key;
         if (flowDown != listDown) redraw = 1;
     }
     // The port's debug menu (debugmenu.h): L, R and D-Pad Up held together
     // on the main menu, the last of them pressed this frame, show its item.
     // The menu is entered again to find it, on it. The three go no further.
-    if (g_flow.screen && g_flow.screen->hash == BGF_SCREEN_NEW_MAIN_MENU
+    if (port == 0 && g_flow.screen
+        && g_flow.screen->hash == BGF_SCREEN_NEW_MAIN_MENU
         && !bpopup_any_active(&g_flow)) {
         const u32 chord = KEY_L | KEY_R | KEY_DUP;
         if ((hidKeysHeld() & chord) == chord && (flowDown & chord)) {
@@ -5676,10 +5841,14 @@ static int flowInput(u32 kDown)
     // consumes it, the current item has it as a select. That second half
     // is how START leaves PRESS START and skips the NFS intro; the title
     // screen only swallows the click.
+    // A screen given a port (hookSetScreenFilterPort) hears no other's;
+    // its menu filters the same.
+    int32_t filter = screenFilterPort(g_boot.screenHash);
+    bool    takes  = filter == -1 || filter == port;
     if (flowDown & KEY_START) {
         if (g_boot.hasMenu) {
-            bmenu_joy(&g_boot.menu, 0, BJOY_START, true);
-        } else {
+            bmenu_joy(&g_boot.menu, port, BJOY_START, true);
+        } else if (takes) {
             bgf_screen_event(&g_flow, BMSG_SCREEN_START_BUTTON, 0);
         }
         redraw = 1;
@@ -5688,8 +5857,8 @@ static int flowInput(u32 kDown)
     // SCREEN_BACK_BUTTON first and may veto the pop. A START that left no
     // screen took the handler with it, and RemoveEvent cleared the frame's
     // queued BACK.
-    if ((flowDown & KEY_B) && g_flow.screen) {
-        bgf_back_button(&g_flow, 0);
+    if ((flowDown & KEY_B) && g_flow.screen && takes) {
+        bgf_back_button(&g_flow, port);
         redraw = 1;
     }
     // JOY_EVENT_MAIN_MENU_SELECT_TRANSMISSION. The Mode Selects register a
@@ -5697,13 +5866,14 @@ static int flowInput(u32 kDown)
     // StartQuickRace reads that at the moment it runs. So it is a held
     // button, not a pressed one, and the state goes through every frame
     // rather than on an edge.
-    bscr_joy(&g_uiScreens, 0, BSCR_JOY_SELECT_TRANSMISSION,
-             (hidKeysHeld() & KEY_X) ? 1 : 0);
+    if (port == 0)
+        bscr_joy(&g_uiScreens, 0, BSCR_JOY_SELECT_TRANSMISSION,
+                 (hidKeysHeld() & KEY_X) ? 1 : 0);
 
     if (g_boot.hasMenu) {
         for (int i = 0; i < NUM_BINDS; i++) {
             if (!(flowDown & kBinds[i].key)) continue;
-            bmenu_joy(&g_boot.menu, 0, kBinds[i].ev, true);
+            bmenu_joy(&g_boot.menu, port, kBinds[i].ev, true);
             redraw = 1;
         }
     }
@@ -5931,6 +6101,7 @@ int main(int argc, char** argv)
     gPauseMenuCtorFn = pauseMenuNew;
     gPauseMenuDestroyFn = pause_menu_destroy;
     gPauseMenuEnterPauseFn = pause_menu_enter_pause;
+    gSetScreenFilterPortFn = hookSetScreenFilterPort;
     gPauseMenuExitPauseFn = pause_menu_exit_pause;
     gGrayMenuItemFn = pauseGrayMenuItem;
     gSummonPopupFn = pauseSummonPopup;
@@ -6297,6 +6468,7 @@ int main(int argc, char** argv)
     // that port drop what they held, and the replay and the pause menu's
     // resume register the type monitor again so it does (retail's).
     joyhid_install();
+    gJoypadRead = joypadRead;
     gJoyHidRaceLayoutFn = joyhidRaceLayout;
     gJoyResetPortDriversFn = realdriver_reset_port_joy_values;
     gRestoreTypeChangedHandlersFn = RestoreTypeChangedHandlers;
@@ -6929,6 +7101,7 @@ int main(int argc, char** argv)
     g_setup.wirelessPlayers = 1;
     lobby_init(&kLobbyNet, lobbyLog);
     netrace_init(&kNetRaceNet, &kNetRaceGame, lobbyLog);
+    netstep_init(&kNetStepNet, lobbyLog);
     lobby_on_start(netrace_begin);
     lobby_cpu_wish(lobbyCpuWish);
     gTrackFlowHoldRaceFn = netrace_hold;
@@ -7150,15 +7323,25 @@ int main(int argc, char** argv)
         // frame's end (0x0012f62c), which here is the top of the next one.
         // FrameCounter is the vertical-blank count PSX2VBlank keeps: the
         // top screen's, from citro3d (realtime.h).
-        if (clockStarted) {
+        //
+        // A wireless race steps in lockstep (lockFrame): a loop that runs
+        // no race frame advances no clock, and the step is the record's.
+        bool lockOn = netstep_on();
+        bool raceStep = true;
+        g_lockMenu |= menuDown;
+        if (clockStarted && (!lockOn || g_lockRan)) {
             AdvanceRealTime();
             AdvanceWorldTime();
         }
+        g_lockRan = false;
         clockStarted = true;
         FrameCounter = (int32_t)C3D_FrameCounter(0);
-        prepare_real_timestep_from_ticker(&frameTicker);
+        if (lockOn)
+            raceStep = lockFrame(&frameTicker);
+        else
+            prepare_real_timestep_from_ticker(&frameTicker);
 
-        uiTimer += (uint32_t)(int)(RealTimeElapsed * 4000.0f);
+        if (raceStep) uiTimer += (uint32_t)(int)(RealTimeElapsed * 4000.0f);
         uirender_set_time(&ui, (float)uiTimer * 0.00025f);
         // A race up as the frame begins takes its world step, and the
         // events, after the coordinator's TICK: raceFrame. One the flow
@@ -7219,46 +7402,75 @@ int main(int argc, char** argv)
             // In the frontend the screens have the pad before the flow's
             // pass. A race's have it after the coordinator's queue and
             // the players' events, below.
-            if (!raceUp && flowInput(menuDown)) redraw = 1;
+            if (!raceUp && flowInput(menuDown, 0)) redraw = 1;
 
             // The local wireless link, on whichever screen: what came in,
             // the resends and the network's status, before the screens
-            // read it (TASKS 37).
-            if (wireless_state() != WIRELESS_OFF)
+            // read it (TASKS 37). A lockstep race's was pumped in its wait.
+            if (wireless_state() != WIRELESS_OFF && !lockOn)
                 wireless_pump((uint32_t)osGetTime());
             // And a wireless race's setup, through the loads too.
             if (netrace_active()) netrace_frame(&g_flow);
+            // A wireless race shows this console's player alone (player.h)
+            // from its load on, until the race is gone. A place past the
+            // two players' is player 0's view for now (37d-2).
+            if (netrace_active() && netrace_stage() >= NR_LOADING) {
+                int place = netrace_place();
+                PlayerNetLocal = place == 1 ? 1 : 0;
+            } else if (pRaceCoordinator == NULL) {
+                PlayerNetLocal = -1;
+            }
+            eViewShowOne = PlayerNetLocal >= 0;
 
             // MainLoop: one pass of the flow per frame, by the real step.
             // bgf_frame is the flow's service and the menus' tick both.
             // With no race the race's three stamps are the same tick.
             frameMark("flow");
-            bgf_frame(&g_flow, RealTimeElapsed);
+            if (raceStep) bgf_frame(&g_flow, RealTimeElapsed);
             MainLoopTiming.ServiceGameFlow = bGetTicker();
             MainLoopTiming.MenuSystemTick = MainLoopTiming.ServiceGameFlow;
             MainLoopTiming.GenerateJoyEvents = MainLoopTiming.ServiceGameFlow;
             MainLoopTiming.WorldDoTimestep = MainLoopTiming.ServiceGameFlow;
             MainLoopTiming.UpdateCameraMovers = MainLoopTiming.ServiceGameFlow;
             if (raceUp && pRaceCoordinator != NULL) {
-                raceFrame();
+                if (raceStep) raceFrame();
                 // GenerateJoyEvents hands the Flailer and the players the
                 // same events, after ExecuteQueuedMessages: the START that
                 // resumes the race posts the unpause, and the players,
                 // still paused, let it go. Before the queue it would be
                 // racing again by the players' turn, and pause again.
-                if (flowInput(menuDown)) redraw = 1;
+                // In lockstep the presses are the record's.
+                if (lockOn) {
+                    if (raceStep && lockFlowInput()) redraw = 1;
+                } else if (flowInput(menuDown, 0)) {
+                    redraw = 1;
+                }
                 frameMark("race: the track's attach");
                 (void)raceAttachTrack();
             } else if (raceUp) {
                 // The coordinator went in the flow's pass (Quit Race's
                 // unloading): the pad is the screen's that is up.
-                if (flowInput(menuDown)) redraw = 1;
+                if (flowInput(menuDown, 0)) redraw = 1;
             } else if (g_flow.current == BGF_IN_FRONTEND) {
                 // MainLoop's UpdateCameraMovers, which raceFrame makes in
                 // a race; in the frontend the car select's camera is the
                 // one mover.
                 update_camera_movers();
             }
+            // The lockstep frame ran: the world's checksum after it, and
+            // on to the next. The race gone, lockstep ends (37f's end); not
+            // before its coordinator was ever up (the GO loop's flow makes
+            // it).
+            if (lockOn && raceStep) {
+                netstep_done(pCurrentWorld != NULL
+                             ? world_calculate_debug_checksum(pCurrentWorld)
+                             : 0);
+                g_lockRan = true;
+                if (pRaceCoordinator != NULL) g_lockRaced = true;
+            }
+            if (netstep_on() && g_lockRaced && pRaceCoordinator == NULL)
+                netstep_stop();
+
             // The Begin of unloading deleted the coordinator and is
             // unloading the track's files: the view lets go of the bundle
             // before anything else can read it.
@@ -7389,9 +7601,8 @@ int main(int argc, char** argv)
             C2D_SceneBegin(g_bot);
             // In a race the bottom screen is the HUD's other half
             // (hudsplit.h), and the frontend's panel when the HUD is down.
-            if (PlayerNumPlayers == 1 && PlayerPlayersByIndex[0] != NULL)
-                hudsplit_set_features(
-                    PlayerPlayersByIndex[0]->CurrentHudFeatures);
+            if (PLAYER_NUM_SHOWN() == 1 && player_shown(0) != NULL)
+                hudsplit_set_features(player_shown(0)->CurrentHudFeatures);
             if (uirender_draw_visible_bottom(&ui, BOT_W, BOT_H, 1.0f)) {
                 // eDisplayFrame's RenderTrackMap for each player, after
                 // the Flailer layers: the minimap, made bigger under the
@@ -7399,13 +7610,13 @@ int main(int argc, char** argv)
                 if (g_track.loaded) {
                     float mapScale = 1.0f, mapDx = 0.0f, mapDy = 0.0f;
 
-                    for (int i = 0; i < PlayerNumPlayers; i++) {
-                        player_render_track_map(PlayerPlayersByIndex[i]);
+                    for (int i = 0; i < PLAYER_NUM_SHOWN(); i++) {
+                        player_render_track_map(player_shown(i));
                     }
-                    if (PlayerNumPlayers == 1
-                        && PlayerPlayersByIndex[0]->pTrackMap != NULL) {
+                    if (PLAYER_NUM_SHOWN() == 1
+                        && player_shown(0)->pTrackMap != NULL) {
                         hudsplit_map_place(
-                            PlayerPlayersByIndex[0]->pTrackMap
+                            player_shown(0)->pTrackMap
                                 ->CurrentlyDisplayedMode,
                             &mapScale, &mapDx, &mapDy);
                     }

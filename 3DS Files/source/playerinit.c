@@ -87,7 +87,7 @@ struct Player *player_init(struct Player *p, JoystickPort port,
 {
     char name[32];
     void *mem;
-    int i;
+    int i, remote;
 
     // The Timers' constructors, in declaration order, then the two
     // members'.
@@ -140,7 +140,15 @@ struct Player *player_init(struct Player *p, JoystickPort port,
         p->nZoneCredits[i] = 0;
     }
 
-    if (RaceParametersNumPlayerCars != 2) {
+    // A wireless race's (player.h, PlayerNetLocal): this console's player
+    // has a race of one's view and mirror, and the other the second view,
+    // which nothing shows, and no mirror.
+    remote = PlayerNetLocal >= 0 && RaceParametersNumPlayerCars == 2
+          && number != PlayerNetLocal;
+    if (PlayerNetLocal >= 0 && RaceParametersNumPlayerCars == 2) {
+        p->ViewID = remote ? 2 : 1;
+        p->RearViewMirrorViewID = remote ? 0 : 3;
+    } else if (RaceParametersNumPlayerCars != 2) {
         p->ViewID = 1;
         p->RearViewMirrorViewID = 3;
     } else {
@@ -160,8 +168,10 @@ struct Player *player_init(struct Player *p, JoystickPort port,
     p->CurrentHudFeatures = 0;
     p->HudScreenHash = 0;
     p->NisOverlayHash = 0;
-    if (!RaceParametersAIDemoMode && !RaceParametersReplayDemoMode) {
-        if (RaceParametersNumPlayerCars != 2) {
+    // And this console's player a race of one's HUD; the other none.
+    if (!RaceParametersAIDemoMode && !RaceParametersReplayDemoMode
+        && !remote) {
+        if (RaceParametersNumPlayerCars != 2 || PlayerNetLocal >= 0) {
             p->HudScreenHash = PLAYER_HUD_SINGLE;
             p->NisOverlayHash = PLAYER_NIS_SINGLE;
         } else if (number == 0) {
@@ -172,7 +182,7 @@ struct Player *player_init(struct Player *p, JoystickPort port,
             p->NisOverlayHash = PLAYER_NIS_SPLIT_BOT;
         }
     }
-    if (RaceParametersBeACop)
+    if (RaceParametersBeACop && !remote)
         p->NisOverlayHash = PLAYER_NIS_BE_A_COP;
     nisoverlay_set_screen(&p->mFlailerNIS, p->NisOverlayHash);
 

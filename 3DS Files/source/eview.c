@@ -17,6 +17,7 @@ int32_t CurrentViewMode;
 int32_t RenderingViewMode;
 int32_t TweakerViewMode;
 int32_t EnvironmentMappingEnable = 1;
+int32_t eViewShowOne;
 
 bNode SolidList;
 bNode ModelList;
@@ -191,7 +192,7 @@ void eUpdateViewMode(void)
 {
     eView *v1 = eGetView(1), *v2 = eGetView(2), *v3 = eGetView(3);
 
-    if (first_mover(v1) != 0 && first_mover(v2) != 0)
+    if (first_mover(v1) != 0 && first_mover(v2) != 0 && !eViewShowOne)
         CurrentViewMode = 3;
     else if (first_mover(v1) != 0 && first_mover(v3) != 0)
         CurrentViewMode = 2;

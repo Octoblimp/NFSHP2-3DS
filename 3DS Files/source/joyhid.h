@@ -133,6 +133,12 @@ uint32_t joyhid_menu_pad(JoyHidMenuPad *p, int32_t cx, int32_t cy);
 // The DualShock 2 buffer for one reading.
 void joyhid_build(const JoyHidState *s, uint8_t buf[32]);
 
+// The buffer again from bytes 2 to 7 of one joyhid_build made, as a
+// wireless race's lockstep sends a pad (netstep.h): the buttons and the
+// sticks, with each pressure byte 255 where its button is down. So
+// from_wire(build's bytes 2 to 7) is build's buffer.
+void joyhid_from_wire(const uint8_t six[6], uint8_t buf[32]);
+
 // gJoypadRead: port 0 is the console and answers 1; port 1 answers 0,
 // nothing plugged in (joypad.c fills its read with 0xff, as retail's
 // failed scePadRead is). Reads hidKeysHeld, so it wants hidScanInput to

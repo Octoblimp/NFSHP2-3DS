@@ -95,9 +95,10 @@ static uint32_t gauge_features(struct Player *p)
     m = p->pCameraMover;
     if (m->vtbl->IsExteriorView(m))
         return HUD_GAUGES_OUTSIDE;
-    if (TheRaceParameters.NumPlayerCars == 2)
+    if (PLAYER_SHOWN_COUNT(TheRaceParameters.NumPlayerCars) == 2)
         return HUD_GAUGES_OUTSIDE;
-    if (pov->Type == POV_BUMPER && TheRaceParameters.NumPlayerCars == 1)
+    if (pov->Type == POV_BUMPER
+        && PLAYER_SHOWN_COUNT(TheRaceParameters.NumPlayerCars) == 1)
         return HUD_GAUGES;
     if (pov->Type == POV_INCAR)
         return HUD_GAUGES_IN_CAR;
@@ -109,7 +110,8 @@ uint32_t player_determine_hud_features(struct Player *p)
     const RaceParameters *rp = &TheRaceParameters;
     const tGlobalDisplaySettings *ds = &rp->GlobalDisplaySettings;
     int32_t cop = rp->BeACop;
-    int32_t np = PlayerNumPlayers;
+    // The players shown: a wireless race's console shows its own alone.
+    int32_t np = PLAYER_NUM_SHOWN();
     uint32_t f = HUD_MUSIC;
     uint32_t reset;
     RCState rc;
@@ -311,7 +313,7 @@ void player_set_track_map_mode(struct Player *p, int32_t mode)
     if (TheRaceParameters.BeACop != 0) {
         mode = valid_mode(BeTheCopModes, 2, mode);
         stored = &ds->BeTheCopTrackMapMode;
-    } else if (PlayerNumPlayers == 2) {
+    } else if (PLAYER_NUM_SHOWN() == 2) {
         mode = p->PlayerNumber >= 1 ? TRACKMAP_MODE_OFF
              : valid_mode(TwoPlayerModes, 2, mode);
         stored = &ds->TwoPlayerTrackMapMode;
@@ -502,10 +504,10 @@ static void show_gauges_outside(struct Player *p, uint32_t h, int32_t v)
 
     ChooseLoadableTextures(p->MyCar->pRideInfo->Type, units, &tex);
     if (units == 1)
-        t = PlayerNumPlayers < 2 ? tex.ThirdPerson
+        t = PLAYER_NUM_SHOWN() < 2 ? tex.ThirdPerson
                                  : bchunk_hash("3RDPERSONGAUGE_KMH");
     else
-        t = PlayerNumPlayers > 1 ? bchunk_hash("3RDPERSONGAUGE_MPH")
+        t = PLAYER_NUM_SHOWN() > 1 ? bchunk_hash("3RDPERSONGAUGE_MPH")
                                  : tex.ThirdPerson;
     flailer_change_texture(h, 0x9309e75c, t);
     set_visibility_all(h, off, sizeof off / sizeof off[0], 0);
@@ -676,7 +678,7 @@ static void show_radar(struct Player *p, uint32_t h, uint32_t f,
     int32_t first = 1, mirror = 0;
     int32_t i;
 
-    if (PlayerNumPlayers == 1) {
+    if (PLAYER_NUM_SHOWN() == 1) {
         p->bRadarOffset = 1;
         mirror = (chg & HUD_REAR_VIEW_MIRROR) != 0;
     }
@@ -689,7 +691,7 @@ static void show_radar(struct Player *p, uint32_t h, uint32_t f,
         float x, y;
 
         flailerobject_set_visibility(o, v);
-        if (PlayerNumPlayers != 1)
+        if (PLAYER_NUM_SHOWN() != 1)
             continue;
         if (p->fInitialRadarY == 0.0f && l0 != NULL) {
             flailerobject_get_top_left(l0, &x, &y);
@@ -821,7 +823,7 @@ void player_set_hud_features(struct Player *p, uint32_t f)
         p->pFlailerBigRaceExtension = find(h, 0x9a492668, FLAILER_TYPE_TEXT);
         flailer_set_visibility(h, 0x84bb420f, v);
         p->pFlailerBigRaceTotal = find(h, 0x84bb420f, FLAILER_TYPE_TEXT);
-        if (PlayerNumPlayers == 2 && p->PlayerNumber == 1) {
+        if (PLAYER_NUM_SHOWN() == 2 && p->PlayerNumber == 1) {
             flailer_set_object_color(h, 0x004e27a0, &PlayerTwoColor);
             flailer_set_object_color(h, 0x9a492668, &PlayerTwoColor);
         }
@@ -834,7 +836,7 @@ void player_set_hud_features(struct Player *p, uint32_t f)
         p->pFlailerLapTime = find(h, 0xfc1b498a, FLAILER_TYPE_TEXT);
         p->pFlailerLapCounter = find(h, 0x6486623b, FLAILER_TYPE_TEXT);
         p->pFlailerBestLap = find(h, 0xa8247197, FLAILER_TYPE_TEXT);
-        if (TheRaceParameters.BeACop == 0 && PlayerNumPlayers == 2 && on) {
+        if (TheRaceParameters.BeACop == 0 && PLAYER_NUM_SHOWN() == 2 && on) {
             p->pFlailerLeadTitle = find(h, 0xeb406fec, FLAILER_TYPE_TEXT);
             p->pFlailerLeadTime = find(h, 0xf7292837, FLAILER_TYPE_TEXT);
             flailer_set_visibility(h, 0xeb406fec, 1);
@@ -883,7 +885,7 @@ void player_set_hud_features(struct Player *p, uint32_t f)
             if (TheRaceParameters.BeACop != 0) {
                 mode = ds->BeTheCopTrackMapMode;
             } else {
-                mode = PlayerNumPlayers != 1 ? ds->TwoPlayerTrackMapMode
+                mode = PLAYER_NUM_SHOWN() != 1 ? ds->TwoPlayerTrackMapMode
                                              : ds->OnePlayerTrackMapMode;
                 if (p->PlayerSettings.PlayersHudState == 1
                     && mode == TRACKMAP_MODE_OFF)
@@ -1000,9 +1002,9 @@ void player_set_hud_features(struct Player *p, uint32_t f)
     if (chg & HUD_CINEMA_BARS) {
         // The bars' screen is shown when the bit is set.
         v = (int32_t)((f >> 25) ^ 1) & 1;
-        if (PlayerNumPlayers == 1) {
+        if (PLAYER_NUM_SHOWN() == 1) {
             screen_visibility(0x49c15518, v);
-        } else if (PlayerNumPlayers == 2) {
+        } else if (PLAYER_NUM_SHOWN() == 2) {
             if (TheRaceParameters.BeACop == 0
                 && (pCurrentRace == NULL
                     || (pCurrentRace->RaceStage != RACE_STAGE_FLYBY

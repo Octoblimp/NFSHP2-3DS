@@ -155,6 +155,21 @@ void joyhid_build(const JoyHidState *s, uint8_t buf[32])
     buf[7] = axis(-s->cy);
 }
 
+void joyhid_from_wire(const uint8_t six[6], uint8_t buf[32])
+{
+    uint32_t buttons = (uint32_t)six[0] | (uint32_t)six[1] << 8;
+    size_t i;
+
+    memset(buf, 0, 32);
+    buf[1] = 0x79;
+    memcpy(buf + 2, six, 6);
+    for (i = 0; i < sizeof(kMap) / sizeof(kMap[0]); i++) {
+        if (kMap[i].pressure != P_NONE
+            && !(buttons & (1u << kMap[i].button)))
+            buf[8 + kMap[i].pressure] = 255;
+    }
+}
+
 int32_t joyhid_read(int32_t port, uint8_t *buf)
 {
 #ifdef __3DS__
