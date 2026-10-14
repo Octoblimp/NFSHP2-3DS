@@ -62,7 +62,8 @@ and the client's place (1 on; the host is 0). Then it goes on. If the
 last client went as Start was pressed, the list comes back instead.
 
 If the network goes from under the host, it says local wireless could
-not start, and OK goes back to Ask.
+not start, and OK goes back to Ask. If the console's wireless is off,
+it says that instead (below).
 
 ### CPU racers (TASKS 37c-2)
 
@@ -115,6 +116,38 @@ frame, until the host's start message comes, and goes on. If the link
 goes first, it says "The link to name was lost.", and OK goes back to
 Ask. A failed join says so, and OK goes back to searching.
 
+### Wireless communication off (TASKS 62)
+
+The 3DS can have its wireless communication turned off: from the HOME
+Menu on a New 3DS, or the switch on an Old 3DS. The system says so on
+the shared page: NETWORK_STATE (0x1FF81067, `OS_SharedConfig->
+network_state`) is 7 then (3dbrew, "Configuration Memory"; 2 is
+Internet, 3, 4 and 6 local). `wireless_radio_off` reads it. The lobby
+asks through `LobbyNet.radioOff`, which `main.c` fills with that, or
+with the config's `WirelessOff 1` (below).
+
+- Host or Join with it off says "Wireless communication is turned off.
+  Turn it on from the HOME Menu to play over Local Wireless." UDS is
+  never started. OK goes back to Ask, so turned on again (the game
+  suspended on HOME), Host or Join works.
+- The same line wherever local wireless would not start or went with
+  it off: UDS failing to start, the network failing or going from under
+  the host.
+- Turned off with the link up (hosting, searching, a race found,
+  joined), the link goes down and the line says why, on the lobby's
+  next tick or on a press before it (other than BACK, which goes to Ask
+  as always). Nothing more is asked of the link: no start, host,
+  setOpen, scan, join or send.
+- Back in the lobby from the race's setup with a notice to show (a
+  console lost, `lobby_notice_next`), with it off the line is this one:
+  this console's wireless went, not the other's.
+
+With it on, a start that fails says "Local wireless could not start.
+Please try again." (the line used to ask whether the wireless switch
+was on, which a New 3DS does not have). Azahar's NETWORK_STATE is
+always 2, so `WirelessOff 1` in `sdmc:/nfshp2_config.txt` makes
+the lobby take it as off. It is off by default.
+
 ### Names
 
 A name is the console's user name, which UDS carries as UTF-8.
@@ -124,7 +157,7 @@ popup's lines) becomes `?`.
 
 ## The strings
 
-`portlang.c` holds 17 strings, each in the six languages retail ships
+`portlang.c` holds 18 strings, each in the six languages retail ships
 (English, French, German, Italian, Spanish, Swedish), in retail's
 encoding, Latin-1. Their IDs start at 2000000 (`PORTLANG_FIRST`), well
 past retail's last (980002). `langtab_get` answers those IDs from
@@ -150,11 +183,12 @@ starts a new line in a popup's message, as in retail's strings.
 | 2000009 | Waiting for $NAME to start the race. |
 | 2000010 | Start |
 | 2000011 | The link to $NAME was lost. |
-| 2000012 | Local wireless could not start. Is the wireless switch on? |
+| 2000012 | Local wireless could not start. Please try again. |
 | 2000013 | Could not join the race. |
 | 2000014 | Waiting for a car from: (netrace's) |
 | 2000015 | CPU Racers |
 | 2000016 | CPU racers: $N |
+| 2000017 | Wireless communication is turned off. Turn it on from the HOME Menu to play over Local Wireless. |
 
 ### How it looks
 
@@ -211,12 +245,20 @@ Session 99, 2 consoles with `-Race -Cpu 2`: the host's list said "CPU
 racers: 7" alone and 6 once the client was in; A on CPU Racers counted
 0, 1 and 2, and Start went with "2 consoles, 2 CPU racers".
 
+`-WirelessOff` puts `WirelessOff 1` on every card: the host presses
+Host, the rest Join, and each must log "lobby: wireless communication
+off", go back to the question on OK, and never log "wireless: up".
+Session 101, 2 consoles: both passed, the line in three lines under the
+title with OK below, and Host and Join again after OK. Without it, 2
+consoles still reached Select Car: Azahar's NETWORK_STATE does not read
+as off.
+
 ## The check
 
 `tools/lobby_check.py` builds `tools/src/lobby_test.c` with `lobby.c`,
 `portlang.c` and the real flow and popups under them (`gameflow.c`,
 `bpopup.c`, `memcard.c`, `banim.c`). A fake network stands in for
-`wireless.c`. It runs 34 scenarios, each a script of presses and of
+`wireless.c`. It runs 50 scenarios, each a script of presses and of
 what the network does: hosting alone, with one, with seven and with a
 full network; clients coming and going; the network going; joining,
 Next past every race, a failed join, a lost host, leaving; no wireless;
@@ -224,7 +266,13 @@ back from car select; a language not yet chosen; French. Six are the
 CPU racers': a full grid's wish; counting through every count and back
 to none; the count held to the room as clients join and go, with A
 pressed as the last one fills it; no choice; a wish asked again on
-hosting again; French.
+hosting again; French. Sixteen are the console's wireless off (TASKS
+62), whose network the fake sees go two frames after the shared page
+says so: Host and Join with it off, with UDS failing too, in French and
+with no language, turned on again; turned off while hosting, searching,
+on a race found and joined; on the frame of a press (Join, Next past
+the last, Start, BACK); and during the race's setup, back in the lobby
+with the race's notice, against the same with it on.
 
 At every frame and after every press it checks:
 
@@ -241,7 +289,9 @@ At every frame and after every press it checks:
   after the last;
 - each call on the network only when it makes sense (no host or scan
   while on a network, no join of a host the last scan did not see, no
-  send to a client that went);
+  send to a client that went; no start, host, setOpen, scan, join or
+  send with the wireless off);
+- the lobby's link down by the end of a frame with the wireless off;
 - on to car select only with the link up and the network closed, each
   client told once its place and the count, and a joiner only after
   reading its start;
@@ -250,8 +300,8 @@ At every frame and after every press it checks:
 
 The last line is `total faults N`, and the check passes at 0.
 
-`--mutate` makes 87 mutations of `lobby.c` (out of tree, in parallel).
-84 are caught and 3 are equivalent, named in the script:
+`--mutate` makes 104 mutations of `lobby.c` (out of tree, in parallel).
+101 are caught and 3 are equivalent, named in the script:
 
 - `lb-latin1-two`: a two-byte lead's bit 5 is always clear, so masking
   it again changes nothing.

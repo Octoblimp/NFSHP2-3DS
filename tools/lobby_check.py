@@ -23,7 +23,14 @@ what it shows and does each frame (the harness's header has the list):
   - the host's CPU racers (TASKS 37c-2): a Full Grid, none counted on to
     six and round, five that fit fewer as consoles come and more as they
     go, eight consoles with no room and A on CPU Racers as the eighth
-    comes, no choice, hosting again, French.
+    comes, no choice, hosting again, French;
+  - the console's wireless communication off (TASKS 62): on Host and on
+    Join (UDS never asked to start), with UDS failing too, in French and
+    with no language, turned on again; turned off while hosting,
+    searching, on a race found and joined; on the frame of a press (Join,
+    Next past the last, Start, B) before the network is seen to go; and
+    during the race's setup, back in the lobby, against the race's own
+    notice with it on.
 
 The harness prints "faults 0" after each scenario that holds and "total
 faults 0" at the end. A mutant is caught only when the harness finds a
@@ -143,11 +150,10 @@ MUTATIONS = [
     M("lb-list-say", "if (strcmp(msg, L.message)) say(\"lobby: list", "say(\"lobby: list"),
     M("lb-list-buttons", "showPopup(gf, clients > 0, PORTLANG_START",
       "showPopup(gf, 1, PORTLANG_START"),
-    M("lb-host-fail-down", "        linkDown();\n        notice(gf, "
-      "PORTLANG_WIRELESS_OFF, \"\", LS_ASK);\n        return;\n    }\n"
-      "    L.state   = LS_HOSTING;",
-      "        notice(gf, PORTLANG_WIRELESS_OFF, \"\", LS_ASK);\n"
-      "        return;\n    }\n    L.state   = LS_HOSTING;"),
+    M("lb-host-fail-down", "        linkDown();\n        offNotice(gf);\n"
+      "        return;\n    }\n    L.state   = LS_HOSTING;",
+      "        offNotice(gf);\n        return;\n    }\n"
+      "    L.state   = LS_HOSTING;"),
     M("lb-host-max", "L.net.host(WIRELESS_MAX_CONSOLES, NULL, 0)",
       "L.net.host(2, NULL, 0)"),
     M("lb-host-gone", "            if (L.net.state() != WIRELESS_HOSTING) {",
@@ -266,6 +272,39 @@ MUTATIONS = [
       "else if (0) data->noise = BSND_NONE;"),
     M("lb-dismiss-index", "            L.popup = -1;\n            if (data) {",
       "            if (data) {"),
+    # -- the console's wireless off (TASKS 62)
+    M("lb-radio-never", "return L.net.radioOff && L.net.radioOff();",
+      "return 0;"),
+    M("lb-radio-host", "if (radioOff() || !L.net.start()) {",
+      "if (!L.net.start()) {"),
+    M("lb-radio-join", "if (!radioOff() && L.net.start())",
+      "if (L.net.start())"),
+    M("lb-radio-line", "    if (radioOff()) {\n        say(", "    if (0) {\n        say("),
+    M("lb-radio-say", "        say(\"lobby: wireless communication off\");\n", ""),
+    M("lb-radio-id", "notice(gf, PORTLANG_WIRELESS_DISABLED, \"\", LS_ASK);",
+      "notice(gf, PORTLANG_WIRELESS_OFF, \"\", LS_ASK);"),
+    M("lb-radio-after", "notice(gf, PORTLANG_WIRELESS_DISABLED, \"\", LS_ASK);",
+      "notice(gf, PORTLANG_WIRELESS_DISABLED, \"\", LS_SEARCHING);"),
+    M("lb-radio-hosting", "if (L.state != LS_HOSTING && L.state != LS_SEARCHING",
+      "if (L.state != LS_SEARCHING"),
+    M("lb-radio-searching", " && L.state != LS_SEARCHING\n", "\n"),
+    M("lb-radio-found", "        && L.state != LS_FOUND && L.state != LS_JOINED)",
+      "        && L.state != LS_JOINED)"),
+    M("lb-radio-joined", "        && L.state != LS_FOUND && L.state != LS_JOINED)",
+      "        && L.state != LS_FOUND)"),
+    M("lb-radio-went-down", "    if (!radioOff()) return 0;\n    linkDown();\n",
+      "    if (!radioOff()) return 0;\n"),
+    M("lb-radio-tick", "    if (radioWent()) {\n        offNotice(gf);\n"
+      "        return;\n    }\n", ""),
+    M("lb-radio-press", "if (a != A_BACK && radioWent()) {", "if (0) {"),
+    M("lb-radio-press-back", "if (a != A_BACK && radioWent()) {",
+      "if (radioWent()) {"),
+    M("lb-radio-return", "                if (radioOff()) offNotice(gf);\n"
+      "                else notice(gf, id, L.nextName, LS_ASK);\n",
+      "                notice(gf, id, L.nextName, LS_ASK);\n"),
+    M("lb-radio-return-on", "                if (radioOff()) offNotice(gf);\n"
+      "                else notice(gf, id, L.nextName, LS_ASK);\n",
+      "                offNotice(gf);\n"),
 ]
 
 EQUIVALENT = {

@@ -104,6 +104,12 @@ extern int32_t ConfigWirelessTest;          // 0
 extern int32_t ConfigWirelessTestSeconds;   // 120
 extern int32_t ConfigWirelessTestConsoles;  // 2
 
+// The port's own: "WirelessOff 1" has the Local Wireless lobby take the
+// console's wireless communication as turned off (TASKS 62), as the
+// HOME Menu's setting does; Azahar's is never off. Off by default
+// (2026-10-14).
+extern int32_t ConfigWirelessOff;           // 0
+
 // SkipFE as the image reads it, `lw -23220(gp)`: gameflow's skipFE
 // through gPlayerCamSkipFE, 0 while that is unset.
 int32_t config_skip_fe(void);

@@ -116,8 +116,10 @@ sends its pad 3 frames ahead, the host builds each frame's record with
 its step, and every console runs the frame on that record alone; each
 shows its own car, mirror and HUD. On Azahar two copies raced with
 every logged checksum matching through frame 1200, 28 FPS each.
-Next: TASKS 62 (wireless off message), then 37e, 37f, 37g, then TASKS
-61, 46, 60 and 59.**
+TASKS 62 is done too: Host or Join with the 3DS's wireless
+communication off says so and that it is turned on from the HOME Menu
+(`wireless_radio_off`, NETWORK_STATE 7; `WirelessOff 1` for Azahar).
+Next: 37e, 37f, 37g, then TASKS 61, 46, 60 and 59.**
 
 **Now (Session 100, 2026-10-14): TASKS 37d, the lockstep race, is in
 progress, and nothing of it is committed. `netstep.c` (the lockstep

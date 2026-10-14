@@ -186,6 +186,13 @@ static void linkDown(void)
     say("lobby: link down");
 }
 
+// The console's wireless communication turned off (TASKS 62): nothing
+// local starts, and what was up has gone.
+static int radioOff(void)
+{
+    return L.net.radioOff && L.net.radioOff();
+}
+
 static int clientsAlive(void)
 {
     int i, n = 0;
@@ -215,6 +222,31 @@ static void notice(BGameFlow* gf, int32_t id, const char* name,
     fill(L.message, sizeof L.message, text(gf, id), name, 0, 0);
     say("lobby: notice %s", L.message);
     showPopup(gf, 1, LANG_OK, A_OK, 0, 0, 0);
+}
+
+// Local wireless would not come up, or went: that the console's wireless
+// is off when it is, so it can be turned on; OK, then the question.
+static void offNotice(BGameFlow* gf)
+{
+    if (radioOff()) {
+        say("lobby: wireless communication off");
+        notice(gf, PORTLANG_WIRELESS_DISABLED, "", LS_ASK);
+    } else {
+        notice(gf, PORTLANG_WIRELESS_OFF, "", LS_ASK);
+    }
+}
+
+// Turned off with the link up (from the HOME Menu, the game suspended):
+// the network went with it, so the lobby's link goes, before a tick or a
+// press asks anything more of it. Whether it did.
+static int radioWent(void)
+{
+    if (L.state != LS_HOSTING && L.state != LS_SEARCHING
+        && L.state != LS_FOUND && L.state != LS_JOINED)
+        return 0;
+    if (!radioOff()) return 0;
+    linkDown();
+    return 1;
 }
 
 // The CPU racers the host's list shows: as many as wished, of those that
@@ -287,13 +319,13 @@ static void nextCpu(BGameFlow* gf)
 
 static void startHosting(BGameFlow* gf)
 {
-    if (!L.net.start()) {
-        notice(gf, PORTLANG_WIRELESS_OFF, "", LS_ASK);
+    if (radioOff() || !L.net.start()) {
+        offNotice(gf);
         return;
     }
     if (!L.net.host(WIRELESS_MAX_CONSOLES, NULL, 0)) {
         linkDown();
-        notice(gf, PORTLANG_WIRELESS_OFF, "", LS_ASK);
+        offNotice(gf);
         return;
     }
     L.state   = LS_HOSTING;
@@ -407,12 +439,16 @@ static void joinFound(BGameFlow* gf)
 
 static void tick(BGameFlow* gf)
 {
+    if (radioWent()) {
+        offNotice(gf);
+        return;
+    }
     switch (L.state) {
         case LS_HOSTING:
             if (L.net.state() != WIRELESS_HOSTING) {
                 say("lobby: the network went");
                 linkDown();
-                notice(gf, PORTLANG_WIRELESS_OFF, "", LS_ASK);
+                offNotice(gf);
                 break;
             }
             // A place kept for one that went would keep the next out.
@@ -459,12 +495,16 @@ static void tick(BGameFlow* gf)
 // What a popup's button, or BACK, says in each state.
 static void answer(BGameFlow* gf, int a)
 {
+    if (a != A_BACK && radioWent()) {
+        offNotice(gf);
+        return;
+    }
     switch (L.state) {
         case LS_ASK:
             if (a == A_HOST) startHosting(gf);
             else if (a == A_JOIN) {
-                if (L.net.start()) startSearching(gf, 0);
-                else notice(gf, PORTLANG_WIRELESS_OFF, "", LS_ASK);
+                if (!radioOff() && L.net.start()) startSearching(gf, 0);
+                else offNotice(gf);
             } else if (a == A_BACK) {
                 say("lobby: back");
                 L.state = LS_OFF;
@@ -552,6 +592,8 @@ void lobby_callback(BGameFlow* gf, BScreenMessage msg,
     switch (msg) {
         // Coming back from car select takes the link down: the question
         // again, as at the start, after the race's notice if it left one.
+        // A console lost with this one's wireless off was this one: that
+        // is the notice.
         case BMSG_SCREEN_ACTIVATE:
             L.popup = -1;
             if (L.nextNotice) {
@@ -559,7 +601,8 @@ void lobby_callback(BGameFlow* gf, BScreenMessage msg,
 
                 L.nextNotice = 0;
                 linkDown();
-                notice(gf, id, L.nextName, LS_ASK);
+                if (radioOff()) offNotice(gf);
+                else notice(gf, id, L.nextName, LS_ASK);
                 break;
             }
             toAsk(gf);

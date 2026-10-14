@@ -20,6 +20,10 @@
 //     Once joined, the host's name until the host starts; BACK leaves.
 //   - The link lost, local wireless off or a join refused: the line, OK,
 //     and back to the question.
+//   - The console's wireless communication turned off (TASKS 62), on Host
+//     or Join or under the lobby with the link up: the line that says so
+//     and that it is turned on from the HOME Menu, OK, the question. UDS
+//     is never started with it off.
 //
 // Start goes to every client as LOBBY_MSG_START, and every console then
 // goes on to "Select Car", the lobby pushed under it. Coming back to the
@@ -72,6 +76,10 @@ typedef struct LobbyNet {
     // A reliable message to peer i, and the next one from it.
     int           (*send)(int i, uint8_t type, const void* data, size_t n);
     int           (*recv)(int i, WlMsg* out);
+    // Whether the console's wireless communication is turned off (TASKS
+    // 62, wireless_radio_off): asked before start, and each frame with
+    // the link up. NULL: never.
+    int           (*radioOff)(void);
 } LobbyNet;
 
 // What the lobby says it did, for the log and the check.

@@ -43,12 +43,19 @@
 # game must run silent: each copy has to log "Sound: ndsp unavailable", and
 # still pass with no unmapped read (a driver call through NULL).
 #
+# With -WirelessOff (TASKS 62) each card's config has "WirelessOff 1", the
+# console's wireless communication taken as off (Azahar's never is): the
+# host presses Host and the rest Join, and each must say so ("lobby:
+# wireless communication off", a shot of the line), go back to the
+# question on OK, and never start UDS (no "wireless: up").
+#
 # Usage:
 #   powershell -File tools/run_azahar_lobby.ps1
 #   powershell -File tools/run_azahar_lobby.ps1 -Consoles 4
 #   powershell -File tools/run_azahar_lobby.ps1 -Consoles 2 -Race
 #   powershell -File tools/run_azahar_lobby.ps1 -Consoles 2 -Race -NoDsp
 #   powershell -File tools/run_azahar_lobby.ps1 -Consoles 3 -Race -Cpu 0
+#   powershell -File tools/run_azahar_lobby.ps1 -Consoles 2 -WirelessOff
 #
 # Screenshots of each copy go to %TEMP%\nfshp2_lobby. Exit code 0 when
 # every copy reached Select Car from the lobby (with -Race: racing, every
@@ -59,6 +66,7 @@ param(
     [int]$Consoles = 2,           # the host and the rest
     [switch]$Race,                # on to a loaded race (37c)
     [switch]$NoDsp,               # no DSP firmware on the cards: silent
+    [switch]$WirelessOff,         # each console's wireless taken as off (62)
     [ValidateRange(-1, 7)]
     [int]$Cpu = 2,                # the host's CPU racers; -1 as shown
     [int]$Drive = 30,             # -Race: seconds of gas once all race
@@ -71,6 +79,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+if ($WirelessOff -and $Race) { throw "-WirelessOff stops in the lobby: no -Race with it" }
 
 $root = Split-Path -Parent $PSScriptRoot
 if ($Target3dsx -eq "") { $Target3dsx = Join-Path $root "3DS Files\NFSHP2-3DS.3dsx" }
@@ -275,7 +284,9 @@ function Prepare([string]$name, [string]$nick, [bool]$isHost) {
     }
     SetConsoleName $cfg $nick
     # The frontend, not the soak: no WirelessTest and no SkipFE.
-    Set-Content -Path (Join-Path $user "sdmc\nfshp2_config.txt") -Encoding ASCII -Value @("DebugLog 1")
+    $lines = @("DebugLog 1")
+    if ($WirelessOff) { $lines += "WirelessOff 1" }
+    Set-Content -Path (Join-Path $user "sdmc\nfshp2_config.txt") -Encoding ASCII -Value $lines
     LinkData $user
     $log = Join-Path $user "sdmc\nfshp2_debug.txt"
     Remove-Item $log -ErrorAction SilentlyContinue
@@ -493,6 +504,23 @@ $joinBase = $boot + @(
     Step "car select" @{ Pattern = "flow enter Select Car [0-9a-f]{8}"; Wait = 30; Settle = 2000; Shot = "carsel" }
 )
 
+# -WirelessOff: Host, or Join, says the console's wireless is off; OK
+# asks again.
+if ($WirelessOff) {
+    $offEnd = @(
+        Step "ok" @{ Key = $VK_A; Pattern = "lobby: ask"; Settle = 1500; Shot = "ask-again" }
+    )
+    $hostSteps = $boot + @(
+        Step "host off" @{ Key = $VK_A; Pattern = "lobby: wireless communication off"; Settle = 1500;
+                          Shot = "off-host" }
+    ) + $offEnd
+    $joinBase = $boot + @(
+        Step "join pick" @{ Key = $VK_RIGHT; Settle = 700 }
+        Step "join off" @{ Key = $VK_A; Pattern = "lobby: wireless communication off"; Settle = 1500;
+                          Shot = "off-join" }
+    ) + $offEnd
+}
+
 # -Race: the car (see run_azahar_coprace.ps1), then the host's track and
 # each client's wait, the load, GO and the race.
 $joinRace = @()
@@ -589,7 +617,7 @@ function Advance($side) {
                 $side.Seen[$step.Name] = $true
                 $side.SettleUntil = $now.AddMilliseconds($step.Settle)
                 $side.Phase = "settle"
-                if ($step.Name -match "^(lobby|host|search|found|join|started|car select|all in|start|track select|host start|built|car sent|taken|go|racing|race on)$") {
+                if ($step.Name -match "^(lobby|host|search|found|join|started|car select|all in|start|track select|host start|built|car sent|taken|go|racing|race on|host off|join off|ok)$") {
                     Say $side $step.Name
                 }
             } elseif ($now -gt $side.Deadline) {
@@ -701,6 +729,9 @@ foreach ($s in $sides) {
     } elseif ($silent -and -not $s.Failed) {
         $s.Failed = "no sound: ndsp unavailable"
     }
+    if ($WirelessOff -and @(LogLines $s "^wireless: up").Count -gt 0 -and -not $s.Failed) {
+        $s.Failed = "UDS started with the wireless off"
+    }
     if (Test-Path $s.AzLog) {
         $crash = @(Select-String -Path $s.AzLog -Pattern $crashSigs | Select-Object -First 3)
         foreach ($c in $crash) {
@@ -782,14 +813,15 @@ if ($Race) {
 }
 Write-Host ""
 $failed = @($sides | Where-Object { -not $_.Done -or $_.Failed })
-$goal = if ($Race) { "racing" } else { "Select Car" }
+$goal = if ($WirelessOff) { "the wireless-off line, then the question" } elseif ($Race) { "racing" } else { "Select Car" }
 foreach ($s in $sides) {
     $v = if ($s.Done -and -not $s.Failed) { "PASS ($goal)" } else { "FAIL ($($s.Failed))" }
     Write-Host ("{0} {1,-9} {2}" -f $s.Name, $s.Nick, $v)
 }
 Write-Host "Screenshots in $OutDir"
 if ($failed.Count -eq 0) {
-    if ($Race) { Write-Host "All $Consoles racing from the lobby, GO on seed $hostSeed." }
+    if ($WirelessOff) { Write-Host "All $Consoles said the wireless is off, and asked again." }
+    elseif ($Race) { Write-Host "All $Consoles racing from the lobby, GO on seed $hostSeed." }
     else { Write-Host "All $Consoles reached Select Car from the lobby." }
 } else {
     exit 1

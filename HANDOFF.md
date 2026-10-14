@@ -22684,3 +22684,57 @@ whole of it.
 TASKS 62 (a message when the 3DS's wireless is off), then 37e, 37f and
 37g, then TASKS 61, 46, 60 and 59. Still to ask the user: TASKS 47's
 bridge and 52's popups.
+
+## Session 101 (continued) -- TASKS 62, wireless communication off (done)
+
+### What changed
+
+- `wireless.c`/`.h`: `wireless_radio_off()`, the shared page's
+  NETWORK_STATE (0x1FF81067, `OS_SharedConfig->network_state`) at 7, the
+  console's wireless communication off (3dbrew, "Configuration
+  Memory"; 2 is Internet, 3/4/6 local). udsInit's failure now logs the
+  state too.
+- `lobby.c`/`.h`: `LobbyNet.radioOff` (NULL: never). Host or Join with
+  it off: the new notice, no start. `offNotice` picks it over the old
+  WIRELESS_OFF line wherever UDS would not start or went. `radioWent`:
+  with the link up (hosting, searching, found, joined) and it off, the
+  link down and the notice, from the tick and from any press but BACK
+  (before the tick). ACTIVATE with a race's notice pending shows it in
+  place of that notice.
+- `portlang.c`/`.h`: `PORTLANG_WIRELESS_DISABLED` (2000017) in the six
+  languages; WIRELESS_OFF (2000012) now "Local wireless could not
+  start. Please try again." (it asked about a switch the New 3DS lacks).
+- `configitems.c`/`.h`: `WirelessOff 1` takes it as off (Azahar's is
+  always 2); `main.c`'s `lobbyNetRadioOff`.
+- `tools/src/lobby_test.c`: the fake's radio (`radioOffFrom`/`Until`,
+  the network seen to go 2 frames later), a fault on start, host,
+  setOpen, scan, join or send with it off and on the lobby's link up at
+  a frame's end, key "N" (`lobby_notice_next`), 16 scenarios; the old
+  ones padded with the two new fields. `tools/lobby_check.py`: 17
+  mutations.
+- `tools/run_azahar_lobby.ps1 -WirelessOff`.
+- `docs/formats/lobby.md`: "Wireless communication off".
+
+### Checks
+
+- lobby_check: 50 scenarios, faults 0; `--mutate`: 104, 101 caught, 3
+  equivalent (the old three). netrace, carsel, fred, fredrace,
+  trackflow, tracksel, drivingchoice: 0 differ / faults 0; langtab 0
+  differ.
+- tools/build_cia.ps1: built, relocations and shaders OK.
+- `run_azahar_lobby.ps1 -Consoles 2 -WirelessOff`: both PASS. Each
+  logged "lobby: wireless communication off" and the notice, no
+  "wireless: up", and "lobby: ask" after OK. The shot: the line in
+  three lines under the "Local Wireless" title, OK below.
+- Without it, `run_azahar_lobby.ps1 -Consoles 2` still passed: Azahar's state does not read as off.
+
+### Not tried
+
+- A real 3DS with the wireless off: whether NETWORK_STATE is 7 there as
+  3dbrew says. udsInit's failure logs the state, so the debug log will
+  show it if it is not.
+
+### Next
+
+37e (determinism), 37f and 37g, then TASKS 61, 46, 60 and 59. Still to
+ask the user: TASKS 47's bridge and 52's popups.

@@ -45,6 +45,7 @@ int32_t ConfigDebugMenu;                    // the port's own
 int32_t ConfigWirelessTest;                 // the port's own
 int32_t ConfigWirelessTestSeconds = 120;    // the port's own
 int32_t ConfigWirelessTestConsoles = 2;     // the port's own
+int32_t ConfigWirelessOff;                  // the port's own
 
 int32_t config_skip_fe(void)
 {
@@ -96,6 +97,7 @@ static const ConfigItem kConfigItems[] = {
     { "WirelessTest",               &ConfigWirelessTest,         0 },
     { "WirelessTestSeconds",        &ConfigWirelessTestSeconds,  0 },
     { "WirelessTestConsoles",       &ConfigWirelessTestConsoles, 0 },
+    { "WirelessOff",                &ConfigWirelessOff,          0 },
 };
 
 static void config_log(ConfigItemsLogFn log, const char *fmt,

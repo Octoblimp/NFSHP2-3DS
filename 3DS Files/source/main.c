@@ -2818,6 +2818,13 @@ static void lobbyLog(const char* line)
     logLine("%s", line);
 }
 
+// The console's wireless communication off (TASKS 62), or the config's
+// WirelessOff, Azahar's never being.
+static int lobbyNetRadioOff(void)
+{
+    return ConfigWirelessOff || wireless_radio_off();
+}
+
 // A wireless race's frames (netstep.h): unreliable, each message
 // repeating what the other side still needs.
 static int netStepSend(int i, uint8_t type, const void* data, size_t n)
@@ -2856,6 +2863,7 @@ static const LobbyNet kLobbyNet = {
     .selfName   = wireless_self_name,
     .send       = lobbyNetSend,
     .recv       = lobbyNetRecv,
+    .radioOff   = lobbyNetRadioOff,
 };
 
 // The host's first count of CPU racers (lobby.h, TASKS 37c-2), from the

@@ -61,18 +61,15 @@ static const char* const kStrings[PORTLANG_END - PORTLANG_FIRST][6] = {
       "Il collegamento con $NAME si \xe8 interrotto.",
       "Se perdi\xf3 la conexi\xf3n con $NAME.",
       "Anslutningen till $NAME br\xf6ts." },
-    // PORTLANG_WIRELESS_OFF
-    { "Local wireless could not start. Is the wireless switch on?",
-      "Impossible de lancer le sans-fil local. La communication sans fil "
-      "est-elle activ\xe9" "e ?",
-      "Lokal kabellos konnte nicht starten. Ist die "
-      "Drahtlos-Kommunikation aktiviert?",
-      "Impossibile avviare il wireless locale. La comunicazione wireless "
-      "\xe8 attiva?",
-      "No se pudo iniciar el modo inal\xe1mbrico. \xbf" "Est\xe1 activada "
-      "la conexi\xf3n inal\xe1mbrica?",
-      "Lokalt tr\xe5" "dl\xf6st kunde inte starta. \xc4r tr\xe5" "dl\xf6s "
-      "kommunikation p\xe5?" },
+    // PORTLANG_WIRELESS_OFF: with the console's wireless on, which
+    // PORTLANG_WIRELESS_DISABLED says when it is not
+    { "Local wireless could not start. Please try again.",
+      "Impossible de lancer le sans-fil local. Veuillez r\xe9" "essayer.",
+      "Lokal kabellos konnte nicht starten. Bitte versuche es erneut.",
+      "Impossibile avviare il wireless locale. Riprova.",
+      "No se pudo iniciar el modo inal\xe1mbrico local. Int\xe9ntalo de "
+      "nuevo.",
+      "Lokalt tr\xe5" "dl\xf6st kunde inte starta. F\xf6rs\xf6k igen." },
     // PORTLANG_JOIN_FAILED
     { "Could not join the race.", "Impossible de rejoindre la course.",
       "Beitritt zum Rennen fehlgeschlagen.",
@@ -88,6 +85,19 @@ static const char* const kStrings[PORTLANG_END - PORTLANG_FIRST][6] = {
     // PORTLANG_CPU_RACERS_N
     { "CPU racers: $N", "Pilotes IA : $N", "KI-Fahrer: $N",
       "Piloti CPU: $N", "Pilotos CPU: $N", "Datorf\xf6rare: $N" },
+    // PORTLANG_WIRELESS_DISABLED
+    { "Wireless communication is turned off. Turn it on from the HOME "
+      "Menu to play over Local Wireless.",
+      "La communication sans fil est d\xe9sactiv\xe9" "e. Activez-la "
+      "depuis le menu HOME pour jouer en sans fil local.",
+      "Die Drahtlos-Kommunikation ist deaktiviert. Aktiviere sie im "
+      "HOME-Men\xfc, um lokal kabellos zu spielen.",
+      "La comunicazione wireless \xe8 disattivata. Attivala dal menu HOME "
+      "per giocare in wireless locale.",
+      "La conexi\xf3n inal\xe1mbrica est\xe1 desactivada. Act\xedvala "
+      "desde el men\xfa HOME para jugar en modo inal\xe1mbrico local.",
+      "Tr\xe5" "dl\xf6s kommunikation \xe4r avst\xe4ngd. Sl\xe5 p\xe5 den "
+      "fr\xe5n HOME-menyn f\xf6r att spela lokalt tr\xe5" "dl\xf6st." },
 };
 
 const char* portlang_get(int32_t languageEnum, int32_t id, size_t* outLen)

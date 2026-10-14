@@ -34,6 +34,9 @@
 //     one LOBBY_MSG_START with the count and its place, a joiner having
 //     read one; the start told once, with the CPU racers the host's list
 //     showed (none on a joiner or with no choice);
+//   - with the console's wireless communication off (TASKS 62): no start,
+//     host, scan or join asked of the link, and the lobby's link down by
+//     the end of the frame it went off on;
 //
 // and at the end the scenario's own: the screen it ends on, the link up
 // or down, and the lobby's log lines it must have said, in order.
@@ -80,7 +83,9 @@ typedef struct {
 typedef struct {
     int         frame;
     const char* key;       // "A", "B", "L", "R"; "CB" is B on car select,
-                           // "X" a change to Prev from outside the lobby
+                           // "X" a change to Prev from outside the lobby,
+                           // "N" the race's notice for the lobby's return
+                           // (lobby_notice_next: the link to hp2host lost)
 } Input;
 
 typedef struct {
@@ -103,7 +108,15 @@ typedef struct {
     int         junkFirst;      // a joined host sends another message first
     int         cpuFn;          // a CPU racer wish (lobby_cpu_wish), and
     int         cpuWish;        // what it says at each hosting
+    int         radioOffFrom;   // the frame the console's wireless goes
+    int         radioOffUntil;  // off, 0 never; and comes on, 0 never
 } Scenario;
+
+#define RADIO_OFF_LINE "lobby: notice Wireless communication is turned " \
+                       "off. Turn it on from the HOME Menu to play over " \
+                       "Local Wireless."
+#define WIRELESS_OFF_LINE "lobby: notice Local wireless could not start. " \
+                          "Please try again."
 
 #define NONE {{0}}
 
@@ -111,7 +124,7 @@ static const Scenario kScenarios[] = {
     // B on the question: back where it came from, the link never up.
     { "back", 30, LANG_EN, 0, 0, 0, "hp2host", NONE, NONE, 0, 0,
       {{10, "B"}}, "Prev", 0,
-      {"lobby: ask", "lobby: back"}, 0, 0, 0, 0 },
+      {"lobby: ask", "lobby: back"}, 0, 0, 0, 0, 0, 0 },
 
     // A host, one client, Start: on to car select with the link up.
     { "host_one", 300, LANG_EN, 0, 0, 0, "hp2host",
@@ -120,14 +133,14 @@ static const Scenario kScenarios[] = {
       {"lobby: ask", "lobby: hosting",
        "lobby: list Waiting for players:@hp2host",
        "lobby: list Waiting for players:@hp2host@hp2join1",
-       "lobby: start, 2 consoles"}, 0, 0, 0, 0 },
+       "lobby: start, 2 consoles"}, 0, 0, 0, 0, 0, 0 },
 
     // A on the list before anyone came only puts it back; B then takes
     // the network down and asks again; B again leaves.
     { "host_alone", 200, LANG_EN, 0, 0, 0, "hp2host", NONE, NONE, 0, 0,
       {{10, "A"}, {60, "A"}, {90, "B"}, {130, "B"}}, "Prev", 0,
       {"lobby: hosting", "lobby: list Waiting for players:@hp2host",
-       "lobby: link down", "lobby: ask", "lobby: back"}, 0, 0, 0, 0 },
+       "lobby: link down", "lobby: ask", "lobby: back"}, 0, 0, 0, 0, 0, 0 },
 
     // Two clients, one of which goes on the frame Start is pressed: the
     // other is told it is one of two.
@@ -135,7 +148,7 @@ static const Scenario kScenarios[] = {
       {{"hp2join1", 60, 0}, {"hp2join2", 70, 200}}, NONE, 0, 0,
       {{10, "A"}, {200, "A"}}, "Select Car", 1,
       {"lobby: list Waiting for players:@hp2host@hp2join1@hp2join2",
-       "lobby: start, 2 consoles"}, 0, 0, 0, 0 },
+       "lobby: start, 2 consoles"}, 0, 0, 0, 0, 0, 0 },
 
     // Seven clients fill the network; one goes, and its place is let go
     // so an eighth gets in.
@@ -149,26 +162,25 @@ static const Scenario kScenarios[] = {
        "@hp2join4@hp2join5@hp2join6@hp2join7",
        "lobby: list Waiting for players:@hp2host@hp2join1@hp2join2@hp2join4"
        "@hp2join5@hp2join6@hp2join7@hp2join8",
-       "lobby: start, 8 consoles"}, 0, 0, 0, 0 },
+       "lobby: start, 8 consoles"}, 0, 0, 0, 0, 0, 0 },
 
-    // The hosted network goes (the wireless switch): the notice, OK, the
-    // question.
+    // The hosted network goes, the console's wireless still on: the
+    // notice, OK, the question.
     { "host_network_goes", 300, LANG_EN, 0, 0, 0, "hp2host",
       {{"hp2join1", 60, 0}}, NONE, 0, 0,
       {{10, "A"}, {250, "A"}}, "Local Wireless", 0,
       {"lobby: hosting", "lobby: the network went", "lobby: link down",
-       "lobby: notice Local wireless could not start. Is the wireless "
-       "switch on?", "lobby: ask"}, 150, 0, 0, 0 },
+       WIRELESS_OFF_LINE, "lobby: ask"}, 150, 0, 0, 0, 0, 0 },
 
     // The lobby left some other way than its own: the link down with it.
     { "host_away", 200, LANG_EN, 0, 0, 0, "hp2host",
       {{"hp2join1", 60, 0}}, NONE, 0, 0,
       {{10, "A"}, {150, "X"}}, "Prev", 0,
-      {"lobby: hosting", "lobby: link down"}, 0, 0, 0, 0 },
+      {"lobby: hosting", "lobby: link down"}, 0, 0, 0, 0, 0, 0 },
     { "join_away", 300, LANG_EN, 0, 0, 0, "hp2join1", NONE,
       {{"hp2host", 1, 8, 0, 0}}, 0, 0,
       {{10, "R"}, {20, "A"}, {100, "A"}, {200, "X"}}, "Prev", 0,
-      {"lobby: joined hp2host", "lobby: link down"}, 0, 0, 0, 0 },
+      {"lobby: joined hp2host", "lobby: link down"}, 0, 0, 0, 0, 0, 0 },
 
     // Seven clients, two of which go before Start; the list follows, and
     // the five left get places 1 to 5 of 6.
@@ -185,7 +197,7 @@ static const Scenario kScenarios[] = {
        "@hp2join5@hp2join6@hp2join7",
        "lobby: list Waiting for players:@hp2host@hp2join1@hp2join3@hp2join4"
        "@hp2join6@hp2join7",
-       "lobby: start, 6 consoles"}, 0, 0, 0, 0 },
+       "lobby: start, 6 consoles"}, 0, 0, 0, 0, 0, 0 },
 
     // The only client goes on the frame Start is pressed: nobody is told
     // to start, and the list stays up without it.
@@ -193,31 +205,136 @@ static const Scenario kScenarios[] = {
       {{"hp2join1", 60, 150}}, NONE, 0, 0,
       {{10, "A"}, {150, "A"}}, "Local Wireless", 1,
       {"lobby: list Waiting for players:@hp2host@hp2join1",
-       "lobby: list Waiting for players:@hp2host"}, 0, 0, 0, 0 },
+       "lobby: list Waiting for players:@hp2host"}, 0, 0, 0, 0, 0, 0 },
 
     // A client that comes after Start never gets in.
     { "host_late", 300, LANG_EN, 0, 0, 0, "hp2host",
       {{"hp2join1", 60, 0}, {"hp2join2", 250, 0}}, NONE, 0, 0,
       {{10, "A"}, {200, "A"}}, "Select Car", 1,
-      {"lobby: start, 2 consoles"}, 0, 0, 0, 0 },
+      {"lobby: start, 2 consoles"}, 0, 0, 0, 0, 0, 0 },
 
-    // No local wireless, or no network: a notice, OK, the question again.
+    // No local wireless, or no network, the console's wireless on: a
+    // notice, OK, the question again.
     { "host_no_wireless", 120, LANG_EN, 1, 0, 0, "hp2host", NONE, NONE,
       0, 0, {{10, "A"}, {60, "A"}}, "Local Wireless", 0,
-      {"lobby: ask", "lobby: notice Local wireless could not start. Is the "
-       "wireless switch on?", "lobby: ask"}, 0, 0, 0, 0 },
+      {"lobby: ask", WIRELESS_OFF_LINE, "lobby: ask"}, 0, 0, 0, 0, 0, 0 },
     { "host_no_language", 120, -1, 1, 0, 0, "hp2host", NONE, NONE,
       0, 0, {{10, "A"}, {60, "A"}}, "Local Wireless", 0,
-      {"lobby: notice Local wireless could not start. Is the wireless "
-       "switch on?", "lobby: ask"}, 0, 0, 0, 0 },
+      {WIRELESS_OFF_LINE, "lobby: ask"}, 0, 0, 0, 0, 0, 0 },
     { "host_fails", 120, LANG_EN, 0, 1, 0, "hp2host", NONE, NONE, 0, 0,
       {{10, "A"}, {60, "B"}}, "Local Wireless", 0,
-      {"lobby: link down", "lobby: notice Local wireless could not start. "
-       "Is the wireless switch on?", "lobby: ask"}, 0, 0, 0, 0 },
+      {"lobby: link down", WIRELESS_OFF_LINE, "lobby: ask"}, 0, 0, 0, 0, 0, 0 },
     { "join_no_wireless", 120, LANG_EN, 1, 0, 0, "hp2join1", NONE, NONE,
       0, 0, {{10, "R"}, {20, "A"}, {60, "A"}}, "Local Wireless", 0,
-      {"lobby: notice Local wireless could not start. Is the wireless "
-       "switch on?", "lobby: ask"}, 0, 0, 0, 0 },
+      {WIRELESS_OFF_LINE, "lobby: ask"}, 0, 0, 0, 0, 0, 0 },
+
+    // The console's wireless communication off (TASKS 62): Host or Join
+    // says so, and that it is turned on from the HOME Menu, with UDS
+    // never started; OK, the question.
+    { "radio_off_host", 200, LANG_EN, 0, 0, 0, "hp2host", NONE, NONE,
+      0, 0, {{10, "A"}, {60, "A"}, {100, "B"}}, "Prev", 0,
+      {"lobby: ask", "lobby: wireless communication off", RADIO_OFF_LINE,
+       "lobby: ask", "lobby: back"}, 0, 0, 0, 0, 1, 0 },
+    { "radio_off_join", 120, LANG_EN, 0, 0, 0, "hp2join1", NONE,
+      {{"hp2host", 1, 8, 0, 0}}, 0, 0,
+      {{10, "R"}, {20, "A"}, {60, "A"}}, "Local Wireless", 0,
+      {"lobby: wireless communication off", RADIO_OFF_LINE, "lobby: ask"},
+      0, 0, 0, 0, 1, 0 },
+    // UDS would not start either: still the line that says why.
+    { "radio_off_no_wireless", 120, LANG_EN, 1, 0, 0, "hp2host", NONE,
+      NONE, 0, 0, {{10, "A"}, {60, "A"}}, "Local Wireless", 0,
+      {RADIO_OFF_LINE, "lobby: ask"}, 0, 0, 0, 0, 1, 0 },
+    // French, and no language chosen yet: English.
+    { "radio_off_french", 120, LANG_FR, 0, 0, 0, "hp2host", NONE, NONE,
+      0, 0, {{10, "A"}}, "Local Wireless", 0,
+      {"lobby: notice La communication sans fil est d\xe9sactiv\xe9" "e. "
+       "Activez-la depuis le menu HOME pour jouer en sans fil local."},
+      0, 0, 0, 0, 1, 0 },
+    { "radio_off_no_language", 120, -1, 0, 0, 0, "hp2host", NONE, NONE,
+      0, 0, {{10, "A"}}, "Local Wireless", 0,
+      {RADIO_OFF_LINE}, 0, 0, 0, 0, 1, 0 },
+
+    // Off, then turned on again: Host works.
+    { "radio_back_on", 400, LANG_EN, 0, 0, 0, "hp2host",
+      {{"hp2join1", 160, 0}}, NONE, 0, 0,
+      {{10, "A"}, {50, "A"}, {150, "A"}, {300, "A"}}, "Select Car", 1,
+      {"lobby: wireless communication off", RADIO_OFF_LINE, "lobby: ask",
+       "lobby: hosting", "lobby: list Waiting for players:@hp2host@hp2join1",
+       "lobby: start, 2 consoles"}, 0, 0, 0, 0, 1, 100 },
+
+    // Turned off under the lobby with the link up: hosting, searching, a
+    // race found, joined. The link goes and the line says why.
+    { "radio_off_hosting", 300, LANG_EN, 0, 0, 0, "hp2host",
+      {{"hp2join1", 60, 0}}, NONE, 0, 0,
+      {{10, "A"}, {250, "A"}}, "Local Wireless", 0,
+      {"lobby: hosting", "lobby: list Waiting for players:@hp2host@hp2join1",
+       "lobby: link down", "lobby: wireless communication off",
+       RADIO_OFF_LINE, "lobby: ask"}, 0, 0, 0, 0, 150, 0 },
+    { "radio_off_searching", 300, LANG_EN, 0, 0, 0, "hp2join1", NONE, NONE,
+      0, 0, {{10, "R"}, {20, "A"}, {250, "A"}}, "Local Wireless", 0,
+      {"lobby: searching", "lobby: scan 0", "lobby: link down",
+       "lobby: wireless communication off", RADIO_OFF_LINE, "lobby: ask"},
+      0, 0, 0, 0, 150, 0 },
+    { "radio_off_found", 300, LANG_EN, 0, 0, 0, "hp2join1", NONE,
+      {{"hp2host", 1, 8, 0, 0}}, 0, 0,
+      {{10, "R"}, {20, "A"}, {250, "A"}}, "Local Wireless", 0,
+      {"lobby: found 1 of 1, hp2host", "lobby: link down",
+       "lobby: wireless communication off", RADIO_OFF_LINE, "lobby: ask"},
+      0, 0, 0, 0, 150, 0 },
+    { "radio_off_joined", 400, LANG_EN, 0, 0, 0, "hp2join1", NONE,
+      {{"hp2host", 1, 8, 0, 0}}, 0, 0,
+      {{10, "R"}, {20, "A"}, {100, "A"}, {300, "A"}}, "Local Wireless", 0,
+      {"lobby: joined hp2host", "lobby: link down",
+       "lobby: wireless communication off", RADIO_OFF_LINE, "lobby: ask"},
+      0, 0, 0, 0, 200, 0 },
+
+    // Off on the frame of a press, before the lobby's tick and before the
+    // network is seen to go: Join on a race found, Next past the last,
+    // the host's Start. Nothing is asked of the link; the line says why.
+    { "radio_off_press_join", 300, LANG_EN, 0, 0, 0, "hp2join1", NONE,
+      {{"hp2host", 1, 8, 0, 0}}, 0, 0,
+      {{10, "R"}, {20, "A"}, {150, "A"}, {250, "A"}}, "Local Wireless", 0,
+      {"lobby: found 1 of 1, hp2host", "lobby: link down",
+       "lobby: wireless communication off", RADIO_OFF_LINE, "lobby: ask"},
+      0, 0, 0, 0, 150, 0 },
+    { "radio_off_press_next", 300, LANG_EN, 0, 0, 0, "hp2join1", NONE,
+      {{"hp2host", 1, 8, 0, 0}}, 0, 0,
+      {{10, "R"}, {20, "A"}, {100, "R"}, {150, "A"}, {250, "A"}},
+      "Local Wireless", 0,
+      {"lobby: found 1 of 1, hp2host", "lobby: link down",
+       "lobby: wireless communication off", RADIO_OFF_LINE, "lobby: ask"},
+      0, 0, 0, 0, 150, 0 },
+    { "radio_off_press_start", 300, LANG_EN, 0, 0, 0, "hp2host",
+      {{"hp2join1", 60, 0}}, NONE, 0, 0,
+      {{10, "A"}, {150, "A"}, {250, "A"}}, "Local Wireless", 0,
+      {"lobby: list Waiting for players:@hp2host@hp2join1",
+       "lobby: link down", "lobby: wireless communication off",
+       RADIO_OFF_LINE, "lobby: ask"}, 0, 0, 0, 0, 150, 0 },
+    // B with it off: the question, as B always gives.
+    { "radio_off_press_back", 300, LANG_EN, 0, 0, 0, "hp2host",
+      {{"hp2join1", 60, 0}}, NONE, 0, 0,
+      {{10, "A"}, {150, "B"}, {250, "B"}}, "Prev", 0,
+      {"lobby: hosting", "lobby: link down", "lobby: ask", "lobby: back"},
+      0, 0, 0, 0, 150, 0 },
+
+    // Turned off during the race's setup, which loses the host: back in
+    // the lobby, the line says this console's wireless is off, not that
+    // the link to the host was lost.
+    { "radio_off_after_start", 500, LANG_EN, 0, 0, 0, "hp2join1", NONE,
+      {{"hp2host", 1, 8, 0, 0}}, 60, 0,
+      {{10, "R"}, {20, "A"}, {100, "A"}, {300, "N"}, {300, "CB"},
+       {400, "A"}}, "Local Wireless", 0,
+      {"lobby: started by hp2host, place 1 of 2", "lobby: link down",
+       "lobby: wireless communication off", RADIO_OFF_LINE, "lobby: ask"},
+      0, 0, 0, 0, 250, 0 },
+    // The same with it on: the race's own notice.
+    { "radio_on_after_start", 500, LANG_EN, 0, 0, 0, "hp2join1", NONE,
+      {{"hp2host", 1, 8, 0, 0}}, 60, 0,
+      {{10, "R"}, {20, "A"}, {100, "A"}, {300, "N"}, {300, "CB"},
+       {400, "A"}}, "Local Wireless", 0,
+      {"lobby: started by hp2host, place 1 of 2", "lobby: link down",
+       "lobby: notice The link to hp2host was lost.", "lobby: ask"},
+      0, 0, 0, 0, 0, 0 },
 
     // A joiner: searching, a race found, Join, the host starts: on. The
     // host sends something else first, which is not a start.
@@ -226,7 +343,7 @@ static const Scenario kScenarios[] = {
       {{10, "R"}, {20, "A"}, {200, "A"}}, "Select Car", 1,
       {"lobby: searching", "lobby: scan 0", "lobby: scan 1",
        "lobby: found 1 of 1, hp2host", "lobby: joined hp2host",
-       "lobby: started by hp2host, place 1 of 2"}, 0, 1, 0, 0 },
+       "lobby: started by hp2host, place 1 of 2"}, 0, 1, 0, 0, 0, 0 },
 
     // Ten seconds of nothing in range, and A pressed on it twice: a scan
     // a second, no more.
@@ -234,7 +351,7 @@ static const Scenario kScenarios[] = {
       {{10, "R"}, {20, "A"}, {100, "A"}, {101, "A"}, {630, "B"}},
       "Local Wireless", 0,
       {"lobby: searching", "lobby: scan 0", "lobby: link down",
-       "lobby: ask"}, 0, 0, 0, 0 },
+       "lobby: ask"}, 0, 0, 0, 0, 0, 0 },
 
     // Three races: Next walks them, the highlight staying on Next, then
     // scans again past the last.
@@ -247,7 +364,7 @@ static const Scenario kScenarios[] = {
       {"lobby: found 1 of 3, Alice", "lobby: found 2 of 3, Bob",
        "lobby: found 3 of 3, Carol", "lobby: scan 3",
        "lobby: found 1 of 3, Alice", "lobby: link down", "lobby: ask",
-       "lobby: back"}, 0, 0, 0, 0 },
+       "lobby: back"}, 0, 0, 0, 0, 0, 0 },
 
     // Next once, B, and Join again: the first race again, not the second.
     { "join_next_back", 200, LANG_EN, 0, 0, 0, "hp2join1", NONE,
@@ -257,14 +374,14 @@ static const Scenario kScenarios[] = {
        {80, "A"}},
       "Local Wireless", 1,
       {"lobby: found 2 of 3, Bob", "lobby: link down", "lobby: ask",
-       "lobby: searching", "lobby: found 1 of 3, Alice"}, 0, 0, 0, 0 },
+       "lobby: searching", "lobby: found 1 of 3, Alice"}, 0, 0, 0, 0, 0, 0 },
 
     // Next with nothing left in range: searching again.
     { "join_next_none", 300, LANG_EN, 0, 0, 0, "hp2join1", NONE,
       {{"hp2host", 1, 8, 0, 100}}, 0, 0,
       {{10, "R"}, {20, "A"}, {150, "R"}, {160, "A"}}, "Local Wireless", 1,
       {"lobby: found 1 of 1, hp2host", "lobby: scan 0",
-       "lobby: searching"}, 0, 0, 0, 0 },
+       "lobby: searching"}, 0, 0, 0, 0, 0, 0 },
 
     // Joined, and the host goes: the link lost, OK, the question.
     { "join_lost", 500, LANG_EN, 0, 0, 0, "hp2join1", NONE,
@@ -272,7 +389,7 @@ static const Scenario kScenarios[] = {
       {{10, "R"}, {20, "A"}, {100, "A"}, {400, "A"}}, "Local Wireless", 0,
       {"lobby: joined hp2host", "lobby: lost hp2host", "lobby: link down",
        "lobby: notice The link to hp2host was lost.", "lobby: ask"},
-      0, 0, 0, 0 },
+      0, 0, 0, 0, 0, 0 },
 
     // A join refused: the notice, then searching again, the link still
     // up, with a scan at once although the last was a third of a second
@@ -282,7 +399,7 @@ static const Scenario kScenarios[] = {
       {{10, "R"}, {20, "A"}, {30, "A"}, {40, "A"}}, "Local Wireless", 1,
       {"lobby: found 1 of 1, hp2host",
        "lobby: notice Could not join the race.", "lobby: searching",
-       "lobby: found 1 of 1, hp2host"}, 0, 0, 0, 0 },
+       "lobby: found 1 of 1, hp2host"}, 0, 0, 0, 0, 0, 0 },
 
     // A and then B while waiting for the host: off the network and asked
     // again.
@@ -291,27 +408,27 @@ static const Scenario kScenarios[] = {
       {{10, "R"}, {20, "A"}, {100, "A"}, {150, "A"}, {200, "B"}},
       "Local Wireless", 0,
       {"lobby: joined hp2host", "lobby: link down", "lobby: ask"},
-      0, 0, 0, 0 },
+      0, 0, 0, 0, 0, 0 },
 
     // The race found goes out of range before Join: refused.
     { "join_gone", 300, LANG_EN, 0, 0, 0, "hp2join1", NONE,
       {{"hp2host", 1, 8, 0, 90}}, 0, 0,
       {{10, "R"}, {20, "A"}, {150, "A"}}, "Local Wireless", 1,
       {"lobby: found 1 of 1, hp2host",
-       "lobby: notice Could not join the race."}, 0, 0, 0, 0 },
+       "lobby: notice Could not join the race."}, 0, 0, 0, 0, 0, 0 },
 
     // B on car select comes back to the lobby, which takes the link down.
     { "host_back_from_cars", 400, LANG_EN, 0, 0, 0, "hp2host",
       {{"hp2join1", 60, 0}}, NONE, 0, 0,
       {{10, "A"}, {200, "A"}, {300, "CB"}}, "Local Wireless", 0,
       {"lobby: start, 2 consoles", "lobby: link down", "lobby: ask"},
-      0, 0, 0, 0 },
+      0, 0, 0, 0, 0, 0 },
     { "join_back_from_cars", 500, LANG_EN, 0, 0, 0, "hp2join1", NONE,
       {{"hp2host", 1, 8, 0, 0}}, 60, 0,
       {{10, "R"}, {20, "A"}, {100, "A"}, {300, "CB"}, {400, "B"}},
       "Prev", 0,
       {"lobby: started by hp2host, place 1 of 2", "lobby: link down",
-       "lobby: ask", "lobby: back"}, 0, 0, 0, 0 },
+       "lobby: ask", "lobby: back"}, 0, 0, 0, 0, 0, 0 },
 
     // French, and names past ASCII: Latin-1 bytes, '?' for the rest, for
     // '@' and for each sequence cut short or byte out of place.
@@ -320,12 +437,12 @@ static const Scenario kScenarios[] = {
        {"x\xc3y\x80z\xe9!", 84, 0}}, NONE, 0, 0,
       {{10, "A"}, {250, "B"}}, "Local Wireless", 0,
       {"lobby: list En attente de joueurs :@Zo\xeb@J\xfcrgen@a?b?"
-       "@x?y?z?!"}, 0, 0, 0, 0 },
+       "@x?y?z?!"}, 0, 0, 0, 0, 0, 0 },
     { "join_french", 300, LANG_FR, 0, 0, 0, "hp2join1", NONE,
       {{"Andr\xc3\xa9", 3, 8, 0, 0}}, 0, 0,
       {{10, "R"}, {20, "A"}, {100, "A"}}, "Local Wireless", 1,
       {"lobby: found 1 of 1, Andr\xe9", "lobby: joined Andr\xe9"},
-      0, 0, 0, 0 },
+      0, 0, 0, 0, 0, 0 },
 
     // The CPU racers (TASKS 37c-2). A Full Grid: as many as fit, CPU Racers
     // alone until a client comes, then Start first.
@@ -334,7 +451,7 @@ static const Scenario kScenarios[] = {
       {{10, "A"}, {200, "A"}}, "Select Car", 1,
       {"lobby: list Waiting for players:@hp2host@CPU racers: 7",
        "lobby: list Waiting for players:@hp2host@hp2join1@CPU racers: 6",
-       "lobby: start, 2 consoles, 6 CPU racers"}, 0, 0, 1, LOBBY_CPU_FULL },
+       "lobby: start, 2 consoles, 6 CPU racers"}, 0, 0, 1, LOBBY_CPU_FULL, 0, 0 },
 
     // None to begin with (a Single Race with the cops). A counts on, and
     // the highlight stays on CPU Racers when a client comes; past the six
@@ -351,7 +468,7 @@ static const Scenario kScenarios[] = {
        "lobby: cpu 0",
        "lobby: list Waiting for players:@hp2host@hp2join1@hp2join2"
        "@CPU racers: 0",
-       "lobby: start, 3 consoles, 0 CPU racers"}, 0, 0, 1, 0 },
+       "lobby: start, 3 consoles, 0 CPU racers"}, 0, 0, 1, 0, 0, 0 },
 
     // Four wished and one counted on: as many of the five as fit while
     // clients come, no line or CPU Racers with eight consoles, and the
@@ -379,7 +496,7 @@ static const Scenario kScenarios[] = {
        "@hp2join3@hp2join7@CPU racers: 3",
        "lobby: cpu 0",
        "lobby: list Waiting for players:@hp2host@hp2join1@hp2join2"
-       "@hp2join3@hp2join7@CPU racers: 0"}, 0, 0, 1, 4 },
+       "@hp2join3@hp2join7@CPU racers: 0"}, 0, 0, 1, 4, 0, 0 },
 
     // No choice for the mode: the list and Start as without a wish.
     { "cpu_none", 300, LANG_EN, 0, 0, 0, "hp2host",
@@ -387,7 +504,7 @@ static const Scenario kScenarios[] = {
       {{10, "A"}, {200, "A"}}, "Select Car", 1,
       {"lobby: list Waiting for players:@hp2host",
        "lobby: list Waiting for players:@hp2host@hp2join1",
-       "lobby: start, 2 consoles"}, 0, 0, 1, LOBBY_CPU_NONE },
+       "lobby: start, 2 consoles"}, 0, 0, 1, LOBBY_CPU_NONE, 0, 0 },
 
     // Counted on, then B and Host again: the wish again, the highlight on
     // Start once a client comes.
@@ -399,7 +516,7 @@ static const Scenario kScenarios[] = {
        "lobby: cpu 3", "lobby: link down", "lobby: hosting",
        "lobby: list Waiting for players:@hp2host@CPU racers: 2",
        "lobby: list Waiting for players:@hp2host@hp2join1@CPU racers: 2",
-       "lobby: start, 2 consoles, 2 CPU racers"}, 0, 0, 1, 2 },
+       "lobby: start, 2 consoles, 2 CPU racers"}, 0, 0, 1, 2, 0, 0 },
 
     // French.
     { "cpu_french", 300, LANG_FR, 0, 0, 0, "hp2host",
@@ -409,7 +526,7 @@ static const Scenario kScenarios[] = {
        "@Pilotes IA : 6",
        "lobby: cpu 0",
        "lobby: list En attente de joueurs :@hp2host@hp2join1"
-       "@Pilotes IA : 0"}, 0, 0, 1, LOBBY_CPU_FULL },
+       "@Pilotes IA : 0"}, 0, 0, 1, LOBBY_CPU_FULL, 0, 0 },
 };
 #define NUM_SCENARIOS ((int)(sizeof kScenarios / sizeof kScenarios[0]))
 
@@ -466,10 +583,32 @@ static int inRange(const Race* r)
         && (r->until == 0 || g_frame < r->until);
 }
 
+// The console's wireless communication off (TASKS 62). The network it
+// takes down is seen to go RADIO_LAG frames later, as UDS's status lags
+// the shared page.
+#define RADIO_LAG 2
+
+static int radioIsOff(void)
+{
+    return S->radioOffFrom && g_frame >= S->radioOffFrom
+        && (S->radioOffUntil == 0 || g_frame < S->radioOffUntil);
+}
+
+static int fRadioOff(void)
+{
+    return radioIsOff();
+}
+
+static void radioFault(const char* call)
+{
+    if (radioIsOff()) fault("%s with the wireless off", call);
+}
+
 static int fStart(void)
 {
     printf("net start\n");
-    if (S->noWireless) return 0;
+    radioFault("start");
+    if (S->noWireless || radioIsOff()) return 0;
     N.up = 1;
     return 1;
 }
@@ -485,6 +624,7 @@ static int fHost(int consoles, const void* appdata, size_t n)
 {
     (void)appdata;
     printf("net host %d %u\n", consoles, (unsigned)n);
+    radioFault("host");
     if (!N.up || N.network) fault("host with up %d network %d", N.up,
                                   N.network);
     if (!N.up || N.network || S->hostFails) return 0;
@@ -498,6 +638,7 @@ static int fHost(int consoles, const void* appdata, size_t n)
 static void fSetOpen(int open)
 {
     printf("net open %d\n", open);
+    radioFault("setOpen");
     if (!N.host) fault("setOpen with no network of ours");
     N.open = open;
 }
@@ -508,6 +649,7 @@ static int fScan(WirelessHost* out, int max)
     uint32_t now = lobbyMs();
 
     printf("net scan\n");
+    radioFault("scan");
     if (!N.up || N.network) fault("scan with up %d network %d", N.up,
                                   N.network);
     if (N.scans > 0 && !N.nextAsked && !N.searchBegan
@@ -537,6 +679,7 @@ static int fJoin(int scanIndex)
     int k = scanIndex - 10;
 
     printf("net join %d\n", scanIndex);
+    radioFault("join");
     if (!N.up || N.network) fault("join with up %d network %d", N.up,
                                   N.network);
     if (k < 0 || k >= N.numScan) {
@@ -614,6 +757,7 @@ static const char* fSelfName(void)
 static int fSend(int i, uint8_t type, const void* data, size_t n)
 {
     printf("net send %d %02x %u\n", i, (unsigned)type, (unsigned)n);
+    radioFault("send");
     if (!N.host || !fPeerAlive(i)) {
         fault("send to %d, not a client still on", i);
         return 0;
@@ -651,20 +795,31 @@ static int fRecv(int i, WlMsg* out)
 static const LobbyNet kNet = {
     fStart, fStop, fHost, fSetOpen, fScan, fJoin, fLeave, fState,
     fPeerCount, fPeerAlive, fPeerName, fForgetLost, fSelfName, fSend, fRecv,
+    fRadioOff,
 };
 
 // The script moves on to this frame: clients come and go, and a joined
 // host starts or goes.
 static void fakeStep(void)
 {
-    int c;
+    int c, radioDrop = radioIsOff()
+                    && g_frame >= S->radioOffFrom + RADIO_LAG;
 
-    if (N.network && N.host && S->hostDropAt && g_frame >= S->hostDropAt) {
-        // The wireless switch: UDS stays up, on no network.
+    if (radioIsOff() && g_frame == S->radioOffFrom)
+        printf("net wireless off\n");
+    if (S->radioOffUntil && g_frame == S->radioOffUntil)
+        printf("net wireless on\n");
+    if (N.network && N.host
+        && ((S->hostDropAt && g_frame >= S->hostDropAt) || radioDrop)) {
+        // UDS stays up, on no network.
         N.network = N.host = N.open = 0;
         N.numPeers = 0;
         memset(N.came, 0, sizeof N.came);
         printf("net network went\n");
+    }
+    if (N.network && !N.host && !N.lost && radioDrop) {
+        N.lost = 1;
+        printf("net host lost to the wireless off\n");
     }
     if (N.network && N.host) {
         for (c = 0; c < MAX_CLIENTS; c++) {
@@ -992,6 +1147,12 @@ static void press(const char* key)
         bgf_change_to_screen(&g_gf, "Prev", 0);
         return;
     }
+    if (!strcmp(key, "N")) {
+        // The race's setup lost the host (netrace.c), for the lobby's
+        // return.
+        lobby_notice_next(PORTLANG_LINK_LOST, "hp2host");
+        return;
+    }
     if (!strcmp(key, "A")) ev = BJOY_MENU_SELECT;
     else if (!strcmp(key, "B")) ev = BJOY_MENU_BACK;
     else if (!strcmp(key, "L")) ev = BJOY_SCROLL_LEFT;
@@ -1082,6 +1243,8 @@ static void runScenario(const Scenario* sc)
         bgf_frame(&g_gf, SIXTIETH);
         if (g_entered) checkEntered(g_entered);
         checkFrame();
+        if (onLobby() && radioIsOff() && N.up)
+            fault("the lobby's link up with the wireless off");
     }
 
     printf("final %s link %d\n", g_gf.screen ? g_gf.screen->name : "-",

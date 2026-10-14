@@ -3183,7 +3183,7 @@ phases.
           A race with both cops and racers among the players: not said
           yet; ask when 61 comes.
         - Comes after 37's slices (37b-2 to 37f), which it builds on.
-62. [ ] **A message when wireless communication is off.** Asked for on
+62. [x] **A message when wireless communication is off.** Asked for on
         2026-10-14: hosting or joining a Local Wireless game with the
         3DS's wireless communication turned off (from the Home Menu)
         shows an error saying it is disabled and must be turned on to
@@ -3193,6 +3193,25 @@ phases.
           read before trying; and whether Azahar can turn it off for a
           run.
         - Comes right after 37d and before 37e: one task at a time.
+        - Done in Session 101 (`docs/formats/lobby.md`, "Wireless
+          communication off"). The system says so on the shared page:
+          NETWORK_STATE (0x1FF81067) is 7 then (`wireless_radio_off`).
+          Host or Join with it off says "Wireless communication is
+          turned off. Turn it on from the HOME Menu to play over Local
+          Wireless." in the six languages, and UDS is never started; OK
+          asks again. The same line wherever local wireless would not
+          start or went with it off, when it is turned off under the
+          lobby with the link up (hosting, searching, a race found,
+          joined, or on a press before the tick), and back from the
+          race's setup in place of the race's notice. The old line no
+          longer asks about a wireless switch: "Local wireless could
+          not start. Please try again."
+        - lobby_check: 50 scenarios (16 new), faults 0; 104 mutations,
+          101 caught, 3 equivalent. Azahar's NETWORK_STATE is always 2,
+          so `WirelessOff 1` in the config takes it as off:
+          `run_azahar_lobby.ps1 -Consoles 2 -WirelessOff` passed (host
+          and joiner each showed the line, no "wireless: up", OK back
+          to Host or Join). Without it, `run_azahar_lobby.ps1 -Consoles 2` still passed: Azahar's state does not read as off.
 
 ### The retail frontend
 

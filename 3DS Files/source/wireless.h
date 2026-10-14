@@ -68,6 +68,12 @@ typedef void (*WirelessLogFn)(const char *fmt, ...);
 int  wireless_start(WirelessLogFn log, uint32_t nowMs);
 void wireless_stop(void);
 
+// Whether the console's wireless communication is turned off (the HOME
+// Menu's setting, or an Old 3DS's switch): the shared page's
+// NETWORK_STATE, 7 then (3dbrew, "Configuration Memory"). Read at any
+// time, UDS up or not. Azahar's is always 2, Internet.
+int  wireless_radio_off(void);
+
 // A network for up to `consoles` consoles (this one among them, 2 to
 // WIRELESS_MAX_CONSOLES), its beacon carrying `appdata`. It is open.
 int  wireless_host(int consoles, const void *appdata, size_t n);

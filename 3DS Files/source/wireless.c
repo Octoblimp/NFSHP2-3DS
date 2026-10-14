@@ -145,7 +145,8 @@ int wireless_start(WirelessLogFn log, uint32_t nowMs)
     W.now = nowMs;
     r = udsInit(SHAREDMEM, NULL);
     if (R_FAILED(r)) {
-        LOG("wireless: udsInit %08lx -- no local wireless", (unsigned long)r);
+        LOG("wireless: udsInit %08lx, network state %d -- no local wireless",
+            (unsigned long)r, (int)OS_SharedConfig->network_state);
         W.state = WIRELESS_OFF;
         return 0;
     }
@@ -153,6 +154,13 @@ int wireless_start(WirelessLogFn log, uint32_t nowMs)
     W.state = WIRELESS_IDLE;
     LOG("wireless: up");
     return 1;
+}
+
+#define NETWORK_STATE_DISABLED 7
+
+int wireless_radio_off(void)
+{
+    return OS_SharedConfig->network_state == NETWORK_STATE_DISABLED;
 }
 
 void wireless_stop(void)
