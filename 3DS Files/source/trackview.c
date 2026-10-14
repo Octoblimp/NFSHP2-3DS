@@ -3496,6 +3496,10 @@ void trackview_draw_mirror(TrackView* v)
     // has its own stage.
     memcpy(profCars, FrameProfDraw.cars, sizeof profCars);
     georender_run_begin();
+    // Retail draws the mirror's cars after the player's view's, so their
+    // fAngleToCamera is the one the trackers read: trackview_draw puts it
+    // back (render_cars_keep_angles).
+    render_cars_keep_angles();
     render_cars(view);
     draw_deferred(v, false);
     draw_deferred(v, true);
@@ -3660,6 +3664,8 @@ void trackview_draw(TrackView* v)
     hangwatch_mark("the cars begun");
     georender_run_begin();
     render_cars(view);
+    // The mirror's angles over these, as retail's order leaves them.
+    render_cars_restore_angles();
     profSince = bGetTicker();
     draw_deferred(v, false);
     draw_deferred(v, true);

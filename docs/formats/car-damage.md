@@ -241,6 +241,88 @@ sets the levels to 0 and applies them, so the textures and the
 environment mapping go back. Then it repairs the body, takes it off its
 list, and frees the CarDamage with flags & 1.
 
+## The marker over the car
+
+You're The Cop shows the cops' damage on each suspect as a marker over
+the car. RenderCars calls `Car::DamageAbove` (`0x00135280`) for every car
+it drew, with the camera's eye and direction, unless the view's player is
+in the jump cam. Only DamageAbove calls `Car::DamageCap` (`0x00135490`).
+
+**DamageAbove** works out the car's `fAngleToCamera` (Car +2192) first,
+whatever else happens. With `n` the unit way from the car to the eye, as
+the VU adds it, the angle is `(direction · n + 1) × 0.5`. It is negated
+when z of `direction × n` (`vopmula`/`vopmsub`) is at or above 0. A car
+straight ahead of the camera is 0, one beside it ±0.5, one behind ±1.
+Player::DrawTracker draws the cop HUD's tracker for cars within ±0.5
+([hud-cop](hud-cop.md)). Until 51d the seam was NULL, so the angle stayed
+0 and every tracker sat at the screen's middle.
+
+The angle a car keeps is the last view's to draw it. eDisplayFrame runs
+RenderCars for views 0 to 3 in turn (`0x00113668` to `0x001136f0`), each
+render target the view has, and the mirror is view 3. So with the mirror
+up, a car the mirror draws keeps the mirror's angle, and the trackers
+show the cars within 50 that the mirror looks at, behind the player. A car
+only the player's view draws keeps that view's. The port draws the mirror
+first, so `rendercars.c` keeps the mirror's angles and puts them back
+after the player's view ([car-render-info](car-render-info.md), "Where
+the port differs").
+
+Then it draws the marker only when all of these hold:
+- neither player has a NIS playing;
+- `TheRaceParameters.BeACop` is set;
+- the race coordinator's state is 3, the race in progress (retail does
+  not test the pointer);
+- there is a cop manager;
+- the car is an AI racer (driver type 2), or has a Player and is not a
+  cop (UsageType 1).
+
+The distance from the eye, times 0.005 (gp-31836) and held to 0 .. 1,
+goes to DamageCap. So does whether `tCopManager::IsBeingPursued` finds a
+pursuit for the car, and the cop manager's `fCarDamage[CarIndex]`
+(+10420).
+
+**DamageCap** draws an upside-down pyramid on `WHITE16X16_NOALPHA`
+through `ePoly::Render3D`:
+- **The size.** It is `s = 2 × distance + 0.05` (gp-31832), so a far car's
+  marker is bigger. In an instant replay or after the race it is 0.1
+  (gp-31828), though DamageAbove never calls it then.
+- **The points.** They are ObjectPoints 0 .. 4: the point at the origin
+  and the square's corners at (±3, 0, 3) and (0, ±3, 3), each times `s`
+  in all four lanes.
+- **The matrix.** It comes from the frame memory (64 bytes; none, and
+  nothing is drawn). It is `DamageAboveMatrix × local`, where `local` is
+  the body matrix's three rows with the position and 1 as the fourth.
+  DamageAboveMatrix halves the points and lifts them 1, so the point is 1
+  over the car's origin and the square 1.5 × `s` over that.
+- **The poly.** Its UVs are (0,0), (0,1), (1,1), (1,0), and its alpha
+  equation is the constructor's.
+
+The colours are the GS's, red in the low byte, and 0x80 is 1.0, so
+the white texture saturates:
+
+| when | word | on screen |
+|------|------|-----------|
+| a side, no cop on the car | `0xff00aa00` | green |
+| a side, pursued | `0xffcc0000` | blue |
+| the damaged part, no cop | `0xff005599` | orange |
+| the damaged part, pursued | `0xff995500` | light blue |
+
+With no damage (`c.eq.s` with 0, so -0 too), each side is one poly: the
+point, a corner, the next corner, and the point again. With damage, the
+edges are the corners less the point, made unit by the first edge's
+length `len`. Each side is then two polys:
+- the damaged part, from the point to `len × damage` along its two edges;
+- the rest, from there to the square, in the side's colour.
+
+Damage over 1 reaches past the square, and damage below 0 reaches below
+the point. Last comes the square on top, in the side's colour. Render3D
+draws each poly as the strip V0, V1, V3, V2, so the first, degenerate
+triangle of a whole side draws nothing. The port's strips are not
+culled, so every side shows from both faces, as on the GS.
+
+A frame of `n` suspects draws at most 9 × `n` strips of four in each
+view, out of trackview's 256.
+
 ## In the port
 
 `main.c` binds `carinit.h`'s, `collisionbody.h`'s, `cop.h`'s and
@@ -298,8 +380,10 @@ mesh has to be made to match again:
   which has about 11 MB free in a race. The race's stats line counts
   the bakes that fail ("N bakes failed"); a failed solid never draws.
 
-Still to come (TASKS 51): **Car::DamageAbove** (`0x00135280`,
-`gCarDamageAboveFn`), skipped while NULL.
+`cardamageabove.c` ports DamageAbove and DamageCap (51d), and `main.c`
+binds `gCarDamageAboveFn` to it. Its one addition is a NULL test on the
+race coordinator before the state is read. Retail would read the word at
+address 0, which is not 3 either.
 
 `Car::TriggerEffect` (`0x0011e2b8`, `gCarTriggerEffectFn`) is not
 ported, so the effects are skipped (TASKS 60). The replay's DoSnapshot
@@ -380,3 +464,31 @@ It bakes every solid of the 44 cars' `GEOMETRY.BIN`, 518 solids and
 It changes 1,325,799 vertices over 2,072 refreshes, with 0 faults. Of its
 23 mutations, 22 are caught. The last, georender_free not freeing the
 edit, is a leak the harness cannot see.
+
+`tools/cardamageabove_check.py` runs DamageAbove and DamageCap on the
+retail image, with bStringHash, ePoly's constructor and eMulMatrix as
+shipped, against `cardamageabove.c` in `tools/src/cardamageabove_test.c`.
+IsNisPlaying, IsBeingPursued, GetTextureInfo and Render3D are stubs on
+both sides and print what they are asked. Render3D's prints each vertex's
+x, y and z, the colours, the u and v, and the matrix. After each call
+both print the angle and the frame memory's position, failure and
+amount. The script covers:
+- each gate on its own: the players' NISes, BeACop, the ten states and
+  more, no coordinator, no cop manager, and every driver type with and
+  without a player and a cop's UsageType;
+- the angle with the eye ahead, behind, to each side, above and below;
+- the distance either side of 200 along each axis;
+- every car index's damage, pursued or not;
+- damage at 0, -0, the smallest floats, 1, past 1 and below 0;
+- no texture, and the frame memory too short by one, exactly enough,
+  and absent;
+- random points and matrices with their pads;
+- DamageCap alone in every state, for the replay's size;
+- 500 random calls.
+
+Every float is finite, since a NaN's bits differ between the host and
+the model. It runs 1,045 scenarios for 8,509 lines, 0 differ, with 4,687
+polys drawn in all four colours. Of its 105 mutations, 101 are caught and
+4 are equivalent: the edges', the points' and the pads' fourth lane,
+which Render3D never reads, and the distance's floor at 0, which a
+square root never goes below.

@@ -483,9 +483,7 @@ int32_t car_shadow_ch2d(bVector3 **P, int32_t n);
 // above the cars.
 
 // Car::DamageAbove(bVector3 *, bVector3 *), 0x00135280, with the camera's
-// eye and direction. It calls DamageCap (0x00135490) and asks the race
-// coordinator, the cop manager and IsBeingPursued, so it goes with the
-// cops (step 12); NULL skips it.
+// eye and direction: cardamageabove.c (TASKS 51d), and NULL skips it.
 extern void (*gCarDamageAboveFn)(Car *c, bVector3 *eye, bVector3 *direction);
 
 // 0x00133190: 0 in a view with the override, else Car::IsBlinking or the
@@ -503,5 +501,16 @@ void car_get_render_wheel_matrices(Car *c, bMatrix4 *tires,
 // and visible in the view, and not in a blink's off frame. Each is drawn
 // at its override where the view has one, then gets its damage above.
 void render_cars(eView *view);
+
+// The port's, not retail's. eDisplayFrame runs RenderCars for views 0 to
+// 3 in turn (0x00113668 to 0x001136f0), so the mirror's (3) comes after
+// the player's (1), and the fAngleToCamera DamageAbove leaves, which the
+// cop HUD's trackers read, is the mirror's. The port draws the mirror
+// first. keep_angles makes the next render_cars note each angle it leaves,
+// and restore_angles, after the player's view, puts them back, as
+// retail's order leaves them. Kept angles live within one frame
+// (eFrameCounter).
+void render_cars_keep_angles(void);
+void render_cars_restore_angles(void);
 
 #endif

@@ -14,6 +14,33 @@
 
 void (*gCarDamageAboveFn)(Car *c, bVector3 *eye, bVector3 *direction);
 
+// The angles a kept view's DamageAbove left (render_cars_keep_angles), one
+// for each call, in the order they came: a view draws 99 cars at most.
+#define KEPT_MAX 99
+static int      s_keep;
+static uint32_t s_keptFrame;
+static int      s_kept;
+static Car     *s_keptCar[KEPT_MAX];
+static float    s_keptAngle[KEPT_MAX];
+
+void render_cars_keep_angles(void)
+{
+    s_keep      = 1;
+    s_kept      = 0;
+    s_keptFrame = eFrameCounter;
+}
+
+void render_cars_restore_angles(void)
+{
+    int i;
+
+    // Only within the frame that kept them: a car may be gone since.
+    if (s_keptFrame == eFrameCounter)
+        for (i = 0; i < s_kept; i++)
+            s_keptCar[i]->fAngleToCamera = s_keptAngle[i];
+    s_kept = 0;
+}
+
 // srav: the shift is the ID's low five bits.
 static uint32_t view_bit(uint32_t bits, int32_t view_id)
 {
@@ -83,7 +110,9 @@ void render_cars(eView *view)
     Camera *camera;
     Car *car, *hidden;
     int32_t left = 99;
+    int keep = s_keep;
 
+    s_keep = 0;
     if (pCurrentWorld == NULL)
         return;
     camera = view->pCamera;
@@ -119,8 +148,14 @@ void render_cars(eView *view)
                                   : &car->State.GeometryPosition,
                              over ? &o->BodyMatrix : &car->State.BodyMatrix,
                              tires, brakes, 0, 0);
-        if (!view_in_jump_cam(view) && gCarDamageAboveFn != NULL)
+        if (!view_in_jump_cam(view) && gCarDamageAboveFn != NULL) {
             gCarDamageAboveFn(car, &camera->CurrentKey.Position,
                               &camera->CurrentKey.Direction);
+            if (keep && s_kept < KEPT_MAX) {
+                s_keptCar[s_kept]   = car;
+                s_keptAngle[s_kept] = car->fAngleToCamera;
+                s_kept++;
+            }
+        }
     }
 }

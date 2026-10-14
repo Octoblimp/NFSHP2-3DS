@@ -2249,13 +2249,14 @@ AnimatedDriver, the editor link, the ninth slice's four classes that are
 not ported, the splash, the Player's four and the twelfth slice's sound,
 damage, render and event calls are seams.
 
-Twelve are left, eleven of the forty-six and `DoWheelForces`, and every
+`DamageAbove` and `DamageCap` are ported too (`cardamageabove.c`,
+[car-damage](car-damage.md), "The marker over the car").
+
+Ten are left, nine of the forty-six and `DoWheelForces`, and every
 one reaches a class that is not ported:
 - `TriggerEvents` (`0x00131a58`): the event manager, the ferns,
   `Player::TriggerVisibleDrivingLine`;
 - `AssignAnimatedDriver` and `UnAssignAnimatedDriver`;
-- `DamageAbove` and `DamageCap`: `ePoly`, `Player::IsNisPlaying` and the
-  cop manager;
 - the render group: `TriggerEffect` and `SwitchSkin`;
 - force feedback and rumble: `DoWheelForces`, `CalcForceParameters`,
   `StartForceImpact` and `MaybeRumble`;

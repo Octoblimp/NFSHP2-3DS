@@ -17,6 +17,13 @@ nothing in the game does yet, to show that both sides read it again for
 every test of the loop. A pointer prints by what it is: a car, a car's
 position or body matrix, the override's, the camera's eye or direction.
 
+DamageAbove's stubs leave an angle naming the view and the car. A frame
+scenario runs two views: retail as eDisplayFrame does, the player's view
+(1) and then the mirror's (3); the port as trackview does, the mirror
+first under render_cars_keep_angles, then the player's view and
+render_cars_restore_angles. The model prints the mirror's calls first, as
+the port makes them, and both print every car's angle at the end.
+
     python tools/rendercars_check.py
     python tools/rendercars_check.py --mutate [--only a,b]
     python tools/rendercars_check.py --dump out/rendercars
@@ -71,6 +78,7 @@ C_ENABLED = 1192                  # lb
 C_RI = 1200
 C_OVR = 1216                      # BodyMatrix; GeometryPosition at +64
 O_BITS = 80                       # Override, Visible, Blinking at 80 84 88
+C_ANGLE = 2192                    # fAngleToCamera
 CTI_WHEELS = 288                  # four of 32 bytes; the first 16 are read
 CAM_HIDDEN = 444
 CAM_EYE = 64
@@ -87,7 +95,7 @@ CTIS = 0x01020000
 CTI_STRIDE = 0x200
 NCTI = 4
 CARS = 0x01100000
-CAR_STRIDE = 0x600
+CAR_STRIDE = 0x900                # past C_ANGLE
 MAXCARS = 128
 RIS = 0x01400000
 RI_STRIDE = 0x40
@@ -124,7 +132,8 @@ class Sc(object):
     cti, ri (an index, -1 for NULL) and the 128 words of the wheels' and
     the brakes' matrices. `players` holds (view_id, zone) or None for
     each; `swap` is (who, k, j): at who's k-th call pCurrentWorld becomes
-    car j."""
+    car j. `frame_views` (mirror, player's) makes it a frame of two
+    views."""
 
     def __init__(self, rnd, ncars=0, **kw):
         self.world = kw.get("world", True)
@@ -134,6 +143,7 @@ class Sc(object):
         self.wte = kw.get("wte", 1.0 / 60)
         self.frame = kw.get("frame", 1)
         self.swap = kw.get("swap", None)
+        self.frame_views = kw.get("frame_views", None)
         self.ctis = [[fb(rnd.uniform(-3.0, 3.0)) for _ in range(16)]
                      for _ in range(NCTI)]
         self.cars = []
@@ -180,7 +190,10 @@ class Sc(object):
         if self.swap:
             who, k, j = self.swap
             out.append("X %s %x %x" % (who, k, j))
-        out.append("G")
+        if self.frame_views:
+            out.append("F %x %x" % tuple(v & M32 for v in self.frame_views))
+        else:
+            out.append("G")
         return out
 
 
@@ -289,6 +302,38 @@ def script():
     s = mk(5, swap=("p", 1, 2))
     s.cars[0]["poof"] = 1
     s = mk(5, swap=("r", 1, 3), players=[(0, 6), None])
+
+    # Frames, the mirror (3) and the player's view (1): which angle each
+    # car is left with. A car either view draws, both or neither; a view
+    # whose player is in the jump cam; no world; the 99 in both views; and
+    # one view twice.
+    def frame(ncars, views=(3, 1), **kw):
+        kw.setdefault("frame", rnd.getrandbits(32) | 1)
+        s = mk(0, view_id=views[0], frame_views=views, **kw)
+        for i in range(ncars):
+            c = s.car(rnd, i, poof=rnd.choice((0, 0, 0, 0, 1)),
+                      en=rnd.choice((1, 1, 1, 1, 0)))
+            c["vb"] = ((rnd.getrandbits(32) & ~0xa)
+                       | rnd.choice((0, 2, 8, 0xa, 0xa)))
+            c["ob"] = rnd.choice((0, 0, rnd.getrandbits(32)))
+            c["bb"] = 0
+            s.cars.append(c)
+        return s
+
+    frame(3, world=False)
+    frame(0)
+    for players in ([(1, 0), None], [(1, 6), None], [(1, 7), None],
+                    [(3, 6), None], [(1, 6), (3, 7)], [None, None],
+                    [(0, 6), (1, 0)]):
+        for n in range(6):
+            frame(rnd.randrange(1, 9), players=players)
+    for n in (99, 104):
+        s = frame(n, players=[(1, 0), None])
+        for c in s.cars:
+            c.update(en=1, poof=0, vb=0xffffffff)
+    frame(5, views=(3, 3))
+    frame(5, views=(1, 1))
+    frame(5, frame=0)
 
     # And at random.
     for n in range(400):
@@ -402,9 +447,11 @@ class Model(object):
         self.after("r")
 
     def damage(self, em):
+        c = self.arg(0)
         self.emit("  dmg %s %s %s" % (
-            self.label(self.arg(0)), self.label(self.arg(1)),
-            self.label(self.arg(2))))
+            self.label(c), self.label(self.arg(1)), self.label(self.arg(2))))
+        self.e.put32(c + C_ANGLE, 0x3f000000 | (self.e.u32(VIEW) & 0xff) << 8
+                     | self.car_index(c))
         self.after("d")
 
     # ---- the world -------------------------------------------------------
@@ -459,6 +506,22 @@ class Model(object):
                 p(a + C_WHEEL + 4 * q, c["m"][q])
                 p(a + C_BRAKE + 4 * q, c["m"][64 + q])
 
+    def frame(self, sc):
+        """eDisplayFrame's order, the player's view and then the mirror,
+        with the mirror's calls printed first, as the port makes them."""
+        mirror, main = sc.frame_views
+        start = len(self.out)
+        for k, vid in enumerate((main, mirror)):
+            self.e.put32(VIEW, vid)
+            self.fill_stack()
+            self.e.call(RENDER_CARS, VIEW, limit=2000000)
+            if k == 0:
+                main_lines = self.out[start:]
+                del self.out[start:]
+        self.out.extend(main_lines)
+        self.emit("A" + "".join(" %08x" % self.e.u32(car_at(i) + C_ANGLE)
+                                for i in range(len(sc.cars))))
+
     def run(self, scenarios):
         self.register()
         for n, sc in enumerate(scenarios):
@@ -466,8 +529,11 @@ class Model(object):
             self.calls = dict.fromkeys("pbrd", 0)
             self.world(sc)
             self.emit("R %d" % n)
-            self.fill_stack()
-            self.e.call(RENDER_CARS, VIEW, limit=2000000)
+            if sc.frame_views:
+                self.frame(sc)
+            else:
+                self.fill_stack()
+                self.e.call(RENDER_CARS, VIEW, limit=2000000)
             self.emit("E %s" % self.label(self.e.u32(G_WORLD)))
         return self.out
 
@@ -675,9 +741,44 @@ MUTATIONS = [
       "gCarDamageAboveFn(car, &camera->CurrentKey.Direction,"),
     M("rc_dmg_dir", "&camera->CurrentKey.Direction);",
       "&camera->CurrentKey.Position);"),
+
+    # render_cars_keep_angles and render_cars_restore_angles
+    M("ka_keep_off", "    s_keep      = 1;\n", "    s_keep      = 0;\n"),
+    M("ka_reset_skip", "    s_keep      = 1;\n    s_kept      = 0;\n",
+      "    s_keep      = 1;\n"),
+    M("ka_frame_skip", "    s_keptFrame = eFrameCounter;\n", ""),
+    M("ka_keep_none", "    int keep = s_keep;\n", "    int keep = 0;\n"),
+    M("ka_keep_stays", "    s_keep = 0;\n    if (pCurrentWorld == NULL)",
+      "    if (pCurrentWorld == NULL)"),
+    M("kc_keep_any", "if (keep && s_kept < KEPT_MAX)",
+      "if (s_kept < KEPT_MAX)"),
+    M("kc_max_one", "if (keep && s_kept < KEPT_MAX)",
+      "if (keep && s_kept < 1)"),
+    M("kc_max_less", "if (keep && s_kept < KEPT_MAX)",
+      "if (keep && s_kept < KEPT_MAX - 1)"),
+    M("kc_angle", "s_keptAngle[s_kept] = car->fAngleToCamera;",
+      "s_keptAngle[s_kept] = 0.0f;"),
+    M("kc_count_skip", "                s_kept++;\n", ""),
+    M("ra_frame_inv", "if (s_keptFrame == eFrameCounter)",
+      "if (s_keptFrame != eFrameCounter)"),
+    M("ra_frame_skip", "    if (s_keptFrame == eFrameCounter)\n", ""),
+    M("ra_skip",
+      "            s_keptCar[i]->fAngleToCamera = s_keptAngle[i];\n", ""),
+    M("ra_first", "for (i = 0; i < s_kept; i++)",
+      "for (i = 0; i < s_kept && i < 1; i++)"),
+    M("ra_clear_skip", "s_keptAngle[i];\n    s_kept = 0;\n",
+      "s_keptAngle[i];\n"),
 ]
 
 EQUIVALENT = {
+    # Every frame the check runs ends with its restore, which empties the
+    # list, so the next keep finds it empty either way. The game's frames
+    # do the same while the player's view reaches its cars.
+    "ka_reset_skip",
+    "ra_clear_skip",
+    # Only the frame counter tells a frame's restore from a later one's,
+    # and the check's frames keep and restore within the same count.
+    "ra_frame_skip",
 }
 
 

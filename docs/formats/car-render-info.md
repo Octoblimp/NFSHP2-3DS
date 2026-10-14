@@ -409,8 +409,22 @@ the cars in every view.
 ### Where the port differs
 
 - **DamageAbove** (0x00135280) is `gCarDamageAboveFn`, and NULL skips it.
-  It calls DamageCap (0x00135490) and asks the race coordinator, the cop
-  manager and IsBeingPursued, so it is ported with the cops (step 12).
+  `cardamageabove.c` ports it and DamageCap (0x00135490), and `main.c`
+  binds it (TASKS 51d; [car-damage](car-damage.md), "The marker over the
+  car").
+- **The views' order.** eDisplayFrame calls RenderCars for views 0 to 3
+  in turn (`0x00113668` to `0x001136f0`), once for each render target
+  `SetupRenderTargetPtrs` (`0x001127f8`) finds: none for an inactive view,
+  the second only in view mode 3. The mirror, view 3, comes after the
+  player's view, 1. The port draws the mirror first (`trackview.c`), and
+  the one thing that order leaves behind is the `fAngleToCamera`
+  DamageAbove writes, which the cop HUD's trackers read. So
+  `render_cars_keep_angles` before the mirror's `render_cars` notes each
+  angle it leaves, up to 99, and `render_cars_restore_angles` after the
+  player's view puts them back in order. A car only the player's view
+  draws keeps that view's, as in retail. The kept angles count only within
+  the frame that kept them (`eFrameCounter`), since a car may be gone by a
+  later one.
 - **Player** is still a partial layout. RenderCars reads ViewID and
   nZoneCurrent, which retail keeps at 24 and 88, and the port keeps them at
   20 and 76, by name.
@@ -439,13 +453,28 @@ The scenarios cover:
   first 99;
 - each way of finding the view's player, over seven zones;
 - a NULL render info, and one shared by two cars;
+- frames of two views: retail runs the player's view (1) and then the
+  mirror (3), as eDisplayFrame does, and the port runs the mirror under
+  `render_cars_keep_angles`, then the player's view and
+  `render_cars_restore_angles`, as trackview does. Each DamageAbove stub
+  leaves an angle naming its view and car, and both sides print every
+  car's angle at the end. The frames have cars drawn in either view, both
+  or neither, either view's player in the jump cam, no world, 99 and 104
+  cars in both views, and one view twice;
 - 400 random calls.
 
 It ran 1272 scenarios over 20075 lines, and 0 differed on the first run.
 They reach 3684 renders, 974 of them at the override, and 3492 damage
-calls. Six calls hit the cap of 99. The world moves in 27.
+calls. Six calls hit the cap of 99. The world moves in 27. With the
+frames (TASKS 51d) it runs 1321 scenarios over 22488 lines, and 0
+differ. The frames leave 265 angles at the mirror's, 22 at the player's
+view's, and 126 untouched.
 
-`--mutate` runs 89 mutations over `rendercars.c`, and all 89 are caught.
+`--mutate` runs 104 mutations over `rendercars.c`. 101 are caught and 3
+are equivalent. The three are the keep's and the restore's emptying of
+the list and the restore's frame test: every frame the check runs is
+restored in the frame that kept it, which empties the list. The 89 on
+RenderCars itself are all caught.
 Two of them crash the harness: `rc_null_world` and `rc_next_prev`. The
 four on the cap are the narrowest, at 16 and 24 lines, and only the cap's
 scenarios catch them: 98, 100, `<` for `<=`, and counting a car before it

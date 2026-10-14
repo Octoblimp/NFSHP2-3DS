@@ -2,8 +2,8 @@
 // scenarios, lays each world out, calls render_cars, and prints what every
 // stand-in was asked, in the model's words.
 //
-// A scenario is a run of lines, "S" first and "G" to go; every value is
-// hex, a float by its bits.
+// A scenario is a run of lines, "S" first and "G" to go, or "F" for a
+// frame's two views; every value is hex, a float by its bits.
 
 #include <stdint.h>
 #include <stdio.h>
@@ -172,9 +172,15 @@ void carrenderinfo_render(CarRenderInfo *ri, eView *view,
     after('r');
 }
 
+// It leaves an angle that says which view and car it came from, as the
+// model's does, for a frame's two views ("F") to show whose is kept.
 static void st_damage_above(Car *c, bVector3 *eye, bVector3 *direction)
 {
+    uint32_t a = 0x3f000000u | ((uint32_t)g_view.ID & 0xffu) << 8
+               | (uint32_t)(c - g_cars);
+
     printf("  dmg %s %s %s\n", label(c), label(eye), label(direction));
+    memcpy(&c->fAngleToCamera, &a, 4);
     after('d');
 }
 
@@ -321,6 +327,27 @@ int main(int argc, char **argv)
             render_cars(&g_view);
             printf("E %s\n", label(pCurrentWorld));
             break;
+        case 'F': {
+            // A frame as trackview draws it: the mirror's view, kept, then
+            // the player's, then the mirror's angles back.
+            int32_t mirror = (int32_t)u();
+            int32_t main_id = (int32_t)u();
+            int i;
+
+            printf("R %d\n", n++);
+            render_cars_keep_angles();
+            g_view.ID = mirror;
+            render_cars(&g_view);
+            g_view.ID = main_id;
+            render_cars(&g_view);
+            render_cars_restore_angles();
+            printf("A");
+            for (i = 0; i < g_ncars; i++)
+                words(&g_cars[i].fAngleToCamera, 1);
+            printf("\n");
+            printf("E %s\n", label(pCurrentWorld));
+            break;
+        }
         default:
             fprintf(stderr, "rendercars_test: bad line %s\n", t);
             return 2;

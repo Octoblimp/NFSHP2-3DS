@@ -106,7 +106,10 @@ Draws tracker `index` over car `c`:
    `(dx·dx + dy·dy) + dz·dz`, then the square root. Over 50, or NaN, and
    nothing is drawn.
 2. **The turn**, `c`'s `fAngleToCamera` (Car +2192). Below −0.5 or above
-   0.5 and nothing is drawn. A NaN passes.
+   0.5 and nothing is drawn. A NaN passes. DamageAbove writes it as the
+   last frame's views draw the car, and the mirror draws last, so with
+   the mirror up a car behind the player has the mirror's angle and gets
+   a tracker ([car-damage](car-damage.md), "The marker over the car").
 3. **The tracker** is placed at x = `trunc((turn + 0.5) × 400) + 120`,
    which is 120 to 520. Its y is left as it is.
 4. **The scale** is `1 − d × 0.02`, so 1 near and 0 at 50, doubled into

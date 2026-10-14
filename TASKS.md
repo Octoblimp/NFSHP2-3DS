@@ -2547,6 +2547,13 @@ phases.
         the device's log at track 11's fire with that build, and the
         smoke's quads cut to their texture's non-zero alpha (the
         sprites are fill-bound, 2.3 to 2.5 ms per 100 on the device).
+        **The user, 2026-10-14:** the fire's area on track 11 is still
+        under 30 (Azahar's frame log in Session 94's You're The Cop
+        race: 15.5 FPS, draw 35.7 ms, world 14.6, citro3d GPU 38.2).
+        "I want it fully optimized to 30 FPS, along with all similar
+        scenarios/areas." Done means a steady 30 at the fire, the
+        desert's end, and every other heavy place (fog, smoke, many
+        cars, the chopper), still lossless (TASKS 46's rules).
 
 47. [ ] **A brief artifact on the bridge before the finish line.**
         Reported on 2026-10-12, after the user played build bb70171 on
@@ -2643,7 +2650,7 @@ phases.
         and where the table comes from, then port it. On the 3DS the
         sixteen buttons are joyhid's DualShock 2 buttons, so a code is
         entered with the 3DS keys mapped to them.
-51. [ ] **The damage system (CarDamage).** Found on 2026-10-12 with
+51. [x] **The damage system (CarDamage).** Found on 2026-10-12 with
         TASKS 39. Nothing made a CarDamage, so `pCarDamage` was NULL on
         every car: no hit dented a car, broke a light or a window, or
         derated the engine, and a munition's blast never wrecked one.
@@ -2685,7 +2692,25 @@ phases.
         2026-10-14). On Azahar a You're The Cop race shows the cop car
         whole, "refreshed 4 damaged meshes in 10.9 ms" and 0 bakes
         failed.
-  - [ ] 51d: Car::DamageAbove (`0x00135280`, `gCarDamageAboveFn`).
+  - [x] 51d: Car::DamageAbove (`0x00135280`, `gCarDamageAboveFn`).
+        `cardamageabove.c` ports DamageAbove and DamageCap
+        (`0x00135490`): every drawn car's fAngleToCamera, and in You're
+        The Cop the marker over each suspect, its sides cut by the
+        cops' damage. Retail's eDisplayFrame runs RenderCars for views
+        0 to 3 in turn, so the mirror's angle is the one the cop HUD's
+        trackers read. The port draws the mirror first, so
+        `rendercars.c` keeps the mirror's angles and puts them back
+        after the player's view (`render_cars_keep_angles`,
+        `render_cars_restore_angles`). cardamageabove_check: 1,045
+        scenarios, 8,509 lines, 0 differ; 101 of 105 mutations caught,
+        4 equivalent. rendercars_check, with frames of both views:
+        1,321 scenarios, 22,488 lines, 0 differ; 101 of 104 caught, 3
+        equivalent. On Azahar (AC power, Speed 100%) a You're The Cop
+        race on track 11 ran at 30 FPS with 0 bakes failed. Green
+        markers sat over the suspects, and a tracker marked a car
+        behind in the mirror. `run_azahar_coprace.ps1` waits 15 s for
+        Hot Pursuit's A, since a late log line had made it press twice
+        into a quick race.
 52. [x] **Profiles: save, load, and a save prompt after each race.**
         Asked for on 2026-10-12. The profile is retail's one save,
         `settings.db` in `sdmc:/NFSHP2/SAVES` (the folder is made on

@@ -21947,3 +21947,65 @@ the black car and a car of only wheels and a shadow.
 51d, Car::DamageAbove (`0x00135280`, `gCarDamageAboveFn`). Then TASKS
 37 (multi-card multiplayer). Still to ask the user: a device log at the
 fire (TASKS 46), TASKS 47's bridge, TASKS 52's popups.
+
+## Session 94 -- 51d, the marker over the car (done); TASKS 51 done
+
+`docs/formats/car-damage.md` ("The marker over the car") and
+`docs/formats/car-render-info.md` ("Where the port differs", "The
+check") have the whole of it; this is the short form.
+
+### What the user said on 2026-10-14 (verbatim)
+
+"What's status update on damage task? How long til next task?", then,
+on the 15.5 FPS in the first race's frame log: "FPS dropped to 15.5
+because I went to the firetruck fire place area I mentioned before
+remember? Its been optimized but not to 30 FPS. Its a pending task (if
+its not, add it, I want it fully optimized to 30 FPS, along with all
+similar scenarios/areas)." It is TASKS 46, and the note is there.
+
+### What is where
+
+- `cardamageabove.c`/`.h` (new): Car::DamageAbove (`0x00135280`) and
+  DamageCap (`0x00135490`). `main.c` binds `gCarDamageAboveFn`.
+- `rendercars.c`: `render_cars_keep_angles` and
+  `render_cars_restore_angles`, the port's. `trackview.c` keeps before
+  the mirror's `render_cars` and restores after the player's view's.
+- `tools/cardamageabove_check.py`, `tools/src/cardamageabove_test.c`
+  (new). `rendercars_check` gained frames of two views; its car stride
+  is 0x900 now, past fAngleToCamera at +2192.
+- `tools/run_azahar_coprace.ps1`: Hot Pursuit's A waits 15 s a press.
+
+### What bit
+
+- **Which angle the trackers read.** eDisplayFrame (`0x00113668` to
+  `0x001136f0`) runs RenderCars for views 0 to 3 in turn, once for each
+  render target `SetupRenderTargetPtrs` finds, so the mirror (view 3)
+  comes after the player's view (1). RenderCars calls DamageAbove for
+  every car it draws, with no frustum test, so with the mirror up every
+  car ends the frame with the mirror's angle. The trackers then mark
+  the cars within 50 behind the player. The port drew the mirror first,
+  so its trackers showed the cars ahead.
+- `run_azahar_coprace.ps1` twice landed in a quick race: "flow enter
+  Cops On Mode Select" came more than 8 s after the A, so the script
+  pressed A again on Cops On Mode Select.
+- The first race's 15.5 FPS was the fire on track 11 (TASKS 46/57), not
+  51d: the next race on the same track held 30 away from it.
+
+### Checks
+
+- cardamageabove_check: 1,045 scenarios, 8,509 lines, 0 differ; 4,687
+  renders over all four colours; 105 mutations, 101 caught, 4
+  equivalent.
+- rendercars_check: 1,321 scenarios, 22,488 lines, 0 differ. The
+  frames leave 265 angles at the mirror's, 22 at the player's view's,
+  126 untouched. 104 mutations, 101 caught, 3 equivalent (the list's
+  two resets and the restore's frame test).
+- Azahar (AC power, Speed 100%): a You're The Cop race on track 11, 102
+  s at 30 FPS, 0 bakes failed, strips 84 (0 dropped). Green markers
+  over the suspects; one tracker for a car behind, seen in the mirror.
+
+### Next
+
+TASKS 37 (multi-card multiplayer). TASKS 46 (a steady 30 at the fire
+and every heavy place) is the user's, with no order given against 37.
+Still to ask the user: TASKS 47's bridge, TASKS 52's popups.

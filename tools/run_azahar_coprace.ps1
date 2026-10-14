@@ -230,7 +230,9 @@ if ($booted) {
     Start-Sleep -Milliseconds 900
     if (Press-Until $VK_M "flow enter New Main Menu" 6 3) {   # START
         Start-Sleep -Milliseconds 1200
-        if (Press-Until $VK_A "flow enter Cops On Mode Select" 6 3) {   # A, Hot Pursuit
+        # 15 s a press: this line has come later than 8 s, and a second A
+        # lands on Cops On Mode Select and starts a quick race.
+        if (Press-Until $VK_A "flow enter Cops On Mode Select" 3 15) {   # A, Hot Pursuit
             # A press before the menu has its first item is dropped.
             [void](Wait-ForLog "screen Cops On Mode Select .* last HIGHLIGHT" 10)
             Start-Sleep -Milliseconds 2500

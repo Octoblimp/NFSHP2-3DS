@@ -78,6 +78,7 @@
 #include "bsetup.h"
 #include "carcontroller.h"
 #include "cardamage.h"
+#include "cardamageabove.h"
 #include "estripdata.h"
 #include "cardriver.h"
 #include "carinfo.h"
@@ -6114,6 +6115,11 @@ int main(int argc, char** argv)
     gCarDamageWreckFn          = car_damage_wreck_seam;
     gCarDamageRepairAllFn      = car_damage_repair_all_seam;
     gESolidVerticesChangedFn   = solid_vertices_changed;
+
+    // RenderCars' Car::DamageAbove (51d): every drawn car's fAngleToCamera,
+    // which the cop HUD's trackers read, and in You're The Cop the marker
+    // over each suspect. Left NULL, the angle stayed 0.
+    gCarDamageAboveFn          = car_damage_above;
 
     // The two calls Suspension makes into Wheel go through pointers, left
     // NULL until something says Wheel is linked -- which, in the game,
