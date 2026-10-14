@@ -2661,9 +2661,13 @@ phases.
         solids: 6 of 7 new mutations caught, 1 equivalent. On Azahar a
         race ran 66 s at 100% and 28-30 FPS, and the brake lights went
         dark after a crash into the trees.
-  - [ ] 51b: the renderer reads strip flag `0x100`. The port's GeoBatch
-        flags are baked when the car's meshes are built, so a broken
-        window keeps its environment map.
+  - [x] 51b: the renderer reads strip flag `0x100`. The port's GeoBatch
+        flags were baked when the car's meshes were built, so a broken
+        window kept its environment map. Each batch now keeps its first
+        strip, and trackview's `strip_flags` reads its Flags live
+        (`geo_strip_flags`) from the engine's own entry table, which
+        `esolid_set_environment_mapping` writes. On Azahar the race
+        draws as before, at 30 FPS and Speed 100%.
   - [ ] 51c: the vertices. DamageVertexFunction dents each vertex by its
         key, darkens it, and shows the scuff strips. The port's solids
         are GPU meshes, so the walk is a seam

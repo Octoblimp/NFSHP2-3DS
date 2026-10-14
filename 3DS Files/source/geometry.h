@@ -157,6 +157,11 @@ int geo_open_in_place(const void* header, const void* stripEntries,
 // One eStripEntry out of the 64-byte table.
 int geo_strip_entry(const GeoSolid* solid, int index, GeoStripEntry* out);
 
+// Strip `index`'s Flags as the table holds them now, or `otherwise` for an
+// index it does not have. eSolid::SetEnvironmentMapping (esolid.c) changes
+// them after the solid is baked.
+uint16_t geo_strip_flags(const GeoSolid* solid, int index, uint16_t otherwise);
+
 // Replay strip `index`'s VU1 packet and read the vertices back out of it.
 // `out` is scratch the caller owns; nothing inside it points anywhere.
 //

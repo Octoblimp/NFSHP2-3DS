@@ -92,9 +92,10 @@ every seam but the vertex walk, DamageAbove and TriggerEffect: each
 racer and cop has a CarDamage, hits dent its zones, break its lights and
 windows and derate its engine, and a blast wrecks it. cardamage_check:
 13,349 lines, 0 differ, 132 of 135 mutations caught, 3 equivalent
-(HANDOFF.md, "Session 92"; `docs/formats/car-damage.md`). Next, one at
-a time: 51b (the renderer reads strip flag 0x100), 51c (the vertices),
-51d (DamageAbove). Then TASKS 37, multi-card multiplayer, at the user's
+(HANDOFF.md, "Session 92"; `docs/formats/car-damage.md`). 51b is done
+too: the renderer reads each batch's strip flags live, so a broken
+window loses its environment map (HANDOFF.md, "Session 92, continued
+-- 51b"). Next, one at a time: 51c (the vertices), 51d (DamageAbove). Then TASKS 37, multi-card multiplayer, at the user's
 word of 2026-10-13. TASKS 60 (Car::TriggerEffect, the car's particles)
 is new.**
 

@@ -54,11 +54,15 @@ typedef struct {
 // so a solid draws in as many calls as it has distinct ones -- 1 to 34
 // across the disc, usually fewer than 12. Within a solid the flags and the
 // material never differ between strips of one texture, so the split costs
-// nothing.
+// nothing. The flags are the bake's: eSolid::SetEnvironmentMapping changes
+// 0x100 on every strip of a texture afterwards (CarDamage, when a window
+// breaks), so the draw reads `strip`'s as they are now (geometry.h's
+// geo_strip_flags).
 typedef struct {
     int      first;             // first index in the mesh's ibo
     int      count;             // indices, three a triangle
     int      texture;           // index into the solid's texture table, or -1
+    int      strip;             // its first strip in the solid's entry table
     uint16_t flags;             // eStripEntry's: 0x80 lit, 0x100 env mapped
     int8_t   lightMaterial;     // the solid's LightMaterialTable index, or -1
     int      cluster;           // its boxes in the mesh's clusters (geocull.h)

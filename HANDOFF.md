@@ -21846,3 +21846,29 @@ overall.
 its environment map. Then 51c (the vertices) and 51d (DamageAbove),
 then TASKS 37 (multi-card multiplayer). Still to ask the user: a device
 log at the fire (TASKS 46), TASKS 47's bridge, TASKS 52's popups.
+
+## Session 92, continued -- 51b, the renderer reads the env flag (done)
+
+- **The fault.** Retail's RenderStrips (`0x0010dd58`) reads each
+  strip's Flags as it draws. The port bakes a solid's strips into
+  batches of one texture, flags and material (`georender.c`), and
+  trackview's `strip_flags` started from the batch's baked flags. A
+  window that CarDamage broke kept its environment map.
+- **The fix.**
+  - `GeoBatch.strip` keeps the batch's first strip.
+  - `geometry.c`'s `geo_strip_flags(solid, index, otherwise)` reads that
+    strip's Flags (`0x0e`) from the solid's entry table as it is now.
+  - `strip_flags` takes the GeoSolid and starts from it.
+  - A car's solids are opened over the engine's own `StripEntryTable`
+    (`find_other`'s `geo_open_in_place`), which
+    `esolid_set_environment_mapping` writes. Every strip of a batch has
+    its texture, and SetEnvironmentMapping changes every strip of a
+    texture, so one strip speaks for the batch.
+- **Checks.** The build is clean, and `loadertable_check` already shows
+  the strips' flags (`sf`) changing on the duplicated solids. On Azahar
+  (AC power, CPU 4%), `run_azahar_race.ps1 -HoldKeys 65` ran 66 s at 30
+  FPS and Speed 100%, and the car draws as it did. The Speedster's
+  hardtop leaves only a small rear window, so no shot shows the map go.
+- **Next.** 51c, the vertices: DamageVertexFunction's dents, colours
+  and scuffs, through `gBodyDamageVertexWalkFn`, on meshes that live
+  on the GPU.

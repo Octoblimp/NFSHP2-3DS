@@ -211,10 +211,19 @@ wreck and RepairAll. Every racer and cop now has a CarDamage, so hits
 derate the engine (physicscar), smoke and steam (careffects) and break
 the lights and windows (carrenderinfo).
 
+**The renderer's environment mapping** (51b). Retail's RenderStrips
+(`0x0010dd58`) reads each strip's Flags as it draws. The port bakes a
+solid's strips into batches of one texture, flags and material
+(`georender.c`), so the bake's flags would keep a broken window's map.
+Each batch keeps its first strip (`GeoBatch.strip`), and trackview's
+`strip_flags` reads that strip's Flags from the solid's entry table as
+they are now (`geometry.h`'s `geo_strip_flags`). A car's solids are
+opened over the engine's own table (`geo_open_in_place` on
+`StripEntryTable`), the one `esolid_set_environment_mapping` writes.
+Every strip of a batch has the batch's texture, and SetEnvironmentMapping
+changes every strip of a texture, so one strip speaks for the batch.
+
 Still to come (TASKS 51):
-- **The renderer's environment mapping** (51b). The port's GeoBatch
-  flags are baked when the car's meshes are built, so the strip flag
-  that CarDamage clears is not yet read.
 - **The vertices** (51c). DamageVertexFunction dents each vertex by its
   key, darkens it, and shows the scuff strips. The port's solids are GPU
   meshes, so the walk is a seam, `gBodyDamageVertexWalkFn`, skipped

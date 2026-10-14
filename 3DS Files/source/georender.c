@@ -547,6 +547,7 @@ bool georender_bake(const GeoSolid* solid, GeoMesh* out)
             batch->first   = at;
             batch->count   = 0;
             batch->texture = order[i].texture;
+            batch->strip   = order[i].strip;
             batch->flags   = order[i].flags;
             batch->lightMaterial = order[i].lightMaterial;
         }

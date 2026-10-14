@@ -255,6 +255,15 @@ int geo_strip_entry(const GeoSolid* solid, int index, GeoStripEntry* out)
     return GEO_OK;
 }
 
+uint16_t geo_strip_flags(const GeoSolid* solid, int index, uint16_t otherwise)
+{
+    if (index < 0 || index >= solid->numStrips || !solid->stripEntries) {
+        return otherwise;
+    }
+    return rd16(solid->stripEntries + (size_t)index * STRIP_ENTRY_SIZE
+                + STRIP_FLAGS);
+}
+
 // ------------------------------------------------------------ the chunk tree
 
 static int index_solid(GeoSolid* s, const uint8_t* payload, size_t size)

@@ -1272,19 +1272,23 @@ static void render_effects(eView* view)
 
 // ------------------------------------------------------------- the lighter
 
-// RenderStrips' flags for one batch (0x0010dd58): the strips' own, with 4
-// when the texture holds a gloss map in its alpha, less what the call
-// takes away. Render flags bit 0 takes the environment pass away, as does
+// RenderStrips' flags for one batch (0x0010dd58): the strips' own as they
+// are now, read from the batch's first strip, with 4 when the texture holds
+// a gloss map in its alpha, less what the call takes away. The strips' own
+// change after the bake: a car's broken window loses 0x100 to CarDamage
+// (eSolid::SetEnvironmentMapping, on every strip of its texture), and a
+// repair gives it back. Render flags bit 0 takes the environment pass away, as does
 // EnableEnvMap off, and bit 1 the lighter; a model drawn with no light
 // context loses both, and 0x40, the road's specular. 0x200, a strip that
 // crosses the screen's edge, is VU1's clipping, which the PICA does
 // itself. Into the environment map, the environment pass is left out too:
 // on the PS2 it read the last frame's sphere map, but here it would read
 // the cube being drawn.
-static uint16_t strip_flags(const GeoBatch* b, const TrackTex* t,
-                            const void* light, uint32_t flags)
+static uint16_t strip_flags(const GeoSolid* s, const GeoBatch* b,
+                            const TrackTex* t, const void* light,
+                            uint32_t flags)
 {
-    uint16_t f      = b->flags;
+    uint16_t f      = geo_strip_flags(s, b->strip, b->flags);
     uint16_t remove = 0;
 
     if (t && t->info && t->info->GlossMapInAlpha) {
@@ -1492,7 +1496,7 @@ static void render_model(eModel* m, bMatrix4* matrix, void* light,
             note_use(v, t);
         }
         indices += gb->count;
-        f[b] = strip_flags(gb, t, light, flags);
+        f[b] = strip_flags(&v->solid[i], gb, t, light, flags);
         if (!t || (t->order == 0 && !t->sorted)) {
             if (f[b] & 0x180) {
                 lit |= (uint64_t)1 << b;
