@@ -110,6 +110,19 @@ on the 15.5 FPS of an earlier run: that was the fire on track 11, and
 TASKS 46 must reach a steady 30 there and in every place like it.
 Next: TASKS 37 (multi-card multiplayer).**
 
+**Now (Session 99, 2026-10-14): TASKS 37c-2 is done: the host's CPU
+racers. Where the race setup has AI racers, the host's lobby list ends
+with "CPU racers: n" (the setup's Opponents, never more than 8 less the
+consoles) and CPU Racers counts one more; the host's build puts them at
+the front of the grid, the players behind in place order. Each console
+drives its own car and transmission; the -Race run now picks a different
+car on each client and checks the host got it. lobby_check: 34
+scenarios, 87 mutations, 84 caught, 3 equivalent; netrace_check: 25
+scenarios, 172 mutations, 161 caught, 11 equivalent. On Azahar two
+copies raced with 2 CPU racers at the front, the client in its own car
+on Manual. Next: 37d (the lockstep race), 37e, 37f, then TASKS 61 (with
+the all-cops rule).**
+
 **Now (Session 98, 2026-10-14): TASKS 37c is done: a wireless race's
 setup (`netrace.c`, `docs/formats/netrace.md`). Each console picks its
 car and a client sends it to the host; the host's start builds the race

@@ -5,6 +5,11 @@
 # its list. Every copy must then reach Select Car, each joiner told its
 # place of how many.
 #
+# Where the race setup has CPU racers to choose (TASKS 37c-2, a last line
+# on the host's list), the host moves to CPU Racers and counts to -Cpu
+# (2 unless said; -1 leaves the count shown), then back to Start; the race
+# must start with that many.
+#
 # The copies are run_azahar_wireless.ps1's: portable Azahars under
 # %TEMP%\nfshp2_wl, each with its own console name and card, joined to the
 # room through Multiplayer > Direct Connect to Room. Each card gets the
@@ -17,11 +22,16 @@
 # ~7 s late: a press that changes screen is repeated only after 20 s with
 # nothing, and a press on the lobby's popups never is.
 #
-# With -Race (TASKS 37c, netrace.h) each copy goes on: its car (A on the
-# transmission, Automatic and the first handling), which a client sends to
-# the host and waits on "Wireless Race"; the host's first track, which
-# builds the race once every car is in; the setup taken on each client,
-# every copy's load held until the host's GO, and the race on one seed.
+# With -Race (TASKS 37c, netrace.h) each copy goes on: its car, which a
+# client sends to the host and waits on "Wireless Race"; the host's first
+# track, which builds the race once every car is in; the setup taken on
+# each client, every copy's load held until the host's GO, and the race on
+# one seed, with as many drivers as consoles and CPU racers. Each copy
+# picks its own car: the host the profile's, Automatic; copy i the first
+# unlocked car (the unlocked come first, and left stops there), then
+# (i - 1) mod (u - 1) + 1 to the right of the u unlocked; Manual where i is
+# odd, Automatic where even; the first handling. Each client's car and
+# transmission must reach the host as it chose them.
 #
 # With -NoDsp the copies' cards have no DSP firmware, so ndsp fails and the
 # game must run silent: each copy has to log "Sound: ndsp unavailable", and
@@ -32,6 +42,7 @@
 #   powershell -File tools/run_azahar_lobby.ps1 -Consoles 4
 #   powershell -File tools/run_azahar_lobby.ps1 -Consoles 2 -Race
 #   powershell -File tools/run_azahar_lobby.ps1 -Consoles 2 -Race -NoDsp
+#   powershell -File tools/run_azahar_lobby.ps1 -Consoles 3 -Race -Cpu 0
 #
 # Screenshots of each copy go to %TEMP%\nfshp2_lobby. Exit code 0 when
 # every copy reached Select Car from the lobby (with -Race: racing, every
@@ -42,6 +53,8 @@ param(
     [int]$Consoles = 2,           # the host and the rest
     [switch]$Race,                # on to a loaded race (37c)
     [switch]$NoDsp,               # no DSP firmware on the cards: silent
+    [ValidateRange(-1, 7)]
+    [int]$Cpu = 2,                # the host's CPU racers; -1 as shown
     [int]$RunSeconds = 0,         # hard ceiling; 0 is 240 + 30 a console, + 300 with -Race
     [string]$AzaharDir = "C:\Program Files\Azahar",
     [string]$Target3dsx = "",
@@ -135,8 +148,8 @@ Add-Type -AssemblyName UIAutomationTypes
 $AE = [System.Windows.Automation.AutomationElement]
 $TS = [System.Windows.Automation.TreeScope]
 
-# The user's key map: A, B, START, and the D-pad's down and right.
-$VK_A = 65; $VK_B = 83; $VK_START = 77; $VK_DOWN = 71; $VK_RIGHT = 72
+# The user's key map: A, B, START, and the D-pad's down, right and left.
+$VK_A = 65; $VK_B = 83; $VK_START = 77; $VK_DOWN = 71; $VK_RIGHT = 72; $VK_LEFT = 70
 
 New-Item -ItemType Directory -Force -Path $WorkDir | Out-Null
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
@@ -299,11 +312,22 @@ function RoomLabel($side) {
 
 # Multiplayer > Direct Connect to Room; see run_azahar_wireless.ps1.
 function JoinRoom($side) {
-    $w = MainWindow $side
-    $menu = Find $w "name" "Multiplayer"
-    $menu.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
-    Start-Sleep -Milliseconds 500
-    $item = Find $w "name" "Direct Connect to Room"
+    # The menu's items can come late after a busy start: open it again, up
+    # to three times, each with 2 s for the item.
+    $item = $null
+    for ($try = 0; $try -lt 3 -and $null -eq $item; $try++) {
+        $w = MainWindow $side
+        if ($null -eq $w) { Start-Sleep -Milliseconds 1000; continue }
+        $menu = Find $w "name" "Multiplayer"
+        if ($null -ne $menu) {
+            $menu.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+        }
+        $deadline = (Get-Date).AddSeconds(2)
+        while ($null -eq $item -and (Get-Date) -lt $deadline) {
+            Start-Sleep -Milliseconds 250
+            $item = Find $w "name" "Direct Connect to Room"
+        }
+    }
     if ($null -eq $item) { throw "$($side.Name): no Direct Connect item" }
     $item.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $dlg = $null
@@ -405,20 +429,47 @@ $boot = @(
     Step "lobby" @{ Key = $VK_A; Pattern = "lobby: ask"; Wait = 30; Settle = 1000; Shot = "ask" }
 )
 
-# The host's list: "Waiting for players:" and a name for each console.
+# The host's list: "Waiting for players:", a name for each console, and
+# the CPU racers' line where there is a choice (37c-2).
 function ListFull($side) {
     $l = @(LogLines $side "lobby: list ")
     if ($l.Count -eq 0) { return $false }
-    return (($l[-1] -split "@").Count - 1) -ge $Consoles
+    return @(($l[-1] -split "@") | Where-Object { $_ -match "^hp2(host|join\d)$" }).Count -ge $Consoles
 }
 
+# The CPU racers the host's last list shows, -1 with no line.
+function ListCpu($side) {
+    $l = @(LogLines $side "lobby: list ")
+    if ($l.Count -eq 0) { return -1 }
+    $last = ($l[-1] -split "@")[-1]
+    if ($last -match "^hp2(host|join\d)$") { return -1 }
+    $m = [regex]::Match($last, "(\d+)$")
+    if (-not $m.Success) { return -1 }
+    return [int]$m.Groups[1].Value
+}
+
+# The count CPU Racers last set, -1 with none.
+function LastCpu($side) {
+    $l = @(LogLines $side "lobby: cpu \d+")
+    if ($l.Count -eq 0) { return -1 }
+    return [int]([regex]::Match($l[-1], "cpu (\d+)")).Groups[1].Value
+}
+
+# A on CPU Racers counts one more (none again past the room), one press a
+# try with a wait past the log's lag, until the count is -Cpu.
+$cpuToSet = { param($s) $Cpu -ge 0 -and (ListCpu $s) -ge 0 -and (ListCpu $s) -ne $Cpu }
+$cpuMoved = { param($s) $s.Seen["to cpu"] }
 $hostSteps = $boot + @(
     Step "host" @{ Key = $VK_A; Pattern = "lobby: hosting"; Settle = 500; Shot = "hosting" }
     Step "all in" @{ Check = { param($s) ListFull $s }; Wait = $RunSeconds; Settle = 1500; Shot = "list" }
+    Step "to cpu" @{ Key = $VK_RIGHT; Settle = 1000; When = $cpuToSet }
+    Step "cpu" @{ Key = $VK_A; Check = { param($s) (LastCpu $s) -eq $Cpu }; Wait = 10; Tries = 20;
+                  Settle = 1500; Shot = "cpu"; When = $cpuMoved }
+    Step "to start" @{ Key = $VK_LEFT; Settle = 1000; When = $cpuMoved }
     Step "start" @{ Key = $VK_A; Pattern = "lobby: start, $Consoles consoles" }
     Step "car select" @{ Pattern = "flow enter Select Car [0-9a-f]{8}"; Wait = 30; Settle = 2000; Shot = "carsel" }
 )
-$joinSteps = $boot + @(
+$joinBase = $boot + @(
     Step "join pick" @{ Key = $VK_RIGHT; Settle = 700 }
     Step "search" @{ Key = $VK_A; Pattern = "lobby: searching"; Settle = 500; Shot = "searching" }
     Step "found" @{ Pattern = "lobby: found 1 of \d+, hp2host"; Wait = 90; Settle = 1000; Shot = "found" }
@@ -429,6 +480,7 @@ $joinSteps = $boot + @(
 
 # -Race: the car (see run_azahar_coprace.ps1), then the host's track and
 # each client's wait, the load, GO and the race.
+$joinRace = @()
 if ($Race) {
     $car = @(
         Step "transmission" @{ Key = $VK_A; Settle = 1500 }
@@ -447,11 +499,44 @@ if ($Race) {
                             Shot = "host-wait" }
         Step "built" @{ Pattern = "netrace: built"; Wait = $RunSeconds; Settle = 1500; Shot = "loading" }
     ) + $raceEnd
-    $joinSteps += $car + @(
+    $joinRace = @(
         Step "car sent" @{ Key = $VK_A; Pattern = "netrace: car sent"; Tries = 2; Settle = 1500;
                           Shot = "client-wait" }
         Step "taken" @{ Pattern = "netrace: setup taken"; Wait = $RunSeconds; Settle = 1500; Shot = "loading" }
     ) + $raceEnd
+}
+
+# The unlocked cars car select counts ("carsel player p on ...: n cars, u
+# unlocked"), 0 before its line.
+function Unlocked($side) {
+    $l = @(LogLines $side "carsel player \d+ on [0-9a-f]+: \d+ cars, \d+ unlocked")
+    if ($l.Count -eq 0) { return 0 }
+    return [int]([regex]::Match($l[-1], "(\d+) unlocked")).Groups[1].Value
+}
+
+# Copy i's steps: with -Race the first unlocked car (left as far as it
+# goes; the list does not wrap), then car (i - 1) mod (u - 1) + 1 of the u
+# unlocked, so no two clients share one while there are cars enough, and,
+# where i is odd, Manual (right of Automatic on the transmission popup).
+# The presses past the count are passed over (a When made as text, so it
+# holds k and i).
+function JoinSteps([int]$i) {
+    $steps = $joinBase
+    if (-not $Race) { return $steps }
+    $steps += Step "car list" @{ Pattern = "carsel player \d+ on [0-9a-f]+: \d+ cars, \d+ unlocked"; Wait = 30 }
+    for ($k = 0; $k -lt 8; $k++) {
+        $steps += Step "car home" @{ Key = $VK_LEFT; Settle = 800;
+                                     When = [scriptblock]::Create("param(`$s) $k -lt (Unlocked `$s) - 1") }
+    }
+    for ($k = 0; $k -lt 8; $k++) {
+        $steps += Step "car right" @{ Key = $VK_RIGHT; Settle = 1200;
+                                      When = [scriptblock]::Create(
+                                          "param(`$s) `$u = Unlocked `$s; `$u -gt 1 -and $k -lt (($i - 1) % (`$u - 1)) + 1") }
+    }
+    $steps += Step "transmission" @{ Key = $VK_A; Settle = 1500 }
+    if ($i % 2) { $steps += Step "manual" @{ Key = $VK_RIGHT; Settle = 1000 } }
+    $steps += Step "gearbox" @{ Key = $VK_A; Settle = 1500; Shot = "handling" }
+    return $steps + $joinRace
 }
 
 $start = Get-Date
@@ -529,7 +614,7 @@ $sides = @()
 for ($i = 0; $i -lt $Consoles; $i++) {
     $nick = if ($i -eq 0) { "hp2host" } else { "hp2join$i" }
     $s = Prepare $letters[$i] $nick ($i -eq 0)
-    $s.Steps = if ($i -eq 0) { $hostSteps } else { $joinSteps }
+    $s.Steps = if ($i -eq 0) { $hostSteps } else { JoinSteps $i }
     $sides += $s
 }
 
@@ -603,6 +688,47 @@ if ($Race) {
         $seed = ([regex]::Match($go[0], "seed ([0-9a-f]{8})")).Groups[1].Value
         if ($null -eq $hostSeed) { $hostSeed = $seed }
         elseif ($seed -ne $hostSeed -and -not $s.Failed) { $s.Failed = "GO on $seed, the host's $hostSeed" }
+    }
+
+    # The CPU racers the host started with, and as many more drivers.
+    $h = $sides[0]
+    $cpuRun = 0
+    $st = @(LogLines $h "lobby: start, \d+ consoles")
+    if ($st.Count -gt 0) {
+        $m = [regex]::Match($st[-1], ", (\d+) CPU racers")
+        if ($m.Success) { $cpuRun = [int]$m.Groups[1].Value }
+    }
+    if ($h.Seen["to cpu"] -and $cpuRun -ne $Cpu -and -not $h.Failed) {
+        $h.Failed = "started with $cpuRun CPU racers, not $Cpu"
+    }
+    $built = @(LogLines $h "netrace: built, track \d+, \d+ drivers")
+    if ($built.Count -eq 1) {
+        $n = [int]([regex]::Match($built[0], ", (\d+) drivers")).Groups[1].Value
+        Write-Host "Host: $cpuRun CPU racers, $n drivers"
+        if ($n -ne $Consoles + $cpuRun -and -not $h.Failed) {
+            $h.Failed = "$n drivers for $Consoles consoles and $cpuRun CPU racers"
+        }
+    }
+
+    # Each copy's car and transmission, the clients' as the host got them.
+    $hs = @(LogLines $h "netrace: the host's start, type \d+ skin \d+, transmission \d+")
+    $hostType = $null
+    if ($hs.Count -gt 0) {
+        $m = [regex]::Match($hs[-1], "type (\d+) skin (\d+), transmission (\d+)")
+        $hostType = $m.Groups[1].Value
+        Write-Host "Host's car: type $hostType skin $($m.Groups[2].Value), transmission $($m.Groups[3].Value)"
+    }
+    for ($i = 1; $i -lt $sides.Count; $i++) {
+        $s = $sides[$i]
+        $sent = @(LogLines $s "netrace: car sent, type \d+ skin \d+, transmission \d+")
+        if ($sent.Count -eq 0) { continue }
+        $m = [regex]::Match($sent[-1], "type (\d+) skin (\d+), transmission (\d+)")
+        $type = $m.Groups[1].Value; $skin = $m.Groups[2].Value; $gear = [int]$m.Groups[3].Value
+        Write-Host "$($s.Name)'s car: type $type skin $skin, transmission $gear"
+        if ($gear -ne ($i % 2) -and -not $s.Failed) { $s.Failed = "transmission $gear, not $($i % 2)" }
+        $got = @(LogLines $h "netrace: place \d+'s car, type $type skin $skin, transmission $gear")
+        if ($got.Count -eq 0 -and -not $h.Failed) { $h.Failed = "$($s.Name)'s car not as sent" }
+        if ($type -eq $hostType) { Write-Host "  (the same car as the host's)" }
     }
 }
 Write-Host ""

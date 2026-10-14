@@ -2474,24 +2474,43 @@ phases.
                   run gave the 3 s timeout back at GO and each copy timed
                   the other out. 37d gives it back once every console's
                   frames come in.
-          - [ ] 37c-2: the CPU racers, the host's call (the user,
+          - [x] 37c-2: the CPU racers, the host's call (the user,
                 2026-10-14). In a race with no cop among the players,
                 the host's wireless setup chooses whether there are CPU
                 racers and how many: none, or 1 up to 8 less the players
                 in the room (8 cars at most).
-                - Each player already picks their own car and
-                  transmission on their own console (37c sends the
-                  ride and the settings, TransmissionType among them).
-                  The -Race run picked the same car and Automatic on
-                  both copies; it should pick different ones on each
-                  to show it.
-                - Today netrace_begin raises NumAICars to the consoles
-                  less two and the players past the second take AI
-                  racers' places, so the setup's Opponents row (retail's
-                  None / One / Full Grid, `bsetup.c`) does not say how
-                  many CPU racers there are. Done when the wireless
-                  setups' row counts CPU racers only (0 to 8 less the
-                  players) and the build adds the players on top.
+                - Done in Session 99 (`docs/formats/lobby.md`, "CPU
+                  racers"; `docs/formats/netrace.md`, "The build"). The
+                  host's list ends with "CPU racers: n" where the setup
+                  has AI racers (`lobby_cpu_wish`, `main.c`: Single
+                  Race's Opponents, Full Grid as many as fit, One 1,
+                  None 0, 0 with the cops; Knockout and Lap Knockout 2;
+                  no choice for Free Run and Be A Cop), never more than
+                  8 less the consoles; CPU Racers counts one more, none
+                  again past the room. Start hands the count on
+                  (`LobbyRace.cpu`). The host's build adds the CPU
+                  racers to the clients in AI racers' places; they take
+                  the front by performance and the players start behind
+                  them in place order; a Lap Knockout's laps stay one
+                  fewer than the cars.
+                - Each console's own car and transmission: the -Race run
+                  picks a different car on each client, Manual on the
+                  odd ones, and checks the host got each as sent.
+                - All cops (2 to 8 CPU racers) is TASKS 61's rule.
+                - lobby_check: 34 scenarios, faults 0; 87 mutations, 84
+                  caught, 3 equivalent. netrace_check: 25 scenarios,
+                  faults 0; 172 mutations, 161 caught, 11 equivalent.
+                  fredrace_check: 0 differ.
+                - On Azahar (`run_azahar_lobby.ps1 -Consoles 2 -Race
+                  -Cpu 2`): both PASS (racing). The host's list showed 7
+                  CPU racers alone and 6 with the client in; A counted
+                  0, 1, 2, and Start went with 2. The client sent its
+                  Vauxhall VX220 (type 35, skin 7) on Manual, the host
+                  got it as sent and started with its Opel Speedster
+                  on Automatic. Track 11 built with 4 drivers, GO at
+                  199 s on seed ced6d9c3, both racing; each Starting
+                  Grid has the CPU racers 1 and 2, the host 3, the
+                  client 4.
           - [ ] 37d: the lockstep race. The host's step each frame and
                 both pads, with a frame or two of input delay; each
                 console's own view, mirror and HUD.

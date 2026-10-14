@@ -36,7 +36,7 @@ void (*gDemoModeReplayStartRaceFn)(void);
 int32_t (*gEventRewardCarsUnlockedFn)(void);
 int32_t (*gFredGameFlowStateFn)(void);
 void (*gFredChangeGameFlowFn)(int32_t state);
-int32_t (*gFredNetRideFn)(int32_t ai, RideInfo *ride);
+int32_t (*gFredNetRideFn)(int32_t ai, RideInfo *ride, int32_t *startPos);
 
 // GameFlowState's two StartRace asks for, as the image writes them.
 #define FLOW_UNLOADING_FRONTEND   2
@@ -623,6 +623,7 @@ void fred_setup_cars_for_race(FrontendDatabase *f)
     for (i = 0; i < numAI; i++) {
         int32_t c = pick_character_number_that_isnt_racing(list, 8, -1);
         int32_t skill = -1;
+        int32_t start = 0;
 
         ride.Type = -1;
         ride.InstanceIndex = 0;
@@ -630,11 +631,11 @@ void fred_setup_cars_for_race(FrontendDatabase *f)
         ride.HasDash = 0;
         ride.CanBeVertexDamaged = 0;
         // The port's: a wireless player's car in this racer's place.
-        if (gFredNetRideFn == NULL || !gFredNetRideFn(i, &ride))
+        if (gFredNetRideFn == NULL || !gFredNetRideFn(i, &ride, &start))
             choose_ai_ride(f, i, minClass, maxClass, &firstGen, &secondGen,
                            &ride, &skill);
         driver_info_init(&d, i + 100, DRIVER_TYPE_AI_RACER, &ride, c, skill,
-                         0);
+                         start);
         race_parameters_add_driver_info(rp, &d);
         count_driver(f, i + 100, &count);
     }

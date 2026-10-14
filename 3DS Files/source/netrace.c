@@ -259,13 +259,16 @@ static void maybeGo(void)
 
 // ------------------------------------------------------------ the build
 
-// gFredNetRideFn: AI racer `ai`'s place, a player's.
-static int32_t aiRide(int32_t ai, RideInfo* ride)
+// gFredNetRideFn: AI racer `ai`'s place, a player's. The players start
+// behind the CPU racers and the two players, in the order of their places;
+// the CPU racers, past them, take the front by performance as retail's do.
+static int32_t aiRide(int32_t ai, RideInfo* ride, int32_t* startPos)
 {
     if (ai < 0 || ai >= R->humanAI) return 0;
     *ride = R->cars[R->aiPlace[ai]].ride;
     ride->InstanceIndex      = 0;
     ride->CanBeVertexDamaged = 0;   // as retail's AI racers
+    *startPos = R->race.cpu + 3 + ai;
     return 1;
 }
 
@@ -356,7 +359,14 @@ static void build(BGameFlow* gf)
     }
     R->driver[0]        = 0;
     R->cars[0].settings = Fred.FrontendPlayers[0].mPlayerSettings;
-    if (rp->NumAICars < R->humanAI) rp->NumAICars = R->humanAI;
+    // The host's CPU racers and the players still on in AI racers' places,
+    // the two players behind the CPU racers; a Lap Knockout's laps are one
+    // fewer than the cars, as track select counts them.
+    rp->NumAICars              = R->race.cpu + R->humanAI;
+    rp->PlayerStartPosition[0] = (int8_t)(R->race.cpu + 1);
+    rp->PlayerStartPosition[1] = (int8_t)(R->race.cpu + 2);
+    if (Fred.GameType == 5)
+        rp->NumLapsInRace = rp->NumAICars + rp->NumPlayerCars - 1;
 
     r1           = R->game.selectedRide(1);
     keepRide     = *r1;
@@ -488,9 +498,10 @@ static void hostRead(void)
                     memcpy(&R->cars[p].settings, m.data + 1 + sizeof(RideInfo),
                            sizeof(cPlayerSettings));
                     R->cars[p].in = 1;
-                    say("netrace: place %d's car, type %d skin %d", p,
-                        (int)R->cars[p].ride.Type,
-                        (int)R->cars[p].ride.SkinNumber);
+                    say("netrace: place %d's car, type %d skin %d, "
+                        "transmission %d", p, (int)R->cars[p].ride.Type,
+                        (int)R->cars[p].ride.SkinNumber,
+                        (int)R->cars[p].settings.TransmissionType);
                     break;
                 case NETRACE_MSG_UNCAR:
                     if (R->stage > NR_WAIT) break;
@@ -619,11 +630,13 @@ void netrace_begin(const LobbyRace* race)
     for (p = 0; p < WIRELESS_MAX_CONSOLES; p++) R->driver[p] = -1;
     if (R->net.setPatience) R->net.setPatience(NETRACE_PATIENCE_MS);
     say("netrace: begin, place %d of %d", race->place, race->consoles);
-    // The third to eighth take AI racers' places, so there are as many by
-    // track select (Lap Knockout counts its laps there).
-    if (R->host && TheRaceParameters.NumAICars < race->consoles - 2) {
-        TheRaceParameters.NumAICars = race->consoles - 2;
-        say("netrace: %d AI racers", (int)TheRaceParameters.NumAICars);
+    // The host's CPU racers, and the third to eighth consoles in AI racers'
+    // places, so there are as many by track select (Lap Knockout counts
+    // its laps there).
+    if (R->host) {
+        TheRaceParameters.NumAICars = race->cpu + race->consoles - 2;
+        say("netrace: %d AI racers, %d CPU", (int)TheRaceParameters.NumAICars,
+            race->cpu);
     }
 }
 
@@ -665,19 +678,24 @@ int netrace_car_chosen(BGameFlow* gf)
            sizeof(cPlayerSettings));
     R->net.send(0, NETRACE_MSG_CAR, m, sizeof m);
     R->stage = NR_WAIT;
-    say("netrace: car sent, type %d skin %d", (int)ride->Type,
-        (int)ride->SkinNumber);
+    say("netrace: car sent, type %d skin %d, transmission %d",
+        (int)ride->Type, (int)ride->SkinNumber,
+        (int)Fred.FrontendPlayers[0].mPlayerSettings.TransmissionType);
     bgf_change_to_screen(gf, NETRACE_SCREEN_NAME, 1);
     return 1;
 }
 
 int netrace_host_start(BGameFlow* gf)
 {
-    int p, ready = 1;
+    RideInfo* ride;
+    int       p, ready = 1;
 
     if (R->stage != NR_CARS || !R->host) return 0;
     R->stage = NR_WAIT;
-    say("netrace: the host's start");
+    ride     = R->game.selectedRide(0);
+    say("netrace: the host's start, type %d skin %d, transmission %d",
+        (int)ride->Type, (int)ride->SkinNumber,
+        (int)Fred.FrontendPlayers[0].mPlayerSettings.TransmissionType);
     // With no client left the build goes back to the lobby.
     for (p = 1; p < R->race.consoles; p++)
         if (placeAlive(p) && !R->cars[p].in) ready = 0;

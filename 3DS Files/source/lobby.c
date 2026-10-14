@@ -28,7 +28,7 @@ typedef enum {
 
 // The popups' answers: each button's Param, BACK's, and the Param a popup
 // with no buttons gives SELECT, which only puts it back.
-enum { A_HOST = 1, A_JOIN, A_BACK, A_STAY, A_START, A_NEXT, A_OK };
+enum { A_HOST = 1, A_JOIN, A_BACK, A_STAY, A_START, A_NEXT, A_OK, A_CPU };
 
 static struct {
     LobbyNet     net;
@@ -46,6 +46,9 @@ static struct {
     LobbyStartFn onStart;
     int32_t      nextNotice;                    // lobby_notice_next's, or 0
     char         nextName[WIRELESS_NAME_MAX];   // Latin-1
+    LobbyCpuFn   cpuFn;
+    int          cpuWant;        // the host's CPU racers, or LOBBY_CPU_NONE
+    int          onCpu;          // the host's highlight on CPU Racers
 } L = { .popup = -1 };
 
 static void say(const char* fmt, ...)
@@ -214,15 +217,28 @@ static void notice(BGameFlow* gf, int32_t id, const char* name,
     showPopup(gf, 1, LANG_OK, A_OK, 0, 0, 0);
 }
 
+// The CPU racers the host's list shows: as many as wished, of those that
+// fit beside the consoles on the network; below 0 with no choice (the
+// wish's own), or no room.
+static int cpuShown(void)
+{
+    int room = LOBBY_GRID - (clientsAlive() + 1);
+
+    if (room <= 0) return -1;
+    return L.cpuWant < room ? L.cpuWant : room;
+}
+
 // The host's list: the line, then this console, then each client still
-// on, in the order they came. Start once there is one. Put up again only
-// when it changed, or when there is none up (a press took it down); the
-// names say whether there is one, so the line alone says what changed.
+// on, in the order they came, then the CPU racers if there is a choice.
+// Start once there is a client, then CPU Racers, the highlight where the
+// host left it. Put up again only when it changed, or when there is none
+// up (a press took it down); the lines say which buttons there are, so
+// they alone say what changed.
 static void showList(BGameFlow* gf)
 {
     char msg[MESSAGE_MAX];
     char name[WIRELESS_NAME_MAX];
-    int  i, buttons = clientsAlive() > 0;
+    int  i, clients = clientsAlive(), cpu = cpuShown();
 
     snprintf(msg, sizeof msg, "%s", text(gf, PORTLANG_WAITING_FOR_PLAYERS));
     lobby_latin1(name, sizeof name, L.net.selfName());
@@ -234,11 +250,39 @@ static void showList(BGameFlow* gf)
         strncat(msg, "@", sizeof msg - strlen(msg) - 1);
         strncat(msg, name, sizeof msg - strlen(msg) - 1);
     }
+    if (cpu >= 0) {
+        char line[64];
+
+        fill(line, sizeof line, text(gf, PORTLANG_CPU_RACERS_N), "", cpu, 0);
+        strncat(msg, "@", sizeof msg - strlen(msg) - 1);
+        strncat(msg, line, sizeof msg - strlen(msg) - 1);
+    }
     if (L.popup >= 0 && !strcmp(msg, L.message)) return;
     hidePopup(gf);
     if (strcmp(msg, L.message)) say("lobby: list %s", msg);
     memcpy(L.message, msg, sizeof msg);
-    showPopup(gf, buttons, PORTLANG_START, A_START, 0, 0, 0);
+    if (cpu < 0)
+        showPopup(gf, clients > 0, PORTLANG_START, A_START, 0, 0, 0);
+    else if (clients == 0)
+        showPopup(gf, 1, PORTLANG_CPU_RACERS, A_CPU, 0, 0, 0);
+    else
+        showPopup(gf, 2, PORTLANG_START, A_START, PORTLANG_CPU_RACERS, A_CPU,
+                  L.onCpu);
+}
+
+// A on CPU Racers: one more, none again past as many as fit, and the
+// highlight kept on it, so A counts on.
+static void nextCpu(BGameFlow* gf)
+{
+    int cpu  = cpuShown();
+    int room = LOBBY_GRID - (clientsAlive() + 1);
+
+    if (cpu >= 0) {   // not if a console filled the room as A was pressed
+        L.cpuWant = cpu < room ? cpu + 1 : 0;
+        L.onCpu   = 1;
+        say("lobby: cpu %d", L.cpuWant);
+    }
+    showList(gf);
 }
 
 static void startHosting(BGameFlow* gf)
@@ -252,7 +296,9 @@ static void startHosting(BGameFlow* gf)
         notice(gf, PORTLANG_WIRELESS_OFF, "", LS_ASK);
         return;
     }
-    L.state = LS_HOSTING;
+    L.state   = LS_HOSTING;
+    L.cpuWant = L.cpuFn ? L.cpuFn() : LOBBY_CPU_NONE;
+    L.onCpu   = 0;
     say("lobby: hosting");
     showList(gf);
 }
@@ -278,7 +324,7 @@ static void raceInit(LobbyRace* r, int consoles, int place)
 
 static void startRace(BGameFlow* gf)
 {
-    int       i, place = 0, consoles = clientsAlive() + 1;
+    int       i, place = 0, consoles = clientsAlive() + 1, cpu = cpuShown();
     uint8_t   msg[2];
     LobbyRace race;
 
@@ -288,6 +334,7 @@ static void startRace(BGameFlow* gf)
     }
     L.net.setOpen(0);
     raceInit(&race, consoles, 0);
+    race.cpu = cpu > 0 ? cpu : 0;
     lobby_latin1(race.hostName, sizeof race.hostName, L.net.selfName());
     for (i = 0; i < L.net.peerCount(); i++) {
         if (!L.net.peerAlive(i)) continue;
@@ -296,7 +343,10 @@ static void startRace(BGameFlow* gf)
         race.peer[place] = i;
         L.net.send(i, LOBBY_MSG_START, msg, sizeof msg);
     }
-    say("lobby: start, %d consoles", consoles);
+    if (cpu >= 0)
+        say("lobby: start, %d consoles, %d CPU racers", consoles, cpu);
+    else
+        say("lobby: start, %d consoles", consoles);
     if (L.onStart) L.onStart(&race);
     goOn(gf);
 }
@@ -431,6 +481,7 @@ static void answer(BGameFlow* gf, int a)
 
         case LS_HOSTING:
             if (a == A_START) startRace(gf);
+            else if (a == A_CPU) nextCpu(gf);
             else if (a == A_BACK) toAsk(gf);
             else showList(gf);
             break;
@@ -484,6 +535,11 @@ void lobby_on_start(LobbyStartFn fn)
     L.onStart = fn;
 }
 
+void lobby_cpu_wish(LobbyCpuFn fn)
+{
+    L.cpuFn = fn;
+}
+
 void lobby_notice_next(int32_t id, const char* name)
 {
     L.nextNotice = id;
@@ -520,6 +576,13 @@ void lobby_callback(BGameFlow* gf, BScreenMessage msg,
 
         case BMSG_SCREEN_TICK:
             tick(gf);
+            break;
+
+        // The host's two buttons are Start and CPU Racers.
+        case BMSG_POPUP_NEXT:
+        case BMSG_POPUP_PREV:
+            if (L.state == LS_HOSTING && data)
+                L.onCpu = data->itemHash == BPOPUP_OBJ_BUTTON2;
             break;
 
         case BMSG_POPUP_DISMISS:

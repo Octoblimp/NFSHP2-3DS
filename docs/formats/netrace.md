@@ -17,7 +17,8 @@ together, frame by frame, is 37d's.
   or `netrace_car_chosen` for a client), and each frame after the link's
   pump (`netrace_frame`). The lobby's Start calls `netrace_begin`.
 - Two hooks in retail's code, NULL unless a race is being set up:
-  `gFredNetRideFn` in StartRace's AI racers (`fredrace.c`) and
+  `gFredNetRideFn` in StartRace's AI racers (`fredrace.c`: the ride and
+  the starting position, 0 by performance as retail's) and
   `gTrackFlowHoldRaceFn` at the end of the load (`trackflow.c` Part6).
 - `portlang.c` has the host's new line, "Waiting for a car from:", in
   retail's six languages.
@@ -35,7 +36,8 @@ together, frame by frame, is 37d's.
 
 ### The cars
 
-Each console picks its own car on its own car select. On a client, the
+Each console picks its own car and transmission on its own car select.
+On a client, the
 continue that would go on to "Select Track" sends the car instead
 (`NETRACE_MSG_CAR`: the place, the `RideInfo` of player 0's ride for
 Fred's game type, and player 0's `cPlayerSettings`), and goes on to
@@ -72,12 +74,26 @@ The host runs retail's StartRace (`fred_start_race`) with:
   frontend's second player, which is put back after;
 - every other client's car in an AI racer's place, in place order
   (`gFredNetRideFn`), at instance 0 and not vertex-damageable, as
-  retail's AI racers are. `netrace_begin` raises NumAICars to the
-  consoles less two, so track select (Lap Knockout counts its laps there)
-  already has those places; the build raises it again if it must.
+  retail's AI racers are;
+- the host's CPU racers from the lobby (`LobbyRace.cpu`, TASKS 37c-2,
+  `docs/formats/lobby.md`) after them, StartRace's own, drawn as
+  retail's.
+
+NumAICars is the CPU racers and the clients in AI racers' places.
+`netrace_begin` sets it to the CPU racers and the consoles less two, so
+track select already counts them (a Lap Knockout's laps are one fewer
+than the cars). The build sets it again to the clients still on, and a
+Lap Knockout's laps with it.
+
+The grid: the CPU racers take the front, places 1 to n, by performance,
+as retail's AI racers do (a starting position of 0). The host starts
+at n + 1 and the first client at n + 2 (`PlayerStartPosition`), and the
+client in AI racer k's place at n + 3 + k, the hook's starting position.
+With no CPU racers that is the consoles in place order.
 
 Each place's driver (its UniqueDriverNumber) is 0 for the host, 1 for
-the first client, and 100 + k for the client in AI racer k's place.
+the first client, and 100 + k for the client in AI racer k's place; the
+CPU racers are the AI racers after them.
 
 What StartRace made goes to every client racing as `NETRACE_MSG_SETUP`,
 in pieces of `WL_MSG_MAX - 4` bytes, each with its offset and the total
@@ -172,13 +188,15 @@ drawing a ride from `bDefaultSeed`), and a load of the scenario's
 frames, the loop stalled for most of them, that draws a different count
 of randoms on each console.
 
-21 scenarios: two consoles; the host waiting on two cars; a client's and
+25 scenarios: two consoles; the host waiting on two cars; a client's and
 the host's BACK; eight consoles; a client gone before its car, with its
 car in, of two waited for, while waiting, at car select, during the
 load; every client gone at the start, at car select, while the host
 waits; the host gone while a client waits, at car select, during the
 load; a knockout (the event's state in the event); a setup from another
-build; a client leaving; French; and no wireless race at all.
+build; a client leaving; French; the host's CPU racers with two and
+three consoles, with one gone before its car, and in a Lap Knockout;
+and no wireless race at all.
 
 Every frame it checks the popup (one at most, only on "Wireless Race",
 the lobby's look), each console's line, the sounds, the link's patience,
@@ -189,23 +207,40 @@ racing client's race is the host's at GO: the parameters, the driver
 table, the event, Fred's game type and players, the drivers, and the
 seed. The host's table must have the first client as the second player
 and the rest in AI racers' places, and the frontend's second player put
-back.
+back; exactly as many AI racers as CPU racers and clients in them; each
+driver's starting position (the CPU racers 0, the players behind them in
+place order); and the laps (a Lap Knockout's one fewer than the cars,
+any other race's as track select left them).
 
 The last line is `total faults N`, and the check passes at 0.
 
-`--mutate` makes 158 mutations of `netrace.c`. 147 are caught and 11 are
+`--mutate` makes 172 mutations of `netrace.c`. 161 are caught and 11 are
 equivalent, each named in the script with its reason.
 
 ## On Azahar
 
-`tools/run_azahar_lobby.ps1 -Race` goes on from the lobby's run. Each
-copy picks the first car (A on the transmission, Automatic and the first
-handling). Each client sends its car and waits on "Wireless Race". The
-host picks the first track and starts. It passes when every copy has
-logged GO on the host's seed and reached `flow state RACING`, with its
-sound up and no unmapped reads in Azahar's log. Each copy's card gets
-the DSP firmware (`sdmc:/3ds/dspfirm.cdc`) from Azahar's own card.
+`tools/run_azahar_lobby.ps1 -Race` goes on from the lobby's run, the
+host's CPU racers set to `-Cpu` (2 unless said). Each copy picks a car
+of its own: the host the profile's, with Automatic; copy i the first
+unlocked car (the unlocked cars come first, and left stops there), then
+(i - 1) mod (u - 1) + 1 to the right of the u unlocked, with Manual
+where i is odd; each the first handling. Each client
+sends its car and waits on "Wireless Race". The host picks the first
+track and starts. It passes when every copy has logged GO on the host's
+seed and reached `flow state RACING`, with its sound up and no unmapped
+reads in Azahar's log; the race built with as many drivers as consoles
+and CPU racers; and each client's car and transmission ("car sent, type
+t skin s, transmission x") as it chose them and as the host got them.
+Each copy's card gets the DSP firmware (`sdmc:/3ds/dspfirm.cdc`) from
+Azahar's own card.
 
 Two copies passed in Session 98: track 11 with four drivers, GO 4 s
 after the build, both racing on seed 248fe492 with the same Starting
 Grid.
+
+Two copies passed in Session 99 with `-Cpu 2`: the client sent its
+Vauxhall VX220 (type 35, skin 7) on Manual and the host got it as
+sent; the host started with its Opel Speedster on Automatic. Track 11
+built with four drivers, GO 3 s after, both racing on seed ced6d9c3.
+Each Starting Grid has the two CPU racers first (Mercedes CL55 AMG, Ford
+TS50), then the host and the client.

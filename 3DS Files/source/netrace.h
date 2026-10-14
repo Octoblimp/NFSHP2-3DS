@@ -13,7 +13,11 @@
 //     line naming whoever has not sent a car, until all still on have.
 //   - The host builds the race: retail's StartRace (fred_start_race), with
 //     the first client's car and settings as the second player's and the
-//     rest of the clients' cars in AI racers' places (gFredNetRideFn).
+//     rest of the clients' cars in AI racers' places (gFredNetRideFn), as
+//     many CPU racers as the host chose in the lobby (TASKS 37c-2) on top.
+//     The CPU racers take the front of the grid by performance, as
+//     retail's AI racers do; the players start behind them in the order
+//     of their places.
 //     What it made -- the race's parameters, the driver table, the race
 //     event, Fred's game type and player count, the random seed, and the
 //     driver each place drives -- goes to every client (NETRACE_MSG_SETUP,

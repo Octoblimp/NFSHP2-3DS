@@ -22407,3 +22407,82 @@ Any player whose card lacks the firmware would have hit it at the race.
 TASKS 37c-2 (the user's, 2026-10-14): the host chooses the CPU racers,
 none or up to 8 less the players; each player's own car and transmission
 shown on a -Race run with different picks. Then 37d.
+
+## Session 99 -- 37c-2, the host's CPU racers (done)
+
+The user's, 2026-10-14: in a race with no cop among the players, the
+host chooses the CPU racers, none or up to 8 less the players, and each
+player drives their own car and transmission. `docs/formats/lobby.md`,
+"CPU racers", and `docs/formats/netrace.md`, "The build", have it.
+
+### What changed
+
+- `lobby.c`/`.h`: where the race setup has AI racers, the host's list
+  ends with "CPU racers: n" and a CPU Racers button beside Start. n is
+  the setup's wish but never more than fit beside the consoles on the
+  network (8 less them), so it falls as consoles join and rises as they
+  go; A counts one more, none again past the room. The highlight stays
+  on CPU Racers while the list changes, so an A meant for the count
+  never starts the race. Start hands the count on (`LobbyRace.cpu`; a
+  client's 0). `lobby_cpu_wish` asks for the wish each time hosting
+  begins.
+- `main.c`: `lobbyCpuWish`. Single Race's Opponents (Full Grid as many
+  as fit, One 1, None 0; 0 with the cops, as retail's two race alone),
+  Knockout's and Lap Knockout's 2 (retail's for two players), and no
+  choice for Free Run and Be A Cop (TASKS 61's).
+- `netrace.c`/`.h`: the build adds the CPU racers to the clients in AI
+  racers' places (NumAICars), `netrace_begin` counts them for track
+  select, and a Lap Knockout's laps stay one fewer than the cars. The
+  CPU racers take the front by performance (a starting position of 0,
+  as retail's AI racers); the host starts at n + 1, the first client at
+  n + 2 (`PlayerStartPosition`), the client in AI racer k's place at
+  n + 3 + k. The logs name each car's type, skin and transmission: the
+  client's "car sent", the host's "place p's car" and "the host's
+  start".
+- `fredrace.c`/`.h`: `gFredNetRideFn` writes the starting position too.
+- `portlang.c`/`.h`: "CPU Racers" and "CPU racers: $N" in the six
+  languages (2000015, 2000016).
+- `tools/run_azahar_lobby.ps1`: `-Cpu` (2 unless said) sets the host's
+  count; each client picks a car of its own (the first unlocked, then
+  (i - 1) mod (u - 1) + 1 right of it) and Manual where odd; the verdict
+  checks the count started with, the drivers built, and each client's
+  car and transmission as sent and as the host got them. Joining the
+  room opens Azahar's Multiplayer menu again if its items come late.
+
+### What bit
+
+- Three lobby_check mutations (lb-host-fail-down, lb-activate,
+  lb-cpu-room) no longer found their text after the edits, and
+  lb-cpu-none was equivalent; the three are fixed, the fourth gone, and
+  `cpuShown` is now the wish or the room, the smaller.
+- The first -Race run picked the same car on both copies: car select's
+  list does not wrap and the profile's car (OPEL) is the first unlocked,
+  so LEFT went nowhere. The run now walks right from the first unlocked.
+- One start found no "Direct Connect to Room" in Azahar's menu half a
+  second after opening it; the run now tries again.
+- The user asked whether the READY popup (car select's last step, no
+  buttons, an empty strip under its header) was a glitch: it is retail's
+  own popup, string 49070 "READY" in the header and A to go on; the
+  strip is where the other popups' buttons sit.
+
+### Checks
+
+- lobby_check: 34 scenarios, faults 0; `--mutate`: 87 mutations, 84
+  caught, 3 equivalent, 0 unexplained.
+- netrace_check: 25 scenarios, faults 0; `--mutate`: 172 mutations,
+  161 caught, 11 equivalent, 0 unexplained.
+- fredrace_check: 0 differ.
+- On Azahar, `run_azahar_lobby.ps1 -Consoles 2 -Race -Cpu 2`: both
+  PASS (racing). The host's list showed 7 CPU racers alone and 6 with
+  the client in; A counted 0, 1, 2 and Start went with 2. The client
+  sent its Vauxhall VX220 (type 35, skin 7) on Manual and the host got
+  it as sent; the host started with its Opel Speedster on Automatic.
+  Track 11 built with 4 drivers, GO at 199 s on seed ced6d9c3, both
+  racing; each Starting Grid has the CPU racers (Mercedes CL55 AMG,
+  Ford TS50) 1 and 2, the host 3, the client 4.
+
+### Next
+
+37d: the lockstep race. Then 37e, 37f, then TASKS 61 (cops and racers
+wireless, with the all-cops rule: 2 to 8 CPU racers). Still to ask:
+TASKS 47's bridge, TASKS 52's popups.

@@ -98,7 +98,7 @@ RaceParameters   TheRaceParameters;
 DriverInfo       DriverInfoTable[RACE_PARAMETERS_MAX_DRIVERS];
 RaceEvent        TheRaceEvent;
 FrontendDatabase Fred;
-int32_t (*gFredNetRideFn)(int32_t ai, RideInfo* ride);
+int32_t (*gFredNetRideFn)(int32_t ai, RideInfo* ride, int32_t* startPos);
 
 static RideInfo g_rides[2];   // Fred's players' selected rides
 
@@ -117,6 +117,7 @@ typedef struct {
     int         language;
     int32_t     gameType;          // the host's Fred.GameType
     int32_t     numAI;             // the host's NumAICars, before
+    int         cpu;               // the host's CPU racers, the lobby's
     int         delay;             // a message's most frames on the way
     int         load[MAXC];        // each console's load, in frames
     const char* names[MAXC];       // UTF-8
@@ -140,15 +141,15 @@ static const Scenario kScenarios[] = {
     // Two: the client's car in before the host's start, which builds at
     // once; the client takes it, both load, the host waits for the
     // client's, and GO.
-    { "two", 700, 2, LANG_EN, 1, 3, 3, {120, 260}, TWO,
+    { "two", 700, 2, LANG_EN, 1, 3, 0, 3, {120, 260}, TWO,
       {{30, 1, "car"}, {40, 0, "car"}, {80, 0, "start"}}, 0,
       {"Racing", "Racing"}, {1, 1}, "0 1",
       {"0|netrace: begin, place 0 of 2", "1|netrace: begin, place 1 of 2",
-       "1|netrace: car sent, type 8 skin 1",
-       "0|netrace: place 1's car, type 8 skin 1",
-       "0|netrace: the host's start",
-       "0|netrace: built, track 7, 5 drivers, 0 players in AI places",
-       "1|netrace: setup taken, track 7, 5 drivers, driver 1",
+       "1|netrace: car sent, type 8 skin 1, transmission 1",
+       "0|netrace: place 1's car, type 8 skin 1, transmission 1",
+       "0|netrace: the host's start, type 3 skin 0, transmission 0",
+       "0|netrace: built, track 7, 2 drivers, 0 players in AI places",
+       "1|netrace: setup taken, track 7, 2 drivers, driver 1",
        "0|netrace: loaded, holding for the rest",
        "1|netrace: loaded, holding for the host",
        "0|netrace: place 1 loaded", "0|netrace: go, seed",
@@ -156,7 +157,7 @@ static const Scenario kScenarios[] = {
 
     // The host's start first: it waits for both, the line shrinking as
     // the cars come; A on it only puts it back.
-    { "host_waits", 900, 3, LANG_EN, 1, 1, 4, {100, 150, 90}, THREE,
+    { "host_waits", 900, 3, LANG_EN, 1, 1, 0, 4, {100, 150, 90}, THREE,
       {{20, 0, "car"}, {40, 0, "start"}, {60, 0, "A"}, {100, 1, "car"},
        {300, 2, "car"}}, 0,
       {"Racing", "Racing", "Racing"}, {1, 1, 1}, "0 1 100",
@@ -170,7 +171,7 @@ static const Scenario kScenarios[] = {
 
     // A client's car taken back with B, and sent again after the host's
     // start.
-    { "client_back", 900, 2, LANG_EN, 1, 2, 3, {80, 80}, TWO,
+    { "client_back", 900, 2, LANG_EN, 1, 2, 0, 3, {80, 80}, TWO,
       {{30, 1, "car"}, {100, 1, "B"}, {110, 0, "car"}, {150, 0, "start"},
        {250, 1, "car"}}, 0,
       {"Racing", "Racing"}, {1, 1}, "0 1",
@@ -183,7 +184,7 @@ static const Scenario kScenarios[] = {
 
     // The host's B on its wait: back to Select Track, where a car coming
     // in builds nothing until the next start.
-    { "host_back", 900, 2, LANG_EN, 1, 2, 3, {80, 80}, TWO,
+    { "host_back", 900, 2, LANG_EN, 1, 2, 0, 3, {80, 80}, TWO,
       {{20, 0, "car"}, {40, 0, "start"}, {80, 0, "B"}, {120, 1, "car"},
        {200, 0, "start"}}, 0,
       {"Racing", "Racing"}, {1, 1}, "0 1",
@@ -191,9 +192,10 @@ static const Scenario kScenarios[] = {
        "0|netrace: back to track select", "0|netrace: place 1's car",
        "0|netrace: the host's start", "0|netrace: built"} },
 
-    // Eight: six clients in AI racers' places, the AI count raised at the
-    // start to the six; cars and loads all over the place.
-    { "eight", 1500, 8, LANG_EN, 1, 2, 6,
+    // Eight: six clients in AI racers' places, the AI count set at the
+    // start to the six (track select's options had none); cars and
+    // loads all over the place.
+    { "eight", 1500, 8, LANG_EN, 1, 2, 0, 6,
       {200, 90, 400, 60, 300, 250, 120, 350}, EIGHT,
       {{50, 3, "car"}, {60, 0, "car"}, {70, 6, "car"}, {90, 0, "ai0"},
        {100, 0, "start"},
@@ -211,25 +213,25 @@ static const Scenario kScenarios[] = {
 
     // A client gone before its car: the race goes on without it, the next
     // the second player.
-    { "client_gone_before", 800, 3, LANG_EN, 1, 3, 3, {80, 80, 80}, THREE,
+    { "client_gone_before", 800, 3, LANG_EN, 1, 3, 0, 3, {80, 80, 80}, THREE,
       {{50, 1, "gone"}, {60, 2, "car"}, {70, 0, "car"}, {100, 0, "start"}},
       0, {"Racing", NULL, "Racing"}, {1, 0, 1}, "0 -1 1",
       {"0|netrace: place 1 (hp2join1) is gone",
-       "0|netrace: built, track 7, 5 drivers, 0 players in AI places",
-       "2|netrace: setup taken, track 7, 5 drivers, driver 1"} },
+       "0|netrace: built, track 7, 2 drivers, 0 players in AI places",
+       "2|netrace: setup taken, track 7, 2 drivers, driver 1"} },
 
     // One gone after its car, before the start: not in the race.
-    { "gone_with_car", 800, 3, LANG_EN, 1, 3, 3, {80, 80, 80}, THREE,
+    { "gone_with_car", 800, 3, LANG_EN, 1, 3, 0, 3, {80, 80, 80}, THREE,
       {{30, 1, "car"}, {40, 2, "car"}, {100, 1, "gone"}, {110, 0, "car"},
        {150, 0, "start"}}, 0,
       {"Racing", NULL, "Racing"}, {1, 0, 1}, "0 -1 1",
       {"0|netrace: place 1's car", "0|netrace: place 2's car",
        "0|netrace: place 1 (hp2join1) is gone",
-       "0|netrace: built, track 7, 5 drivers, 0 players in AI places"} },
+       "0|netrace: built, track 7, 2 drivers, 0 players in AI places"} },
 
     // One of two the host waits for gone: the line loses it, and the
     // other's car builds the race.
-    { "gone_of_two_waited", 900, 4, LANG_EN, 1, 2, 3, {80, 80, 80, 80},
+    { "gone_of_two_waited", 900, 4, LANG_EN, 1, 2, 0, 3, {80, 80, 80, 80},
       { "hp2host", "hp2join1", "hp2join2", "hp2join3" },
       {{30, 1, "car"}, {35, 0, "car"}, {40, 0, "start"}, {100, 2, "gone"},
        {300, 3, "car"}}, 0,
@@ -237,10 +239,10 @@ static const Scenario kScenarios[] = {
       {"0|netrace: wait Waiting for a car from:@hp2join2@hp2join3",
        "0|netrace: place 2 (hp2join2) is gone",
        "0|netrace: wait Waiting for a car from:@hp2join3",
-       "0|netrace: built, track 7, 4 drivers, 1 players in AI places"} },
+       "0|netrace: built, track 7, 3 drivers, 1 players in AI places"} },
 
     // The last client gone on the frame of the host's start.
-    { "all_gone_at_start", 300, 2, LANG_EN, 1, 3, 3, {80, 80}, TWO,
+    { "all_gone_at_start", 300, 2, LANG_EN, 1, 3, 0, 3, {80, 80}, TWO,
       {{20, 0, "car"}, {60, 1, "gone"}, {60, 0, "start"}}, 0,
       {"Local Wireless", NULL}, {0, 0}, NULL,
       {"0|netrace: the host's start",
@@ -249,16 +251,16 @@ static const Scenario kScenarios[] = {
        "0|lobby: notice The link to hp2join1 was lost."} },
 
     // One gone while the host waits for its car: built with the rest.
-    { "client_gone_waiting", 800, 3, LANG_EN, 1, 1, 3, {80, 80, 80}, THREE,
+    { "client_gone_waiting", 800, 3, LANG_EN, 1, 1, 0, 3, {80, 80, 80}, THREE,
       {{30, 1, "car"}, {50, 0, "car"}, {60, 0, "start"}, {150, 2, "gone"}},
       0, {"Racing", "Racing", NULL}, {1, 1, 0}, "0 1 -1",
       {"0|netrace: wait Waiting for a car from:@hp2join2",
        "0|netrace: place 2 (hp2join2) is gone",
-       "0|netrace: built, track 7, 3 drivers, 0 players"} },
+       "0|netrace: built, track 7, 2 drivers, 0 players"} },
 
     // The only client gone while the host waits: back to the lobby, which
     // says so.
-    { "all_gone", 400, 2, LANG_EN, 1, 3, 3, {80, 80}, TWO,
+    { "all_gone", 400, 2, LANG_EN, 1, 3, 0, 3, {80, 80}, TWO,
       {{20, 0, "car"}, {40, 0, "start"}, {100, 1, "gone"}}, 0,
       {"Local Wireless", NULL}, {0, 0}, NULL,
       {"0|netrace: place 1 (hp2join1) is gone",
@@ -267,7 +269,7 @@ static const Scenario kScenarios[] = {
        "0|lobby: notice The link to hp2join1 was lost."} },
 
     // And gone while the host is still on car select.
-    { "all_gone_car_select", 300, 2, LANG_EN, 1, 3, 3, {80, 80}, TWO,
+    { "all_gone_car_select", 300, 2, LANG_EN, 1, 3, 0, 3, {80, 80}, TWO,
       {{50, 1, "gone"}}, 0,
       {"Local Wireless", NULL}, {0, 0}, NULL,
       {"0|netrace: every other console is gone",
@@ -276,14 +278,14 @@ static const Scenario kScenarios[] = {
 
     // The host gone while a client waits on "Wireless Race", or picks its
     // car: back to the lobby.
-    { "host_gone_waiting", 400, 2, LANG_EN, 1, 3, 3, {80, 80}, TWO,
+    { "host_gone_waiting", 400, 2, LANG_EN, 1, 3, 0, 3, {80, 80}, TWO,
       {{30, 1, "car"}, {100, 0, "gone"}}, 0,
       {NULL, "Local Wireless"}, {0, 0}, NULL,
       {"1|netrace: wait Waiting for hp2host to start the race.",
        "1|netrace: place 0 (hp2host) is gone",
        "1|netrace: back to the lobby",
        "1|lobby: notice The link to hp2host was lost."} },
-    { "host_gone_car_select", 400, 3, LANG_EN, 1, 3, 3, {80, 80, 80}, THREE,
+    { "host_gone_car_select", 400, 3, LANG_EN, 1, 3, 0, 3, {80, 80, 80}, THREE,
       {{50, 0, "gone"}}, 0,
       {NULL, "Local Wireless", "Local Wireless"}, {0, 0, 0}, NULL,
       {"1|netrace: back to the lobby",
@@ -292,7 +294,7 @@ static const Scenario kScenarios[] = {
        "2|lobby: notice The link to hp2host was lost."} },
 
     // The host gone while a client loads: it races alone at its hold.
-    { "host_gone_loading", 900, 2, LANG_EN, 1, 3, 3, {100, 300}, TWO,
+    { "host_gone_loading", 900, 2, LANG_EN, 1, 3, 0, 3, {100, 300}, TWO,
       {{30, 1, "car"}, {40, 0, "car"}, {80, 0, "start"}, {250, 0, "gone"}},
       0, {NULL, "Racing"}, {0, 1}, NULL,
       {"1|netrace: setup taken", "1|netrace: loaded, holding for the host",
@@ -300,7 +302,7 @@ static const Scenario kScenarios[] = {
        "1|netrace: go, seed"} },
 
     // A client gone while it loads: GO when the other has loaded.
-    { "client_gone_loading", 900, 3, LANG_EN, 1, 0, 3, {100, 200, 400},
+    { "client_gone_loading", 900, 3, LANG_EN, 1, 0, 0, 3, {100, 200, 400},
       THREE,
       {{30, 1, "car"}, {35, 2, "car"}, {40, 0, "car"}, {80, 0, "start"},
        {200, 2, "gone"}}, 0,
@@ -310,7 +312,7 @@ static const Scenario kScenarios[] = {
        "0|netrace: go, seed", "1|netrace: go, seed"} },
 
     // Lap Knockout: the fake event's state is its own aOldState.
-    { "knockout", 700, 3, LANG_EN, 4, 0, 3, {120, 260, 200}, THREE,
+    { "knockout", 700, 3, LANG_EN, 4, 0, 0, 3, {120, 260, 200}, THREE,
       {{30, 1, "car"}, {32, 2, "car"}, {40, 0, "car"}, {80, 0, "start"}},
       0, {"Racing", "Racing", "Racing"}, {1, 1, 1}, "0 1 100",
       {"0|netrace: 1 AI racers",
@@ -320,7 +322,7 @@ static const Scenario kScenarios[] = {
 
     // A setup that is not this build's: the client back to the lobby; the
     // host, its client gone, races alone.
-    { "bad_setup", 700, 2, LANG_EN, 1, 3, 3, {120, 260}, TWO,
+    { "bad_setup", 700, 2, LANG_EN, 1, 3, 0, 3, {120, 260}, TWO,
       {{30, 1, "car"}, {40, 0, "car"}, {80, 0, "start"}}, 1,
       {"Racing", "Local Wireless"}, {1, 0}, "0 1",
       {"1|netrace: the setup is not this build's",
@@ -330,7 +332,7 @@ static const Scenario kScenarios[] = {
 
     // B on a client's car select: the lobby takes the link down, and the
     // host, alone, goes back to the lobby too.
-    { "client_leaves", 300, 2, LANG_EN, 1, 3, 3, {80, 80}, TWO,
+    { "client_leaves", 300, 2, LANG_EN, 1, 3, 0, 3, {80, 80}, TWO,
       {{20, 0, "car"}, {40, 1, "B"}}, 0,
       {"Local Wireless", "Local Wireless"}, {0, 0}, NULL,
       {"1|lobby: link down", "1|netrace: the link is down",
@@ -339,7 +341,7 @@ static const Scenario kScenarios[] = {
        "0|lobby: notice The link to hp2join1 was lost."} },
 
     // French, and names past ASCII.
-    { "french", 800, 2, LANG_FR, 1, 3, 3, {80, 120},
+    { "french", 800, 2, LANG_FR, 1, 3, 0, 3, {80, 120},
       {"H\xc3\xb4te", "Zo\xc3\xab"},
       {{20, 0, "car"}, {40, 0, "start"}, {200, 1, "car"}}, 0,
       {"Racing", "Racing"}, {1, 1}, "0 1",
@@ -347,9 +349,47 @@ static const Scenario kScenarios[] = {
        "1|netrace: wait En attente du lancement de la course par H\xf4te.",
        "1|netrace: setup taken", "1|netrace: go, seed"} },
 
+    // The host's CPU racers (TASKS 37c-2): drawn by StartRace, in front
+    // of the two players, and the third console behind them.
+    { "cpu_two", 700, 2, LANG_EN, 3, 1, 3, 3, {120, 200}, TWO,
+      {{30, 1, "car"}, {40, 0, "car"}, {80, 0, "start"}}, 0,
+      {"Racing", "Racing"}, {1, 1}, "0 1",
+      {"0|netrace: 3 AI racers, 3 CPU",
+       "0|netrace: built, track 7, 5 drivers, 0 players in AI places",
+       "1|netrace: setup taken, track 7, 5 drivers, driver 1",
+       "0|netrace: go, seed", "1|netrace: go, seed"} },
+    { "cpu_three", 800, 3, LANG_EN, 3, 0, 2, 3, {120, 200, 160}, THREE,
+      {{30, 1, "car"}, {32, 2, "car"}, {40, 0, "car"}, {80, 0, "start"}},
+      0, {"Racing", "Racing", "Racing"}, {1, 1, 1}, "0 1 100",
+      {"0|netrace: 3 AI racers, 2 CPU",
+       "0|netrace: built, track 7, 5 drivers, 1 players in AI places",
+       "2|netrace: setup taken, track 7, 5 drivers, driver 100",
+       "0|netrace: go, seed", "2|netrace: go, seed"} },
+
+    // A console gone before its car: the CPU racers stay, the grid one
+    // car shorter.
+    { "cpu_gone", 900, 4, LANG_EN, 3, 2, 4, 3, {80, 80, 80, 80},
+      { "hp2host", "hp2join1", "hp2join2", "hp2join3" },
+      {{30, 1, "gone"}, {40, 2, "car"}, {50, 3, "car"}, {60, 0, "car"},
+       {100, 0, "start"}}, 0,
+      {"Racing", NULL, "Racing", "Racing"}, {1, 0, 1, 1}, "0 -1 1 100",
+      {"0|netrace: 6 AI racers, 4 CPU",
+       "0|netrace: place 1 (hp2join1) is gone",
+       "0|netrace: built, track 7, 7 drivers, 1 players in AI places",
+       "3|netrace: setup taken, track 7, 7 drivers, driver 100"} },
+
+    // Lap Knockout: a lap fewer than the cars, the CPU racers counted.
+    { "cpu_lap_knockout", 800, 3, LANG_EN, 5, 0, 2, 3, {120, 200, 160},
+      THREE,
+      {{30, 1, "car"}, {32, 2, "car"}, {40, 0, "car"}, {80, 0, "start"}},
+      0, {"Racing", "Racing", "Racing"}, {1, 1, 1}, "0 1 100",
+      {"0|netrace: 3 AI racers, 2 CPU",
+       "0|netrace: built, track 7, 5 drivers, 1 players in AI places",
+       "1|netrace: setup taken, track 7, 5 drivers, driver 1"} },
+
     // No wireless race: car select and track select as ever, the load not
     // held, and netrace silent.
-    { "offline", 300, 1, LANG_EN, 1, 3, 3, {80}, {"hp2host"},
+    { "offline", 300, 1, LANG_EN, 1, 3, 0, 3, {80}, {"hp2host"},
       {{20, 0, "car"}, {40, 0, "start"}}, 0,
       {"Racing"}, {1}, NULL, {NULL} },
 };
@@ -402,6 +442,7 @@ typedef struct {
     uint8_t*         state;
     RideInfo         ride1;
     cPlayerSettings  set1;
+    int32_t          laps;
     // At GO.
     RaceParameters   goRp;
     DriverInfo       goTable[RACE_PARAMETERS_MAX_DRIVERS];
@@ -701,6 +742,7 @@ static void gStartRace(void)
         d->TheDriverType      = 1;
         d->CurrentRideInfo    = g_rides[i];
         d->CurrentRideInfo.CanBeVertexDamaged = 1;
+        d->StartingPosition   = rp->PlayerStartPosition[i];
         d->pCharacterInfo     = &g_chars[g_cur][i];
         rp->PlayerSettings[i] = Fred.FrontendPlayers[i].mPlayerSettings;
     }
@@ -708,9 +750,10 @@ static void gStartRace(void)
          i++, n++) {
         DriverInfo* d = &DriverInfoTable[n];
         RideInfo    ride;
+        int32_t     start = 0;   // 0: placed by performance
 
         memset(d, 0, sizeof *d);
-        if (!gFredNetRideFn || !gFredNetRideFn(i, &ride)) {
+        if (!gFredNetRideFn || !gFredNetRideFn(i, &ride, &start)) {
             memset(&ride, 0, sizeof ride);
             ride.Type          = (int32_t)(draw() % 40);
             ride.SkinNumber    = (int8_t)(draw() % 4);
@@ -719,7 +762,7 @@ static void gStartRace(void)
         d->UniqueDriverNumber = (int8_t)(100 + i);
         d->CharacterNumber    = (int8_t)(2 + i);
         d->SkillLevel         = (int8_t)(draw() % 3);
-        d->StartingPosition   = (int8_t)n;
+        d->StartingPosition   = (int8_t)start;
         d->TheDriverType      = 2;
         d->CurrentRideInfo    = ride;
         d->pCharacterInfo     = &g_chars[g_cur][2 + i];
@@ -1051,12 +1094,14 @@ static void initConsole(int c)
     k->tree    = k->ev.pTree;
     k->state   = k->ev.pState;
     k->ride1   = k->rides[1];
+    k->laps    = k->rp.NumLapsInRace;
     k->set1    = f->FrontendPlayers[1].mPlayerSettings;
     k->loadingAt = k->loadedAt = k->heldAt = k->racingAt = -1;
 
     // The lobby's Start: on to car select, the lobby under it.
     k->race.consoles = S->consoles;
     k->race.place    = c;
+    k->race.cpu      = c == 0 ? S->cpu : 0;
     for (i = 0; i < MAXC; i++) k->race.peer[i] = -1;
     if (c == 0) {
         for (i = 1; i < S->consoles; i++) k->race.peer[i] = peerOf(i);
@@ -1228,11 +1273,24 @@ static void checkHost(void)
         if (h->goTable[p].CurrentRideInfo.HasDash
             || h->goTable[p].CurrentRideInfo.InstanceIndex != 2)
             fault("driver %d not in a car StartRace drew", p);
-    if (h->goRp.NumAICars < ai)
-        fault("%ld AI racers for %d players", (long)h->goRp.NumAICars, ai);
-    if (h->goRp.NumAICars < S->consoles - 2)
-        fault("%ld AI racers for %d consoles", (long)h->goRp.NumAICars,
-              S->consoles);
+    // The CPU racers in front, placed by performance, then the two
+    // players, then the players in AI racers' places in place order.
+    if (h->goRp.NumAICars != S->cpu + ai)
+        fault("%ld AI racers for %d CPU racers and %d players",
+              (long)h->goRp.NumAICars, S->cpu, ai);
+    for (p = 0; p < h->goRp.NumDriverInfo; p++) {
+        const DriverInfo* t = &h->goTable[p];
+        int at = p < 2 + ai ? S->cpu + 1 + p : 0;
+        if (t->StartingPosition != at)
+            fault("driver %d starts at %d, not %d", p,
+                  t->StartingPosition, at);
+    }
+    for (p = 0; p < 2; p++)
+        if (h->goRp.PlayerStartPosition[p] != S->cpu + 1 + p)
+            fault("player %d's start %d", p, h->goRp.PlayerStartPosition[p]);
+    if (h->goRp.NumLapsInRace != (S->gameType == 5
+            ? h->goRp.NumAICars + h->goRp.NumPlayerCars - 1 : h->laps))
+        fault("%ld laps", (long)h->goRp.NumLapsInRace);
     if (h->goTable[0].CurrentRideInfo.CanBeVertexDamaged != 1)
         fault("the host's car not damageable");
 }

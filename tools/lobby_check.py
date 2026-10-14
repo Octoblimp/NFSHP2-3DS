@@ -19,7 +19,11 @@ what it shows and does each frame (the harness's header has the list):
     past the last, going back after a Next, refused, the host lost,
     leaving, the race gone before Join;
   - French, no language chosen yet, and console names past ASCII, broken
-    UTF-8 among them.
+    UTF-8 among them;
+  - the host's CPU racers (TASKS 37c-2): a Full Grid, none counted on to
+    six and round, five that fit fewer as consoles come and more as they
+    go, eight consoles with no room and A on CPU Racers as the eighth
+    comes, no choice, hosting again, French.
 
 The harness prints "faults 0" after each scenario that holds and "total
 faults 0" at the end. A mutant is caught only when the harness finds a
@@ -137,13 +141,13 @@ MUTATIONS = [
     M("lb-list-shown", "if (L.popup >= 0 && !strcmp(msg, L.message)) return;",
       "if (!strcmp(msg, L.message)) return;"),
     M("lb-list-say", "if (strcmp(msg, L.message)) say(\"lobby: list", "say(\"lobby: list"),
-    M("lb-list-buttons", "int  i, buttons = clientsAlive() > 0;",
-      "int  i, buttons = 1;"),
+    M("lb-list-buttons", "showPopup(gf, clients > 0, PORTLANG_START",
+      "showPopup(gf, 1, PORTLANG_START"),
     M("lb-host-fail-down", "        linkDown();\n        notice(gf, "
       "PORTLANG_WIRELESS_OFF, \"\", LS_ASK);\n        return;\n    }\n"
-      "    L.state = LS_HOSTING;",
+      "    L.state   = LS_HOSTING;",
       "        notice(gf, PORTLANG_WIRELESS_OFF, \"\", LS_ASK);\n"
-      "        return;\n    }\n    L.state = LS_HOSTING;"),
+      "        return;\n    }\n    L.state   = LS_HOSTING;"),
     M("lb-host-max", "L.net.host(WIRELESS_MAX_CONSOLES, NULL, 0)",
       "L.net.host(2, NULL, 0)"),
     M("lb-host-gone", "            if (L.net.state() != WIRELESS_HOSTING) {",
@@ -159,6 +163,44 @@ MUTATIONS = [
     M("lb-start-place", "msg[1] = (uint8_t)++place;", "msg[1] = (uint8_t)place++;"),
     M("lb-start-send", "        L.net.send(i, LOBBY_MSG_START, msg, sizeof msg);\n",
       ""),
+    # -- the CPU racers
+    M("lb-cpu-wish", "L.cpuWant = L.cpuFn ? L.cpuFn() : LOBBY_CPU_NONE;",
+      "L.cpuWant = L.cpuFn ? L.cpuFn() : 0;"),
+    M("lb-cpu-wish-once", "    L.cpuWant = L.cpuFn ? L.cpuFn() : LOBBY_CPU_NONE;\n",
+      "    if (!L.cpuWant) L.cpuWant = L.cpuFn ? L.cpuFn() : LOBBY_CPU_NONE;\n"),
+    M("lb-cpu-oncpu-reset", "    L.onCpu   = 0;\n    say(\"lobby: hosting\");",
+      "    say(\"lobby: hosting\");"),
+    M("lb-cpu-room", "    int room = LOBBY_GRID - (clientsAlive() + 1);\n\n"
+      "    if (room <= 0)", "    int room = LOBBY_GRID - clientsAlive();\n\n"
+      "    if (room <= 0)"),
+    M("lb-cpu-full", "    if (room <= 0) return -1;\n", ""),
+    M("lb-cpu-fit", "return L.cpuWant < room ? L.cpuWant : room;",
+      "return L.cpuWant;"),
+    M("lb-cpu-line", "        strncat(msg, line, sizeof msg - strlen(msg) - 1);\n", ""),
+    M("lb-cpu-line-n", "text(gf, PORTLANG_CPU_RACERS_N), \"\", cpu, 0);",
+      "text(gf, PORTLANG_CPU_RACERS_N), \"\", L.cpuWant, 0);"),
+    M("lb-cpu-alone", "    else if (clients == 0)\n        showPopup(gf, 1,",
+      "    else if (0)\n        showPopup(gf, 1,"),
+    M("lb-cpu-keep", "PORTLANG_CPU_RACERS, A_CPU,\n                  L.onCpu);",
+      "PORTLANG_CPU_RACERS, A_CPU,\n                  0);"),
+    M("lb-cpu-answer", "            else if (a == A_CPU) nextCpu(gf);\n", ""),
+    M("lb-cpu-wrap", "L.cpuWant = cpu < room ? cpu + 1 : 0;",
+      "L.cpuWant = cpu + 1;"),
+    M("lb-cpu-wrap-edge", "L.cpuWant = cpu < room ? cpu + 1 : 0;",
+      "L.cpuWant = cpu <= room ? cpu + 1 : 0;"),
+    M("lb-cpu-on", "        L.onCpu   = 1;\n        say(\"lobby: cpu", "        say(\"lobby: cpu"),
+    M("lb-cpu-filled", "    if (cpu >= 0) {   // not if", "    if (1) {   // not if"),
+    M("lb-cpu-move", "                L.onCpu = data->itemHash == BPOPUP_OBJ_BUTTON2;",
+      "                L.onCpu = data->itemHash == BPOPUP_OBJ_BUTTON1;"),
+    M("lb-cpu-move-none", "        case BMSG_POPUP_NEXT:\n        case BMSG_POPUP_PREV:\n"
+      "            if (L.state == LS_HOSTING && data)",
+      "        case BMSG_POPUP_NEXT:\n        case BMSG_POPUP_PREV:\n"
+      "            if (0)"),
+    M("lb-cpu-start", "race.cpu = cpu > 0 ? cpu : 0;", "race.cpu = cpu;"),
+    M("lb-cpu-start-want", "race.cpu = cpu > 0 ? cpu : 0;",
+      "race.cpu = L.cpuWant > 0 ? L.cpuWant : 0;"),
+    M("lb-cpu-start-say", "    if (cpu >= 0)\n        say(\"lobby: start, %d consoles, %d",
+      "    if (0)\n        say(\"lobby: start, %d consoles, %d"),
     M("lb-gone-state", "    L.state = LS_GONE;\n", ""),
     M("lb-gone-push", "bgf_change_to_screen(gf, LOBBY_NEXT_SCREEN, 1);",
       "bgf_change_to_screen(gf, LOBBY_NEXT_SCREEN, 0);"),
@@ -209,8 +251,8 @@ MUTATIONS = [
     M("lb-back", "                L.state = LS_OFF;\n"
       "                bgf_move_back_screen(gf, 1);\n",
       "                L.state = LS_OFF;\n"),
-    M("lb-activate", "            L.popup = -1;\n            toAsk(gf);\n",
-      "            L.popup = -1;\n"),
+    M("lb-activate", "                break;\n            }\n            toAsk(gf);\n",
+      "                break;\n            }\n"),
     M("lb-unactivate", "            if (L.state != LS_GONE) {",
       "            if (1) {"),
     M("lb-unactivate-down", "                hidePopup(gf);\n"

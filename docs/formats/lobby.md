@@ -30,7 +30,7 @@ The previous one is taken down with no sound and no answer.
 | State | The message | Buttons | What A does | BACK |
 |---|---|---|---|---|
 | Ask | "Host a race, or join one?" | Host, Join | Host: hosts. Join: searches. | Back to the mode screen |
-| Hosting | "Waiting for players:", then each name | Start, once a client is on | Starts the race | Ask |
+| Hosting | "Waiting for players:", then each name, then "CPU racers: n" where there is a choice | Start, once a client is on; CPU Racers where there is a choice | Start: starts the race. CPU Racers: one more. | Ask |
 | Searching | "Looking for races..." | none | Puts it back | Ask |
 | Found | "Race: name", "Players: n/max" | Join, Next | Join: joins. Next: the next race found. | Ask |
 | Joined | "Waiting for name to start the race." | none | Puts it back | Ask |
@@ -64,6 +64,42 @@ last client went as Start was pressed, the list comes back instead.
 If the network goes from under the host, it says local wireless could
 not start, and OK goes back to Ask.
 
+### CPU racers (TASKS 37c-2)
+
+Retail's grid has eight cars. Where the race setup the lobby came from
+has AI racers, the host chooses how many race beside the consoles:
+none, or up to eight less the consoles on the network. The user asked
+for it on 2026-10-14. Each console already picks its own car and
+transmission on its own car select (`docs/formats/netrace.md`).
+
+`main.c` tells the lobby what the setup has (`lobby_cpu_wish`), asked
+each time hosting begins: the count the host's starts at, or no choice.
+
+| Fred.GameType | The count starts at |
+|---|---|
+| 3, Single Race | Opponents "Full Grid": as many as fit. "1": one. "None": none. With the cops on, none. |
+| 4, Knockout; 5, Lap Knockout | Two, retail's for two players |
+| anything else (Free Run, Be A Cop) | No choice: no line and no button |
+
+The host's list then ends with "CPU racers: n", n the wish but no more
+than fit beside the consoles on it, so it falls as consoles join and
+rises again as they go. With 8 consoles on there is no room, and no
+line. The buttons are:
+
+- no client yet: CPU Racers alone;
+- a client on: Start and CPU Racers, the highlight where it was;
+- no choice: Start alone once a client is on, as before.
+
+A on CPU Racers counts one more, and none again past as many as fit.
+The highlight stays on CPU Racers while the list changes under it, so
+an A meant for the count never starts the race. Start takes the count
+shown into `LobbyRace.cpu`, which the host's netrace adds to the AI
+racers (`docs/formats/netrace.md`, "The build"); a client's is 0.
+
+The lobby says "lobby: cpu n" for each count and "lobby: start, c
+consoles, n CPU racers" at Start (where there is no choice, "lobby:
+start, c consoles").
+
 ### Joining
 
 Join starts UDS and scans at once. While nothing is found, it scans
@@ -88,7 +124,7 @@ popup's lines) becomes `?`.
 
 ## The strings
 
-`portlang.c` holds 14 strings, each in the six languages retail ships
+`portlang.c` holds 17 strings, each in the six languages retail ships
 (English, French, German, Italian, Spanish, Swedish), in retail's
 encoding, Latin-1. Their IDs start at 2000000 (`PORTLANG_FIRST`), well
 past retail's last (980002). `langtab_get` answers those IDs from
@@ -116,6 +152,9 @@ starts a new line in a popup's message, as in retail's strings.
 | 2000011 | The link to $NAME was lost. |
 | 2000012 | Local wireless could not start. Is the wireless switch on? |
 | 2000013 | Could not join the race. |
+| 2000014 | Waiting for a car from: (netrace's) |
+| 2000015 | CPU Racers |
+| 2000016 | CPU racers: $N |
 
 ### How it looks
 
@@ -146,6 +185,10 @@ port 24873.
 - Copy A hosts and waits until its list has every copy, then presses
   Start. The rest press right to Join and A to search, wait for
   hp2host's race, join it, and wait for the start.
+- Where the host's list has a CPU racers line, the host presses right
+  to CPU Racers, A until the count is `-Cpu` (2 unless said; -1 leaves
+  it), one press at a time with a wait past the log's lag, and left
+  back to Start. The race must start with that many.
 - It passes when every copy reaches Select Car: the host after "start,
   N consoles", each joiner after "started by hp2host, place p of N".
   Screenshots of each step go to `%TEMP%\nfshp2_lobby`.
@@ -164,23 +207,34 @@ list grew one name at a time in the order they joined, not their
 letters, and each joiner was told the place of its turn. Its nine lines
 and Start fit the top screen, and the host held 100% speed.
 
+Session 99, 2 consoles with `-Race -Cpu 2`: the host's list said "CPU
+racers: 7" alone and 6 once the client was in; A on CPU Racers counted
+0, 1 and 2, and Start went with "2 consoles, 2 CPU racers".
+
 ## The check
 
 `tools/lobby_check.py` builds `tools/src/lobby_test.c` with `lobby.c`,
 `portlang.c` and the real flow and popups under them (`gameflow.c`,
 `bpopup.c`, `memcard.c`, `banim.c`). A fake network stands in for
-`wireless.c`. It runs 28 scenarios, each a script of presses and of
+`wireless.c`. It runs 34 scenarios, each a script of presses and of
 what the network does: hosting alone, with one, with seven and with a
 full network; clients coming and going; the network going; joining,
 Next past every race, a failed join, a lost host, leaving; no wireless;
-back from car select; a language not yet chosen; French.
+back from car select; a language not yet chosen; French. Six are the
+CPU racers': a full grid's wish; counting through every count and back
+to none; the count held to the room as clients join and go, with A
+pressed as the last one fills it; no choice; a wish asked again on
+hosting again; French.
 
 At every frame and after every press it checks:
 
 - one popup up on the lobby, the lobby's own, and none off it;
 - the question never up with the link up;
-- the host's list against the network, and Start there exactly when a
-  client is on;
+- the host's list against the network, its CPU racers line (the wish,
+  no more than fit), and its buttons: Start exactly when a client is
+  on, CPU Racers where there is a choice, the highlight where it was
+  left;
+- the count Start hands on (`LobbyRace.cpu`), once per Start;
 - the joiner's wait naming the host joined;
 - each press's sound, and no sound without a press;
 - a new search scanning at once, and no scan sooner than a second
@@ -196,8 +250,8 @@ At every frame and after every press it checks:
 
 The last line is `total faults N`, and the check passes at 0.
 
-`--mutate` makes 67 mutations of `lobby.c` (out of tree, in parallel).
-64 are caught and 3 are equivalent, named in the script:
+`--mutate` makes 87 mutations of `lobby.c` (out of tree, in parallel).
+84 are caught and 3 are equivalent, named in the script:
 
 - `lb-latin1-two`: a two-byte lead's bit 5 is always clear, so masking
   it again changes nothing.

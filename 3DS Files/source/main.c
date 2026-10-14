@@ -2794,6 +2794,26 @@ static const LobbyNet kLobbyNet = {
     .recv       = lobbyNetRecv,
 };
 
+// The host's first count of CPU racers (lobby.h, TASKS 37c-2), from the
+// race setup the lobby came from: a Single Race's Opponents row (None or
+// Full Grid for two players; none with the cops, as retail's two race
+// alone) and a knockout's two, retail's for two players. Free Run has no
+// AI racers, and Be A Cop's are TASKS 61's.
+static int lobbyCpuWish(void)
+{
+    switch (Fred.GameType) {
+        case 3:
+            if (Fred.MainMenuOpts[1]) return 0;
+            if (Fred.SingleRaceSetupData[0] == 2) return LOBBY_CPU_FULL;
+            return Fred.SingleRaceSetupData[0] == 1 ? 1 : 0;
+        case 4:
+        case 5:
+            return 2;
+        default:
+            return LOBBY_CPU_NONE;
+    }
+}
+
 // A wireless race's setup (netrace.h): the same link, and the game's
 // StartRace, rides, characters and flow.
 static const NetRaceNet kNetRaceNet = {
@@ -6910,6 +6930,7 @@ int main(int argc, char** argv)
     lobby_init(&kLobbyNet, lobbyLog);
     netrace_init(&kNetRaceNet, &kNetRaceGame, lobbyLog);
     lobby_on_start(netrace_begin);
+    lobby_cpu_wish(lobbyCpuWish);
     gTrackFlowHoldRaceFn = netrace_hold;
 
     BCarSelHooks carselHooks;

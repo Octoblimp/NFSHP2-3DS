@@ -9,7 +9,11 @@
 //   - "Host a race, or join one?" Host or Join; BACK leaves the lobby.
 //   - The host: UDS up and a network made, then the names of the consoles
 //     on it, this one first. Start shows once one has joined, and closes
-//     the network; BACK takes it down.
+//     the network; BACK takes it down. Where the race setup has CPU
+//     racers to choose (lobby_cpu_wish, TASKS 37c-2), a last line says how
+//     many and CPU Racers counts one more, none again past as many as fit
+//     beside the consoles on the network; the highlight stays on it as
+//     consoles come and go, so A there never starts the race.
 //   - A joiner: a scan each LOBBY_SCAN_MS until a race is found, then
 //     that race, its host's name and how many are on it: Join, or Next
 //     for the next one found (a new scan once the list has been seen).
@@ -75,15 +79,28 @@ typedef void (*LobbyLogFn)(const char* line);
 
 void lobby_init(const LobbyNet* net, LobbyLogFn log);
 
+// The host's CPU racers. Retail's grid has 8 cars, so there is room for 8
+// less the consoles. The wish is asked as hosting begins: how many the
+// race setup the lobby came from has (LOBBY_CPU_FULL for its Full Grid,
+// as many as fit), or LOBBY_CPU_NONE (any count below 0) where the mode
+// has none to choose. With no wish function there is no choice.
+#define LOBBY_GRID     8
+#define LOBBY_CPU_NONE (-1)
+#define LOBBY_CPU_FULL LOBBY_GRID
+typedef int (*LobbyCpuFn)(void);
+void lobby_cpu_wish(LobbyCpuFn fn);
+
 // What Start settled. Each console still on has a place, the host's 0
 // and the clients' 1 on in the order they came; `peer` is each place's
 // peer for the link (the host's own -1, and on a client only the host's,
-// 0, is known) and -1 past `consoles`.
+// 0, is known) and -1 past `consoles`. `cpu` is the host's CPU racers, 0
+// with no choice and on a client (the host's setup says).
 typedef struct LobbyRace {
     int  consoles;
     int  place;
     int  peer[WIRELESS_MAX_CONSOLES];
     char hostName[WIRELESS_NAME_MAX];    // Latin-1; on the host its own
+    int  cpu;
 } LobbyRace;
 
 // Told on Start, on every console, before it goes on to car select.

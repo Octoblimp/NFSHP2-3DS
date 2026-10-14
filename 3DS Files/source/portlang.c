@@ -82,6 +82,12 @@ static const char* const kStrings[PORTLANG_END - PORTLANG_FIRST][6] = {
     { "Waiting for a car from:", "En attente de la voiture de :",
       "Warte auf das Auto von:", "In attesa dell'auto di:",
       "Esperando el coche de:", "V\xe4ntar p\xe5 bil fr\xe5n:" },
+    // PORTLANG_CPU_RACERS
+    { "CPU Racers", "Pilotes IA", "KI-Fahrer", "Piloti CPU", "Pilotos CPU",
+      "Datorf\xf6rare" },
+    // PORTLANG_CPU_RACERS_N
+    { "CPU racers: $N", "Pilotes IA : $N", "KI-Fahrer: $N",
+      "Piloti CPU: $N", "Pilotos CPU: $N", "Datorf\xf6rare: $N" },
 };
 
 const char* portlang_get(int32_t languageEnum, int32_t id, size_t* outLen)

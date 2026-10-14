@@ -20,7 +20,9 @@ shows, sends and ends with (the harness's header has the list):
     lobby;
   - Lap Knockout's event state; a setup from another build; French and
     names past ASCII; a console with no wireless race, which netrace
-    leaves alone.
+    leaves alone;
+  - the host's CPU racers (TASKS 37c-2): in front of two and three
+    consoles, one console gone before its car, and a Lap Knockout's laps.
 
 The harness prints "faults 0" after each scenario that holds and "total
 faults 0" at the end. A mutant is caught only when the harness finds a
@@ -179,9 +181,13 @@ MUTATIONS = [
       "*ride = R->cars[1 + ai].ride;"),
     M("nr-airide-instance", "    ride->InstanceIndex      = 0;\n", ""),
     M("nr-airide-damage", "    ride->CanBeVertexDamaged = 0;", ""),
-    M("nr-airide-ret", "    ride->CanBeVertexDamaged = 0;   // as retail's AI "
-      "racers\n    return 1;", "    ride->CanBeVertexDamaged = 0;   // as "
-      "retail's AI racers\n    return 0;"),
+    M("nr-airide-ret", "    *startPos = R->race.cpu + 3 + ai;\n    return 1;",
+      "    *startPos = R->race.cpu + 3 + ai;\n    return 0;"),
+    M("nr-airide-start", "    *startPos = R->race.cpu + 3 + ai;\n", ""),
+    M("nr-airide-start-cpu", "*startPos = R->race.cpu + 3 + ai;",
+      "*startPos = 3 + ai;"),
+    M("nr-airide-start-ai", "*startPos = R->race.cpu + 3 + ai;",
+      "*startPos = R->race.cpu + 3;"),
     M("nr-pack-magic", "h.magic[0]      = 'N';", "h.magic[0]      = 'X';"),
     M("nr-pack-version", "h.version       = SETUP_VERSION;",
       "h.version       = 0;"),
@@ -217,8 +223,20 @@ MUTATIONS = [
     M("nr-build-host-settings", "R->cars[0].settings = "
       "Fred.FrontendPlayers[0].mPlayerSettings;",
       "R->cars[0].settings = Fred.FrontendPlayers[1].mPlayerSettings;"),
-    M("nr-build-numai", "if (rp->NumAICars < R->humanAI) rp->NumAICars = "
-      "R->humanAI;", "(void)0;"),
+    M("nr-build-numai", "    rp->NumAICars              = R->race.cpu + "
+      "R->humanAI;\n", ""),
+    M("nr-build-numai-cpu", "rp->NumAICars              = R->race.cpu + "
+      "R->humanAI;", "rp->NumAICars              = R->humanAI;"),
+    M("nr-build-numai-human", "rp->NumAICars              = R->race.cpu + "
+      "R->humanAI;", "rp->NumAICars              = R->race.cpu;"),
+    M("nr-build-start0", "rp->PlayerStartPosition[0] = (int8_t)(R->race.cpu "
+      "+ 1);", "rp->PlayerStartPosition[0] = 1;"),
+    M("nr-build-start1", "rp->PlayerStartPosition[1] = (int8_t)(R->race.cpu "
+      "+ 2);", "rp->PlayerStartPosition[1] = 2;"),
+    M("nr-build-laps-type", "    if (Fred.GameType == 5)\n        rp->"
+      "NumLapsInRace", "    if (Fred.GameType == 4)\n        rp->NumLapsInRace"),
+    M("nr-build-laps", "rp->NumLapsInRace = rp->NumAICars + rp->NumPlayerCars "
+      "- 1;", "rp->NumLapsInRace = rp->NumAICars + rp->NumPlayerCars;"),
     M("nr-build-swap-ride", "    *r1          = R->cars[second].ride;\n", ""),
     M("nr-build-swap-set", "    Fred.FrontendPlayers[1].mPlayerSettings = "
       "R->cars[second].settings;\n", ""),
@@ -313,10 +331,14 @@ MUTATIONS = [
       "    if (R->net.setPatience)"),
     M("nr-begin-patience", "if (R->net.setPatience) "
       "R->net.setPatience(NETRACE_PATIENCE_MS);", "(void)0;"),
-    M("nr-begin-ai", "if (R->host && TheRaceParameters.NumAICars < "
-      "race->consoles - 2) {", "if (0) {"),
-    M("nr-begin-ai-count", "TheRaceParameters.NumAICars = race->consoles - 2;",
-      "TheRaceParameters.NumAICars = race->consoles - 1;"),
+    M("nr-begin-ai", "    if (R->host) {\n        TheRaceParameters.NumAICars",
+      "    if (0) {\n        TheRaceParameters.NumAICars"),
+    M("nr-begin-ai-count", "TheRaceParameters.NumAICars = race->cpu + "
+      "race->consoles - 2;", "TheRaceParameters.NumAICars = race->cpu + "
+      "race->consoles - 1;"),
+    M("nr-begin-ai-cpu", "TheRaceParameters.NumAICars = race->cpu + "
+      "race->consoles - 2;", "TheRaceParameters.NumAICars = "
+      "race->consoles - 2;"),
     M("nr-chosen-host", "if (R->stage != NR_CARS || R->host) return 0;",
       "if (R->stage != NR_CARS) return 0;"),
     M("nr-chosen-stage", "if (R->stage != NR_CARS || R->host) return 0;",
@@ -329,14 +351,24 @@ MUTATIONS = [
     M("nr-chosen-send", "    R->net.send(0, NETRACE_MSG_CAR, m, sizeof m);\n", ""),
     M("nr-chosen-wait", "    R->stage = NR_WAIT;\n    say(\"netrace: car sent",
       "    say(\"netrace: car sent"),
+    M("nr-chosen-say-trans", "(int)Fred.FrontendPlayers[0].mPlayerSettings."
+      "TransmissionType);\n    bgf_change_to_screen", "(int)Fred.FrontendPlayers"
+      "[1].mPlayerSettings.TransmissionType);\n    bgf_change_to_screen"),
+    M("nr-car-say-trans", "(int)R->cars[p].settings.TransmissionType);",
+      "(int)R->cars[0].settings.TransmissionType);"),
+    M("nr-hoststart-say-ride", "    ride     = R->game.selectedRide(0);",
+      "    ride     = R->game.selectedRide(1);"),
+    M("nr-hoststart-say-trans", "(int)Fred.FrontendPlayers[0].mPlayerSettings."
+      "TransmissionType);\n    // With no client", "(int)Fred.FrontendPlayers"
+      "[1].mPlayerSettings.TransmissionType);\n    // With no client"),
     M("nr-chosen-push", "    bgf_change_to_screen(gf, NETRACE_SCREEN_NAME, 1);\n"
       "    return 1;\n}\n\nint netrace_host_start",
       "    bgf_change_to_screen(gf, NETRACE_SCREEN_NAME, 0);\n"
       "    return 1;\n}\n\nint netrace_host_start"),
     M("nr-hoststart-host", "if (R->stage != NR_CARS || !R->host) return 0;",
       "if (R->stage != NR_CARS) return 0;"),
-    M("nr-hoststart-wait", "    R->stage = NR_WAIT;\n    say(\"netrace: the host's",
-      "    say(\"netrace: the host's"),
+    M("nr-hoststart-wait", "    R->stage = NR_WAIT;\n    ride     = ",
+      "    ride     = "),
     M("nr-hoststart-ready", "        if (placeAlive(p) && !R->cars[p].in) ready = "
       "0;\n    if (ready) build(gf);", "        if (0) ready = 0;\n"
       "    if (ready) build(gf);"),
