@@ -72,7 +72,7 @@ EMC = "3DS Files/source/emodel.c"
 EPC = "3DS Files/source/epositionmarker.c"
 CTC = "3DS Files/source/cartypeinfo.c"
 SOURCES = [HARNESS, CRC, EMC, EPC, CTC] + ["3DS Files/source/" + f for f in (
-    "langtab.c", "bmath.c", "bmathtab.c", "bvector.c")]
+    "langtab.c", "portlang.c", "bmath.c", "bmathtab.c", "bvector.c")]
 
 HARNESS_TIMEOUT = 120
 

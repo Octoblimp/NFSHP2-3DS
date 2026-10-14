@@ -9,6 +9,8 @@
 
 #include "bmath.h"
 #include "bscreens.h"
+#include "lobby.h"
+#include "portlang.h"
 
 // ---------------------------------------------------------------- hooks
 
@@ -268,8 +270,9 @@ static int32_t valueChanger(int32_t cur, int32_t d, int32_t lo, int32_t hi)
 }
 
 // MaybeChangeNumPlayers (0x001b5c90): 1 or 2, wrapping, and 1 whenever the
-// second pad is not plugged in -- which on a 3DS is always. Answers whether
-// it changed.
+// second pad is not plugged in. A 3DS has no second pad: the port's hook
+// answers for a second console instead (main.c), so two can be picked.
+// Answers whether it changed.
 static int maybeChangeNumPlayers(BSetup* s, BChallengeData* d, int32_t n)
 {
     int32_t v = n > 0 ? n : 2;
@@ -278,6 +281,24 @@ static int maybeChangeNumPlayers(BSetup* s, BChallengeData* d, int32_t n)
     if (d->numPlayers == v) return 0;
     d->numPlayers = v;
     return 1;
+}
+
+// Two players, the port's way when s->wirelessPlayers says so (bsetup.h):
+// retail's "2" (20004), its head-to-head line (19001) and its two-pad car
+// select become Local Wireless, up to eight consoles, and the lobby.
+static int32_t twoPlayersLabel(const BSetup* s)
+{
+    return s->wirelessPlayers ? PORTLANG_LOCAL_WIRELESS : 20004;
+}
+
+static int32_t twoPlayersBlurb(const BSetup* s)
+{
+    return s->wirelessPlayers ? PORTLANG_LOCAL_WIRELESS_BLURB : 19001;
+}
+
+static const char* twoPlayersCarSelect(const BSetup* s)
+{
+    return s->wirelessPlayers ? LOBBY_SCREEN_NAME : "Select Car2P";
 }
 
 // MaybeChangeOpponentSkillLevel (0x001b5d70): 0..2, wrapping.
@@ -342,7 +363,8 @@ static void beACopResync(BSetup* s, BBeACopSetup* b)
         HOOK(s, grayMenuItem, b->screen, ITEM_SKILL, BSCR_GRAY_ENABLE);
         HOOK(s, setVisible, b->screen, BSETUP_OBJ_SKILL_VALUE, 1);
     } else if (b->data.numPlayers == 2) {
-        HOOK(s, setLanguageID, b->screen, BSETUP_OBJ_PLAYERS_VALUE, 20004);
+        HOOK(s, setLanguageID, b->screen, BSETUP_OBJ_PLAYERS_VALUE,
+             twoPlayersLabel(s));
         HOOK(s, grayMenuItem, b->screen, ITEM_SKILL, BSCR_GRAY_DISABLE);
         HOOK(s, setVisible, b->screen, BSETUP_OBJ_SKILL_VALUE, 0);
     }
@@ -358,7 +380,7 @@ static void beACopBlurb(BSetup* s, BBeACopSetup* b, uint32_t item)
     switch (item) {
         case ITEM_PLAYERS:
             if (b->data.numPlayers == 1) id = 19000;
-            else if (b->data.numPlayers == 2) id = 19001;
+            else if (b->data.numPlayers == 2) id = twoPlayersBlurb(s);
             break;
         case ITEM_SKILL:
             if (b->data.beACopSkill == 0) id = 19002;
@@ -554,7 +576,7 @@ static void beACopSelect(BSetup* s, BBeACopSetup* b,
     HOOK(s, setRaceParameters, numPlayers, b->data.raceMode);
 
     if (data->itemHash >= ITEM_PLAYERS && data->itemHash <= ITEM_SKILL) {
-        target = numPlayers == 2 ? "Select Car2P" : "Select Car";
+        target = numPlayers == 2 ? twoPlayersCarSelect(s) : "Select Car";
         HOOK0(s, makeChallengeCarsAvailable);
         HOOK0(s, setupRaceParametersAfterRaceSetup);
     } else if (data->itemHash == ITEM_SETUP) {
@@ -646,7 +668,8 @@ static void challengeResync(BSetup* s, BChallengeScreen* c)
     if (c->data.numPlayers == 1)
         HOOK(s, setLanguageID, c->screen, BSETUP_OBJ_PLAYERS_VALUE, 20003);
     else if (c->data.numPlayers == 2)
-        HOOK(s, setLanguageID, c->screen, BSETUP_OBJ_PLAYERS_VALUE, 20004);
+        HOOK(s, setLanguageID, c->screen, BSETUP_OBJ_PLAYERS_VALUE,
+             twoPlayersLabel(s));
     refreshOpponentSkillLevel(s, c->screen, c->data.skillLevel,
                               BSETUP_OBJ_SKILL_VALUE);
     if (c->data.challengeMode == FRED_CHALLENGE_GAME_FREE_RUN
@@ -668,7 +691,7 @@ static void challengeBlurb(BSetup* s, BChallengeScreen* c, uint32_t item)
     switch (item) {
         case ITEM_PLAYERS:
             if (c->data.numPlayers == 1) id = 19000;
-            else if (c->data.numPlayers == 2) id = 19001;
+            else if (c->data.numPlayers == 2) id = twoPlayersBlurb(s);
             break;
         case ITEM_RACE_TYPE:
             switch (c->data.challengeMode) {
@@ -938,7 +961,7 @@ static void challengeSelect(BSetup* s, BChallengeScreen* c,
             default: break;
         }
     } else {
-        target = numPlayers == 2 ? "Select Car2P" : "Select Car";
+        target = numPlayers == 2 ? twoPlayersCarSelect(s) : "Select Car";
         HOOK0(s, setupRaceParametersAfterRaceSetup);
     }
 
@@ -1571,7 +1594,7 @@ static void raceSetupEvent(BSetup* s, BRaceSetup* r, BScreenMessage msg,
         // The brackets leave with the items, and the arrows go.
         case BMSG_MENUITEM_SELECT: {
             const char* target =
-                fredGet(s, FRED_NUM_PLAYER_CARS) == 2 ? "Select Car2P"
+                fredGet(s, FRED_NUM_PLAYER_CARS) == 2 ? twoPlayersCarSelect(s)
                                                       : "Select Car";
             banim_exit_init(a, &r->exit, r->screen, target);
             r->exitActive = 1;

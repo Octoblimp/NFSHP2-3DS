@@ -87,7 +87,7 @@ SOURCES = [HARNESS, BTRACKSEL, "3DS Files/source/nfsrewards.c",
            "3DS Files/source/banim.c", "3DS Files/source/bmath.c",
            "3DS Files/source/bmathtab.c", "3DS Files/source/flailer.c",
            "3DS Files/source/bprintf.c", "3DS Files/source/bui.c",
-           "3DS Files/source/bchunk.c", "3DS Files/source/langtab.c",
+           "3DS Files/source/bchunk.c", "3DS Files/source/langtab.c", "3DS Files/source/portlang.c",
            "3DS Files/source/emath.c", "3DS Files/source/bmatrix.c",
            "3DS Files/source/bvector.c"]
 

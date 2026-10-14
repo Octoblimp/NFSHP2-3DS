@@ -57,7 +57,7 @@ HARNESS = "tools/src/carloader_test.c"
 CL = "3DS Files/source/carloader.c"
 CTI = "3DS Files/source/cartypeinfo.c"
 SOURCES = [HARNESS, CL] + ["3DS Files/source/" + f for f in (
-    "cartypeinfo.c", "langtab.c", "bmath.c", "bmathtab.c")]
+    "cartypeinfo.c", "langtab.c", "portlang.c", "bmath.c", "bmathtab.c")]
 
 HARNESS_TIMEOUT = 120
 

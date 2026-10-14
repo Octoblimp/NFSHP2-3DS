@@ -38,6 +38,7 @@ static struct {
     udsBindContext      bind;
     WirelessState       state;
     uint16_t            self;
+    char                selfName[WIRELESS_NAME_MAX];   // read once per network
     uint16_t            goneMask;     // the host's: nodes let go, still on
     Peer                peers[WIRELESS_MAX_PEERS];
     int                 numPeers;     // places taken, in the order they came
@@ -318,6 +319,7 @@ void wireless_leave(void)
     W.host    = 0;
     W.open    = 0;
     W.self    = 0;
+    W.selfName[0] = 0;
     W.goneMask = 0;
     clear_peers();
     W.state   = W.up ? WIRELESS_IDLE : WIRELESS_OFF;
@@ -487,6 +489,17 @@ void wireless_forget_lost(void)
         }
     W.numPeers = j;
     memset(&W.peers[j], 0, sizeof W.peers[0] * (size_t)(WIRELESS_MAX_PEERS - j));
+}
+
+const char *wireless_self_name(void)
+{
+    udsNodeInfo info;
+
+    if (!W.network || !W.self)
+        return "";
+    if (!W.selfName[0] && R_SUCCEEDED(udsGetNodeInformation(W.self, &info)))
+        (void)udsGetNodeInfoUsername(&info, W.selfName);
+    return W.selfName;
 }
 
 void wireless_stats(WirelessStats *out)

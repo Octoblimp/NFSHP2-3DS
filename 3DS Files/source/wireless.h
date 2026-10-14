@@ -106,6 +106,10 @@ WlLink       *wireless_peer_link(int i);
 // The host's: the places of the consoles that went, cleared.
 void          wireless_forget_lost(void);
 
+// This console's user name as the network has it (UTF-8), or "" when on
+// no network.
+const char   *wireless_self_name(void);
+
 // What went wrong at the UDS level, for the log.
 typedef struct WirelessStats {
     uint32_t sendErrors;     // udsSendTo failed (not the ignorable one)

@@ -2381,7 +2381,7 @@ phases.
                   of them players. A third to eighth human takes an AI
                   racer's car, driven by its console's pad. 37c and 37d
                   work that out.
-          - [ ] 37b: the lobby. Players 2 on the mode screens becomes
+          - [x] 37b: the lobby. Players 2 on the mode screens becomes
                 local wireless: Host or Join, the hosts listed by
                 console name, and a lost link handled.
                 - [x] 37b-1: where Players lives. Both Mode Selects'
@@ -2401,8 +2401,30 @@ phases.
                   the message and always started at 0; it now keeps
                   SavedMenuItemNumber per screen (gameflow.h savedItem)
                   and the order (the closeMenu hook).
-                - [ ] 37b-2: Players' Local Wireless, the lobby popups,
+                - [x] 37b-2: Players' Local Wireless, the lobby popups,
                   an N-copy Azahar test, and portlang.c.
+                  - Done in Session 97 (`docs/formats/lobby.md`). Players
+                    2 reads "Local Wireless" on Challenge and the four
+                    setups, and goes on to the lobby, the screen "Local
+                    Wireless" (`lobby.c`), instead of Select Car2P. The
+                    lobby is popups on the memory card's popup screen:
+                    Host or Join; the host's list of names with Start;
+                    a joiner's search, each race found (Join or Next),
+                    and the wait for the host. Start closes the network
+                    and tells each client its place and the count; then
+                    all go on to Select Car with the link up. Going
+                    back, or coming back from car select, takes it
+                    down.
+                  - `portlang.c`: the port's 14 strings in retail's six
+                    languages, IDs from 2000000, answered by
+                    `langtab_get`.
+                  - lobby_check: 28 scenarios, faults 0; 67 mutations,
+                    64 caught, 3 equivalent.
+                  - `tools/run_azahar_lobby.ps1` (`-Consoles 2` to `8`),
+                    each copy on the retail data through junctions and
+                    its own SAVES: with 2, 4 and 8 consoles, every copy
+                    reached Select Car, each joiner at its own place (1
+                    to 7 of 8).
           - [ ] 37c: the setup. The client's car to the host; the
                 host's race parameters, seeds and start to the client;
                 both load, then a barrier before the race.

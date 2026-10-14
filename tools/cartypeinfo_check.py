@@ -54,7 +54,7 @@ NL = chr(10)
 SOURCES = [
     "tools/src/cartypeinfo_test.c",
     "3DS Files/source/cartypeinfo.c",
-    "3DS Files/source/langtab.c",
+    "3DS Files/source/langtab.c", "3DS Files/source/portlang.c",
     "3DS Files/source/bmath.c",
     "3DS Files/source/bmathtab.c",
 ]

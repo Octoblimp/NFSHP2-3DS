@@ -110,6 +110,18 @@ on the 15.5 FPS of an earlier run: that was the fire on track 11, and
 TASKS 46 must reach a steady 30 there and in every place like it.
 Next: TASKS 37 (multi-card multiplayer).**
 
+**Now (Session 97, 2026-10-14): TASKS 37b is done with 37b-2, the
+Local Wireless lobby. Players 2 on Challenge and its four setups reads
+Local Wireless and goes on to the lobby (`lobby.c`): Host or Join, the
+host's list of names and Start, a joiner's search and each race found,
+then every console on to Select Car with the link up, each joiner told
+its place. The port's own strings are in `portlang.c`, in retail's six
+languages (`docs/formats/lobby.md`). lobby_check: 28 scenarios, faults
+0; 67 mutations, 64 caught, 3 equivalent. `tools/run_azahar_lobby.ps1`
+runs it between Azahar copies: with 2, 4 and 8 consoles, all reached
+Select Car (HANDOFF.md, "Session 97"). Next: 37c (the setup: cars,
+track, seeds, load, barrier), then 37d to 37f, then TASKS 61.**
+
 **Now (Session 96, 2026-10-14): TASKS 37b-1 is done (10f0e44 and its
 follow-up). Both Mode Selects' Challenge and the four race setups it
 leads to are ported (`bsetup.c`), checked against retail

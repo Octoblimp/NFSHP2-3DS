@@ -89,7 +89,7 @@ DLC = "3DS Files/source/drivinglocation.c"
 AIA = "3DS Files/source/aiaction.c"
 SOURCES = [HARNESS, NBC, DLC, AIA] + ["3DS Files/source/" + f for f in (
     "drivetarget.c", "car.c", "carstate.c", "carinfo.c", "cartypeinfo.c",
-    "langtab.c", "drivetrain.c", "engine.c", "wheel.c", "suspension.c",
+    "langtab.c", "portlang.c", "drivetrain.c", "engine.c", "wheel.c", "suspension.c",
     "steering.c", "rigidbody.c", "table.c", "trackroute.c", "trackpath.c",
     "quickspline.c", "bchunk.c", "world.c", "graph.c", "race.c",
     "copmanager.c", "replay.c", "p32.c", "bmem.c", "vtable.c", "emath.c",

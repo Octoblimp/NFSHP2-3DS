@@ -95,7 +95,9 @@
 #include "collisionsound.h"
 #include "configitems.h"
 #include "debugmenu.h"
+#include "lobby.h"
 #include "nameentry.h"
+#include "wireless.h"
 #include "wirelesstest.h"
 #include "cop.h"
 #include "copdriver.h"
@@ -437,6 +439,11 @@ static const BScreenConfig kScreens[] = {
       debugmenu_callback },
     { DEBUGMENU_RACE_NAME,       DEBUGMENU_RACE_SCREEN,
       debugmenu_race_callback },
+    // The port's too: where two players go on the 3DS (bsetup.c's
+    // twoPlayersCarSelect), the Local Wireless lobby. It has no Flailer
+    // screen of its own, so its popups sit on black, as BootAutoload's do.
+    { LOBBY_SCREEN_NAME,         0,
+      lobby_callback },
 };
 #define NUM_SCREENS ((int)(sizeof(kScreens) / sizeof(kScreens[0])))
 
@@ -2730,13 +2737,57 @@ static void hookSetupGrayNamed(void* user, const char* name, uint32_t screen,
     hookGrayMenuItem(user, screen, item, (BScrGrayMode)mode);
 }
 
-// IsJoystickPluggedIn (0x001542f0). The 3DS is one player's: port 0 is the
-// console's own buttons, and there is no second pad to plug in.
+// IsJoystickPluggedIn (0x001542f0). Port 0 is the console's own buttons.
+// There is no second pad to plug in, but port 1 stands for the second
+// console, over local wireless (TASKS 37b): the mode screens' Players can
+// be two, which g_setup.wirelessPlayers shows as Local Wireless.
 static int hookSetupJoystickPluggedIn(void* user, int port)
 {
     (void)user;
-    return port == 0;
+    return port == 0 || port == 1;
 }
+
+// The Local Wireless lobby's link (lobby.h): wireless.h's, with the time
+// and the log put in, and each peer's link for its messages.
+static int lobbyNetStart(void)
+{
+    return wireless_start(logLine, (uint32_t)osGetTime());
+}
+
+static int lobbyNetSend(int i, uint8_t type, const void* data, size_t n)
+{
+    WlLink* l = wireless_peer_link(i);
+    return l ? wl_link_send(l, type, data, n, 1) : 0;
+}
+
+static int lobbyNetRecv(int i, WlMsg* out)
+{
+    WlLink* l = wireless_peer_link(i);
+    return l ? wl_link_recv(l, out) : 0;
+}
+
+static void lobbyLog(const char* line)
+{
+    logLine("%s", line);
+}
+
+static const LobbyNet kLobbyNet = {
+    .start      = lobbyNetStart,
+    .stop       = wireless_stop,
+    .host       = wireless_host,
+    .setOpen    = wireless_set_open,
+    .scan       = wireless_scan,
+    .join       = wireless_join,
+    .leave      = wireless_leave,
+    .state      = wireless_state,
+    .peerCount  = wireless_peer_count,
+    .peerAlive  = wireless_peer_alive,
+    .peerName   = wireless_peer_name,
+    .forgetLost = wireless_forget_lost,
+    .selfName   = wireless_self_name,
+    .send       = lobbyNetSend,
+    .recv       = lobbyNetRecv,
+};
 
 // SetHelpOverride (0x0016d448). The help menu (tHelpMenu) is not ported;
 // the table is logged so the screen's lines can be checked.
@@ -6804,6 +6855,8 @@ int main(int argc, char** argv)
     setupHooks.setRaceParameters   = hookSetupRaceParameters;
     setupHooks.trace               = hookTrace;
     bsetup_init(&g_setup, &g_flow, &setupHooks);
+    g_setup.wirelessPlayers = 1;
+    lobby_init(&kLobbyNet, lobbyLog);
 
     BCarSelHooks carselHooks;
     memset(&carselHooks, 0, sizeof(carselHooks));
@@ -7092,6 +7145,12 @@ int main(int argc, char** argv)
             // pass. A race's have it after the coordinator's queue and
             // the players' events, below.
             if (!raceUp && flowInput(menuDown)) redraw = 1;
+
+            // The local wireless link, on whichever screen: what came in,
+            // the resends and the network's status, before the screens
+            // read it (TASKS 37).
+            if (wireless_state() != WIRELESS_OFF)
+                wireless_pump((uint32_t)osGetTime());
 
             // MainLoop: one pass of the flow per frame, by the real step.
             // bgf_frame is the flow's service and the menus' tick both.

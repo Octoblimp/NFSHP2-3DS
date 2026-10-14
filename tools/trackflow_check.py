@@ -82,7 +82,7 @@ HARNESS = "tools/src/trackflow_test.c"
 TFC = "3DS Files/source/trackflow.c"
 HTC = "3DS Files/source/hudtex.c"
 SOURCES = [HARNESS, TFC, HTC] + ["3DS Files/source/" + f for f in (
-    "cartypeinfo.c", "langtab.c", "bmath.c", "bmathtab.c")]
+    "cartypeinfo.c", "langtab.c", "portlang.c", "bmath.c", "bmathtab.c")]
 
 HARNESS_TIMEOUT = 60
 LIMIT = 20000000

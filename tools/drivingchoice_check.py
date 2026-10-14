@@ -106,7 +106,7 @@ AIA = "3DS Files/source/aiaction.c"
 AAS = "3DS Files/source/aiactions.c"
 SOURCES = [HARNESS, DCC, RCC, CCP, AIA, AAS] + ["3DS Files/source/" + f for f in (
     "nearbycar.c", "drivinglocation.c", "drivetarget.c", "obb.c", "car.c",
-    "carstate.c", "carinfo.c", "cartypeinfo.c", "langtab.c", "drivetrain.c",
+    "carstate.c", "carinfo.c", "cartypeinfo.c", "langtab.c", "portlang.c", "drivetrain.c",
     "engine.c", "wheel.c", "suspension.c", "steering.c", "rigidbody.c",
     "table.c", "trackroute.c", "trackpath.c", "quickspline.c", "bchunk.c",
     "world.c", "graph.c", "race.c", "copmanager.c", "replay.c", "p32.c",

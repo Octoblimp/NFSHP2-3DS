@@ -21,7 +21,7 @@ import hostbuild                                # noqa: E402
 import language_dump as ld                      # noqa: E402
 
 SOURCES = ["tools/src/langtab_test.c",
-           "3DS Files/source/langtab.c",
+           "3DS Files/source/langtab.c", "3DS Files/source/portlang.c",
            "3DS Files/source/bchunk.c"]
 
 

@@ -156,7 +156,7 @@ SOURCES = [HARNESS, STUBS, BCL, ESC, EMC] + ["3DS Files/source/" + f for f in (
     "texturepack.c", "sun.c", "weatherman.c", "carinfo.c",
     "characterinfo.c", "acidsys.c", "acidfx.c", "cameracoord.c",
     "bprintf.c", "vtable.c",
-    "cartypeinfo.c", "langtab.c", "drivetrain.c", "engine.c", "wheel.c",
+    "cartypeinfo.c", "langtab.c", "portlang.c", "drivetrain.c", "engine.c", "wheel.c",
     "suspension.c", "steering.c", "rigidbody.c", "table.c", "elight.c",
     "helisheet.c", "copmgr.c", "cop.c", "copmanager.c", "timer.c",
     "epositionmarker.c", "nisinfo.c", "soundscape.c", "eventtree.c",

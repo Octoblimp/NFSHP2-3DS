@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "bchunk.h"
+#include "portlang.h"
 
 #define ENTRY_SIZE 8
 // LanguageDescription is 100 bytes: bNode(8) + FileName[64] +
@@ -64,6 +65,8 @@ static const char* lookup(const LangTable* t, const uint8_t* table,
 
 const char* langtab_get(const LangTable* t, int32_t id, size_t* outLen)
 {
+    // The port's own IDs (portlang.h) are past every retail one.
+    if (id >= PORTLANG_FIRST) return portlang_get(t->languageEnum, id, outLen);
     if (!t->idTable) return NULL;
     return lookup(t, t->idTable, t->numID, id, outLen);
 }

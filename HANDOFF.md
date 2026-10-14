@@ -22207,3 +22207,72 @@ and the race setups it leads to. 37b-1 ports them; 37b-2 is the lobby.
 and portlang.c with the langtab hook. Then 37c to 37f, then TASKS 61
 (cops and racers in one wireless race, asked for 2026-10-14). TASKS 46
 is still the user's. Still to ask: TASKS 47's bridge, TASKS 52's popups.
+
+## Session 97 -- 37b-2, the Local Wireless lobby (done)
+
+Players 2 on a mode screen is retail's split screen; the port has none
+(TASKS 30, closed). It is now Local Wireless: the lobby where 2 to 8
+consoles find each other before car select. `docs/formats/lobby.md` has
+the whole of it.
+
+### What changed
+
+- `lobby.c`/`.h` (new): the screen "Local Wireless", hash 0, popups on
+  the memory card's popup screen. Ask (Host, Join); Hosting (the names,
+  Start once a client is on); Searching (a scan at once, then each
+  second); Found (Join, Next, walking the races); Joined (the wait); a
+  Notice with OK when something fails. Start closes the network and
+  sends each client `LOBBY_MSG_START` (the count and its place). The
+  link only stays up on the way on to Select Car. No `<3ds.h>`: the link
+  is a `LobbyNet` of function pointers, which `main.c` fills with
+  `wireless.c`'s.
+- `portlang.c`/`.h` (new): the port's 14 strings in retail's six
+  languages (Latin-1), IDs from 2000000; `langtab_get` hands those IDs
+  to `portlang_get`. FE_LONGEST and FE_ID answer as retail's tables do.
+- `bsetup.c`/`.h`: `wirelessPlayers`. When it is set, Players 2's label
+  and blurb are the port's, and the screens that went on to Select
+  Car2P go on to the lobby (Challenge and the four setups).
+- `main.c`: the lobby's screen row, the `LobbyNet`, `wirelessPlayers`
+  set, `wireless_pump` each frame in the flow, and port 1 plugged in
+  (the second console) so Players reaches 2.
+- `wireless.c`/`.h`: `wireless_self_name`, this console's user name
+  from UDS, for the host's list.
+- The 13 checks that build `langtab.c` now build `portlang.c` too.
+
+### What bit
+
+- The harness first let 22 mutants live. The checks that caught them:
+  each press's sound, no log from A on a popup with no buttons, a new
+  search scanning at once, the checks after presses as well as each
+  frame, no client past the network's places, the network going from
+  under the host, X, and junk read before the start message.
+- The Azahar script's first run failed on a line that was already in
+  the log: launching and joining the room took long enough that
+  "entering main loop" landed before the step began, and the step only
+  counted lines past its start. It now counts lines past the last press,
+  as run_azahar_challenge.ps1 does.
+
+### Checks
+
+- lobby_check: 28 scenarios, faults 0. `--mutate`: 67 mutations, 64
+  caught, 3 equivalent (`lb-latin1-two`, `lb-hide-index`,
+  `lb-ask-hide`), 0 unexplained.
+- langtab_check on the eight retail tables: 1896 entries each, 0 differ.
+- challenge, racesetups, racesetup, setup, carinfo, carloader,
+  carrenderinfo, carsel (8366 ops), cartypeinfo, drivingchoice (778
+  scenarios), fred, fredrace, loadertable, nearbycar, trackflow,
+  tracksel: all 0 differ.
+- Azahar (AC, 100%), `tools/run_azahar_lobby.ps1`:
+  - 2 consoles: both reached Select Car, 13 s after the lobby came up.
+  - 4 consoles: all 4 reached Select Car; the host's list grew one name
+    at a time, and the joiners were told places 1, 2 and 3 of 4.
+  - 8 consoles: all 8 reached Select Car, 22 s after the host's lobby
+    came up, the joiners at places 1 to 7 in the order they joined. The
+    host's nine lines and Start fit the top screen.
+
+### Next
+
+37c: the setup. Each console picks its car; the host picks the track
+and sends the race's parameters, every car, the seeds and each console's
+place; all load, then a barrier before the race. Then 37d to 37f, then
+TASKS 61. Still to ask: TASKS 47's bridge, TASKS 52's popups.
