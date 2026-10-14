@@ -340,6 +340,9 @@ struct BSetup {
 // Installs `s` as the module's instance and clears it. `hooks` may be NULL.
 // The kit is gf->anim, and the clock gf's.
 void bsetup_init(BSetup* s, BGameFlow* gf, const BSetupHooks* hooks);
+// That instance, or NULL before bsetup_init: the arrows' hooks, for the
+// other screens that have a pair (nameentry.c).
+BSetup* bsetup_instance(void);
 
 // BeACopChallengeSetup::Callback (0x001b6f18), for kScreens[].
 void bsetup_beacop_callback(BGameFlow* gf, BScreenMessage msg,

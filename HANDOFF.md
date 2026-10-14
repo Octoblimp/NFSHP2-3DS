@@ -21667,3 +21667,115 @@ Pause Menu hides itself under its popups.
 TASKS 54, the 3DS keyboard for NameEntry (Player Names). Still open
 from Session 88: ask the user for a device log at the fire on track 11
 with the GpuSends build ("DebugLog 1" on the card).
+
+## Session 91 -- TASKS 54, Player Names on the 3DS keyboard (done)
+
+The session finished the code Session 90's end had started
+(`nameentry.c`), then took the user's four additions of 2026-10-13.
+TASKS 54 is done. `docs/formats/name-entry.md` has the whole of it; this
+is the short form.
+
+### What the user asked for on 2026-10-13 (verbatim)
+
+"Continue where you left off, never stop working, get the port to
+100%" ... "Also, add stereoscopic 3D support to the game (remember 3DS
+only supports it on the top screen)"
+
+"No stereoscopic 3D is just a task, you can do it later if its less
+important in your eyes" -- TASKS 59, for later.
+
+"What is player two used for? There is no split screen or anything on
+here, so no player two is possible" -- Player 2's rows hidden; TASKS 30
+closed with it.
+
+"Need to make it pause audio whenever keyboard input is open so it
+doesn't go all crazy once keyboard exits"
+
+"Audio's still acting wonky, also you need to prompt for saving once
+you try to leave player names if you made one or more changes"
+
+### What is where
+
+- `nameentry.c`/`.h` (LF): retail's NameEntry (0x0024d408 ..
+  0x0024dc70). `maybeKeyboard` calls the `keyboard` hook where retail
+  activates tKeyboard. `hidePlayer2` grays MENUITEM_3 and 4 with mode 2
+  and hides their values, bars and label. `askToSave` and `answered`
+  hold the save prompt.
+- `main.c`:
+  - the `kScreens` row, "NameEntry", 617a4e0a;
+  - `nameKeyboardFilter` and `hookNameKeyboard` (swkbd, QWERTY, two
+    buttons, seven characters, the blurb as the hint in UTF-8);
+  - `holdAudio`, `audioHoldTick` (once a frame, before the flow's
+    input) and `onEmulator`;
+  - `gAudioUp`, set from `bsnd_hw_init`, and the hooks after
+    `debugmenu_init`.
+- `bsetup.c`/`.h`: `bsetup_instance`, for the arrows.
+- `hangwatch.c`/`.h`: `hangwatch_applet`, so the watchdog skips the
+  applet's wait.
+- `tools/run_azahar_nameentry.ps1`: the walk, with Azahar's keyboard
+  dialog driven through UI Automation.
+
+### The sound
+
+- **The first fix** paused every playing ndsp channel around
+  `swkbdInputText`. The user still heard it go wrong.
+- **Why.** Azahar had no DSP sleep or wake in its log. Its keyboard is
+  a Qt dialog, and `QtKeyboard::Execute` waits on it with a
+  BlockingQueuedConnection, so the whole emulated console stops while
+  it is open. Its audio stretcher (`TimeStretcher::Process`: tempo from
+  input over output, a 0.712 s low-pass, a floor of 0.05) is fed
+  nothing and slows to 5%. A simulation of its code
+  (`tools/azahar_stretch_sim.py`, 10 s frozen) has the tempo at 1.32x at
+  1.5 s, 0.88x at 2.8 s, and within 5% of normal by 3.5 s.
+- **The fix.** The channels are paused and the master volume set to 0.
+  Afterwards, on a 3DS, the channels go on at once and the volume fades
+  in over 250 ms. On Azahar they wait 3.5 s first, so the swing is over
+  silence. `svcGetSystemInfo(0x20000, 0)` is Azahar's EMULATOR_ID (2;
+  Citra 1), and an error on a 3DS. Nothing else in the port sets the
+  master volume.
+- **On a 3DS**, libctru's `aptLaunchLibraryApplet` calls ONSUSPEND, the
+  DSP sleeps (ndsp's `ndspFinalize(true)`), and on wake
+  `ndspInitialize(true)` sends every channel again. Already queued
+  waves are not sent again, so the pause beforehand is the safe side.
+  Not yet heard on the device.
+
+### The save prompt
+
+- B with the names or genders changed (`dataDifferent`) holds the move
+  back (`param 0`) and opens memcard.c's popup, titled "Save" (150000):
+  "Save your changes to the card?". The screen hides under it.
+- **Yes:** `bgf_change_to_screen(gf, "Autosave", 0)`. With a save on the
+  card, the Autosave screen asks retail's overwrite question, opened on
+  No, as at the end of a race. Its end moves back to Options.
+- **No:** `dataPutBack`, then `bgf_move_back_screen(gf, 1)`.
+- **B:** stays.
+- It asks with autosave on or off. Retail's BACK saves only with
+  autosave on, without asking.
+
+### Checks
+
+`tools/run_azahar_nameentry.ps1`: "PASS (keyboard, OK, Cancel, sound,
+prompt: stay, yes, no)". The walk:
+
+- "Racer7" and OK, then "Zzz" and Cancel ("Racer7" kept);
+- the gender switched, and no Player 2 row reached;
+- "audio: back after the applet" after both keyboards;
+- B (asked), B (stayed), B and Yes, then the overwrite Yes
+  ("Save written: True", put back);
+- in again with "Racer7", then a gender, B and No (the gender back to
+  1).
+
+One run lost the second A, posted just after the dialog closed. The
+walk now presses A again while no keyboard opens, up to three tries.
+Azahar's dialog starts empty; it does not show the initial text.
+
+### Next
+
+TASKS 51, the damage system (CarDamage), which names itself next after
+the profiles and the debug menu. Still open:
+
+- ask the user for a device log at the fire on track 11 with the
+  GpuSends build ("DebugLog 1");
+- TASKS 47's bridge: what it looked like;
+- TASKS 52's popups, which still say "Memory Card (PS2)";
+- TASKS 59, stereoscopic 3D, for later.

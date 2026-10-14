@@ -35,6 +35,7 @@ const char *volatile HangwatchTrail[HANGWATCH_TRAIL];
 volatile uint32_t    HangwatchMarks;
 
 static const char kApt[] = "aptMainLoop: HOME, sleep or a suspend";
+static const char kApplet[] = "a library applet: the 3DS keyboard";
 
 static void (*s_log)(const char *fmt, ...);
 static Thread            s_thread;
@@ -152,7 +153,8 @@ static void watch_main(void *arg)
             stalled = false;
             continue;
         }
-        if (f == 0 || HangwatchTrail[(m - 1) % HANGWATCH_TRAIL] == kApt)
+        if (f == 0 || HangwatchTrail[(m - 1) % HANGWATCH_TRAIL] == kApt
+            || HangwatchTrail[(m - 1) % HANGWATCH_TRAIL] == kApplet)
             continue;
         since = now_ms() - s_beatMs;
         if (since < next) continue;
@@ -200,6 +202,17 @@ bool hangwatch_main_loop(void)
     s_frames++;
     hangwatch_mark("frame begun");
     return up;
+}
+
+void hangwatch_applet(bool in)
+{
+    if (in) {
+        hangwatch_mark(kApplet);
+        return;
+    }
+    s_beatMs = now_ms();
+    s_marksAtBeat = HangwatchMarks;
+    hangwatch_mark("the applet closed");
 }
 
 void hangwatch_log(const char *fmt, ...)

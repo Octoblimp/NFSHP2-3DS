@@ -86,6 +86,21 @@ road, walls and cars) is closed at the user's word with no fault
 found: the hull matches the body and no penetration showed (HANDOFF.md,
 "Session 87, continued -- TASKS 58").**
 
+**Now (Session 91, 2026-10-13): TASKS 54 (Player Names on the 3DS
+keyboard) is done. A on Player 1's name opens the 3DS's keyboard with
+retail's rules: seven characters, letters, numbers, ! . # and the
+space. OK keeps the name; Cancel keeps the old one. Player 2's rows are
+hidden (no split screen, the user's word; TASKS 30 is closed with it).
+The sound is held while the keyboard is open. On Azahar it stays off
+3.5 s after, because Azahar stops the whole console during its dialog
+and its audio stretcher swings for about three seconds. B with anything
+changed asks "Save your changes to the card?" (Yes, No, or B to stay).
+The Azahar walk passes (HANDOFF.md, "Session 91";
+`docs/formats/name-entry.md`). TASKS 59, stereoscopic 3D on the top
+screen, is logged for later at the user's word. Next: TASKS 51 (the
+damage system, CarDamage). Ask the user for a log at the fire with the
+GpuSends build.**
+
 **Now (Session 90, 2026-10-13): TASKS 53 (the debug menu) is done.
 L + R + D-Pad Up on the main menu, or "DebugMenu 1" in the config,
 shows a fourth item, "Debug Menu". It has two screens:

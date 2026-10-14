@@ -2103,8 +2103,12 @@ is citro3d and owns the top.
         `CalcForceParameters`, `StartForceImpact`, which the 3DS has no
         motors for; and every `DoSnapshot`, which waits on
         `ReplaySnapshot`.
-30. [ ] Split-screen/multiplayer scope decision (HP2 supported split-screen;
+30. [x] Split-screen/multiplayer scope decision (HP2 supported split-screen;
         not committed to yet -- decide once single-player core is solid)
+        Decided on 2026-10-13 at the user's word: "There is no split
+        screen or anything on here, so no player two is possible". No
+        split screen; Player Names hides Player 2 (TASKS 54).
+        Multiplayer is TASKS 37's, one console each.
 31. [ ] Final CIA packaging + Old3DS/New3DS compatibility pass
         (Since 2026-10-03 the New 3DS is the target, task 28. Since
         2026-10-05 it is the only one, the user's call: an Old 3DS stops
@@ -2695,13 +2699,41 @@ phases.
           byte for byte).
         - The user saw the popup drawn over the rows on 2026-10-13. The
           screen now hides under it, as the Pause Menu's does.
-54. [ ] **Text input on the 3DS keyboard.** Asked for on 2026-10-12.
+54. [x] **Text input on the 3DS keyboard.** Asked for on 2026-10-12.
         Anything that asks for typed text uses the 3DS's built-in
         software keyboard (libctru's swkbd applet) in place of a ported
         letter grid. The first is the Options menu's Player Names, the
         `NameEntry` screen (a plain screen in `kScreens[]` for now). Keep
         retail's length limit and allowed characters. Cancel keeps the
         old name. It comes after TASKS 53.
+        Added on 2026-10-13: hide Player 2 (no split screen on the 3DS),
+        hold the sound while the keyboard is open so it doesn't go wrong
+        when it closes, and ask whether to save when leaving with
+        anything changed.
+        Done in Session 91 (`docs/formats/name-entry.md`):
+        - `nameentry.c` is retail's NameEntry (0x0024d408 ..
+          0x0024dc70). A on Player 1's name opens swkbd with
+          tKeyboard's rules: seven characters, a-z A-Z 0-9 ! . # and
+          the space (a filter callback), and the row's blurb as the
+          hint. OK writes the name with NameFinalSelect's noise; Cancel
+          keeps the old one.
+        - Player 2's rows, values, bars and label are hidden, and the
+          menu passes over them. Their values stay in the save.
+        - The sound: every playing channel paused and the master
+          volume at 0 while the applet is open; on a 3DS it fades back
+          over 250 ms. Azahar stops the whole console during its
+          keyboard dialog, and its audio stretcher then swings slow,
+          fast and slow for about three seconds, which was the wrong
+          sound. There the hold lasts 3.5 s (`svcGetSystemInfo`
+          0x20000 tells Azahar from a 3DS).
+        - B with changes asks "Save your changes to the card?". Yes
+          saves on the Autosave screen (which asks retail's overwrite
+          question when a save exists), No puts the names and genders
+          back, and B stays.
+        - Azahar walk PASS (`tools/run_azahar_nameentry.ps1`): OK,
+          Cancel, gender, no Player 2 row, the sound back after both
+          keyboards, and the prompt's stay, yes and no. `settings.db`
+          was saved and put back.
 55. [x] **A crash dump when the game closes.** Reported on 2026-10-12:
         closing the game from the HOME Menu, or turning the system off
         while it runs, leaves a Luma ARM11 exception dump
@@ -2786,6 +2818,13 @@ phases.
         If it comes back, the place to look is the rail meshes against
         their wall polygons (retail data), where a scraping car's side
         can show through a rail.
+59. [ ] **Stereoscopic 3D on the top screen.** Asked for on 2026-10-13.
+        Draw the top screen in stereo when the 3D slider is up: each
+        eye's view (`gfxSet3D`, `osGet3DSliderState`, a left and right
+        render target). The bottom screen has no 3D. The user said it is
+        "just a task", for later, when it matters less than what is in
+        hand. Mind the frame time: two views of the race at 30 FPS on
+        New 3DS.
 
 ### The retail frontend
 

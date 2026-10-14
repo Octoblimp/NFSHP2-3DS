@@ -64,6 +64,11 @@ static inline void hangwatch_mark(const char *where)
 // aptMainLoop, marked as the wait it is, and a frame begun after it.
 bool hangwatch_main_loop(void);
 
+// Around a library applet the main thread waits in (the keyboard,
+// nameentry.h): `in` marks the wait as aptMainLoop's is, and the end
+// counts as a beat, so the minutes spent typing are not a stall.
+void hangwatch_applet(bool in);
+
 // The file whose presence at a race's start turns its timing frames on.
 #define HANGWATCH_TIMING_FLAG "sdmc:/nfshp2_gputiming.txt"
 

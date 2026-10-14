@@ -92,6 +92,7 @@
 #include "collisionsound.h"
 #include "configitems.h"
 #include "debugmenu.h"
+#include "nameentry.h"
 #include "cop.h"
 #include "copdriver.h"
 #include "copmgr.h"
@@ -342,8 +343,8 @@ static const BScreenConfig kScreens[] = {
       bgf_plain_screen_callback },
     { "Display Options",         0x8bc68340u,   // tDisplayOptionsScreen
       bgf_plain_screen_callback },
-    { "NameEntry",               0x617a4e0au,   // NameEntry
-      bgf_plain_screen_callback },
+    { "NameEntry",               NAMEENTRY_SCREEN,   // NameEntry
+      nameentry_callback },
     { "Credits",                 0xfd8a3b6du,   // CreditsScreen
       bgf_plain_screen_callback },
     // Where You're The Cop and its Setup go. The two-player car select has
@@ -3415,6 +3416,166 @@ static void hookDebugLog(void* user, const char* line)
     logLine("debug menu: %s", line);
 }
 
+// Player Names' keyboard (nameentry.h): the 3DS's own, libctru's swkbd.
+// Its filter holds the name to tKeyboard's characters, and the hint is the
+// row's blurb, Latin-1 made UTF-8 for the applet. The main thread waits in
+// the applet, between frames: the flow's input is before C3D_FrameBegin.
+static SwkbdCallbackResult nameKeyboardFilter(void* user,
+                                              const char** message,
+                                              const char* text,
+                                              size_t length)
+{
+    (void)user;
+    for (size_t i = 0; i < length; i++) {
+        if (!nameentry_char_ok((unsigned char)text[i])) {
+            *message = "Names can have letters, numbers, spaces, "
+                       "! . and #.";
+            return SWKBD_CALLBACK_CONTINUE;
+        }
+    }
+    return SWKBD_CALLBACK_OK;
+}
+
+// The sound held while an applet has the main thread (the user's word,
+// 2026-10-13: it went wild when the keyboard closed). Every ndsp channel
+// -- bsnd's voices and streams, the jukebox's, the movies' -- that plays
+// is paused, and the master volume is 0. The streams' workers only queue
+// waves, so nothing un-pauses a channel while the main thread waits; their
+// queues fill and stop.
+//
+// On a 3DS the channels go on as the applet closes, and the volume comes
+// back over a quarter second. Azahar stops the whole console while its
+// keyboard dialog is open (QtKeyboard::Execute waits on the dialog), and
+// its audio stretcher, fed nothing, slows to its floor of 5%; fed again,
+// it swings fast, slow and back for about three seconds (TimeStretcher::
+// Process, simulated). There the hold lasts 3.5 s, so the swing is over
+// silence, then the channels go on.
+#define AUDIO_HOLD_EMU_MS 3500u
+#define AUDIO_FADE_MS     250u
+
+enum { HOLD_NONE, HOLD_APPLET, HOLD_WAIT, HOLD_FADE };
+
+static bool     gAudioUp;
+static int      gHold;
+static bool     gHeld[BSND_MAX_VOICES];  // the channels the hold paused
+static uint64_t gHoldUntil;              // HOLD_WAIT's end, a tick
+static uint64_t gFadeFrom;               // HOLD_FADE's start
+
+// svcGetSystemInfo's 0x20000 is Citra's and Azahar's own (EMULATOR_ID, 1
+// and 2); a 3DS's kernel has no such type and returns an error.
+static bool onEmulator(void)
+{
+    static int known = -1;
+    s64        id    = 0;
+
+    if (known < 0)
+        known = R_SUCCEEDED(svcGetSystemInfo(&id, 0x20000, 0)) && id != 0;
+    return known != 0;
+}
+
+static void audioHoldTick(void)
+{
+    uint64_t now;
+    float    v;
+
+    if (gHold != HOLD_WAIT && gHold != HOLD_FADE) return;
+    now = svcGetSystemTick();
+    if (gHold == HOLD_WAIT) {
+        if (now < gHoldUntil) return;
+        for (int ch = 0; ch < BSND_MAX_VOICES; ch++) {
+            if (gHeld[ch]) ndspChnSetPaused(ch, false);
+            gHeld[ch] = false;
+        }
+        gHold     = HOLD_FADE;
+        gFadeFrom = now;
+    }
+    v = (float)((now - gFadeFrom) / CPU_TICKS_PER_MSEC) / (float)AUDIO_FADE_MS;
+    if (v >= 1.0f) {
+        ndspSetMasterVol(1.0f);
+        gHold = HOLD_NONE;
+        logLine("audio: back after the applet");
+        return;
+    }
+    ndspSetMasterVol(v);
+}
+
+static void holdAudio(bool hold)
+{
+    if (!gAudioUp) return;
+    if (hold) {
+        // A hold still letting go keeps what it paused.
+        for (int ch = 0; ch < BSND_MAX_VOICES; ch++) {
+            if (!ndspChnIsPaused(ch)) {
+                gHeld[ch] = true;
+                ndspChnSetPaused(ch, true);
+            }
+        }
+        ndspSetMasterVol(0.0f);
+        gHold = HOLD_APPLET;
+        return;
+    }
+    gHold      = HOLD_WAIT;
+    gHoldUntil = svcGetSystemTick();
+    if (onEmulator())
+        gHoldUntil += (uint64_t)(AUDIO_HOLD_EMU_MS * CPU_TICKS_PER_MSEC);
+    audioHoldTick();
+}
+
+static int hookNameKeyboard(void* user, const char* hint, char* name,
+                            int size)
+{
+    SwkbdState  kb;
+    SwkbdButton button;
+    char        hintUtf8[256];
+    char        typed[4 * NAMEENTRY_MAX_CHARS + 1];
+    size_t      n = 0;
+    int         i, j;
+
+    (void)user;
+    for (i = 0; hint[i] != '\0' && n + 3 < sizeof hintUtf8; i++) {
+        unsigned char c = (unsigned char)hint[i];
+        if (c < 0x80) {
+            hintUtf8[n++] = (char)c;
+        } else {
+            hintUtf8[n++] = (char)(0xc0 | (c >> 6));
+            hintUtf8[n++] = (char)(0x80 | (c & 0x3f));
+        }
+    }
+    hintUtf8[n] = '\0';
+    swkbdInit(&kb, SWKBD_TYPE_QWERTY, 2, NAMEENTRY_MAX_CHARS);
+    swkbdSetHintText(&kb, hintUtf8);
+    swkbdSetInitialText(&kb, name);
+    swkbdSetValidation(&kb, SWKBD_ANYTHING, SWKBD_FILTER_CALLBACK, 0);
+    swkbdSetFilterCallback(&kb, nameKeyboardFilter, NULL);
+    swkbdSetFeatures(&kb, SWKBD_DARKEN_TOP_SCREEN);
+    memset(typed, 0, sizeof typed);
+    holdAudio(true);
+    hangwatch_applet(true);
+    button = swkbdInputText(&kb, typed, sizeof typed);
+    hangwatch_applet(false);
+    holdAudio(false);
+    if (button != SWKBD_BUTTON_CONFIRM) {
+        logLine("name entry: keyboard closed, %s (%d)",
+                button == SWKBD_BUTTON_NONE ? "no button" : "cancel",
+                (int)swkbdGetResult(&kb));
+        return 0;
+    }
+    // The filter has passed every character; this keeps the name to them
+    // and to its length whatever the applet hands back.
+    for (i = j = 0; typed[i] != '\0' && j < NAMEENTRY_MAX_CHARS
+                    && j < size - 1; i++)
+        if (nameentry_char_ok((unsigned char)typed[i]))
+            name[j++] = typed[i];
+    name[j] = '\0';
+    return 1;
+}
+
+static void hookNameEntryLog(void* user, const char* line)
+{
+    (void)user;
+    logLine("name entry: %s", line);
+}
+
 static void hookCarSelLoaderFrontEnd(void* user)
 {
     (void)user;
@@ -5987,6 +6148,7 @@ int main(int argc, char** argv)
     // ndsp. Silence is a survivable failure -- a card with no SOUND
     // directory still runs the frontend -- so nothing below checks.
     bool soundUp = bsnd_hw_init(&gSnd);
+    gAudioUp = soundUp;
     if (!gamedata_path("SOUND", gSoundDir, sizeof(gSoundDir)))
         gSoundDir[0] = '\0';
     // Sound.obj's statics, bSound's constructor and sound::jukebox's: with
@@ -6605,6 +6767,12 @@ int main(int argc, char** argv)
     debugHooks.log           = hookDebugLog;
     debugmenu_init(&debugHooks);
 
+    NameEntryHooks nameHooks;
+    memset(&nameHooks, 0, sizeof nameHooks);
+    nameHooks.keyboard = hookNameKeyboard;
+    nameHooks.log      = hookNameEntryLog;
+    nameentry_init(&nameHooks);
+
     // Retail's main (0x0012f000), after InitializeEverything: with SkipFE
     // set, StartSkipFEGame on Fred, whose StartRace asks for
     // LOADING_TRACK_COMMON straight from NONE; else
@@ -6818,6 +6986,8 @@ int main(int argc, char** argv)
                 logPrintf("mode %d\n", mode);
             }
         }
+
+        audioHoldTick();
 
         if (mode == MODE_FLOW) {
             // ---- the boot flow

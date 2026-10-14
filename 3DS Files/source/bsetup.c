@@ -1213,6 +1213,11 @@ void bsetup_init(BSetup* s, BGameFlow* gf, const BSetupHooks* hooks)
     g_setup = s;
 }
 
+BSetup* bsetup_instance(void)
+{
+    return g_setup;
+}
+
 // Callback (0x001b6f18): ACTIVATE news the instance on the screen the
 // callback data names, UNACTIVATE deletes it if there is one, and every
 // other message goes to HandleEvent -- in retail with the instance
