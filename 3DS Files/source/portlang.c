@@ -78,6 +78,10 @@ static const char* const kStrings[PORTLANG_END - PORTLANG_FIRST][6] = {
       "Beitritt zum Rennen fehlgeschlagen.",
       "Impossibile unirsi alla gara.", "No se pudo unir a la carrera.",
       "Kunde inte g\xe5 med i loppet." },
+    // PORTLANG_WAITING_FOR_CARS
+    { "Waiting for a car from:", "En attente de la voiture de :",
+      "Warte auf das Auto von:", "In attesa dell'auto di:",
+      "Esperando el coche de:", "V\xe4ntar p\xe5 bil fr\xe5n:" },
 };
 
 const char* portlang_get(int32_t languageEnum, int32_t id, size_t* outLen)

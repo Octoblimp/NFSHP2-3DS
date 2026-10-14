@@ -69,6 +69,7 @@ void (*gEDuplicateSolidFn)(const char *from, const char *to);
 void (*gEDeleteAllDuplicatedSolidsFn)(void);
 void (*gDemoModeReplayLoadFn)(void);
 void (*gLoadSoundRegionsInGameFn)(void (*done)(intptr_t), intptr_t param);
+int (*gTrackFlowHoldRaceFn)(void);
 
 #define CALL(fn) do { if ((fn) != NULL) (fn)(); } while (0)
 
@@ -335,6 +336,13 @@ void GameFlowLoadingTrackSpecificPart5(intptr_t param)
 void GameFlowLoadingTrackSpecificPart6(intptr_t param)
 {
     (void)param;
+    if (gTrackFlowHoldRaceFn != NULL && gTrackFlowHoldRaceFn())
+        return;
+    trackflow_go_racing();
+}
+
+void trackflow_go_racing(void)
+{
     set_loading_screen(FLAILER_SCREEN_INVISIBLE);
     change_game_flow(BGF_RACING);
 }

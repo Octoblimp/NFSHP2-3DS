@@ -22276,3 +22276,86 @@ the whole of it.
 and sends the race's parameters, every car, the seeds and each console's
 place; all load, then a barrier before the race. Then 37d to 37f, then
 TASKS 61. Still to ask: TASKS 47's bridge, TASKS 52's popups.
+
+## Session 98 -- 37c, a wireless race's setup (done)
+
+From the lobby's Start to a race loaded on every console and started on
+one seed. `docs/formats/netrace.md` has the whole of it.
+
+### What changed
+
+- `netrace.c`/`.h` (new): the setup, with no `<3ds.h>`: the link is a
+  `NetRaceNet` and the game's StartRace, rides, characters and flow a
+  `NetRaceGame`, both filled by `main.c`.
+  - Each console picks its car. A client sends it (NETRACE_MSG_CAR) in
+    place of going on to Select Track and waits on "Wireless Race", a
+    lobby-style popup; BACK takes the car back (NETRACE_MSG_UNCAR).
+  - The host's start on Select Track builds the race once every car is
+    in, or waits on "Wireless Race" naming who has not sent one. The
+    build is retail's StartRace with the first client as the second
+    player and the rest in AI racers' places (`gFredNetRideFn`), the
+    frontend's second player put back after.
+  - What StartRace made goes to every client (NETRACE_MSG_SETUP, in
+    pieces): the race parameters, the driver table, the event, Fred's
+    game type and players, the seed and each place's driver. A client
+    checks it is this build's and takes it in place of its own.
+  - Each console holds at the end of its load (`gTrackFlowHoldRaceFn`,
+    trackflow's Part6); clients say so (NETRACE_MSG_LOADED). The host's
+    GO carries the seed every console races on.
+  - A console lost before the build is raced without; with none left, or
+    a client's host lost, back to the lobby with "The link to $NAME was
+    lost." After the build nobody gone is waited for.
+- `fredrace.c`/`.h`: `gFredNetRideFn`, asked for each AI racer's ride.
+- `trackflow.c`/`.h`: `gTrackFlowHoldRaceFn` before going racing, and
+  `trackflow_go_racing` for GO.
+- `lobby.c`/`.h`: `lobby_on_start` (netrace_begin), `lobby_notice_next`
+  for the notice coming back, and `lobby_latin1`.
+- `wireless.c`/`.h`, `wlproto.c`/`.h`: `wireless_set_patience`, a
+  longer timeout for a console whose loop a load stops.
+- `portlang.c`/`.h`: "Waiting for a car from:" in the six languages.
+- `main.c`: the "Wireless Race" screen row, the two hooks at car
+  select's and track select's start, `netrace_frame` after the link's
+  pump, and the NetRaceNet/NetRaceGame.
+- `tools/run_azahar_lobby.ps1 -Race`: on from car select to the race;
+  each copy's card gets the DSP firmware now (sdmc:/3ds/dspfirm.cdc),
+  and a copy that logs "ndsp unavailable" fails.
+
+### What bit
+
+- The first Azahar run raced, both copies on seed a5a2ece9, but GO gave
+  the link its 3 s timeout back, and the race's first frame (its
+  drawing's preparation) took 8.9 s on each: each timed the other out.
+  The 30 s patience now stays past GO; 37d gives it back once every
+  console's frames come in.
+- The same run had no sound: the copies' cards had no
+  sdmc:/3ds/dspfirm.cdc (the user's own card has it, which is why every
+  one-copy run had sound). With no ndsp, main.c gives the sound no
+  driver, and the race's sound setup reads through the NULL one:
+  `bsnd_patch_id`'s walk of the bank slots, unmapped reads at 0x5e8,
+  0x620, 0x658 on Azahar, a data abort on a 3DS with no DSP firmware.
+  Its own fix comes next.
+- The harness first let 31 mutants live; the checks that caught them
+  are listed in netrace_test.c's header (the popup's look and place,
+  drawn AI rides marked, a second load not held, the race's first
+  messages left unread).
+
+### Checks
+
+- netrace_check: 21 scenarios, faults 0. `--mutate`: 158 mutations,
+  147 caught, 11 equivalent (named, with reasons), 0 unexplained.
+- lobby_check, wlproto_check, fredrace_check (11 scenarios, 0 differ),
+  trackflow_check (22 scenarios, 0 differ), langtab: all pass.
+- On Azahar, `run_azahar_lobby.ps1 -Consoles 2 -Race` after both fixes:
+  both PASS (racing). The host built track 11 with 4 drivers at 174 s;
+  the client took it (driver 1) and loaded; GO at 178 s; both racing on
+  seed 248fe492 at 179-180 s, the same Starting Grid on each, sound up,
+  no link lost, no unmapped reads. The grid colours the same rows on
+  both, so the client's marks player 0's (the host's car) as its own:
+  each console's own view is 37d's.
+
+### Next
+
+The silent-sound fix (no driver, no lookups), then 37d: the lockstep
+race. The leads from this session's survey are under 37d and 37e in
+TASKS.md. Then 37e, 37f, TASKS 61. Still to ask: TASKS 47's bridge,
+TASKS 52's popups.

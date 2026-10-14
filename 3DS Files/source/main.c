@@ -97,6 +97,7 @@
 #include "debugmenu.h"
 #include "lobby.h"
 #include "nameentry.h"
+#include "netrace.h"
 #include "wireless.h"
 #include "wirelesstest.h"
 #include "cop.h"
@@ -444,6 +445,10 @@ static const BScreenConfig kScreens[] = {
     // screen of its own, so its popups sit on black, as BootAutoload's do.
     { LOBBY_SCREEN_NAME,         0,
       lobby_callback },
+    // And the wait for the other consoles' cars or the host's race
+    // (netrace.h), the same way.
+    { NETRACE_SCREEN_NAME,       0,
+      netrace_callback },
 };
 #define NUM_SCREENS ((int)(sizeof(kScreens) / sizeof(kScreens[0])))
 
@@ -2789,6 +2794,44 @@ static const LobbyNet kLobbyNet = {
     .recv       = lobbyNetRecv,
 };
 
+// A wireless race's setup (netrace.h): the same link, and the game's
+// StartRace, rides, characters and flow.
+static const NetRaceNet kNetRaceNet = {
+    .state       = wireless_state,
+    .peerAlive   = wireless_peer_alive,
+    .peerName    = wireless_peer_name,
+    .send        = lobbyNetSend,
+    .recv        = lobbyNetRecv,
+    .setPatience = wireless_set_patience,
+};
+
+static void netRaceStartRace(void)
+{
+    fred_start_race(&Fred);
+    logRaceStart();
+}
+
+static RideInfo* netRaceSelectedRide(int p)
+{
+    return fpi_get_selected_ride_info(&Fred.FrontendPlayers[p], Fred.GameType);
+}
+
+// StartRace's own change: from the frontend, unload it first.
+static void netRaceStartLoading(void)
+{
+    bgf_change_state(&g_flow, g_flow.current == BGF_IN_FRONTEND
+                              ? BGF_UNLOADING_FRONTEND
+                              : BGF_LOADING_TRACK_COMMON, BGF_NONE);
+}
+
+static const NetRaceGame kNetRaceGame = {
+    .startRace     = netRaceStartRace,
+    .selectedRide  = netRaceSelectedRide,
+    .characterInfo = get_character_info,
+    .startLoading  = netRaceStartLoading,
+    .goRacing      = trackflow_go_racing,
+};
+
 // SetHelpOverride (0x0016d448). The help menu (tHelpMenu) is not ported;
 // the table is logged so the screen's lines can be checked.
 static void hookSetupHelpOverride(void* user, const int32_t* lines)
@@ -3475,13 +3518,21 @@ static void hookCarSelDismissPopup(void* user, int popup)
 static void hookCarSelChangeToScreen(void* user, const char* name, int push)
 {
     (void)user;
+    // A wireless race's client sends its car and waits for the host's
+    // track instead.
+    if (!strcmp(name, "Select Track") && netrace_car_chosen(&g_flow)) return;
     bgf_change_to_screen(&g_flow, name, push);
 }
 
 // FrontendDatabase::StartRace, for the single race and the championship.
+// A wireless race's host builds it once every car is in (netrace.c); a
+// client's car select that starts a race straight away sends its car.
 static void hookCarSelStartRace(void* user)
 {
     (void)user;
+    if (netrace_active()
+        && (netrace_host_start(&g_flow) || netrace_car_chosen(&g_flow)))
+        return;
     fred_start_race(&Fred);
     logRaceStart();
 }
@@ -6857,6 +6908,9 @@ int main(int argc, char** argv)
     bsetup_init(&g_setup, &g_flow, &setupHooks);
     g_setup.wirelessPlayers = 1;
     lobby_init(&kLobbyNet, lobbyLog);
+    netrace_init(&kNetRaceNet, &kNetRaceGame, lobbyLog);
+    lobby_on_start(netrace_begin);
+    gTrackFlowHoldRaceFn = netrace_hold;
 
     BCarSelHooks carselHooks;
     memset(&carselHooks, 0, sizeof(carselHooks));
@@ -7151,6 +7205,8 @@ int main(int argc, char** argv)
             // read it (TASKS 37).
             if (wireless_state() != WIRELESS_OFF)
                 wireless_pump((uint32_t)osGetTime());
+            // And a wireless race's setup, through the loads too.
+            if (netrace_active()) netrace_frame(&g_flow);
 
             // MainLoop: one pass of the flow per frame, by the real step.
             // bgf_frame is the flow's service and the menus' tick both.

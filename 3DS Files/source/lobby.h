@@ -20,7 +20,8 @@
 // Start goes to every client as LOBBY_MSG_START, and every console then
 // goes on to "Select Car", the lobby pushed under it. Coming back to the
 // lobby takes the network down. What the race needs over the link (the
-// cars, the race's parameters, a barrier) is 37c's.
+// cars, the race's parameters, a barrier) is netrace.c's (37c), which the
+// lobby tells what Start settled.
 //
 // Host-buildable: the link is the LobbyNet's, wireless.h's on the 3DS and
 // a script in tools/src/lobby_test.c.
@@ -73,6 +74,26 @@ typedef struct LobbyNet {
 typedef void (*LobbyLogFn)(const char* line);
 
 void lobby_init(const LobbyNet* net, LobbyLogFn log);
+
+// What Start settled. Each console still on has a place, the host's 0
+// and the clients' 1 on in the order they came; `peer` is each place's
+// peer for the link (the host's own -1, and on a client only the host's,
+// 0, is known) and -1 past `consoles`.
+typedef struct LobbyRace {
+    int  consoles;
+    int  place;
+    int  peer[WIRELESS_MAX_CONSOLES];
+    char hostName[WIRELESS_NAME_MAX];    // Latin-1; on the host its own
+} LobbyRace;
+
+// Told on Start, on every console, before it goes on to car select.
+typedef void (*LobbyStartFn)(const LobbyRace* race);
+void lobby_on_start(LobbyStartFn fn);
+
+// When the lobby is next come back to, the line `id` with `name` for
+// $NAME (Latin-1, as lobby_latin1 makes it) and OK, before the question:
+// the race lost a console on the way to it.
+void lobby_notice_next(int32_t id, const char* name);
 
 // The ScreenCallback, for kScreens[]: LOBBY_SCREEN_NAME's.
 void lobby_callback(BGameFlow* gf, BScreenMessage msg,

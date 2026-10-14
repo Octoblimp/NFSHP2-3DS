@@ -250,4 +250,11 @@ extern int32_t (*gEventRewardCarsUnlockedFn)(void);
 extern int32_t (*gFredGameFlowStateFn)(void);
 extern void (*gFredChangeGameFlowFn)(int32_t state);
 
+// The port's: a local wireless race's third to eighth players drive AI
+// racers' cars (netrace.c, TASKS 37c). SetupCarsForRace asks it for AI
+// racer `ai`'s ride first; nonzero means it wrote one into `ride`, which
+// then takes the place of the one the AI would choose. NULL asks nothing,
+// as retail.
+extern int32_t (*gFredNetRideFn)(int32_t ai, RideInfo *ride);
+
 #endif

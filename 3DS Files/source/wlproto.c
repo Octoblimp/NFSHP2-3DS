@@ -54,6 +54,7 @@ void wl_link_init(WlLink *l, WlSendFn send, void *ctx, uint32_t now)
     l->now       = now;
     l->lastHeard = now;
     l->lastSent  = now;
+    l->timeout   = WL_TIMEOUT_MS;
 }
 
 int wl_link_send(WlLink *l, uint8_t type, const void *data, size_t n,
@@ -284,7 +285,12 @@ int wl_link_recv(WlLink *l, WlMsg *out)
 
 int wl_link_alive(const WlLink *l)
 {
-    return l->heard && (int32_t)(l->now - l->lastHeard) < WL_TIMEOUT_MS;
+    return l->heard && (int32_t)(l->now - l->lastHeard) < (int32_t)l->timeout;
+}
+
+void wl_link_set_timeout(WlLink *l, uint32_t ms)
+{
+    l->timeout = ms ? ms : WL_TIMEOUT_MS;
 }
 
 int wl_link_unacked(const WlLink *l)

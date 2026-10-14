@@ -65,6 +65,7 @@ typedef struct WlLink {
     uint32_t lastHeard;          // a well-formed packet came
     uint32_t lastSent;
     int      heard;              // anything at all yet
+    uint32_t timeout;            // ms of silence that lose it
 
     // Out: the reliable messages from base up to next, not yet acked,
     // each in out[seq % WL_WINDOW] with when it is due to go (again) and
@@ -110,8 +111,13 @@ void wl_link_tick(WlLink *l, uint32_t now);
 // The next message to read into *out: 1, or 0 for none.
 int wl_link_recv(WlLink *l, WlMsg *out);
 
-// Heard from within WL_TIMEOUT_MS.
+// Heard from within the link's timeout, WL_TIMEOUT_MS until set.
 int wl_link_alive(const WlLink *l);
+
+// The silence that loses the link from now on: longer while a console
+// loads a track and its loop stops for seconds (netrace.c). 0 is
+// WL_TIMEOUT_MS.
+void wl_link_set_timeout(WlLink *l, uint32_t ms);
 
 // Reliable messages sent and not yet acked.
 int wl_link_unacked(const WlLink *l);

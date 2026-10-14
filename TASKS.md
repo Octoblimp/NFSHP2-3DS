@@ -2425,16 +2425,70 @@ phases.
                     its own SAVES: with 2, 4 and 8 consoles, every copy
                     reached Select Car, each joiner at its own place (1
                     to 7 of 8).
-          - [ ] 37c: the setup. The client's car to the host; the
+          - [x] 37c: the setup. The client's car to the host; the
                 host's race parameters, seeds and start to the client;
                 both load, then a barrier before the race.
+                - Done in Session 98 (`docs/formats/netrace.md`).
+                  `netrace.c`: each console picks its car; a client
+                  sends it (NETRACE_MSG_CAR) and waits on "Wireless
+                  Race", BACK taking it back. The host's start on track
+                  select builds the race once every car is in: retail's
+                  StartRace with the first client as the second player
+                  and the rest in AI racers' places (`gFredNetRideFn`),
+                  then the race parameters, the driver table, the event,
+                  Fred's game type and players, the seed and each place's
+                  driver to every client (NETRACE_MSG_SETUP, in pieces).
+                  Each console holds at the end of its load
+                  (`gTrackFlowHoldRaceFn`) until the host's GO, which
+                  carries the seed every console races on. A console
+                  lost before the build is raced without; with none left,
+                  or the host lost, back to the lobby with a notice.
+                - netrace_check: 21 scenarios (2 to 8 consoles, BACK on
+                  both sides, consoles lost at every stage, a knockout, a
+                  setup from another build, French, no wireless race),
+                  faults 0; 158 mutations, 147 caught, 11 equivalent.
+                - On Azahar (`run_azahar_lobby.ps1 -Consoles 2 -Race`):
+                  both PASS (racing). The host built track 11 with 4
+                  drivers at 174 s, the client took it (driver 1), both
+                  loaded and held, GO at 178 s, both racing on seed
+                  248fe492 at 179-180 s with the same Starting Grid;
+                  sound up, no link lost, no unmapped reads. The grid
+                  colours the same rows on both: the client's marks
+                  player 0's, the host's car, as its own (37d).
+                - The link keeps its 30 s patience past GO: the race's
+                  first frame (its drawing's preparation, 8.9 s on
+                  Azahar) stops each loop as long as a load. The first
+                  run gave the 3 s timeout back at GO and each copy timed
+                  the other out. 37d gives it back once every console's
+                  frames come in.
           - [ ] 37d: the lockstep race. The host's step each frame and
                 both pads, with a frame or two of input delay; each
                 console's own view, mirror and HUD.
+                - Give the link its own timeout back (setPatience(0))
+                  once every console's race frames come in (37c keeps
+                  NETRACE_PATIENCE_MS past GO).
+                - Leads (Session 98's survey): dt is wall-clock
+                  (`realtime.c` PrepareRealTimestep), so the host's
+                  quantised step goes with the pads; the joylog's event
+                  list (`joyevent.c` GenerateJoyEvents, port in bits 16
+                  to 18) is the place to inject each console's pad;
+                  JOYSTICK_PORTS is 2 and players are capped at 2
+                  (`playerinit.c`), and AI places are AI_CONTROL
+                  (`raceinit.c` racecoordinator_init_cars); the view,
+                  mirror and HUD follow player 0 / view 1 in
+                  `trackview.c`, `sundraw.c`, `eenvmap.c` and main.c's
+                  bottom screen.
           - [ ] 37e: determinism. The per-frame hashes (cars, cops,
                 traffic, seeds, the race coordinator) compared, each
                 part's hash logged at a mismatch, and every source of
                 drift fixed.
+                - Leads: `world_calculate_debug_checksum` (worldstep.c)
+                  is a per-frame hash already. The world's own seed is
+                  drawn from bDefaultSeed in `world_init`, during the
+                  load, before GO; in Session 98's runs the client's
+                  seed at the hold matched the host's. bDefaultSeed
+                  feeds the drawing and the speech as well as the
+                  simulation, and cop filler speech waits on playback.
           - [ ] 37f: the end. Results and points on each console, back
                 to the lobby or a rematch, and a player leaving
                 mid-race.

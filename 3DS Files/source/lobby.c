@@ -43,6 +43,9 @@ static struct {
     int          numHosts, hostIndex;
     char         hostName[WIRELESS_NAME_MAX];   // the one joined, Latin-1
     char         message[MESSAGE_MAX];          // the popup's
+    LobbyStartFn onStart;
+    int32_t      nextNotice;                    // lobby_notice_next's, or 0
+    char         nextName[WIRELESS_NAME_MAX];   // Latin-1
 } L = { .popup = -1 };
 
 static void say(const char* fmt, ...)
@@ -263,23 +266,38 @@ static void goOn(BGameFlow* gf)
 
 // Start: no more in, and each client told how many there are and which
 // place is its, the host's being 0.
+static void raceInit(LobbyRace* r, int consoles, int place)
+{
+    int i;
+
+    memset(r, 0, sizeof *r);
+    r->consoles = consoles;
+    r->place    = place;
+    for (i = 0; i < WIRELESS_MAX_CONSOLES; i++) r->peer[i] = -1;
+}
+
 static void startRace(BGameFlow* gf)
 {
-    int     i, place = 0, consoles = clientsAlive() + 1;
-    uint8_t msg[2];
+    int       i, place = 0, consoles = clientsAlive() + 1;
+    uint8_t   msg[2];
+    LobbyRace race;
 
     if (consoles < 2) {
         showList(gf);   // the last one went as Start was pressed
         return;
     }
     L.net.setOpen(0);
+    raceInit(&race, consoles, 0);
+    lobby_latin1(race.hostName, sizeof race.hostName, L.net.selfName());
     for (i = 0; i < L.net.peerCount(); i++) {
         if (!L.net.peerAlive(i)) continue;
         msg[0] = (uint8_t)consoles;
         msg[1] = (uint8_t)++place;
+        race.peer[place] = i;
         L.net.send(i, LOBBY_MSG_START, msg, sizeof msg);
     }
     say("lobby: start, %d consoles", consoles);
+    if (L.onStart) L.onStart(&race);
     goOn(gf);
 }
 
@@ -363,9 +381,15 @@ static void tick(BGameFlow* gf)
         case LS_JOINED: {
             WlMsg m;
             while (L.net.recv(0, &m)) {
+                LobbyRace race;
+
                 if (m.type != LOBBY_MSG_START || m.len < 2) continue;
                 say("lobby: started by %s, place %d of %d", L.hostName,
                     m.data[1], m.data[0]);
+                raceInit(&race, m.data[0], m.data[1]);
+                race.peer[0] = 0;
+                memcpy(race.hostName, L.hostName, sizeof race.hostName);
+                if (L.onStart) L.onStart(&race);
                 goOn(gf);
                 return;
             }
@@ -455,14 +479,33 @@ void lobby_init(const LobbyNet* net, LobbyLogFn log)
     L.popup = -1;
 }
 
+void lobby_on_start(LobbyStartFn fn)
+{
+    L.onStart = fn;
+}
+
+void lobby_notice_next(int32_t id, const char* name)
+{
+    L.nextNotice = id;
+    snprintf(L.nextName, sizeof L.nextName, "%s", name ? name : "");
+}
+
 void lobby_callback(BGameFlow* gf, BScreenMessage msg,
                     BScreenCallbackData* data)
 {
     switch (msg) {
         // Coming back from car select takes the link down: the question
-        // again, as at the start.
+        // again, as at the start, after the race's notice if it left one.
         case BMSG_SCREEN_ACTIVATE:
             L.popup = -1;
+            if (L.nextNotice) {
+                int32_t id = L.nextNotice;
+
+                L.nextNotice = 0;
+                linkDown();
+                notice(gf, id, L.nextName, LS_ASK);
+                break;
+            }
             toAsk(gf);
             break;
 

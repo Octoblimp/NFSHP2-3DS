@@ -9,24 +9,34 @@
 # %TEMP%\nfshp2_wl, each with its own console name and card, joined to the
 # room through Multiplayer > Direct Connect to Room. Each card gets the
 # retail data the user's own card has, a junction per folder of
-# sdmc:/NFSHP2, and a copy of its SAVES (never a junction: a save on one
-# copy is not another's), so every copy starts from the same profile. The
+# sdmc:/NFSHP2, a copy of its SAVES (never a junction: a save on one copy
+# is not another's), so every copy starts from the same profile, and the
+# DSP firmware (sdmc:/3ds/dspfirm.cdc), so every copy has its sound. The
 # walk to Challenge is run_azahar_challenge.ps1's, each copy on its own
 # clock and driven by its own debug log ("DebugLog 1"), which lands up to
 # ~7 s late: a press that changes screen is repeated only after 20 s with
 # nothing, and a press on the lobby's popups never is.
 #
+# With -Race (TASKS 37c, netrace.h) each copy goes on: its car (A on the
+# transmission, Automatic and the first handling), which a client sends to
+# the host and waits on "Wireless Race"; the host's first track, which
+# builds the race once every car is in; the setup taken on each client,
+# every copy's load held until the host's GO, and the race on one seed.
+#
 # Usage:
 #   powershell -File tools/run_azahar_lobby.ps1
 #   powershell -File tools/run_azahar_lobby.ps1 -Consoles 4
+#   powershell -File tools/run_azahar_lobby.ps1 -Consoles 2 -Race
 #
 # Screenshots of each copy go to %TEMP%\nfshp2_lobby. Exit code 0 when
-# every copy reached Select Car from the lobby.
+# every copy reached Select Car from the lobby (with -Race: racing, every
+# copy's GO on the host's seed).
 
 param(
     [ValidateRange(2, 8)]
     [int]$Consoles = 2,           # the host and the rest
-    [int]$RunSeconds = 0,         # hard ceiling; 0 is 240 + 30 a console
+    [switch]$Race,                # on to a loaded race (37c)
+    [int]$RunSeconds = 0,         # hard ceiling; 0 is 240 + 30 a console, + 300 with -Race
     [string]$AzaharDir = "C:\Program Files\Azahar",
     [string]$Target3dsx = "",
     [string]$WorkDir = "",
@@ -40,7 +50,7 @@ $root = Split-Path -Parent $PSScriptRoot
 if ($Target3dsx -eq "") { $Target3dsx = Join-Path $root "3DS Files\NFSHP2-3DS.3dsx" }
 if ($WorkDir -eq "") { $WorkDir = Join-Path $env:TEMP "nfshp2_wl" }
 if ($OutDir -eq "") { $OutDir = Join-Path $env:TEMP "nfshp2_lobby" }
-if ($RunSeconds -le 0) { $RunSeconds = 240 + 30 * $Consoles }
+if ($RunSeconds -le 0) { $RunSeconds = 240 + 30 * $Consoles + $(if ($Race) { 300 } else { 0 }) }
 $azahar = Join-Path $AzaharDir "azahar.exe"
 $roomExe = Join-Path $AzaharDir "azahar-room.exe"
 $dataRoot = Join-Path $env:APPDATA "Azahar\sdmc\NFSHP2"
@@ -175,6 +185,12 @@ function LinkData([string]$user) {
     if (Test-Path $src) {
         Copy-Item -Path (Join-Path $src "*") -Destination $saves -Recurse -Force
     }
+    # ndsp's DSP firmware, where libctru looks for it; without it the game
+    # runs silent ("Sound: ndsp unavailable").
+    $dsp = Join-Path $env:APPDATA "Azahar\sdmc\3ds\dspfirm.cdc"
+    if (-not (Test-Path $dsp)) { throw "no $dsp to give the copies their sound" }
+    New-Item -ItemType Directory -Force -Path (Join-Path $user "sdmc\3ds") | Out-Null
+    Copy-Item -Path $dsp -Destination (Join-Path $user "sdmc\3ds\dspfirm.cdc") -Force
 }
 
 # One portable copy: the install, a config with the room in it, its name,
@@ -396,6 +412,33 @@ $joinSteps = $boot + @(
     Step "car select" @{ Pattern = "flow enter Select Car [0-9a-f]{8}"; Wait = 30; Settle = 2000; Shot = "carsel" }
 )
 
+# -Race: the car (see run_azahar_coprace.ps1), then the host's track and
+# each client's wait, the load, GO and the race.
+if ($Race) {
+    $car = @(
+        Step "transmission" @{ Key = $VK_A; Settle = 1500 }
+        Step "automatic" @{ Key = $VK_A; Settle = 1500; Shot = "handling" }
+    )
+    $raceEnd = @(
+        Step "go" @{ Pattern = "netrace: go, seed"; Wait = 240 }
+        Step "racing" @{ Pattern = "flow state RACING"; Wait = 60; Settle = 6000; Shot = "race" }
+        Step "race on" @{ Pattern = "^trackview: attached"; Wait = 90; Optional = $true; Settle = 8000;
+                         Shot = "race-on" }
+    )
+    $hostSteps += $car + @(
+        Step "track select" @{ Key = $VK_A; Pattern = "flow enter Select Track"; Tries = 2; Settle = 2500;
+                              Shot = "track" }
+        Step "host start" @{ Key = $VK_A; Pattern = "netrace: the host's start"; Tries = 2; Settle = 1500;
+                            Shot = "host-wait" }
+        Step "built" @{ Pattern = "netrace: built"; Wait = $RunSeconds; Settle = 1500; Shot = "loading" }
+    ) + $raceEnd
+    $joinSteps += $car + @(
+        Step "car sent" @{ Key = $VK_A; Pattern = "netrace: car sent"; Tries = 2; Settle = 1500;
+                          Shot = "client-wait" }
+        Step "taken" @{ Pattern = "netrace: setup taken"; Wait = $RunSeconds; Settle = 1500; Shot = "loading" }
+    ) + $raceEnd
+}
+
 $start = Get-Date
 function Elapsed { ((Get-Date) - $start).TotalSeconds }
 function Say($side, [string]$what) {
@@ -431,7 +474,7 @@ function Advance($side) {
                 $side.Seen[$step.Name] = $true
                 $side.SettleUntil = $now.AddMilliseconds($step.Settle)
                 $side.Phase = "settle"
-                if ($step.Name -match "^(lobby|host|search|found|join|started|car select|all in|start)$") {
+                if ($step.Name -match "^(lobby|host|search|found|join|started|car select|all in|start|track select|host start|built|car sent|taken|go|racing|race on)$") {
                     Say $side $step.Name
                 }
             } elseif ($now -gt $side.Deadline) {
@@ -517,8 +560,11 @@ $crashSigs = "PANIC|segfault|Unhandled exception|svcBreak|unmapped (Read|Write)"
 Write-Host ""
 foreach ($s in $sides) {
     Write-Host "--- $($s.Name) ($($s.Nick)): $($s.Log) ---"
-    LogLines $s "lobby: |flow enter (Challenge|Local Wireless|Select Car)|wireless:" |
-        Select-Object -First 60 | ForEach-Object { Write-Host "  $_" }
+    LogLines $s "lobby: |netrace: |race start:|flow state RACING|flow enter (Challenge|Local Wireless|Select Car|Select Track|Wireless Race)|wireless:" |
+        Select-Object -First 80 | ForEach-Object { Write-Host "  $_" }
+    if (@(LogLines $s "^Sound: ndsp unavailable").Count -gt 0 -and -not $s.Failed) {
+        $s.Failed = "no sound: ndsp unavailable"
+    }
     if (Test-Path $s.AzLog) {
         $crash = @(Select-String -Path $s.AzLog -Pattern $crashSigs | Select-Object -First 3)
         foreach ($c in $crash) {
@@ -527,15 +573,31 @@ foreach ($s in $sides) {
         }
     }
 }
+# -Race: every copy's GO on the host's seed.
+if ($Race) {
+    $hostSeed = $null
+    foreach ($s in $sides) {
+        $go = @(LogLines $s "netrace: go, seed ([0-9a-f]{8})")
+        if ($go.Count -ne 1) {
+            if (-not $s.Failed) { $s.Failed = "$($go.Count) GO lines" }
+            continue
+        }
+        $seed = ([regex]::Match($go[0], "seed ([0-9a-f]{8})")).Groups[1].Value
+        if ($null -eq $hostSeed) { $hostSeed = $seed }
+        elseif ($seed -ne $hostSeed -and -not $s.Failed) { $s.Failed = "GO on $seed, the host's $hostSeed" }
+    }
+}
 Write-Host ""
 $failed = @($sides | Where-Object { -not $_.Done -or $_.Failed })
+$goal = if ($Race) { "racing" } else { "Select Car" }
 foreach ($s in $sides) {
-    $v = if ($s.Done -and -not $s.Failed) { "PASS (Select Car)" } else { "FAIL ($($s.Failed))" }
+    $v = if ($s.Done -and -not $s.Failed) { "PASS ($goal)" } else { "FAIL ($($s.Failed))" }
     Write-Host ("{0} {1,-9} {2}" -f $s.Name, $s.Nick, $v)
 }
 Write-Host "Screenshots in $OutDir"
 if ($failed.Count -eq 0) {
-    Write-Host "All $Consoles reached Select Car from the lobby."
+    if ($Race) { Write-Host "All $Consoles racing from the lobby, GO on seed $hostSeed." }
+    else { Write-Host "All $Consoles reached Select Car from the lobby." }
 } else {
     exit 1
 }

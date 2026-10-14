@@ -44,6 +44,7 @@ static struct {
     int                 numPeers;     // places taken, in the order they came
     uint32_t            now;
     uint32_t            statusAt;
+    uint32_t            patience;     // each link's timeout, 0 its own
     udsNetworkScanInfo *scan;
     size_t              numScan;
     WirelessStats       stats;
@@ -103,6 +104,7 @@ static Peer *add_peer(uint16_t node, const char *name)
     if (name)
         memcpy(p->name, name, sizeof p->name - 1);
     wl_link_init(&p->link, send_packet, (void *)(uintptr_t)node, W.now);
+    wl_link_set_timeout(&p->link, W.patience);
     return p;
 }
 
@@ -489,6 +491,16 @@ void wireless_forget_lost(void)
         }
     W.numPeers = j;
     memset(&W.peers[j], 0, sizeof W.peers[0] * (size_t)(WIRELESS_MAX_PEERS - j));
+}
+
+void wireless_set_patience(uint32_t ms)
+{
+    int i;
+
+    W.patience = ms;
+    for (i = 0; i < W.numPeers; i++)
+        wl_link_set_timeout(&W.peers[i].link, ms);
+    LOG("wireless: patience %lu ms", (unsigned long)(ms ? ms : WL_TIMEOUT_MS));
 }
 
 const char *wireless_self_name(void)

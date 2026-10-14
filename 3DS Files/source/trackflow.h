@@ -145,6 +145,12 @@ extern void (*gLoadSoundRegionsInGameFn)(void (*done)(intptr_t),
 // The HUD's textures go through carloader.h's gLoadTexturesFromFileFn
 // (TexturePack::LoadTexturesFromFile, 0x001acc98), on pHudTexturePack.
 
+// The port's: a local wireless race holds every console at the end of
+// its load until all have loaded (netrace.c, TASKS 37c). Part6 asks it
+// first; nonzero holds the LOADING_TRACK screen up, and the hold's owner
+// goes on with trackflow_go_racing. NULL holds nothing, as retail.
+extern int (*gTrackFlowHoldRaceFn)(void);
+
 // ------------------------------------------------------------- the steps
 
 // BeginGameFlowLoadingTrackCommon, 0x00168db8.
@@ -169,6 +175,10 @@ void GameFlowLoadingTrackSpecificPart3(intptr_t param);
 void GameFlowLoadingTrackSpecificPart4(intptr_t param);
 void GameFlowLoadingTrackSpecificPart5(intptr_t param);
 void GameFlowLoadingTrackSpecificPart6(intptr_t param);
+
+// Part6's own work, the screen down and RACING asked for: Part6's unless
+// gTrackFlowHoldRaceFn held it, and then the hold's.
+void trackflow_go_racing(void);
 
 // EndGameFlowLoadingTrackSpecific, 0x00169168.
 void EndGameFlowLoadingTrackSpecific(void);

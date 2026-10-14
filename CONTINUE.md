@@ -110,6 +110,18 @@ on the 15.5 FPS of an earlier run: that was the fire on track 11, and
 TASKS 46 must reach a steady 30 there and in every place like it.
 Next: TASKS 37 (multi-card multiplayer).**
 
+**Now (Session 98, 2026-10-14): TASKS 37c is done: a wireless race's
+setup (`netrace.c`, `docs/formats/netrace.md`). Each console picks its
+car and a client sends it to the host; the host's start builds the race
+with retail's StartRace (the first client as the second player, the
+rest in AI racers' places) and sends every client what it made; each
+console holds at the end of its load until the host's GO, which carries
+the seed. netrace_check: 21 scenarios, faults 0; 158 mutations, 147
+caught, 11 equivalent. On Azahar two copies went from the lobby to a
+race on one seed. Next: the silent-sound fix (a NULL driver read when
+there is no DSP firmware), then 37d (the lockstep race), 37e, 37f, then
+TASKS 61.**
+
 **Now (Session 97, 2026-10-14): TASKS 37b is done with 37b-2, the
 Local Wireless lobby. Players 2 on Challenge and its four setups reads
 Local Wireless and goes on to the lobby (`lobby.c`): Host or Join, the

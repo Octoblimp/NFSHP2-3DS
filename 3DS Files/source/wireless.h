@@ -106,6 +106,11 @@ WlLink       *wireless_peer_link(int i);
 // The host's: the places of the consoles that went, cleared.
 void          wireless_forget_lost(void);
 
+// How long a peer may be silent before its link is lost, for every link
+// now and to come, until wireless_start: 0 is wlproto's WL_TIMEOUT_MS.
+// The race's setup asks for longer while the consoles load (netrace.c).
+void          wireless_set_patience(uint32_t ms);
+
 // This console's user name as the network has it (UTF-8), or "" when on
 // no network.
 const char   *wireless_self_name(void);

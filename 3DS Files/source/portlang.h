@@ -30,6 +30,7 @@ enum {
     PORTLANG_LINK_LOST,                         // the host left
     PORTLANG_WIRELESS_OFF,                      // UDS would not start
     PORTLANG_JOIN_FAILED,
+    PORTLANG_WAITING_FOR_CARS,                  // the host's, for their cars
     PORTLANG_END
 };
 
