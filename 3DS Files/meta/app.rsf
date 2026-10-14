@@ -203,6 +203,9 @@ AccessControlInfo:
   # sleep. Without it the call fails and the CIA's clock is only the
   # ExHeader's CpuSpeed above. The boot log's `clock:` line says whether
   # ptm:sysm opened and what the speedup gave.
+  # nwm::UDS added in TASKS 37a (2026-10-14): wireless.c's udsInit, the
+  # local wireless two consoles race over. udsInit takes ndm:u's
+  # exclusive state too, which is above already.
   ServiceAccessControl:
    - cfg:u
    - gsp::Gpu
@@ -213,6 +216,7 @@ AccessControlInfo:
    - ptm:u
    - ptm:sysm
    - dsp::DSP
+   - nwm::UDS
 
 SystemControlInfo:
   SaveDataSize: 0KB
@@ -237,3 +241,4 @@ SystemControlInfo:
     ndm: 0x0004013000002b02
     pdn: 0x0004013000002102
     ptm: 0x0004013000002202
+    nwm: 0x0004013000002d02

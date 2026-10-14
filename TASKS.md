@@ -2322,6 +2322,64 @@ phases.
         - Not started. It comes after the single-player race is whole.
         - 2026-10-13: the user asked for it next, once task 51 (the
           damage) is 100% done.
+        - **The design (Session 94): lockstep.** Both consoles run
+          retail's own two-player race, the whole simulation on each,
+          and only each frame's step and both pads go over the air.
+          Each console draws only its own player's view, mirror and
+          HUD. Retail's two-player logic then holds on both: the cops,
+          busts, positions, and the two players' cars hitting each
+          other. Packets stay tiny (well under 100 bytes a frame). The
+          cost is determinism: whatever the sound, the drawing or the
+          loading's timing feeds into the simulation has to be found and
+          kept out. State hashes each frame say where the two part.
+          Sending each car's state instead (the first idea above) would
+          mean replicating every cop, chopper, munition, NIS and HUD by
+          hand.
+        - **Testing:** two Azahar instances on this PC, the second a
+          portable copy with its own user folder and sdmc (the retail
+          data through a junction), both in an `azahar-room.exe` room.
+          Joining goes through the GUI's Direct Connect, since the Qt
+          build ignores `--multiplayer`, so a script drives it.
+        - **The slices, one at a time:**
+          - [x] 37a: the link (`wireless.c`). UDS host, scan, join and
+                leave; framing; reliable messages, acked and resent;
+                per-frame messages that repeat the last few frames
+                against loss. A host check runs it over a fake UDS that
+                drops, repeats and reorders packets. A config key runs
+                a link soak between two Azahars and logs it.
+                - Done in Session 95 (`docs/formats/wireless.md`).
+                  `wlproto.c` is the protocol: a CRC-16 on each
+                  packet, 32 reliable messages in flight with 100 ms
+                  resends, and unreliable ones for the next packet.
+                  `wireless.c` puts it on UDS. Repeating the last few
+                  frames is the race messages' job, so it goes to 37d.
+                - `wlproto_check`: 38 scenarios, faults 0; 50
+                  mutations, 48 caught, 2 equivalent.
+                - The soak (`WirelessTest 1`/`2`,
+                  `tools/run_azahar_wireless.ps1`) passed on both
+                  sides over 120 s: 3634 and 3642 reliable messages,
+                  3590 and 3581 frames, 0 faults, 0 resends.
+                - The testing note above holds, with two changes. The
+                  copies need no retail data until 37b. The room
+                  takes one member per nickname, and the nickname is
+                  the console's user name, so the script writes one
+                  into each copy's config savegame.
+          - [ ] 37b: the lobby. Players 2 on the mode screens becomes
+                local wireless: Host or Join, the hosts listed by
+                console name, and a lost link handled.
+          - [ ] 37c: the setup. The client's car to the host; the
+                host's race parameters, seeds and start to the client;
+                both load, then a barrier before the race.
+          - [ ] 37d: the lockstep race. The host's step each frame and
+                both pads, with a frame or two of input delay; each
+                console's own view, mirror and HUD.
+          - [ ] 37e: determinism. The per-frame hashes (cars, cops,
+                traffic, seeds, the race coordinator) compared, each
+                part's hash logged at a mismatch, and every source of
+                drift fixed.
+          - [ ] 37f: the end. Results and points on each console, back
+                to the lobby or a rematch, and a player leaving
+                mid-race.
 38. [x] **BUSTED! is flat and static.** The user's Azahar shot of
         2026-10-09: in the bust NIS, BUSTED! sits squashed, its top cut
         off, and never animates. Retail scales it from 5 down to ScaleX

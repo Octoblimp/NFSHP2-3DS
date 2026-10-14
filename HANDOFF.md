@@ -22009,3 +22009,71 @@ similar scenarios/areas)." It is TASKS 46, and the note is there.
 TASKS 37 (multi-card multiplayer). TASKS 46 (a steady 30 at the fire
 and every heavy place) is the user's, with no order given against 37.
 Still to ask the user: TASKS 47's bridge, TASKS 52's popups.
+
+## Session 95 -- 37a, the local wireless link (done)
+
+`docs/formats/wireless.md` has the whole of it; this is the short form.
+TASKS 37's design (lockstep) is in TASKS.md, from Session 94.
+
+### What is where
+
+- `wlproto.c`/`.h` (new): the protocol, free of `<3ds.h>`. A 7-byte
+  header with a CRC-16/CCITT-FALSE; reliable messages (15-bit numbers,
+  32 in flight, 100 ms resends, acks on every packet, early ones held);
+  unreliable ones for the next packet only; keepalives every 100 ms, and
+  a 3 s timeout.
+- `wireless.c`/`.h` (new): wlproto on UDS. Host, scan, join, leave, and
+  the status (the host takes the first client and blocks the rest).
+  The beacon's appdata is `NHP2`, the version, a length and the
+  caller's bytes.
+- `wirelesstest.c`/`.h` (new): the soak, run from `main.c` in place of
+  the game when `WirelessTest` is 1 (host) or 2 (join).
+  `WirelessTestSeconds` is how long it sends (`configitems.c`/`.h`).
+- `meta/app.rsf`: `nwm::UDS`, and the nwm module in Dependency.
+- `tools/wlproto_check.py`, `tools/src/wlproto_test.c` (new): two links
+  over a simulated channel (drops, repeats, delays, cuts, reader
+  stalls, crafted and random bad packets).
+- `tools/run_azahar_wireless.ps1` (new): the room, two portable Azahar
+  copies, Direct Connect through UI Automation, and both logs read.
+
+### What bit
+
+- **The first mutation pass left 8 survivors.** The harness took the
+  unacked count from the link itself, so it now does its own arithmetic.
+  take() had two delivery paths that overlapped, so every reliable
+  message now goes through `held[]`. A length check was redundant and
+  is gone. Reader stalls had no reordering, and nothing checked that a
+  full read left nothing deliverable held. Both are covered now, and
+  two equivalents are named.
+- **Azahar's room nickname is the console's user name.** The Direct
+  Connect dialog shows it read-only, and every fresh copy is "AZAHAR".
+  A room takes one member of a name, as it does of a console ID. The
+  Configure dialog shows no children to UI Automation (it is modal, and
+  the Invoke that opens it times out). So the script writes the name
+  into block 0x000A0000 of each copy's config savegame, which Azahar
+  makes on its first start.
+- PowerShell unrolls a one-line array, so `$r[-1]` was the last
+  character of the line. Each call site is wrapped in `@()` now.
+- The debug log's lines land up to ~7 s late, so the result's line was
+  cut off when the script closed Azahar. It waits 8 s now.
+- A Bash heredoc mangled the `\n` in a Python edit again. The edit
+  scripts go in the scratchpad.
+
+### Checks
+
+- wlproto_check: 38 scenarios, faults 0. 50 mutations: 48 caught, 2
+  equivalent (`wl-drain-seq`, `wl-in-msg-header`).
+- `tools/run_azahar_wireless.ps1 -Seconds 120` (AC power): both sides
+  PASS. Reliable messages 3634 and 3642 sent, each got whole. Frames
+  3590 and 3581, all got. 0 faults, 0 resends, 0 malformed, 0 UDS
+  errors. The room loses nothing, so the losses come from
+  wlproto_check.
+- The build has `nwm::UDS`. check_3dsx and check_shbin are OK.
+
+### Next
+
+37b, the lobby: Players 2 on the mode screens becomes local wireless,
+with Host or Join, the hosts listed by console name, and a lost link
+handled. The Azahar copies will need the retail data then (a junction
+to the main card's `NFSHP2` folder). TASKS 46 is still the user's.
+Still to ask the user: TASKS 47's bridge, TASKS 52's popups.

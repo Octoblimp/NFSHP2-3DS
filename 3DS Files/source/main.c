@@ -96,6 +96,7 @@
 #include "configitems.h"
 #include "debugmenu.h"
 #include "nameentry.h"
+#include "wirelesstest.h"
 #include "cop.h"
 #include "copdriver.h"
 #include "copmgr.h"
@@ -6184,6 +6185,17 @@ int main(int argc, char** argv)
             gfxExit();
             return 1;
         }
+    }
+
+    // TASKS 37a's link soak between two consoles, in place of the game:
+    // "WirelessTest 1" in the config hosts, "2" joins (wirelesstest.h).
+    if (ConfigWirelessTest == 1 || ConfigWirelessTest == 2) {
+        fatalConsole();
+        wirelesstest_run((int)ConfigWirelessTest,
+                         (int)ConfigWirelessTestSeconds, logLine);
+        waitForExit();
+        gfxExit();
+        return 0;
     }
 
     if (!gamedata_init()) {

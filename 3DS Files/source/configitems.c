@@ -42,6 +42,8 @@ int32_t ConfigGpuSends = 1;                 // the port's own
 int32_t ConfigClusterCull = 1;              // the port's own
 int32_t ConfigForceChopper;                 // the port's own
 int32_t ConfigDebugMenu;                    // the port's own
+int32_t ConfigWirelessTest;                 // the port's own
+int32_t ConfigWirelessTestSeconds = 120;    // the port's own
 
 int32_t config_skip_fe(void)
 {
@@ -90,6 +92,8 @@ static const ConfigItem kConfigItems[] = {
     { "ClusterCull",                &ConfigClusterCull,          0 },
     { "ForceChopper",               &ConfigForceChopper,         0 },
     { "DebugMenu",                  &ConfigDebugMenu,            0 },
+    { "WirelessTest",               &ConfigWirelessTest,         0 },
+    { "WirelessTestSeconds",        &ConfigWirelessTestSeconds,  0 },
 };
 
 static void config_log(ConfigItemsLogFn log, const char *fmt,

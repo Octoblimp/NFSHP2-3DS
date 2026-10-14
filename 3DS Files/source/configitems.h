@@ -95,6 +95,13 @@ extern int32_t ConfigForceChopper;          // 0
 // TASKS 53). Off by default (2026-10-13).
 extern int32_t ConfigDebugMenu;             // 0
 
+// The port's own: "WirelessTest 1" hosts a local wireless network and
+// "WirelessTest 2" joins one, and the two soak the link for
+// WirelessTestSeconds in place of the game (wirelesstest.h, TASKS 37a).
+// Off by default (2026-10-14).
+extern int32_t ConfigWirelessTest;          // 0
+extern int32_t ConfigWirelessTestSeconds;   // 120
+
 // SkipFE as the image reads it, `lw -23220(gp)`: gameflow's skipFE
 // through gPlayerCamSkipFE, 0 while that is unset.
 int32_t config_skip_fe(void);
