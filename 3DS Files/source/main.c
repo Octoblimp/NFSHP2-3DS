@@ -91,6 +91,7 @@
 #include "collisionbody.h"
 #include "collisionsound.h"
 #include "configitems.h"
+#include "debugmenu.h"
 #include "cop.h"
 #include "copdriver.h"
 #include "copmgr.h"
@@ -415,6 +416,11 @@ static const BScreenConfig kScreens[] = {
       lap_times_display_callback },
     { "Lap Times 2P",            END_GAME_LAP_TIMES_2P_SCREEN,
       lap_times_display_callback },
+    // The port's own, which FRONTB gains at boot (debugmenu.h).
+    { BGF_DEBUG_MENU_NAME,       DEBUGMENU_SCREEN,
+      debugmenu_callback },
+    { DEBUGMENU_RACE_NAME,       DEBUGMENU_RACE_SCREEN,
+      debugmenu_race_callback },
 };
 #define NUM_SCREENS ((int)(sizeof(kScreens) / sizeof(kScreens[0])))
 
@@ -2128,6 +2134,21 @@ static void hookSetBlurb(void* user, uint32_t screen, int blurbId)
     bui_set_text_language(ui, (uint32_t)idx, (uint32_t)blurbId);
 }
 
+// The same blurb with the port's own sentence: LanguageID 0, so the
+// renderer draws the object's string, and the sentence in it.
+static void hookSetBlurbText(void* user, uint32_t screen, const char* text)
+{
+    Boot*      b  = (Boot*)user;
+    BUI*       ui = NULL;
+    BUIScreen* s  = uirender_find_screen(b->ui, screen, &ui);
+    int32_t    idx;
+    if (!s || !ui) return;
+    idx = bui_find_object(ui, s, BSCR_OBJ_SCROLLING_TEXT, BUI_TYPE_TEXT);
+    if (idx < 0) return;
+    bui_set_text_language(ui, (uint32_t)idx, 0);
+    bui_set_text_string(ui, (uint32_t)idx, text);
+}
+
 // SetupHighlight's other half: FlailerGetBoundingBox on the current item's
 // MI_n_MASK, then the two brackets to its edges. Only Y moves -- both
 // brackets keep the X they were authored at, which is why they span the
@@ -2950,6 +2971,20 @@ static UIBundle* addBundle(UIRenderer* ui, const char* rel)
         return NULL;
     }
     UIBundle* b = &ui->bundles[ui->numBundles - 1];
+    // FRONTB's Flailer chunk gains the debug menu's item and screen
+    // (debugmenu.h). The rebuilt chunk is what the runtime reads from here
+    // on; the bundle keeps its textures and fonts.
+    if (b->hasUI && strcmp(rel, BUNDLE_FRONTEND) == 0) {
+        size_t   n   = 0;
+        uint8_t* buf = debugmenu_patch_frontend(b->data, b->len, &n);
+        if (buf) {
+            bui_close(&b->ui);
+            b->hasUI  = bui_open(&b->ui, buf, 0, n);
+            b->uiData = buf;
+            if (ConfigDebugMenu) debugmenu_reveal();
+        } else
+            logPrintf("  %s: no debug menu\n", rel);
+    }
     if (b->hasUI && !flailer_add_project(&b->ui))
         logPrintf("  %s: not a retail Flailer project\n", rel);
     return b;
@@ -3365,6 +3400,19 @@ static void hookCarSelStartRace(void* user)
     (void)user;
     fred_start_race(&Fred);
     logRaceStart();
+}
+
+// The debug menu's scroll: the highlight to another row of its menu.
+static void hookDebugSetActiveItem(void* user, uint32_t itemHash)
+{
+    Boot* b = (Boot*)user;
+    if (b->hasMenu) bmenu_set_active_item(&b->menu, itemHash);
+}
+
+static void hookDebugLog(void* user, const char* line)
+{
+    (void)user;
+    logLine("debug menu: %s", line);
 }
 
 static void hookCarSelLoaderFrontEnd(void* user)
@@ -5277,6 +5325,24 @@ static int flowInput(u32 kDown)
                 flowDown &= ~kPopupBinds[i].key;
         if (flowDown != listDown) redraw = 1;
     }
+    // The port's debug menu (debugmenu.h): L, R and D-Pad Up held together
+    // on the main menu, the last of them pressed this frame, show its item.
+    // The menu is entered again to find it, on it. The three go no further.
+    if (g_flow.screen && g_flow.screen->hash == BGF_SCREEN_NEW_MAIN_MENU
+        && !bpopup_any_active(&g_flow)) {
+        const u32 chord = KEY_L | KEY_R | KEY_DUP;
+        if ((hidKeysHeld() & chord) == chord && (flowDown & chord)) {
+            flowDown &= ~chord;
+            if (debugmenu_reveal()) {
+                logLine("debug menu shown");
+                fesound_play(30, NULL);   // an Easter egg's
+                bgf_change_to_screen(&g_flow, "New Main Menu", 0);
+                if (g_boot.hasMenu)
+                    bmenu_set_active_item(&g_boot.menu, BGF_ITEM_MENUITEM_4);
+            }
+            redraw = 1;
+        }
+    }
     // START goes through the menu, as FlailerMenu's JoyHandler takes it:
     // the screen has it as SCREEN_START_BUTTON first, and unless the screen
     // consumes it, the current item has it as a select. That second half
@@ -6052,6 +6118,7 @@ int main(int argc, char** argv)
     hooks.unloadFrontEnd   = hookUnloadFrontEnd;
     hooks.moveBrackets     = hookMoveBrackets;   // NewMainMenu's highlight
     hooks.setBlurb         = hookSetBlurb;
+    hooks.setBlurbText     = hookSetBlurbText;
     hooks.trace            = hookTrace;
     // TheDemoModeReplay has no replays to offer (no hook answers "none"),
     // and StartDemoMode's race is not ported: ConsiderStartDemoMode runs
@@ -6530,6 +6597,14 @@ int main(int argc, char** argv)
     trackselHooks.trace             = hookTrace;
     btracksel_init(&g_tracksel, &trackselHooks);
 
+    DebugMenuHooks debugHooks;
+    memset(&debugHooks, 0, sizeof debugHooks);
+    debugHooks.user          = &g_boot;
+    debugHooks.setActiveItem = hookDebugSetActiveItem;
+    debugHooks.startRace     = hookCarSelStartRace;
+    debugHooks.log           = hookDebugLog;
+    debugmenu_init(&debugHooks);
+
     // Retail's main (0x0012f000), after InitializeEverything: with SkipFE
     // set, StartSkipFEGame on Fred, whose StartRace asks for
     // LOADING_TRACK_COMMON straight from NONE; else
@@ -6945,13 +7020,24 @@ int main(int argc, char** argv)
 
                 botTitle(title, sizeof title,
                          g_flow.screen ? g_flow.screen->name : "");
+                const char* hint =
+                    "A select   B back   START go   SELECT viewer";
                 if (g_flow.screen
                     && g_flow.screen->callback == bgf_plain_screen_callback) {
                     body = kPlainScreenNote;
                     fade = 1.0f;
                 }
-                drawBotPanel(&ui, title, body, fade,
-                             "A select   B back   START go   SELECT viewer");
+                if (g_flow.screen
+                    && g_flow.screen->callback == debugmenu_callback) {
+                    snprintf(title, sizeof title, "DEBUG MENU");
+                    hint = DEBUGMENU_HINT;
+                }
+                if (g_flow.screen
+                    && g_flow.screen->callback == debugmenu_race_callback) {
+                    snprintf(title, sizeof title, "DEBUG RACE");
+                    hint = DEBUGMENU_HINT;
+                }
+                drawBotPanel(&ui, title, body, fade, hint);
             }
             C2D_Flush();
             hangwatch_gpu_stage("the bottom screen");

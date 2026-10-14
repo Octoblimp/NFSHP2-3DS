@@ -2667,15 +2667,34 @@ phases.
         menu leaves without a save, as retail's does.
   - [ ] The popups say retail's "Memory Card (PS2)" and "MEMORY CARD
         slot 1". The 3DS has an SD card.
-53. [ ] **The debug menu.** Asked for on 2026-10-12. A panel in the
+53. [x] **The debug menu.** Asked for on 2026-10-12. A panel in the
         main menu, opened by pressing L + R + D-Pad Up together there,
         or by "DebugMenu 1" in nfshp2_config.txt. It starts any track
         straight away with custom settings, unlocks everything, and
         gives NFS points. It comes after TASKS 39 (the munitions).
-  - [ ] Session 89: designed, no code yet. FRONTB's Flailer chunk is
-        rebuilt at boot with a hidden main-menu item and a "Port Debug
-        Menu" screen copied from Be The Cop Setup (HANDOFF.md,
-        "Session 89").
+        Added on 2026-10-13: Start Debug Race is its own screen with
+        Start Race at the top, "Set Save to 100%" completes the career
+        without touching the points, and anything that changes the
+        save asks whether to save on the way out.
+        Done in Session 90 (`docs/formats/debug-menu.md`):
+        - FRONTB's Flailer chunk is rebuilt at boot
+          (`debugmenu_patch.c`): a hidden fourth main-menu item and
+          two screens copied from Be The Cop Setup, Debug Menu (5 rows)
+          and Debug Race (12 rows, 7 at once, scrolled).
+        - Debug Menu: Start Debug Race, NFS Points, Set Save to 100%,
+          Unlock Everything, Lock Everything. Debug Race: Start Race,
+          Mode, Track, Time Of Day, Direction, Car, Colour, Opponents,
+          Laps, Traffic, Difficulty, Gearbox.
+        - B on Debug Menu, or Start Race, with the save changed shows
+          the card's popup, "Save your changes to the card?". Yes saves
+          on the Autosave screen, No puts the copy taken on entry back,
+          and B stays.
+        - Checks: debugmenu_check ok, bootflow_check 0 differ. Both
+          Azahar walks PASS (`tools/run_azahar_debugmenu.ps1`, and
+          with `-Cop`, which saved and put `settings.db` back
+          byte for byte).
+        - The user saw the popup drawn over the rows on 2026-10-13. The
+          screen now hides under it, as the Pause Menu's does.
 54. [ ] **Text input on the 3DS keyboard.** Asked for on 2026-10-12.
         Anything that asks for typed text uses the 3DS's built-in
         software keyboard (libctru's swkbd applet) in place of a ported

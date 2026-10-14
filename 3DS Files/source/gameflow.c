@@ -1648,6 +1648,21 @@ static void mainMenuHighlight(BGameFlow* gf, uint32_t itemHash)
         case BGF_ITEM_MENUITEM_3:
             mainMenuHighlightItem(gf, BGF_MI_3_MASK, BGF_BLURB_MENUITEM_3);
             break;
+        case BGF_ITEM_MENUITEM_4: {
+            // The port's own (gameflow.h): HighlightMenuItem's three steps,
+            // with a sentence of its own, as no language row has one.
+            static const char kText[] =
+                "Jump into any race, unlock everything, set your NFS points.";
+            BNewMainMenu* m = &gf->mainMenu;
+            BAnim*        a = flowAnim(gf);
+            HOOK_VOID(gf, moveBrackets, BGF_SCREEN_NEW_MAIN_MENU,
+                      BGF_MI_4_MASK, -3.0f, -6.0f);
+            if (a) banim_blurb_new_text(a, &m->blurb, kText);
+            HOOK_VOID(gf, setBlurbText, BGF_SCREEN_NEW_MAIN_MENU, kText);
+            if (a) bsel_set_current(a, &m->sel, BGF_MI_4_MASK);
+            trace(gf, "bracket %08x", (unsigned)BGF_MI_4_MASK);
+            break;
+        }
         default:
             break;
     }
@@ -1674,6 +1689,10 @@ static void mainMenuEvent(BGameFlow* gf, BScreenMessage msg,
                     break;
                 case BGF_ITEM_MENUITEM_3:
                     bgf_change_to_screen(gf, "Options", 1);
+                    break;
+                case BGF_ITEM_MENUITEM_4:
+                    // The port's own, pushing the menu as the others do.
+                    bgf_change_to_screen(gf, BGF_DEBUG_MENU_NAME, 1);
                     break;
                 default:
                     // Every other item hash falls through the test and

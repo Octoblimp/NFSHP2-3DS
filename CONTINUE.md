@@ -86,6 +86,19 @@ road, walls and cars) is closed at the user's word with no fault
 found: the hull matches the body and no penetration showed (HANDOFF.md,
 "Session 87, continued -- TASKS 58").**
 
+**Now (Session 90, 2026-10-13): TASKS 53 (the debug menu) is done.
+L + R + D-Pad Up on the main menu, or "DebugMenu 1" in the config,
+shows a fourth item, "Debug Menu". It has two screens:
+- Debug Menu: Start Debug Race, NFS Points, Set Save to 100%, Unlock
+  Everything, Lock Everything.
+- Debug Race: Start Race at the top, then the race's settings.
+
+Leaving, or starting a race, with the save changed asks "Save your
+changes to the card?". Yes saves on the Autosave screen, No undoes,
+and B stays. Both Azahar walks pass (HANDOFF.md, "Session 90";
+`docs/formats/debug-menu.md`). Next: TASKS 54 (the keyboard). Ask the
+user for a log at the fire with the GpuSends build.**
+
 **Now (Session 89, 2026-10-13): TASKS 53 (the debug menu) is designed
 but nothing is written. The session was stopped at the user's word
 before any code. The plan:**

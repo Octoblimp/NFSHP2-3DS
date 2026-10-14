@@ -160,6 +160,7 @@ void uirender_free(UIRenderer* r)
     for (int i = 0; i < r->numBundles; i++) {
         if (r->bundles[i].hasUI) bui_close(&r->bundles[i].ui);
         free(r->bundles[i].data);
+        free(r->bundles[i].uiData);
     }
     free(r->langData);
     memset(r, 0, sizeof(*r));

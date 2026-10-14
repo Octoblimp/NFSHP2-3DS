@@ -256,6 +256,9 @@ typedef struct {
     void (*moveBrackets)(void* user, uint32_t screen, uint32_t mask,
                          float under, float over);
     void (*setBlurb)(void* user, uint32_t screen, int blurbId);
+    // The port's own: setBlurb with a literal sentence rather than a row
+    // of the language table, for the debug menu's item (debugmenu.h).
+    void (*setBlurbText)(void* user, uint32_t screen, const char* text);
     // StartDemoMode (0x0016ecd8): the attract race. It begins with
     // StopMovie, which the flow runs before the hook; the track it takes in
     // turn and Fred's demo race are the host's.
@@ -684,6 +687,12 @@ void bgf_language_screen_callback(BGameFlow* gf, BScreenMessage msg,
 #define BGF_BLURB_MENUITEM_1 10016
 #define BGF_BLURB_MENUITEM_2 10015
 #define BGF_BLURB_MENUITEM_3 10009
+// The port's own fourth item, "Debug Menu", which retail's screen does not
+// author: debugmenu.c adds it to FRONTB at boot, hidden until revealed (the
+// L + R + D-Pad Up chord, or "DebugMenu 1"). Its mask is MI_4_MASK, the
+// fourth of the constructor's five, and it leads to the port's own screen.
+#define BGF_ITEM_MENUITEM_4  0x52e039f6u
+#define BGF_DEBUG_MENU_NAME  "Port Debug Menu"
 // The language screen's: MENUITEM_1..6 are the six languages in
 // e_Languages order, MENUITEM_7 is Load All Languages.
 #define BGF_ITEM_MENUITEM_6  0x52e039f8u

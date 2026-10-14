@@ -90,6 +90,11 @@ extern int32_t ConfigClusterCull;           // 1
 // forceChopperTick). Off by default (2026-10-12).
 extern int32_t ConfigForceChopper;          // 0
 
+// The port's own: "DebugMenu 1" shows the main menu's Debug Menu item
+// from boot, as the L + R + D-Pad Up chord does there (debugmenu.h,
+// TASKS 53). Off by default (2026-10-13).
+extern int32_t ConfigDebugMenu;             // 0
+
 // SkipFE as the image reads it, `lw -23220(gp)`: gameflow's skipFE
 // through gPlayerCamSkipFE, 0 while that is unset.
 int32_t config_skip_fe(void);

@@ -21561,3 +21561,109 @@ scrolling itself.
 
 Ask the user for a device log at the fire on track 11 with the
 GpuSends build ("DebugLog 1" on the card, nothing else).
+
+## Session 90 -- TASKS 53, the debug menu (done)
+
+The session wrote Session 89's design and then the user's additions of
+2026-10-13. TASKS 53 is done. `docs/formats/debug-menu.md` has the
+whole of it; this is the short form.
+
+### What the user asked for on 2026-10-13 (verbatim)
+
+"I would like it when you change NFS Points that it asks you if you
+want to save when you exit debug menu. ALSO, I want you to add a
+separate field called "Set Save to 100%" which edits your savefile to
+100% complete career and all, everything unlocked etc. but doesn't
+touch your NFS Points or anything. Move all start race stuff into a
+separate field called "Start Debug Race" and then you configure it
+there, and then on the top is "Start Race""
+
+"Should force a save prompt on ANYTHING save-modifying"
+
+Then, after the first Azahar run: "Overlay glitch". The save prompt was
+drawn over the Debug Menu's rows. The screen now hides under it, as the
+Pause Menu hides itself under its popups.
+
+### What is where
+
+- `debugmenu_patch.c` (LF, host-checkable) rebuilds FRONTB's Flailer
+  chunk at boot:
+  - three invisible objects on NEW_MAIN_MENU;
+  - two copies of Be The Cop Setup after the last screen,
+    `PORT_DEBUG_MENU` d98ab71e (5 rows) and `PORT_DEBUG_RACE` d98d6284
+    (7 rows).
+
+  `debugmenu_reveal` shows the item as MENUITEM_4.
+- `debugmenu.c` (LF) holds the two callbacks, `debugmenu_callback` and
+  `debugmenu_race_callback`, over one `Page` type:
+  - Debug Menu's 5 rows: Start Debug Race, NFS Points, Set Save to
+    100%, Unlock Everything, Lock Everything;
+  - Debug Race's 12 rows, 7 at once: Start Race, then the settings.
+- `main.c`:
+  - `addBundle` swaps FRONTB's BUI for the patched chunk; `uiData` in
+    `UIBundle` holds it and `uirender_free` frees it;
+  - the two `kScreens` rows;
+  - the L + R + D-Pad Up chord in `flowInput`;
+  - the hooks (`setActiveItem`, `startRace`, `log`);
+  - the bottom panel's "DEBUG MENU" and "DEBUG RACE" titles.
+- `gameflow.c`/`.h` own MENUITEM_4's highlight and select, and the
+  `setBlurbText` hook. `configitems.c`/`.h` own `ConfigDebugMenu`.
+
+### Set Save to 100% and Unlock Everything
+
+- Nothing in retail computes a career percentage.
+- Every car and track comes from the career: event rewards, the 10
+  tasks and the 18 points thresholds, through
+  `fred_make_challenge_cars_available`.
+- **Set Save to 100%** is retail's `unlock_events` (every event of both
+  trees given its best result, the shared Ultimate too), with every
+  task and points reward taken.
+- **Unlock Everything** fills in only the events not passed or with a
+  reward not earned (`event_info_unlock_state`). The run that tested it
+  logged "unlocked, 63 events filled in".
+- **Lock Everything** is `lock_events` with the rewards cleared.
+- None of the three touches the points.
+
+### The save prompt
+
+- **The copy.** Entering Debug Menu from the main menu (`sVisit`) copies
+  `ChampionshipState`, `HotPursuitState`, the two reward arrays and
+  both `FrontendPlayers`.
+- **When it asks.** B on Debug Menu (its pop vetoed with `param 0`), or
+  A on Start Race, while those differ (the players' points only).
+- **The popup.** memcard.c's (`BPOPUP_SCREEN_MEMCARD`), titled 150000
+  "Save", with Yes 150103 and No 150104. It is cancelable: B answers
+  "stay".
+- **Yes.** `bgf_change_to_screen(gf, "Autosave", 0)`, the end of a
+  race's save with the card's own overwrite or create question. Its
+  end moves back to the main menu. Before a race,
+  `bgf_set_autosave_completion_callback` starts the race instead.
+- **No.** The copy goes back. Then either `bgf_move_back_screen(gf, 1)`
+  or the race starts.
+
+### Checks
+
+- `tools/debugmenu_check.py`: ok. Debug Menu has 46 objects and Debug
+  Race 50, of Be The Cop Setup's 56.
+- `tools/bootflow_check.py`: 96 scenarios, 0 differ.
+- `tools/run_azahar_debugmenu.ps1`: PASS. The walk:
+  - the chord, the points to 21,100, and Set Save to 100%;
+  - B shows the prompt (seen alone on black after the fix), and B
+    stays;
+  - Debug Race scrolled and wrapped, then Start Race;
+  - the prompt again, No, and the Hot Pursuit race starts.
+- The same with `-Cop`: PASS. The walk:
+  - the config line, Unlock Everything, and Mode Be The Cop;
+  - B twice, Yes, then the card's overwrite Yes. "memcard: saved", and
+    the run is back at the main menu;
+  - in again (Debug Race reopens on the row it was left on), and Start
+    Race with nothing changed starts Be The Cop on track 11 at once.
+
+  The script put `settings.db` back afterwards. Its SHA-256 matches the
+  copy taken before (10731EA7...).
+
+### Next
+
+TASKS 54, the 3DS keyboard for NameEntry (Player Names). Still open
+from Session 88: ask the user for a device log at the fire on track 11
+with the GpuSends build ("DebugLog 1" on the card).

@@ -91,6 +91,9 @@ typedef struct {
     size_t   len;
     BUI      ui;
     bool     hasUI;
+    // A Flailer chunk the port rebuilt (debugmenu.h), which `ui` reads in
+    // place of the one in `data`; NULL for the others. Freed with them.
+    uint8_t* uiData;
 } UIBundle;
 
 // Text RenderTextIntoRectangle (retail 0x00144ed0) lays into a box, one
