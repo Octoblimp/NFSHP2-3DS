@@ -1,28 +1,31 @@
-# Runs TASKS 37a's link soak (wirelesstest.h) between two Azahar instances
-# in a room of their own, and reports what each side's log says.
+# Runs TASKS 37a's link soak (wirelesstest.h) between 2 to 8 Azahar
+# instances in a room of their own, and reports what each one's log says.
 #
 # Azahar carries a game's local wireless over a multiplayer room, so this
-# starts azahar-room.exe on this machine and two copies of Azahar, A and B,
-# each in portable mode (a user folder beside its azahar.exe) so each has
-# its own card and its own console ID: a room refuses a second member with
-# the ID of one already in it, and the user's own Azahar folder is not
+# starts azahar-room.exe on this machine and -Consoles copies of Azahar, A
+# to H, each in portable mode (a user folder beside its azahar.exe) so each
+# has its own card and its own console ID: a room refuses a second member
+# with the ID of one already in it, and the user's own Azahar folder is not
 # touched. Each copy's config is the user's qt-config.ini with the room's
-# address and a nickname of its own, and each card's nfshp2_config.txt says
-# "WirelessTest 1" (A hosts) or "2" (B joins) and "DebugLog 1". Both boot
-# the .3dsx, then each joins the room through Multiplayer > Direct Connect
-# to Room, driven with UI Automation; the soak retries its hosting and its
-# scans every 2 s, so it waits on the room.
+# address in it, and each card's nfshp2_config.txt says "WirelessTest 1"
+# (A hosts) or "2" (the rest join), "WirelessTestConsoles" and "DebugLog
+# 1". All boot the .3dsx, then each joins the room through Multiplayer >
+# Direct Connect to Room, driven with UI Automation; the soak retries its
+# hosting and its scans every 2 s, so it waits on the room.
 #
 # Usage:
 #   powershell -File tools/run_azahar_wireless.ps1
 #   powershell -File tools/run_azahar_wireless.ps1 -Seconds 300
+#   powershell -File tools/run_azahar_wireless.ps1 -Consoles 8
 #
 # The copies live under %TEMP%\nfshp2_wl and are made again when the
-# installed azahar.exe is newer. Exit code 0 when both sides passed.
+# installed azahar.exe is newer. Exit code 0 when every one passed.
 
 param(
     [int]$Seconds = 60,           # WirelessTestSeconds: how long each sends
-    [int]$RunSeconds = 0,         # hard ceiling; 0 is -Seconds + 90
+    [ValidateRange(2, 8)]
+    [int]$Consoles = 2,           # WirelessTestConsoles: the host and the rest
+    [int]$RunSeconds = 0,         # hard ceiling; 0 is -Seconds + 60 + 20 a console
     [string]$AzaharDir = "C:\Program Files\Azahar",
     [string]$Target3dsx = "",
     [string]$WorkDir = "",
@@ -34,14 +37,15 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 if ($Target3dsx -eq "") { $Target3dsx = Join-Path $root "3DS Files\NFSHP2-3DS.3dsx" }
 if ($WorkDir -eq "") { $WorkDir = Join-Path $env:TEMP "nfshp2_wl" }
-if ($RunSeconds -le 0) { $RunSeconds = $Seconds + 90 }
+# The copies join the room one at a time; with 8 the last joins ~80 s in.
+if ($RunSeconds -le 0) { $RunSeconds = $Seconds + 60 + 20 * $Consoles }
 $azahar = Join-Path $AzaharDir "azahar.exe"
 $roomExe = Join-Path $AzaharDir "azahar-room.exe"
 foreach ($f in @($azahar, $roomExe, $Target3dsx)) {
     if (-not (Test-Path $f)) { throw "not found: $f" }
 }
 
-# Two emulators on battery run slow (38% speed unplugged, 2026-10-08).
+# Emulators on battery run slow (38% speed unplugged, 2026-10-08).
 $battery = Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue
 if ($battery -and $battery.BatteryStatus -eq 1) {
     throw "on battery: plug in before an Azahar run"
@@ -136,7 +140,7 @@ function Prepare([string]$name, [string]$nick, [int]$mode) {
     }
     Set-Content -Path (Join-Path $user "config\qt-config.ini") -Value $out -Encoding ASCII
     # A room's nickname is the console's own user name, which the Direct
-    # Connect dialog will not change, and both copies start as "AZAHAR";
+    # Connect dialog will not change, and every copy starts as "AZAHAR";
     # the room takes one member of a name. The name is block 0x000A0000 of
     # the config savegame, which Azahar makes on its first start.
     $cfg = Join-Path $user "nand\data\00000000000000000000000000000000\sysdata\00010017\00000000\config"
@@ -151,7 +155,8 @@ function Prepare([string]$name, [string]$nick, [int]$mode) {
     }
     SetConsoleName $cfg $nick
     Set-Content -Path (Join-Path $user "sdmc\nfshp2_config.txt") -Encoding ASCII `
-        -Value @("DebugLog 1", "WirelessTest $mode", "WirelessTestSeconds $Seconds")
+        -Value @("DebugLog 1", "WirelessTest $mode", "WirelessTestSeconds $Seconds",
+                 "WirelessTestConsoles $Consoles")
     $log = Join-Path $user "sdmc\nfshp2_debug.txt"
     Remove-Item $log -ErrorAction SilentlyContinue
     return [pscustomobject]@{ Name = $name; Nick = $nick; Exe = $exe; Log = $log;
@@ -239,15 +244,19 @@ function LogLines($side, [string]$pattern) {
     return @(Select-String -Path $side.Log -Pattern $pattern | ForEach-Object { $_.Line })
 }
 
-Write-Host "Preparing the two copies"
-$a = Prepare "A" "hp2host" 1
-$b = Prepare "B" "hp2join" 2
+$letters = "ABCDEFGH"
+Write-Host "Preparing $Consoles copies"
+$sides = @()
+for ($i = 0; $i -lt $Consoles; $i++) {
+    $nick = if ($i -eq 0) { "hp2host" } else { "hp2join$i" }
+    $sides += Prepare $letters[$i] $nick $(if ($i -eq 0) { 1 } else { 2 })
+}
 
 Write-Host "Starting the room on port $Port"
 $room = Start-Process -FilePath $roomExe -WindowStyle Hidden -PassThru `
     -RedirectStandardOutput (Join-Path $WorkDir "room_out.txt") `
     -RedirectStandardError (Join-Path $WorkDir "room_err.txt") `
-    -ArgumentList "--room-name nfshp2-soak --port $Port --max_members 4 --preferred-app NFSHP2 --preferred-app-id 0"
+    -ArgumentList "--room-name nfshp2-soak --port $Port --max_members $($Consoles + 2) --preferred-app NFSHP2 --preferred-app-id 0"
 Start-Sleep -Seconds 2
 $room.Refresh()
 if ($room.HasExited) { throw "the room server exited: see $WorkDir\room_out.txt" }
@@ -255,18 +264,16 @@ if ($room.HasExited) { throw "the room server exited: see $WorkDir\room_out.txt"
 $start = Get-Date
 function Elapsed { ((Get-Date) - $start).TotalSeconds }
 try {
-    Write-Host "Launching A (host) and B (join) with $Target3dsx"
-    Launch $a
-    Launch $b
-    Join $a
-    Join $b
-    if (-not ($a.Joined -and $b.Joined)) { throw "a side did not join the room" }
+    Write-Host "Launching $($sides[0].Name) (host) and $($Consoles - 1) to join, with $Target3dsx"
+    foreach ($s in $sides) { Launch $s }
+    foreach ($s in $sides) { Join $s }
+    foreach ($s in $sides) { if (-not $s.Joined) { throw "$($s.Name) did not join the room" } }
 
     $resultPattern = "wltest: (PASS|FAIL|left with START)"
     $deadline = $start.AddSeconds($RunSeconds)
     $lastShown = 0
     while ((Get-Date) -lt $deadline) {
-        foreach ($s in @($a, $b)) {
+        foreach ($s in $sides) {
             if ($null -eq $s.Result) {
                 $r = @(LogLines $s $resultPattern)
                 if ($r.Count -gt 0) {
@@ -278,14 +285,16 @@ try {
                 }
             }
         }
-        if ($a.Result -and $b.Result) { break }
+        if (@($sides | Where-Object { $null -eq $_.Result }).Count -eq 0) { break }
         if ((Elapsed) - $lastShown -ge 15) {
             $lastShown = Elapsed
-            foreach ($s in @($a, $b)) {
-                # Whole lines only: the log's last may be half written.
+            foreach ($s in $sides) {
+                # Whole lines only: the log's last may be half written. The
+                # host logs a line for each client each second.
+                $n = if ($s -eq $sides[0]) { $Consoles - 1 } else { 1 }
                 $t = @(LogLines $s "wltest: t .*strays \d+$")
-                if ($t.Count -gt 0) {
-                    Write-Host ("  [{0,5:N0}s] {1}: {2}" -f (Elapsed), $s.Name, ($t[-1] -replace "^.*wltest: ", ""))
+                $t | Select-Object -Last $n | ForEach-Object {
+                    Write-Host ("  [{0,5:N0}s] {1}: {2}" -f (Elapsed), $s.Name, ($_ -replace "^.*wltest: ", ""))
                 }
             }
         }
@@ -295,26 +304,30 @@ try {
     # batching), so the last of them, the result's whole line among them,
     # are waited for before Azahar is closed.
     Start-Sleep -Seconds 8
-    foreach ($s in @($a, $b)) {
+    foreach ($s in $sides) {
         $r = @(LogLines $s $resultPattern)
         if ($r.Count -gt 0) { $s.Result = $r[-1] }
     }
 } finally {
-    foreach ($s in @($a, $b)) {
+    foreach ($s in $sides) {
         if ($s.Proc -and (Alive $s)) { $s.Proc | Stop-Process -Force }
     }
     if (-not $room.HasExited) { $room | Stop-Process -Force }
 }
 
 Write-Host ""
-foreach ($s in @($a, $b)) {
+foreach ($s in $sides) {
     Write-Host "--- $($s.Name): $($s.Log) ---"
-    LogLines $s "wireless:|wltest: (mode|connected|FAULT|.*host\(s\))" | Select-Object -First 20 |
+    LogLines $s "wireless:|wltest: (mode|node .* connected|FAULT|.*host\(s\))" | Select-Object -First 30 |
         ForEach-Object { Write-Host "  $_" }
-    @(LogLines $s "wltest: t ") | Select-Object -Last 1 | ForEach-Object { Write-Host "  $_" }
+    LogLines $s "wltest: node \d+ (done|lost|sending|ending|lingering):" | ForEach-Object { Write-Host "  $_" }
     if ($s.Result) { Write-Host "  $($s.Result)" }
 }
-$pass = ($a.Result -match "wltest: PASS") -and ($b.Result -match "wltest: PASS")
+$failed = @($sides | Where-Object { $_.Result -notmatch "wltest: PASS" })
 Write-Host ""
-Write-Host $(if ($pass) { "Both sides passed." } else { "Not passed: A '$($a.Result)', B '$($b.Result)'" })
-if (-not $pass) { exit 1 }
+if ($failed.Count -eq 0) {
+    Write-Host "All $Consoles passed."
+} else {
+    foreach ($s in $failed) { Write-Host "Not passed: $($s.Name) '$($s.Result)'" }
+    exit 1
+}

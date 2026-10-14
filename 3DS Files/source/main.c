@@ -6192,7 +6192,8 @@ int main(int argc, char** argv)
     if (ConfigWirelessTest == 1 || ConfigWirelessTest == 2) {
         fatalConsole();
         wirelesstest_run((int)ConfigWirelessTest,
-                         (int)ConfigWirelessTestSeconds, logLine);
+                         (int)ConfigWirelessTestSeconds,
+                         (int)ConfigWirelessTestConsoles, logLine);
         waitForExit();
         gfxExit();
         return 0;

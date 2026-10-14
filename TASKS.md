@@ -2305,8 +2305,9 @@ phases.
         full frontend (step 16), the saves (step 17) and every track and
         car (step 18).
 
-37. [ ] **Local Wireless (multi-card) play.** Asked for on 2026-10-07. Two
-        3DS consoles, each with the game and the retail files on its own
+37. [ ] **Local Wireless (multi-card) play.** Asked for on 2026-10-07. Up to
+        eight 3DS consoles (two in the first ask, eight since
+        2026-10-14), each with the game and the retail files on its own
         SD card, race each other over local wireless.
         - Each console loads the track, the cars, their textures and the
           music from its own card, so no file data goes over the air.
@@ -2364,6 +2365,22 @@ phases.
                   takes one member per nickname, and the nickname is
                   the console's user name, so the script writes one
                   into each copy's config savegame.
+                - 2026-10-14, the user: as many consoles as Download
+                  Play takes, up to 8, a race's grid. It takes 8: a UDS
+                  network has up to 16 nodes, and Mario Kart 7 races 8
+                  over Download Play. So the link is now a star of up to
+                  8 (e02c8a9 had 2): the host keeps a link for each
+                  client, closes its network once all have come, ejects
+                  late or quiet ones, and keeps a lost peer's place. The
+                  soak takes `WirelessTestConsoles` and fails unless all
+                  were on the network at once. On Azahar (copies A to
+                  H): 4 and 5 consoles over 30 s and 8 over 60 s all
+                  passed, 0 faults, 0 resends; with 8 the network held
+                  all 8 at once.
+                - The race side of 8: retail's race has 8 cars, two
+                  of them players. A third to eighth human takes an AI
+                  racer's car, driven by its console's pad. 37c and 37d
+                  work that out.
           - [ ] 37b: the lobby. Players 2 on the mode screens becomes
                 local wireless: Host or Join, the hosts listed by
                 console name, and a lost link handled.

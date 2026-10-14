@@ -22077,3 +22077,67 @@ with Host or Join, the hosts listed by console name, and a lost link
 handled. The Azahar copies will need the retail data then (a junction
 to the main card's `NFSHP2` folder). TASKS 46 is still the user's.
 Still to ask the user: TASKS 47's bridge, TASKS 52's popups.
+
+## Session 95, continued -- 37a, the link for up to 8 consoles
+
+The user asked for as many consoles as Download Play takes, up to 8, a
+race's grid (2026-10-14). Download Play does take 8: a UDS network has
+up to 16 nodes (`UDS_MAXNODES`), DLP's own network is made with
+max_nodes = its max clients + 1, and Mario Kart 7 races 8 over Download
+Play. Each console still has the game and the retail files on its own
+card. Sending the game itself over the air is a separate thing, not
+asked for.
+
+### What changed
+
+- `wireless.c`/`.h`: a star of up to `WIRELESS_MAX_CONSOLES` (8). The
+  host has a peer for each client (its node, name, alive and its own
+  `WlLink`), sends to each by `udsSendTo(node)`, and stays open until
+  `wireless_set_open(0)`. Late nodes, and nodes that come once it is
+  full, are ejected. A client that goes quiet is ejected, and
+  `goneMask` stops it being taken again until the mask shows it gone.
+  A lost peer keeps its place (`alive` 0); `wireless_forget_lost`
+  compacts the list. `wireless_link()` and the stats' `peer` are gone,
+  as nothing else used them.
+- The scan logs `wireless: scan sees N network(s): ...` each time what
+  it sees changes, with the skipped ones counted as not the port's or
+  full.
+- `wirelesstest.c`/`.h`: a soak per link. `WirelessTestConsoles` (2 to
+  8; `configitems.c`/`.h`, passed in by `main.c`) is how many the host
+  waits for, itself among them, before it closes. It passes when every
+  link has, and fails unless the network held all of them at once.
+- `tools/run_azahar_wireless.ps1 -Consoles N` (2 to 8): copies A to H,
+  nicknames `hp2host` and `hp2join1` to `hp2join7`, a room of N + 2
+  places, and a deadline of `-Seconds` + 60 + 20 a console.
+
+### What bit
+
+- **The room is not capped at 4.** The user saw 4/6 in the 4-console
+  run, and the 6 was the script's `--max_members`. The room server has
+  no limit of its own, and 5 and 8 copies took part.
+- **The first 8-console run never held 8 at once,** and passed anyway.
+  The script joins the copies to the room one at a time, so G and H
+  joined after B and C had finished their 30 s and left. Azahar's
+  source showed no cap at 6 either: its beacon always carries max_nodes
+  entries, and the host turns a join away only when total == max. The
+  soak now fails a run that never held them all, and the 8-console run
+  is 60 s.
+- With 8, the 150 s deadline ran out before the last ones finished, so
+  it grows with the count now.
+
+### Checks
+
+- The build is clean. check_3dsx and check_shbin are OK. wlproto is
+  unchanged (wlproto_check: faults 0).
+- Azahar, AC power, all PASS with 0 faults and 0 resends:
+  - 2 consoles over 30 s;
+  - 4 over 30 s (each link 888 to 924 reliable messages);
+  - 5 over 30 s (870 to 918);
+  - 8 over 60 s (1733 to 1839). The network was at 8 of 8 (mask
+    `00ff`) and closed at the eighth.
+
+### Next
+
+37b, the lobby, as before, with up to 8. Retail's race has 8 cars, two
+of them players. A third to eighth human takes an AI racer's car,
+driven by its console's pad, and 37c and 37d work that out.

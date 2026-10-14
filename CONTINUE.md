@@ -118,8 +118,12 @@ consoles in place of the game (`docs/formats/wireless.md`).
 wlproto_check: 38 scenarios, faults 0; 50 mutations, 48 caught, 2
 equivalent. `tools/run_azahar_wireless.ps1` runs the soak between two
 portable Azahar copies in a room of their own: both sides passed over
-120 s, with 0 faults and 0 resends (HANDOFF.md, "Session 95"). Next, one
-at a time: 37b (the lobby), then 37c to 37f.**
+120 s, with 0 faults and 0 resends (HANDOFF.md, "Session 95"). Then,
+at the user's ask, the link takes up to 8 consoles (a star around the
+host; `WirelessTestConsoles`; `-Consoles 2` to `8`): 8 Azahar copies
+passed over 60 s, all 8 on the network at once (HANDOFF.md, "Session
+95, continued"). Next, one at a time: 37b (the lobby), then 37c to
+37f.**
 
 **Now (Session 92, 2026-10-13): TASKS 51a (the damage logic) is done.
 `cardamage.c` ports BodyDamage and CarDamage whole, and `main.c` binds

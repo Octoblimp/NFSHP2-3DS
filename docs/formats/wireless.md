@@ -1,18 +1,21 @@
 # The local wireless link (TASKS 37a)
 
 The port's own. Retail's two players share one PS2 (split screen,
-which the port leaves out). In the port, two New 3DS consoles race each
-other over local wireless, each with the game and the retail files on
-its own card (TASKS 37, "The design": lockstep). This is the link under
-that design. It has three parts:
+which the port leaves out). In the port, up to eight New 3DS consoles
+race each other over local wireless, each with the game and the retail
+files on its own card (TASKS 37, "The design": lockstep). Eight is a
+race's grid, and the user asked for the most the hardware takes
+(2026-10-14). A UDS network takes up to 16 nodes (libctru's
+`UDS_MAXNODES`), and Mario Kart 7 races eight over Download Play. This
+is the link under that design. It has three parts:
 
 - `wlproto.c` is the protocol. It has no `<3ds.h>` in it, so
   `tools/wlproto_check.py` runs it on the host.
 - `wireless.c` puts it on UDS, the 3DS's local wireless (libctru's
   `uds*`), and handles the network: hosting, scanning, joining and
   leaving.
-- `wirelesstest.c` is a soak of the link between two consoles. It runs
-  in place of the game when the config asks for it.
+- `wirelesstest.c` is a soak of the link between 2 to 8 consoles. It
+  runs in place of the game when the config asks for it.
 
 The CIA's `app.rsf` asks for `nwm::UDS` and depends on the nwm module
 (0x0004013000002d02).
@@ -24,7 +27,7 @@ The CIA's `app.rsf` asks for `nwm::UDS` and depends on the nwm module
 | Comm ID | 0x4e485032 ("NHP2") |
 | id8 | 1 |
 | Data channel | 1 |
-| Nodes | 2: the host (node 1) and one client |
+| Nodes | 2 to 8, the host's choice: the host (node 1) and its clients |
 | Passphrase | `NFSHP2-3DS local race` (with its terminating 0) |
 | Spectators | none (`udsEjectSpectator`) |
 
@@ -38,21 +41,35 @@ The beacon's application data says which hosts are the port's:
 | 6 | n | the caller's bytes (the soak's are `SOAK`) |
 
 A scan skips any host whose tag or version is not these, whose n runs
-past the data, or whose network is full. The host's name is node 1's
-user name, the console's own.
+past the data, or whose network is full. It gives each host's name
+(node 1's user name, the console's own) and how many consoles are on
+its network of how many.
 
-The host takes the lowest client node it sees in the connection
-status, and then blocks new connections. Each side sends to its peer
-alone (unicast), and drops packets from any other node, counting them
-as strays. The status is read on each status event, and every 250 ms
-without one.
+The network is a star. Each client talks to the host alone, over one
+link, and the host keeps a link for each client: its peers, in the
+order they came. A client's one peer is the host. Each side sends to a
+peer's node alone (unicast), and counts packets from a node that is not
+a peer as strays. The status is read on each status event, and every
+250 ms without one.
 
-The link is lost:
+The host gives each client node new to the status's node mask a peer
+with a fresh link, with its name from `udsGetNodeInformation`. That
+holds while the network is open. `wireless_set_open(0)` closes it (the
+lobby's start, or the soak's once all have come):
+`udsSetNewConnectionsBlocked`, and any node that comes in anyway is
+ejected.
 
-- when the peer's bit leaves the status's node mask (the host's bit,
-  for a client);
+A peer's link is lost:
+
+- when its bit leaves the node mask (the host's bit, for a client);
 - when nothing has come for 3 s, once something has;
 - when nothing has come within 6 s of the join.
+
+The host ejects a client whose link went quiet. It takes no new peer
+on a node it has let go until the mask shows that node gone. A lost
+peer keeps its place with `alive` 0, so the race can tell who went;
+`wireless_forget_lost` clears those places, for the lobby. A client
+whose host is lost is in the state LOST.
 
 ## The packet
 
@@ -117,14 +134,18 @@ later.
 
 ## The soak
 
-`WirelessTest 1` in `nfshp2_config.txt` hosts, and `WirelessTest 2`
-joins the first host it finds. `WirelessTestSeconds` is how long each
-side sends (default 120). The soak runs after the New 3DS check, before
-any game data loads, with the top screen a text console. START leaves.
+`WirelessTest 1` in `nfshp2_config.txt` hosts a network for
+`WirelessTestConsoles` consoles (2 to 8, itself among them; default 2),
+and `WirelessTest 2` joins the first host it finds.
+`WirelessTestSeconds` is how long each side sends (default 120). The
+soak runs after the New 3DS check, before any game data loads, with the
+top screen a text console. START leaves.
 
 Each side retries every 2 s until it is connected: UDS's start, then
 hosting or the scan and join. On Azahar it waits for the room that way.
-Once connected, at 30 ticks a second, it sends:
+The host closes its network once all have come. Each link has its own
+soak (the host has one for each client), and from its connection, at 30
+ticks a second, each side sends over it:
 
 - 0 to 2 numbered reliable messages, of up to 200 bytes, whose bytes
   are a hash of their number;
@@ -133,44 +154,58 @@ Once connected, at 30 ticks a second, it sends:
 It checks everything that comes. A reliable message has to be the next
 in order and intact. A frame has to be intact, and the soak counts
 frames that come twice, go back, or skip some. When the time is up,
-each side sends a reliable count of what it sent. A side has passed
-when it holds the other's count and every message up to it, it has had
-no fault, and its own messages are all acked. It then lingers 1.5 s,
-so the last acks get there, and stops. Once both sides are done, the
-link going away counts as the finish.
+each side sends a reliable count of what it sent. A link has passed on
+a side when that side holds the other's count and every message up to
+it, has had no fault, and has all its own messages acked. It then
+lingers 1.5 s, so the last acks get there. Once a link is done, its
+going away counts as the finish. The test passes when every link has
+(the host's consoles - 1 of them, a client's one), and fails when a
+console goes before its link is done. It also fails unless the network
+held every console at once, as a race needs: the status's node count
+has to reach `WirelessTestConsoles`.
 
-Each second the screen and the log show a `wltest: t` line: the state,
-reliable messages sent and got, frames sent and got (with twice, back
-and gap), faults, and the link's and UDS's counts. The last line is
-`wltest: PASS (...)` or `wltest: FAIL: ...`.
+Each second the screen and the log show a `wltest: t` line for each
+link: the state, the peer's node, reliable messages sent and got,
+frames sent and got (with twice, back and gap), faults, and the link's
+and UDS's counts. At the end, a `wltest: node N` line gives each link's
+totals, and the last line is `wltest: PASS (...)` or
+`wltest: FAIL: ...`. A joiner's `wireless: scan sees` line comes each
+time what its scans see changes: how many networks, how many to join,
+and how many it skips as not the port's or full.
 
 ### On Azahar
 
 Azahar carries a game's local wireless over a multiplayer room.
-`tools/run_azahar_wireless.ps1` runs the soak between two instances on
-one PC:
+`tools/run_azahar_wireless.ps1` runs the soak between 2 to 8 instances
+on one PC (`-Consoles`). The room has places for the consoles and 2
+more (`--max_members`), so a room of 4 shows as 4/6. The room server
+sets no limit of its own.
 
 - It starts `azahar-room.exe` (a private room on port 24872).
-- It makes two portable copies of Azahar under `%TEMP%\nfshp2_wl`
-  (`A`, `B`), each with a `user` folder beside its `azahar.exe`.
+- It makes portable copies of Azahar under `%TEMP%\nfshp2_wl` (`A` to
+  `H`), each with a `user` folder beside its `azahar.exe`.
 - Each copy's config is the user's `qt-config.ini` with the room's
   address in it, and each card's `nfshp2_config.txt` sets the soak's
   keys and `DebugLog 1`. The user's own Azahar folder is not touched.
 - Each copy gets its own console ID and MAC on its first start.
-- It boots the `.3dsx` in both, and joins each to the room through
-  Multiplayer > Direct Connect to Room, driven by UI Automation.
-  Qt's Azahar ignores `--multiplayer`.
+- It boots the `.3dsx` in all of them, and joins each to the room
+  through Multiplayer > Direct Connect to Room, driven by UI
+  Automation. Qt's Azahar ignores `--multiplayer`. The joins go one
+  at a time, so the last copy's scans see nothing for its first minute
+  or so with 8.
+- It waits up to `-Seconds` + 60 + 20 a console for every result.
 
 Two of Azahar's ways shape the script:
 
 - A room refuses a second member with the same console ID or the same
   nickname.
 - The nickname is the console's user name. Direct Connect shows it
-  read-only, and both copies start as "AZAHAR". So the script writes a
-  name of its own (`hp2host`, `hp2join`) into block 0x000A0000 of each
-  copy's config savegame (`nand/.../sysdata/00010017/00000000/config`).
+  read-only, and every copy starts as "AZAHAR". So the script writes a
+  name of its own (`hp2host`, `hp2join1` and on) into block 0x000A0000
+  of each copy's config savegame
+  (`nand/.../sysdata/00010017/00000000/config`).
 
-Session 95, 120 s, both sides:
+Session 95, two consoles, 120 s:
 
 | | Host | Joiner |
 |---|---|---|
@@ -182,6 +217,17 @@ Session 95, 120 s, both sides:
 | Resends | 0 | 0 |
 | Malformed | 0 | 0 |
 | UDS errors | 0 | 0 |
+
+Then, all PASS with 0 faults and 0 resends:
+
+| Consoles | Soak | Host's links | Reliable got, each link |
+|---|---|---|---|
+| 4 | 30 s | 3 | 888 to 924 |
+| 5 | 30 s | 4 | 870 to 918 |
+| 8 | 60 s | 7 | 1733 to 1839 |
+
+With 8, the network held all 8 at once (nodes 1 to 8, mask `00ff`),
+and the host closed it at the eighth.
 
 The room's channel loses nothing, so the losses come from
 `wlproto_check` instead.
