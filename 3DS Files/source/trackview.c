@@ -3408,6 +3408,16 @@ static void display_rvm_images(TrackView* v, eRenderTarget* rt)
     }
     mirror_epoly(v, &p, frame, false);
     mirror_epoly(v, &p, mask, true);
+
+    // The images start at column 1, so column 0 keeps the view's alpha of
+    // one, and DisplayRVMs' fold shows it as a dark line down the mirror's
+    // right edge (TASKS 64). The mask again over that column, with an
+    // alpha of 0, as it leaves past the frame.
+    for (i = 0; i < 4; i++) {
+        p.Vertices[i].x = (i == 1 || i == 2) ? 1.0f : 0.0f;
+        p.Colours[i][3] = 0;
+    }
+    mirror_epoly(v, &p, mask, true);
 }
 
 // View 3's share of eDisplayFrame, into target 7: retail's loop draws its

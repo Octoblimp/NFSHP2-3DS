@@ -3289,6 +3289,65 @@ phases.
           frame's parts the same; with `-CopsOn` the same through Hot
           Pursuit, B told cops on, 4 cops in the race.
 
+64. [ ] **The road vanishes for a moment after the first chase starts.**
+        Reported on 2026-10-14, after the user played build 4988138 on
+        their 3DS (`3DS Files/nfshp2_debug.txt`, "DebugLog 1"): "when I
+        first started the race, right by where a cop started chasing
+        me, I saw a minor graphical artifact", and then, asked what it
+        was: "I meant in the road, it like glitched out for a second,
+        like disappeared and came back". "I want all graphical
+        artifacts fixed."
+        - The race: a Quick Race on track 31 forwards, 2 laps, 3 AI,
+          4 cops, car 19 skin 4. The first chase starts at world 54.1 s
+          (log line 2804).
+        - Where, in the user's words (2026-10-14): not in the jump, "it
+          was at the curb turn, right by the traffic cones ... it
+          glitched out for a sec and disappeared when drifting". The
+          log has that corner at world 58 to 60 s (lines 2919 to
+          2997): car 0 from 307 276 to 242 219, braking and steering
+          at 58.1 s, one wheel down at 59.1 s, the camera in visible
+          zone 23 throughout (no other zone within 70 m of it).
+        - "Azahar can't reproduce it, so don't try any tests": the
+          cause is the device's own. Session 104's burst capture of the
+          jump cam was the wrong place and is gone.
+        - The other artifacts, after it: the thin dark line just right
+          of the mirror's frame (every Azahar race, top screen x 273,
+          y 11 to 44) and the light-blue wedge (Session 37).
+        - [x] The mirror's dark line (Session 105): the RVM images start
+          at the mask's column 1, so its column 0 kept the view's alpha
+          of one and DisplayRVMs' fold drew it dark.
+          `display_rvm_images` draws the mask again over that column
+          with an alpha of 0 (`docs/formats/camera.md`, "Column 0").
+        - [ ] The road's blink: not found from the log and the data
+          alone (Sessions 104 and 105). What the corner has, second by
+          second (world 57.1 to 62.1 s): the track drew 82, 37, 40, 86,
+          104 and 86 pieces but 15061 to 15879 triangles, so the road's
+          big pieces were in every sampled frame and the drop was the
+          small ones a camera facing open desert culls; the camera
+          stayed 1.9 to 2.0 m over the road and the drivable verge
+          (`camclear.py`), never near its 0.5 m near plane; no skid
+          smoke (0 particles, 0 sprites); 3 cones knocked loose (14 to
+          16 dynamic bodies). The road's triangles are 7 to 12 m, its
+          baked shadow layer SHD_S20_CHOP3 1.4 to 3 cm over it. The one
+          thing on screen only then: the sun, 4 quads from 58.1 to 62.1
+          s, its 32 by 32 rect all sky at 59.1 and 60.1 s, alpha 51 at
+          60.1 s, the 550 and 600 pixel halo and rays added over the
+          road as the drift turned the view to it. TASKS 45 and 47,
+          both of the user's earlier artifacts, came with the same
+          glare. Ruled out on top: the fog textures, the vertex rings,
+          early depth, the mip chains, NaNs in the smokeables' matrices.
+          Waits on the user's next look at that corner on their 3DS.
+
+65. [ ] **The FPS dip in the same race.** Reported with TASKS 64:
+        "there was a minor FPS slowdown too at one point, locate that
+        and fix it too". The log's worst second is at world 185.8 to
+        186.8 s (lines ~6902 to 6936): 23.1, then 10.7, then 20.2 FPS,
+        with every draw part up at once (draw 70.5 ms, mirror 17.3, sky
+        13.0, models 15.8, bottom 13.9; citro3d CPU 70.2, GPU 21.3),
+        while the chopper was busy (plan 4) and 264 flares were asked
+        for, 132 drawn. Find what the frame waited on and fix it, as
+        TASKS 46's rules say (lossless).
+
 ### The retail frontend
 
 Asked for on 2026-09-28. The user sent seven PCSX2 photos of the retail

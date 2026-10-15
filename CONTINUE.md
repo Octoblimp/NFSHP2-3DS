@@ -110,6 +110,13 @@ on the 15.5 FPS of an earlier run: that was the fire on track 11, and
 TASKS 46 must reach a steady 30 there and in every place like it.
 Next: TASKS 37 (multi-card multiplayer).**
 
+**Now (Session 105, 2026-10-14): TASKS 64's dark line down the
+mirror's right edge is fixed (the mask's column 0). The road's blink at
+track 31's cone corner was not found from the log and the data; the
+sun's glare is the one thing on screen only then (TASKS 64 has the
+rest). This build drops Session 104's jump-cam capture. Next: TASKS 65,
+then 37f, 37g, TASKS 61, 46, 60 and 59.**
+
 **Now (Session 103, 2026-10-14): TASKS 63 is done: Local Wireless is
 the main menu's fourth row, under Options (the hidden debug row the
 fifth). Host asks the mode, Hot Pursuit or World Racing, then sets the

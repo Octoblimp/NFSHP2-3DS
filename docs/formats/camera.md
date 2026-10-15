@@ -1795,6 +1795,11 @@ quarter, and nothing shows outside the frame.
   `render_cars` and both lists; then `DisplayRVMImages`' two polys
   (`mirror_epoly`). The mask's poly writes its own alpha into the
   target (`set_blend_source_alpha`).
+- **Column 0.** The two polys start at x 1, so column 0 keeps the
+  view's alpha of one. `display_rvms` puts that column at the mirror's
+  right edge, where it showed as a thin dark line (TASKS 64). A third
+  poly, the mask with an alpha of 0, covers x 0 to 1, so the column is
+  clear like the rest outside the frame.
 - **`display_rvms`** comes at the end of `trackview_draw`, before
   citro2d's HUD. It draws the texture at retail's rectangle, taken to
   the top screen's 400 by 240: (125, 10.7) to (275, 45). It blends by

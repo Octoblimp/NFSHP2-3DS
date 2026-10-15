@@ -22892,3 +22892,61 @@ and then picking Local Wireless "can confuse people".
 37f and 37g, then TASKS 61 (You're The Cop and cops over wireless),
 46, 60 and 59. Still to ask the user: TASKS 47's bridge and 52's
 popups.
+
+## Sessions 104 and 105 -- TASKS 64, the mirror's line (done), the road's blink (open)
+
+The user played 4988138 on their 3DS with "DebugLog 1" and saw the road
+"glitch out for a sec and disappear" -- "at the curb turn, right by the
+traffic cones ... when drifting", not in the jump. "Azahar can't
+reproduce it, so don't try any tests": no Azahar run was made for it.
+Session 104's burst capture of the jump cam was the wrong place; it is
+out of the source, and this build is the first without it.
+
+### What changed
+
+- `trackview.c`, `display_rvm_images`: the mask again over its column
+  0 with an alpha of 0. The RVM images start at column 1, so column 0
+  kept the view's alpha of one and DisplayRVMs' fold drew a dark line
+  down the mirror's right edge (top screen x 273, y 11 to 44).
+- `docs/formats/camera.md`, "In the port": "Column 0".
+- `TASKS.md` 64: the mirror's line done; the road's blink with what
+  the log and the data show (below), still open.
+
+### The road's blink, what was looked at
+
+The corner is world 57.1 to 62.1 s of `3DS Files/nfshp2_debug.txt`
+(lines ~2900 to 3070), track 31, section 20's chop 3.
+
+- The track drew 82, 37, 40, 86, 104, 86 pieces a second but 15061 to
+  15879 triangles: the road's big pieces were drawn in every sample;
+  the drop was small ones a view of open desert culls.
+- The camera stayed 1.9 to 2.0 m over the road and the drivable verge
+  (scratchpad `camclear.py`), far off its 0.5 m near plane.
+- No skid smoke (0 particles, 0 sprites); 3 cones knocked loose (14 to
+  16 dynamic bodies).
+- The road's triangles are 7 to 12 m (`trisize.py`); its baked shadow
+  layer SHD_S20_CHOP3 lies 1.4 to 3 cm over it (`layers.py`).
+- Ruled out: the fog textures (refilled before any send), the vertex
+  and index rings, early depth, the mip chains, NaNs in the
+  smokeables' matrices.
+- The one thing on screen only in that window: the sun, 4 quads from
+  58.1 to 62.1 s, its 32 by 32 rect all sky at 59.1 and 60.1 s, alpha
+  51 at 60.1 s. Track 31's layers (`sunchunk.py`): centre 75 px, halo
+  550 px (255, 200, 100), rays 600 px at 1.0 and 0.4, all additive, all
+  textures semitransparent. TASKS 45 and 47 came with the same glare.
+  No way it would draw differently on the device was found; the CPU's
+  read of the VRAM depth (`trackview_read_depth`) is the only part
+  that touches memory the GPU wrote.
+
+### Checks
+
+- tools/build_cia.ps1: built, relocations OK, 2 shaders each output
+  component written once.
+- Not run: anything on Azahar (the user's word), the mirror's line on
+  the device.
+
+### Next
+
+TASKS 65 (the FPS dip at world ~186 s), then 37f, 37g, TASKS 61, 46,
+60 and 59. Still to ask: 47's bridge, 52's popups, and the road's
+blink on the device again.
