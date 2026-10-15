@@ -2126,6 +2126,7 @@ is citro3d and owns the top.
         (Since 2026-10-03 the New 3DS is the target, task 28. Since
         2026-10-05 it is the only one, the user's call: an Old 3DS stops
         at boot with a message (6ac29d1), and the pass checks only that.)
+        The HOME Menu banner, sound and icon are TASKS 66's.
 
 ## Asked for during the port
 
@@ -3482,6 +3483,16 @@ phases.
         - [ ] The next device log: no slow second with the send stages up,
           and the `sends:` line's flush and worst small. Not run on the
           device or on Azahar (whose call does no cache work).
+66. [x] **Hot Pursuit 2's icon, banner and banner sound.** Asked for on
+        2026-10-15: the logo as the icon, a 3D logo that spins as the
+        banner (assets for it in the CIA only), and an engine's rev or a
+        siren. `tools/make_banner.py` makes all three from the retail
+        files into `3DS Files/meta/hp2` (git-ignored); build_cia.ps1
+        runs it and the Makefile packs it, or the placeholder without
+        it. HANDOFF.md Session 110.
+        - [ ] The user's look on their 3DS: the banner shows and turns,
+          the siren plays, the icon and title look right. Not on
+          Azahar and not from a NAND, the user's word (2026-10-15).
 
 ### The retail frontend
 

@@ -110,6 +110,16 @@ on the 15.5 FPS of an earlier run: that was the fire on track 11, and
 TASKS 46 must reach a steady 30 there and in every place like it.
 Next: TASKS 37 (multi-card multiplayer).**
 
+**Now (Session 110, 2026-10-15): the CIA's HOME Menu banner is Hot
+Pursuit 2's: the logo's letters as a 3D chrome badge that turns once in
+front of the light bar's blue and red, one wail of CopSiren01 as its
+sound, and the logo as the icon (tools/make_banner.py, from the retail
+files into the ignored `3DS Files/meta/hp2`; build_cia.ps1 runs it).
+Read back from bannertool's output, not seen on a 3DS: the user tests
+the CIA on theirs (no NAND, no Azahar for the banner, their word).
+Next: 37f-3, 37g, TASKS 61, 46, 60 and 59. See HANDOFF.md's Session
+110.**
+
 **Now (Session 109, 2026-10-15): the second race of a wireless Next
 Race draws its track again. The race's view no longer keeps a 3.1 MB
 table of batches in the main heap (they are in each mesh's vertex

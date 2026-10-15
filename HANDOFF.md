@@ -23449,3 +23449,94 @@ Hot Pursuit 2's icon, banner (a spinning 3D logo) and banner sound
 showing. Still to ask the user: the road's blink on the device (TASKS
 64), 47's bridge, 52's popups, the next device log's `sends:` line for
 65, and how the `-fno-strict-aliasing` build plays on the device.
+
+## Session 110 -- Hot Pursuit 2's banner, banner sound and icon (done)
+
+The user, at the end of Session 108: "change the icon, banner and sound
+to be Need for Speed Hot Pursuit 2". The icon can be the logo. The
+banner can be a 3D logo that spins, with any assets it needs in the
+CIA, for the banner only. The sound can be an engine's rev or a police
+siren. Partway through, they said no Azahar testing of the banner and
+nothing with their NAND, ever: they test the CIA on their own 3DS.
+
+### What the HOME Menu reads
+
+bannertool's `makebanner -ci banner.cgfx -a banner.wav` makes the CBMD:
+the CGFX LZ11-packed at 0x88, then a CWAV (PCM16). The HOME Menu's
+rules, from 3dbrew and the banners people make:
+
+- The model and its animation are both named `COMMON`.
+- RGBA8 textures do not show, so both here are RGBA5551, ordered-dithered
+  (Bayer 4x4) before the 5-bit cut.
+- The whole CGFX stays under 0x80000 bytes.
+- The camera is at (0, 1, 44.786) with a 30-degree field of view, which
+  is 40 x 24 units at z = 0.
+- The sound is about 3 s at most.
+
+The writer follows pycgfx's layout (read in the browser only, nothing
+of it run): self-relative pointers, the DATA block, each node's
+children together in field order and then theirs, the string table,
+and IMAG with textures 128-aligned. The DICTs are Patricia trees, and
+the port of the builder matched all 8 of a template banner's.
+
+### tools/make_banner.py
+
+- Letters: `NFS_LOGO_ALPHA` (GLOBAL/GLOBALB.BUN), its chrome letters
+  and the blue HOT PURSUIT 2 band cut from the glow around them by
+  alpha, brightness and blue (15 outlines). Marched, simplified and
+  extruded 1 unit deep, 30 units wide: 1,090 wall quads on a steel
+  strip, shaded from the blurred alpha's gradient so the steps of the
+  outline do not stripe. The front cap is the logo, the back a dark
+  copy. One edge of all of them fails the inside check.
+- Background: a quad behind at z = -16, a night gradient with the blue
+  and red of the logo's light bar, streaks and a vignette, and the
+  logo's glow with the letters filled in.
+- Spin: 240 frames. The logo rests, turns once (0 to 2 pi, eased,
+  frames 60 to 150) and rests again; one CANM (rot_y only, linear keys
+  every 3 frames).
+- Materials: each with its own hashes, so the HOME Menu's renderer does
+  not skip one's state for the other; no culling; depth LESS as in the
+  template.
+- Sound: `CopSiren01` from SOUND/INGAME's bank, 2.9 s from its lowest
+  pitch over the loop point, faded in 20 ms and out over 0.45 s, 22,050
+  Hz mono.
+- Icon: 48 x 48, the logo at 97% of the width over the same blue and
+  red, with the letters' shadow, drawn 4x and boxed down; makesmdh makes
+  the 24 and 48 RGB565 icons from it.
+
+The output, 394,624 bytes of CGFX (173,221 packed), goes to `3DS
+Files/meta/hp2`, which git ignores like everything retail-derived.
+`tools/build_cia.ps1` runs it before the make. The Makefile uses it
+when it is there and the old placeholder banner and silence when not.
+The title is now "Need for Speed: Hot Pursuit 2", also in the 3DSX's
+SMDH.
+
+### Checks
+
+- A reader written apart from the writer (not kept; it was in the
+  session's scratch space) followed every pointer, unswizzled both
+  textures, ran the curve and drew all 240 frames: every pixel
+  covered. Its 120-frame loop is `out/banner/banner_loop.gif`, with
+  `turn_sheet.png`.
+- bannertool's banner.bnr, read back: the CGFX unpacks byte for byte
+  to make_banner's, the CWAV is PCM16 at 22,050 Hz for 2.90 s, the
+  SMDH has the three titles, and its icon matches icon.png within
+  RGB565's rounding (`out/banner/icon_from_smdh.png`).
+- The CIA built (1,408,448 bytes), check_3dsx and check_shbin pass.
+- Not seen on a 3DS. Left to the hardware: the depth function, whether
+  the HOME Menu plays the 240 frames at 60 (a 4 s loop) or 30 (8 s),
+  and whether it takes the banner at all. If the HOME Menu misbehaves
+  on the title, FBI uninstalls it.
+
+### What changed
+
+- `tools/make_banner.py` (new), `tools/build_cia.ps1`, `3DS
+  Files/Makefile` (BANNER_ART, BANNER_ICON, the titles), `.gitignore`.
+
+### Next
+
+The user's report from their 3DS on the banner, the siren and the icon.
+Then 37f-3, 37g, TASKS 61, 46, 60 and 59. Still to ask the user: the
+road's blink on the device (TASKS 64), 47's bridge, 52's popups, the
+next device log's `sends:` line for 65, and how the
+`-fno-strict-aliasing` build plays on the device.
