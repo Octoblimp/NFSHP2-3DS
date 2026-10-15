@@ -35,9 +35,22 @@ INCLUDES	:=	include
 # by nfshp2_config.txt at runtime (see source/main.c).
 ROMFS		:=
 
-APP_TITLE		:= NFSHP2 3DS
-APP_DESCRIPTION	:= NFS Hot Pursuit 2 port skeleton
+APP_TITLE		:= Need for Speed: Hot Pursuit 2
+APP_DESCRIPTION	:= Need for Speed: Hot Pursuit 2, an unofficial New 3DS port
 APP_AUTHOR		:= NFSHP2-3DS project
+
+# The HOME Menu banner (the logo as a spinning 3D badge), its sound (the
+# game's siren) and the icon are made from the retail files by
+# tools/make_banner.py, which tools/build_cia.ps1 runs into meta/hp2 --
+# git-ignored, like everything retail-derived. Without them the CIA gets the
+# placeholder banner and silence.
+ifneq ($(wildcard meta/hp2/banner.cgfx),)
+BANNER_ART	:= -ci meta/hp2/banner.cgfx -a meta/hp2/banner.wav
+ICON		:= meta/hp2/icon.png
+else
+BANNER_ART	:= -i meta/banner.png -a meta/silence.wav
+endif
+BANNER_ICON	:= $(if $(ICON),$(ICON),meta/icon.png)
 
 #---------------------------------------------------------------------------------
 # options for code generation
@@ -176,15 +189,16 @@ endif
 #---------------------------------------------------------------------------------
 # CIA packaging. makerom/bannertool aren't in devkitPro's package repos, so
 # prebuilt binaries live in tools/3ds-bin (see HANDOFF.md). Requires
-# meta/banner.png, meta/icon.png, meta/silence.wav (bannertool) plus
-# meta/app.rsf (makerom).
+# meta/hp2/banner.cgfx, banner.wav and icon.png, or the placeholders
+# meta/banner.png, meta/icon.png and meta/silence.wav (bannertool, see
+# BANNER_ART above), plus meta/app.rsf (makerom).
 #---------------------------------------------------------------------------------
 MAKEROM		:= $(TOPDIR)/../tools/3ds-bin/makerom.exe
 BANNERTOOL	:= $(TOPDIR)/../tools/3ds-bin/bannertool.exe
 
 cia: all
-	@"$(BANNERTOOL)" makebanner -i meta/banner.png -a meta/silence.wav -o meta/banner.bnr
-	@"$(BANNERTOOL)" makesmdh -s "$(APP_TITLE)" -l "$(APP_DESCRIPTION)" -p "$(APP_AUTHOR)" -i meta/icon.png -o meta/icon.icn
+	@"$(BANNERTOOL)" makebanner $(BANNER_ART) -o meta/banner.bnr
+	@"$(BANNERTOOL)" makesmdh -s "$(APP_TITLE)" -l "$(APP_DESCRIPTION)" -p "$(APP_AUTHOR)" -i $(BANNER_ICON) -o meta/icon.icn
 	@"$(MAKEROM)" -f cia -o "$(TARGET).cia" -DAPP_ENCRYPTED=false -target t \
 		-elf "$(BUILD)/$(TARGET).elf" -icon meta/icon.icn -banner meta/banner.bnr \
 		-rsf meta/app.rsf

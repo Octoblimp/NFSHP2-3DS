@@ -67,6 +67,15 @@ if ($DriveLetter -ne "") {
 }
 Write-Host "Building from $driveLetter -> $projectDir"
 
+# The HOME Menu banner, its siren and the icon are made from the retail files
+# (tools/make_banner.py, into meta/hp2, which the Makefile picks up). Without
+# an extraction the Makefile falls back to the placeholder banner, so a
+# failure here only warns.
+& python (Join-Path $PSScriptRoot "make_banner.py") --out (Join-Path $projectDir "meta\hp2")
+if ($LASTEXITCODE -ne 0) {
+    Write-Warning "make_banner.py failed -- the CIA gets the placeholder banner"
+}
+
 # devkitPro's generated .d files record every source path as seen from the
 # build drive ("/z/source/car.v.pica"), so a build directory left behind by a
 # run on a *different* letter makes make fail with "No rule to make target".
