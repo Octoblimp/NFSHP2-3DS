@@ -23970,3 +23970,182 @@ Still to ask the user:
 - TASKS 52: the popups.
 - TASKS 65: the device log's `sends:` line.
 - How the `-fno-strict-aliasing` build plays on the device.
+
+## Session 112, continued -- 37g-2 done: a console back in the hold
+
+37g-2 lets a console whose link alone dropped (out of range and back)
+rejoin the race during the hold. The race goes on from the frame it
+held on. The code has its own commit, before these notes.
+
+### wireless.c
+
+- **The host.** `wireless_set_rejoin(on, ok)` unblocks new connections
+  even on a closed network (`wireless_set_open` now blocks with
+  `!(W.open || W.rejoin)`). It logs "open to a console lost" and
+  "closed to a console lost". client_came now fetches the node's name
+  and friend code seed (`uds_friendcodeseed`) first. On a closed
+  network with rejoin on, `take_back` looks for a dead peer with the
+  same name, and the same seed when both are nonzero. `ok(i)` must say
+  the race still holds for it. The node gets a fresh wl_link in that
+  peer's slot ("node n (NAME) back in place i", i the peer index). Any
+  other node is ejected as before. The peer's seed is saved at the
+  first join.
+- **The client.** The join saves the host's MAC
+  (`scan.network.host_macaddress`) and name. `wireless_rejoin`:
+  udsDisconnectNetwork and udsUnbind, then udsScanBeacons with the MAC
+  filter (into `s_scanBuf`, now shared with wireless_scan), then
+  udsConnectNetwork and add_peer(host). It logs "looking for NAME
+  again", "back on NAME's network, try k", or the failing call.
+  wireless_leave turns rejoin off.
+- **The test hook.** `wireless_test_deaf(ms)`: the pump drops every
+  pulled packet and send_packet sends nothing until the time is up
+  ("deaf for N ms", then "hears again"). No rejoin is tried while deaf.
+
+### netstep.c
+
+- hostPoll: a place in `lost[]` whose peer is alive again gets the
+  records again (sendFrames now skips only a place lost and not
+  alive), still held for. hostRead sets `back[p]` when it takes a PADS
+  message (takePads now returns whether it took it) from a place held
+  for. Only then does hostPoll say "place p back at frame n, after t
+  ms" and clear the loss. A place on the link again is waited for
+  NETSTEP_BACK_MS past the hold, then gone, its car the CPU's.
+- clientPoll: takeFrames returns whether it took a FRAMES message. A
+  client lost from its host is back only when one comes ("the host
+  back at frame n, after t ms"): the host's records prove it was taken
+  back. A client whose link is up again but has no word waits its hold
+  plus NETSTEP_BACK_MS (3000) before it goes alone, for a rejoin that
+  blocks across the hold's end.
+- A client's netstep_held leaves out its own place: the host's records
+  hold for it until its pads come.
+- **Why the host waits for pads.** The first Azahar runs passed with the
+  host saying "back" as soon as the node was taken back. But a console
+  that restarted and joins from the lobby would be taken back too (same
+  name and seed, the place held), and it sends no pads. The race would
+  have held on every console for good, its link kept up by the lobby's
+  keepalives. Now that console's car goes to the CPU when the hold and
+  the grace are over.
+
+### main.c
+
+- `lockRejoin(now)`, after lockHoldMute each lockstep pass. The host
+  calls `wireless_set_rejoin(held != 0, lockRejoinOk)`. lockRejoinOk
+  maps the peer to its place through netrace_race()->peer and asks
+  netstep_held. A client calls wireless_rejoin every LOCK_REJOIN_MS (2
+  s) while it holds for its host and wireless is WIRELESS_LOST.
+- `lockTestDrop()`, after lockTestFinish: at `WirelessTestDropFrame`
+  it logs "lockstep: frame n, deaf for the test" and calls
+  wireless_test_deaf(`WirelessTestDropMs`, 5000). Both settings are
+  new in configitems (0 and 5000).
+- The stop turns rejoin off.
+
+### The checks
+
+- **netstep_check: 55 scenarios, faults 0.** In the harness, a cut link
+  stops messages both ways. Each end finds it lost by its own timeout,
+  from the other's last pump, and a lost link has no inbox. `repeer()`
+  brings a link back once both ends hold for each other, tried each
+  second. `repeerLate` re-peers with 2 ms of the client's hold left.
+  `repeerHalf` brings back only the client's end, `repeerMute` only the
+  host's (no pad ever comes). `dropAgain` cuts a link a second time once
+  it is back, and "lost" and "back" must then be said twice.
+  `heardHold(c,p)` models which holds a console sees when two links are
+  cut. A place's "gone" is checked at the hold's end, or at the hold
+  plus NETSTEP_BACK_MS when only the host's end came up. The eight new
+  scenarios are listed in netstep.md.
+- **`--mutate`: 190 mutants, 187 caught, 3 equivalent.** New:
+  ns-back-host-clear, -pads, -heard, -reset, -grace, -grace-alive,
+  -send and -after; ns-back-client-clear, -got and -lost;
+  ns-back-grace and -grace-alive; ns-takeframes-taken,
+  ns-takepads-taken, ns-held-client-self and -none. Old patterns moved
+  with the code. The back branch once cleared `back[p]` as well as the
+  loss's start; with both, removing either changed nothing, so only the
+  loss's start clears it now, and the second cut catches its removal.
+- netrace_check and lobby_check: faults 0. The build passed.
+
+### Two Azahars: `run_azahar_lobby.ps1 -Race -Drop N`
+
+`-Drop N` puts `WirelessTestDropFrame -DropFrame` (300) and
+`WirelessTestDropMs -DropMs` (5000) on copy N's card, and
+`WirelessHoldSeconds 30` on every card. Every copy drives on through
+the hold and 30 s more, with a shot every 3 s. The verdict:
+
+- The dropped copy says it went deaf.
+- Each client cut off says the host lost, back on its network, and the
+  host back, once each.
+- The host says each dropped place lost and back once, with one "back
+  in place" line for each.
+- No copy says a place or the host gone, or hands a car to the CPU.
+- Every copy's parts stay the host's.
+
+Results, before the host waited for pads:
+
+- `-Drop 1`, seed dab01660: PASS. B went deaf on frame 300. The host
+  lost node 2 at frame 303 and opened its network. B lost the host at
+  frame 301, heard again at 5 s, and was back on hp2host's network on
+  its first try. The host took node 2 back in place 0 and said place 1
+  back after 2373 ms; B said the host back after 2357 ms. Both were at
+  frame 303. The host closed its network again, and both raced on, all
+  18 logged frames' parts the same.
+- `-Drop 0`, seed d0cf097b: PASS. The host went deaf on frame 300, and
+  both lost the link at frame 301. B found the host on its first try,
+  and the host took it back while still deaf, 401 ms after the loss:
+  UDS's node events still came. B said the host back after 2056 ms,
+  once the host could hear and its records came. All 17 logged frames'
+  parts were the same. This run showed the gap above: the host said
+  "back" with no pad from B yet.
+
+Results, once the host waited for pads (the build committed):
+
+- `-Drop 1`, seed 01389e7e: PASS. B said the host back after 4363 ms,
+  and the host said place 1 back 16 ms later (4379 ms), once B's pads
+  came, both at frame 303. All 18 logged frames' parts the same.
+- `-Drop 0`, seed 9d768a12: PASS. The host took node 2 back while still
+  deaf, as before, but said place 1 back only after "hears again" and
+  B's pads, after 2139 ms. B said the host back after 2056 ms, both at
+  frame 301. All 17 logged frames' parts the same.
+
+So Azahar's UDS handles all of it: the eject, the client's disconnect
+and reconnect, the scan's MAC filter, and SetNewConnectionsBlocked
+turned off and on mid-race. **A real 3DS has not run it yet.**
+
+### Next: 37g-3, a restarted console back in the race
+
+A console that restarted has no race: it boots, goes to Local Wireless
+and Join, and must get the race again. The pieces to work out:
+
+- **The scan.** Mid-race the network is closed and the beacon still
+  says the port's version. The joiner's list must show the race held
+  for it: say so in the beacon's application data, and let a closed
+  network through the scan's filter while it holds.
+- **Telling the two backs apart.** A restarted console comes back
+  through take_back, as 37g-2's does, but sends no pads. Today the host
+  holds on and then gives its car to the CPU. Any message from it that
+  is not the race's reads as "gone on" (a stop), which drops the place
+  at once. It needs a lobby message of its own (LOBBY_MSG_REJOIN?). The
+  host must answer with the race's setup: netrace's, with the event's
+  state for a race past the first. The hold must then stretch while it
+  loads and catches up.
+- **The catch-up.** The host keeps only NETSTEP_RING (64) records.
+  Replaying from frame 0 needs every record since GO: about 8 bytes for
+  each place, plus the step, a frame. That is about 0.6 MB for 5
+  minutes of eight consoles, less if runs of the same pad are packed.
+  The restarted console loads the race, then runs the records without
+  drawing until it reaches the held frame. Every other console stays
+  held, under a box that says how far it has got, with the hold
+  stretched while it gains. Measure how fast the sim runs without
+  drawing on a New 3DS first: at 24 ms a frame with drawing, 5 minutes
+  could take minutes to run again. A snapshot of the world is the other
+  way, and much harder.
+- **The ID.** The match by name and friend code seed already works for
+  37g-2. Azahar's copies differ in console ID, so their seeds should
+  differ: log the seeds to check.
+
+Still to ask the user:
+
+- TASKS 64: the road's blink.
+- TASKS 47: the bridge.
+- TASKS 52: the popups.
+- TASKS 65: the device log's `sends:` line.
+- How the `-fno-strict-aliasing` build plays on the device.
+- Whether a console out of range and back rejoins on real 3DSes (37g-2).

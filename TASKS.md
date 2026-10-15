@@ -2779,10 +2779,46 @@ phases.
                         handed B's car to the CPU on frame 718, and
                         it passed the host's. `-Lose 0`: B held for
                         the host, then raced alone from frame 773.
-                - [ ] 37g-2: a console whose link alone dropped is
+                - [x] 37g-2: a console whose link alone dropped is
                       re-peered during the hold and goes on from its
-                      last frame. wireless.c ejects a lost peer for
-                      good today, and the network is closed mid-race.
+                      last frame. Done in Session 112, continued:
+                      - wireless.c: while the race holds for a place,
+                        `wireless_set_rejoin` opens the closed network
+                        to a lost console. A node with a lost peer's
+                        user name (and friend code seed, when both
+                        have one) whose place the race still holds
+                        takes that peer back with a new link; any
+                        other is sent away. A client that lost its
+                        host calls `wireless_rejoin` every 2 s: it
+                        leaves, scans by the host's MAC and joins
+                        again.
+                      - netstep.c: the host sends a place on the link
+                        again its records, and says it is back ("place
+                        p back") once its pads come. A client is back
+                        once the host's records come ("the host
+                        back"). Either end with the link up but no
+                        word waits NETSTEP_BACK_MS (3 s) past its
+                        hold. A console taken back that sends no pads
+                        (one restarted) has its car go to the CPU
+                        then, instead of holding the race for good.
+                      - netstep_check: links cut and re-peered in the
+                        harness, eight new scenarios, 55 in all, 0
+                        faults; 190 mutants, 187 caught, 3 equivalent.
+                      - `WirelessTestDropFrame`/`WirelessTestDropMs`
+                        make a console deaf from a lockstep frame.
+                        `run_azahar_lobby.ps1 -Race -Drop 1` and
+                        `-Drop 0` pass on two Azahars: the copy deaf
+                        at frame 300 for 5 s, both ends lost the link
+                        and held, B back on the host's network on its
+                        first try, both saying "back", then racing on
+                        in lockstep, every logged frame's parts the
+                        same.
+                      - The last runs (seeds 01389e7e and 9d768a12):
+                        the host says "place 1 back" only once B's pads
+                        come, just after B's "the host back" (16 ms
+                        with B deaf; with the host deaf, once it hears
+                        again). 18 and 17 logged frames the same. Not
+                        yet run on real 3DSes.
                 - [ ] 37g-3: a restarted console rejoins through Local
                       Wireless, then Join, known by its unique ID, and
                       catches up.

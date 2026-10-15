@@ -110,6 +110,20 @@ on the 15.5 FPS of an earlier run: that was the fire on track 11, and
 TASKS 46 must reach a steady 30 there and in every place like it.
 Next: TASKS 37 (multi-card multiplayer).**
 
+**Now (Session 112, continued, 2026-10-15): 37g-2 is done (de5218a). A
+console whose link alone dropped, out of range and back, rejoins the
+race during the hold. The host opens its network to a lost console it
+still holds for, known by its user name and friend code seed. A client
+that lost its host scans for it by its MAC and joins again. Each end
+goes on from the frame it held on once the other's word comes: the
+host's records for the client, the client's pads for the host. A
+console taken back that sends no pads (one restarted) has its car go
+to the CPU after the hold, instead of holding the race for good.
+`run_azahar_lobby.ps1 -Race -Drop 1` and `-Drop 0` pass on two
+Azahars. Next: 37g-3 (a restarted console back in the race), 37f's
+frame-1809 difference, 37d-2, then TASKS 61, 46, 60 and 59. See
+HANDOFF.md's "Session 112, continued".**
+
 **Now (Session 112, 2026-10-15): 37g-1 is done (2a9b396). A lost
 console holds the race on every console for `WirelessHoldSeconds` (90
 s), under a box that names it and counts down, the race's sound muted.
