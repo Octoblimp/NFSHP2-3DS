@@ -111,14 +111,17 @@ TASKS 46 must reach a steady 30 there and in every place like it.
 Next: TASKS 37 (multi-card multiplayer).**
 
 **Now (Session 110, 2026-10-15): the CIA's HOME Menu banner is Hot
-Pursuit 2's: the logo's letters as a 3D chrome badge that turns once in
-front of the light bar's blue and red, one wail of CopSiren01 as its
-sound, and the logo as the icon (tools/make_banner.py, from the retail
-files into the ignored `3DS Files/meta/hp2`; build_cia.ps1 runs it).
-Read back from bannertool's output, not seen on a 3DS: the user tests
-the CIA on theirs (no NAND, no Azahar for the banner, their word).
-Next: 37f-3, 37g, TASKS 61, 46, 60 and 59. See HANDOFF.md's Session
-110.**
+Pursuit 2's. The logo's letters are a 3D chrome badge that the HOME
+Menu turns, in front of an oval plate of the light bar's blue and red.
+Its sound is one wail of CopSiren01, and the icon is the logo
+(tools/make_banner.py, from the retail files into the ignored `3DS
+Files/meta/hp2`; build_cia.ps1 runs it). The user's 3DS showed the
+first version with every picture upside down, the background turning
+with the badge and the default chime. Fixed: textures top row first, a
+billboard background, a stereo sound, publisher Octoblimp, version
+1.0.0. Waiting on the user's next look; they test the CIA on their 3DS
+(no NAND, no Azahar for the banner, their word). Next: 37f-3, 37g,
+TASKS 61, 46, 60 and 59. See HANDOFF.md's Session 110, continued.**
 
 **Now (Session 109, 2026-10-15): the second race of a wireless Next
 Race draws its track again. The race's view no longer keeps a 3.1 MB

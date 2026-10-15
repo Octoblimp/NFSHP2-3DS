@@ -3,7 +3,7 @@ r"""Build the CIA's HOME Menu banner, banner sound and icon from retail data.
 
 The banner is a CGFX model: the letters of `NFS_LOGO_ALPHA` (GLOBALB.BUN) are
 cut out of the logo, extruded into a chrome badge that spins on the top
-screen, in front of a night background lit by the logo's light bar. The
+screen, in front of an oval of night lit by the logo's light bar. The
 sound is one rising wail of the game's `CopSiren01` (SOUND/INGAME). The icon
 is the logo over the same blue and red. Nothing here goes into the game's
 romfs -- bannertool packs the CGFX and the WAV into banner.bnr and the icon
@@ -27,10 +27,19 @@ vertical field of view, so the z = 0 plane shows 40 x 24 units.
                gradient, the shading baked into the UVs of a gradient strip
     caps       one alpha-tested quad per face: the chrome logo in front, a
                dark copy behind
-    background the night behind: gradient, the light bar's blue and red,
-               speed streaks and the logo's glow with its letters
-               inpainted, on a quad far enough back to clear the spin
-    spin       bone "logo" turns once about Y with ease in/out, then rests
+    background an oval plate (a 96-sided fan) with a steel rim: gradient,
+               the light bar's blue and red, speed streaks and the logo's
+               glow with its letters inpainted, far enough back to clear
+               the spin, on a YAxial billboard bone so it keeps facing the
+               camera
+    spin       none authored: the HOME Menu turns every banner model about
+               Y by itself (about once in 10 s on a 3DS)
+
+What a 3DS showed of the first version (Session 110), and what changed for
+it: every texture upside down (stored bottom row first; the HOME Menu wants
+the top row first), the background turning with the badge (now the
+billboard), nothing outside a screen-sized oval (the plate stays inside
+it), and the default chime instead of the siren (the WAV was mono).
 
 Writes banner.cgfx, banner.wav and icon.png into --out, by default
 "3DS Files/meta/hp2", where the Makefile looks for them; tools/build_cia.ps1
@@ -300,9 +309,15 @@ def dither(rgba, bits):
 
 
 def swizzle(rgba, fmt):
-    """RGBA uint8 (h, w, 4), top row first -> PICA tiled texels, bottom first."""
+    """RGBA uint8 (h, w, 4), top row first -> PICA tiled texels, top first.
+
+    The HOME Menu samples the first stored row at t = 1, so the image is
+    stored as it is and the UVs run from v = 0 at its bottom to 1 at its
+    top. That is how bannertool's own banner.cgfx stores its picture; a
+    3DS show of the banner with the rows flipped had every picture upside
+    down."""
     rgba = dither(rgba, 5 if fmt == TEX_RGBA5551 else 4)
-    img = rgba[::-1].astype(np.uint32)
+    img = rgba.astype(np.uint32)
     h, w = img.shape[:2]
     r, g, b, a = img[..., 0], img[..., 1], img[..., 2], img[..., 3]
     if fmt == TEX_RGBA5551:
@@ -446,30 +461,14 @@ def bone_node(name, flags, joint, parent):
     return Node([("str", name), ("I", flags), ("i", joint), ("i", parent)], "BONE")
 
 
-def finish_bone(node, parent, child, prev, nxt):
+BILLBOARD_OFF, BILLBOARD_Y = 0, 5          # 5: YAxial, turned about Y to face the camera
+
+
+def finish_bone(node, parent, child, prev, nxt, billboard):
     node.__init__(node.fields + [("ref", parent), ("ref", child), ("ref", prev), ("ref", nxt),
                                  ("vec", [1, 1, 1]), ("vec", [0, 0, 0]), ("vec", [0, 0, 0]),
                                  ("vec", IDENTITY34), ("vec", IDENTITY34),
-                                 ("vec", IDENTITY34), ("i", 0), ("x", 8)], "BONE")
-
-
-def float_curve(frames, keys):
-    seg = Node([("f", 0.0), ("f", float(frames)), ("i", 1 << 2 | 6 << 5),   # linear, 64-bit keys
-                ("i", len(keys)), ("f", 1.0 / frames)]
-               + [x for f, v in keys for x in (("f", float(f)), ("f", float(v)))], "SEGMENT")
-    return Node([("f", 0.0), ("f", float(frames)), ("b", 0), ("b", 0), ("x", 2), ("i", 0),
-                 ("i", 1), ("ptr", seg)], "CURVE")
-
-
-def spin_animation(bone, frames, keys):
-    ignore = 0x10000 | 0x20000 | 0x40000 | 0x80000 | 0x200000 | 0x800000 | 0x1000000 | 0x2000000
-    member = Node([("i", ignore), ("str", bone), ("str", ""), ("str", ""), ("i", 5),
-                   ("i", 0), ("i", 0), ("i", 0),                 # scale
-                   ("i", 0), ("ptr", float_curve(frames, keys)), ("i", 0), ("x", 4),   # rot
-                   ("i", 0), ("i", 0), ("i", 0)], "CANMBONE")     # position
-    return Node([("sig", b"CANM"), ("i", 0x05000000), ("str", "COMMON"),
-                 ("str", "SkeletalAnimation"), ("i", 1), ("f", float(frames)),
-                 ("dict", [(bone, member)]), ("dict", [])], "CANM")
+                                 ("vec", IDENTITY34), ("i", billboard), ("x", 8)], "BONE")
 
 
 def build_cgfx(scene):
@@ -485,20 +484,22 @@ def build_cgfx(scene):
     for i, m in enumerate(scene["meshes"]):
         mats.append((m["material"], material(m["material"], tex[m["texture"]], m["cutout"])))
         shapes.append(shape(m["name"], (m["pos"], m["uv"]), m["indices"], m["bone"]))
+        bone_name = scene["bones"][m["bone"]][0]          # the mesh node it hangs from
         meshes.append(Node([("I", 0x1000000), ("sig", b"SOBJ"), ("i", 0), ("str", m["name"]),
                             ("dict", []), ("i", i), ("i", i), ("ref", cmdl), ("?", True),
-                            ("B", 0), ("H", 65535), ("x", 72), ("str", "")], "MESH"))
+                            ("B", 0), ("H", 65535), ("x", 72), ("str", bone_name)], "MESH"))
 
-    bones = [bone_node(n, f, j, p) for j, (n, f, p) in enumerate(scene["bones"])]
+    bones = [bone_node(n, f, j, p) for j, (n, f, p, _) in enumerate(scene["bones"])]
+    bb = [b for _, _, _, b in scene["bones"]]
     root = bones[0]
     kids = bones[1:]
-    finish_bone(root, None, kids[0], None, None)
+    finish_bone(root, None, kids[0], None, None, bb[0])
     for k, b in enumerate(kids):
         finish_bone(b, root, None, kids[k - 1] if k else None,
-                    kids[k + 1] if k + 1 < len(kids) else None)
+                    kids[k + 1] if k + 1 < len(kids) else None, bb[k + 1])
     skeleton = Node([("I", 0x2000000), ("sig", b"SOBJ"), ("i", 0), ("str", ""), ("dict", []),
-                     ("dict", [(n, b) for (n, _, _), b in zip(scene["bones"], bones)]),
-                     ("ref", root), ("i", 0), ("i", 0)], "SKELETON")
+                     ("dict", [(n, b) for (n, _, _, _), b in zip(scene["bones"], bones)]),
+                     ("ref", root), ("i", 0), ("i", 2)], "SKELETON")   # flags as the template's
 
     def group(name, flags, mtype, members, blendops, timing):
         return (name, Node([("I", 0x80000000), ("i", flags), ("str", name), ("i", mtype),
@@ -506,7 +507,7 @@ def build_cgfx(scene):
 
     skel_members = [(n, Node([("I", 0x40000000), ("str", n), ("str", n), ("str", None),
                               ("i", 0), ("i", 0), ("i", 0), ("i", 0), ("i", 0), ("x", 4),
-                              ("str", n), ("i", 0)], "MEMBER")) for n, _, _ in scene["bones"]]
+                              ("str", n), ("i", 0)], "MEMBER")) for n, _, _, _ in scene["bones"]]
     vis_members = [("IsVisible", Node([("I", 0x10000000), ("str", "IsVisible"), ("str", None),
                                        ("str", None), ("i", 212), ("i", 1), ("i", 0), ("i", 6),
                                        ("i", 1), ("x", 4), ("i", 0)], "MEMBER"))]
@@ -527,8 +528,10 @@ def build_cgfx(scene):
                    ("list", meshes), ("dict", mats), ("list", shapes), ("dict", []),
                    ("i", 1), ("i", 0), ("i", 0), ("ptr", skeleton)], "CMDL")
 
-    anim = spin_animation(*scene["spin"])
-    dicts = [[("COMMON", cmdl)], textures] + [[]] * 7 + [[("COMMON", anim)]] + [[]] * 5
+    # No animation: the HOME Menu turns every banner model about Y on its own
+    # (seen on a 3DS), which spins the badge, and the background bone's
+    # billboard keeps the background facing the camera through it.
+    dicts = [[("COMMON", cmdl)], textures] + [[]] * 13
     data = Node([("sig", b"DATA"), ("i", 0)] + [("dict", d) for d in dicts], "DATA")
     return write_cgfx(data)
 
@@ -759,12 +762,17 @@ CAP_H = 112                  # front cap rows 0..111, back cap 112..223
 STRIP_Y = 224                # wall gradient strip rows 224..255
 BACK_W, BACK_H = 256, 128
 
-LETTER_WIDTH = 30.0          # world units across the letters (~300 px on screen)
+LETTER_WIDTH = 26.0          # world units across the letters (~260 px on screen)
 THICK = 1.0                  # badge depth
-LETTER_Y = 0.5               # world y of the letters' centre
-BACK_Z = -16.0               # behind the circle the spinning letters sweep
-BACK_MARGIN = 1.12           # the background overshoots the screen, for the 3D slider
-SPIN_FRAMES, SPIN_START, SPIN_END = 240, 60, 150
+LETTER_Y = CAMERA_Y          # world y of the letters' centre: mid-screen
+BACK_Z = -16.0               # behind the circle the turning letters sweep
+# The background is an oval plate with a steel rim. On a 3DS the HOME Menu
+# showed nothing of the banner outside an oval about 93% x 81% of the top
+# screen, so the plate stays well inside that: half-axes in z = 0 units (the
+# screen is 40 x 24), centred mid-screen.
+OVAL_A, OVAL_B = 16.0, 7.4   # 80% x 62% of the screen
+OVAL_RIM = 0.45              # the steel rim's width
+OVAL_SIDES = 96
 LIGHT = np.array([-0.4, 0.7, 0.6]) / np.linalg.norm([-0.4, 0.7, 0.6])
 
 
@@ -887,21 +895,16 @@ def build_scene(logo):
 
     back, back_mesh = build_background(logo, mask, src_to_world)
 
-    # one ease-in/out turn, then rest; 0 and 2 pi are the same pose, so it loops
-    keys = [(0, 0.0), (SPIN_START, 0.0)]
-    for fr in range(SPIN_START + 3, SPIN_END, 3):
-        t = (fr - SPIN_START) / (SPIN_END - SPIN_START)
-        keys.append((fr, math.pi * (1 - math.cos(math.pi * t))))
-    keys += [(SPIN_END, 2 * math.pi), (SPIN_FRAMES, 2 * math.pi)]
-
-    rest = B_RENDER | B_LOCAL | B_WORLD | B_T0 | B_S1 | B_UNIFORM
+    # The HOME Menu turns the whole model about Y (once every ~10 s on a 3DS),
+    # which is the badge's spin. The background's bone is a YAxial billboard
+    # at identity, so it keeps facing the camera behind the turning letters.
+    ident = B_RENDER | B_LOCAL | B_WORLD | B_T0 | B_R0 | B_S1 | B_UNIFORM | B_IDENTITY
     return {
         "textures": [("COMMON1", atlas, TEX_RGBA5551), ("COMMON2", back, TEX_RGBA5551)],
         "meshes": [logo_mesh, back_mesh],
-        "bones": [("root", B_IDENTITY | B_RENDER, -1),
-                  ("logo", rest, 0),                       # spins, so not flagged identity
-                  ("back", rest | B_R0 | B_IDENTITY, 0)],
-        "spin": ("logo", SPIN_FRAMES, keys),
+        "bones": [("root", B_IDENTITY | B_RENDER, -1, BILLBOARD_OFF),
+                  ("logo", ident, 0, BILLBOARD_OFF),
+                  ("back", ident, 0, BILLBOARD_Y)],
         "stats": {"loops": len(loops), "wall_quads": nsegs, "verts": len(pos),
                   "bad_normals": bad_normals},
         "mask": mask,
@@ -909,17 +912,20 @@ def build_scene(logo):
 
 
 def build_background(logo, mask, src_to_world):
-    """The night behind the badge: a dark gradient lit by the light bar's blue
-    and red, faint speed streaks, and the logo's own glow (its letters
-    inpainted away) composited where it sits behind the letters at rest."""
+    """The plate behind the badge: an oval of night lit by the light bar's
+    blue and red, faint speed streaks and the logo's own glow (its letters
+    inpainted away, blurred to a soft light the letters turn in front of),
+    ringed with a steel rim. The oval is a polygon at BACK_Z, scaled to show
+    the size it would at z = 0; the texture covers its bounding box."""
     hole = gauss_blur(mask.astype(float), 1.0) > 0.05
     glow = inpaint(logo.astype(float), hole)
     bright = glow[..., :3].max(-1)
     glow[..., 3] *= np.clip((bright - 20) / 150.0, 0, 1) ** 0.8 * 0.9
-    glow = gauss_blur(glow, 0.5)
+    glow = gauss_blur(glow, 1.5)
 
-    # texel centres -> the z = 0 plane the camera frames (40 x 24 units)
-    hx, hy = 20.0 * BACK_MARGIN, 12.0 * BACK_MARGIN
+    # texel centres -> the z = 0 plane, the oval with 1.5 texels to spare
+    hx = OVAL_A * (1 + 3.0 / BACK_W)
+    hy = OVAL_B * (1 + 3.0 / BACK_H)
     X = -hx + (np.arange(BACK_W) + 0.5) / BACK_W * 2 * hx
     Y = CAMERA_Y + hy - (np.arange(BACK_H) + 0.5) / BACK_H * 2 * hy
     X, Y = np.meshgrid(X, Y)
@@ -931,22 +937,28 @@ def build_background(logo, mask, src_to_world):
         cx, cy = src_to_world(u, v)
         d2 = ((X - cx) / radius) ** 2 + ((Y - cy) / (radius * 0.7)) ** 2
         return np.exp(-d2)[..., None] * np.array(rgb) * gain
-    img += wash(118, 20, (40, 80, 230), 13.0, 0.38)        # blue, left
-    img += wash(204, 20, (230, 40, 34), 13.0, 0.38)        # red, right
+    img += wash(118, 20, (40, 80, 230), 11.0, 0.42)        # blue, left
+    img += wash(204, 20, (230, 40, 34), 11.0, 0.42)        # red, right
 
     rng = np.random.default_rng(2)                          # fixed: same banner each build
-    for _ in range(16):
-        y0 = rng.uniform(CAMERA_Y - hy * 0.9, CAMERA_Y + hy * 0.9)
+    for _ in range(14):
+        y0 = rng.uniform(CAMERA_Y - hy * 0.8, CAMERA_Y + hy * 0.8)
         x0 = rng.uniform(-hx, hx)
-        length = rng.uniform(8, 22)
+        length = rng.uniform(6, 16)
         col = np.array((70, 120, 255) if rng.random() < 0.5 else (255, 70, 60))
         gain = rng.uniform(0.10, 0.22)
-        across = np.exp(-((Y - y0) / 0.18) ** 2)
+        across = np.exp(-((Y - y0) / 0.16) ** 2)
         along = np.clip(1 - np.abs(X - x0) / (length / 2), 0, 1) ** 1.5
         img += (across * along)[..., None] * col * gain
 
-    r = np.hypot(X / hx, (Y - CAMERA_Y) / hy)
-    img *= np.clip(1.15 - 0.45 * r ** 2, 0.35, 1)[..., None]
+    # distance to the oval's edge (negative inside) and the outward normal
+    dx, dy = X, Y - CAMERA_Y
+    re = np.hypot(dx / OVAL_A, dy / OVAL_B)
+    gx, gy = dx / OVAL_A ** 2, dy / OVAL_B ** 2
+    gn = np.maximum(np.hypot(gx, gy), 1e-9)
+    dist = (re - 1) * re / gn
+    nx, ny = gx / gn, gy / gn
+    img *= np.clip(1.12 - 0.5 * re ** 2, 0.4, 1)[..., None]
 
     # composite the glow, premultiplied, bilinear from the logo's pixels
     x0w, y0w = src_to_world(0, 0)
@@ -964,17 +976,37 @@ def build_background(logo, mask, src_to_world):
          + pm[v0 + 1, u0] * (1 - fu) * fv + pm[v0 + 1, u0 + 1] * fu * fv)
     img = img * (1 - g[..., 3:4] / 255.0) + g[..., :3]
 
+    # the rim's shadow on the plate, then the rim: a rounded steel bead lit
+    # from the top left, its outer half facing out and its inner half in,
+    # with a dark seam where it meets the plate. Texels past the edge take
+    # the rim's colour, so filtering at the cut does not pull in black.
+    shadow = np.clip((-dist - OVAL_RIM) / 0.7, 0, 1)
+    img *= (0.55 + 0.45 * shadow)[..., None]
+    s = np.clip(-dist / OVAL_RIM, 0, 1)                     # 0 outer edge .. 1 inner
+    light = np.array([-0.55, 0.83])
+    facing = np.cos(math.pi * s) * (nx * light[0] + ny * light[1])
+    lit = 0.52 + 0.42 * facing + 0.12 * np.sin(math.pi * s)
+    rim = steel(lit, np.zeros_like(lit)) * np.where(s > 0.82, 0.5, 1.0)[..., None]
+    img = np.where((dist > -OVAL_RIM)[..., None], rim, img)
+
     back = np.zeros((BACK_H, BACK_W, 4), np.uint8)
     back[..., :3] = np.clip(np.round(img), 0, 255)
     back[..., 3] = 255
 
+    # the oval itself is geometry, a fan of OVAL_SIDES: a 1-bit alpha cut
+    # left texel steps on its flat top and bottom
     f = (CAMERA_Z - BACK_Z) / CAMERA_Z                     # same size on screen at depth
-    pos = [(x * hx * f, CAMERA_Y + y * hy * f, BACK_Z) for x, y in
-           ((-1, 1), (1, 1), (1, -1), (-1, -1))]
-    uvs = [(0, 1), (1, 1), (1, 0), (0, 0)]
+    ring = [(OVAL_A * math.cos(a), OVAL_B * math.sin(a))
+            for a in np.arange(OVAL_SIDES) * 2 * math.pi / OVAL_SIDES]
+    pts = [(0.0, 0.0)] + ring
+    pos = [(x * f, CAMERA_Y + y * f, BACK_Z) for x, y in pts]
+    uvs = [((x / hx + 1) / 2, (y / hy + 1) / 2) for x, y in pts]
+    idx = []
+    for i in range(OVAL_SIDES):                            # counter-clockwise from the front
+        idx += [0, 1 + i, 1 + (i + 1) % OVAL_SIDES]
     mesh = {"name": "back", "material": "mt_back", "texture": "COMMON2",
             "cutout": False, "bone": 2,
-            "pos": np.array(pos), "uv": np.array(uvs), "indices": [0, 3, 2, 0, 2, 1]}
+            "pos": np.array(pos), "uv": np.array(uvs), "indices": idx}
     return back, mesh
 
 
@@ -1028,11 +1060,26 @@ SIREN = "CopSiren01"         # INGAME bank: the pursuit wail, a 5.3 s loop
 SIREN_FROM = 5.0             # its lowest pitch (~620 Hz), just before the loop point
 SIREN_SECONDS = 2.9          # the HOME Menu plays at most ~3 s
 SIREN_FADE = 0.45            # out as the wail tips over its top (~1440 Hz)
+# The HOME Menu plays a mono banner sound as its default chime instead (seen
+# on a 3DS); stereo 16-bit at 32 kHz is the format of a banner sound that
+# plays on the user's 3DS.
+SOUND_RATE = 32000
+
+
+def resample(x, n_out):
+    """Band-limited resample by zero-padding the spectrum. The clip starts and
+    ends faded to silence, so treating it as periodic adds no click."""
+    spec = np.fft.rfft(x)
+    out = np.zeros(n_out // 2 + 1, complex)
+    k = min(len(spec), len(out))
+    out[:k] = spec[:k]
+    return np.fft.irfft(out, n_out) * (n_out / len(x))
 
 
 def build_sound(retail):
     """One rising wail of the game's own siren: from the bottom of the loop,
-    through the loop point, up to the top, faded as it starts to fall."""
+    through the loop point, up to the top, faded as it starts to fall.
+    Returns the rate and (n, 2) int16 frames, the same in both channels."""
     bank = audio_convert.read_bank(Path(retail) / "SOUND" / "INGAME.MSH")
     patch = next(p for p in bank if p["name"] == SIREN)
     pcm, loop_start, loop_end = audio_convert.decode_adpcm(patch["data"])
@@ -1046,17 +1093,18 @@ def build_sound(retail):
     fout = int(SIREN_FADE * rate)
     env[:fin] = np.linspace(0, 1, fin)
     env[n - fout:] = 0.5 + 0.5 * np.cos(np.linspace(0, math.pi, fout))
-    clip *= env
+    clip = resample(clip * env, int(round(n * SOUND_RATE / rate)))
     clip *= 0.8 * 32767 / np.abs(clip).max()
-    return rate, np.round(clip).astype("<i2")
+    mono = np.round(clip).astype("<i2")
+    return SOUND_RATE, np.stack([mono, mono], 1)
 
 
-def write_wav(path, rate, pcm):
+def write_wav(path, rate, frames):
     with wave.open(str(path), "wb") as w:
-        w.setnchannels(1)
+        w.setnchannels(frames.shape[1])
         w.setsampwidth(2)
         w.setframerate(rate)
-        w.writeframes(pcm.tobytes())
+        w.writeframes(np.ascontiguousarray(frames, "<i2").tobytes())
 
 
 # --------------------------------------------------------------------------
@@ -1083,7 +1131,8 @@ def main():
           "%d edges failing the inside check" % (len(cgfx), st["loops"], st["wall_quads"], st["verts"],
                                   st["bad_normals"]))
     print("icon.png 48x48")
-    print("banner.wav %.2f s of %s at %d Hz" % (len(pcm) / rate, SIREN, rate))
+    print("banner.wav %.2f s of %s at %d Hz, %d channels" % (len(pcm) / rate, SIREN, rate,
+                                                              pcm.shape[1]))
 
 
 if __name__ == "__main__":

@@ -36,8 +36,16 @@ INCLUDES	:=	include
 ROMFS		:=
 
 APP_TITLE		:= Need for Speed: Hot Pursuit 2
-APP_DESCRIPTION	:= Need for Speed: Hot Pursuit 2, an unofficial New 3DS port
-APP_AUTHOR		:= NFSHP2-3DS project
+# No description of its own: the HOME Menu's bubble shows the title and the
+# author.
+APP_DESCRIPTION	:= $(APP_TITLE)
+APP_AUTHOR		:= Octoblimp
+# The title version, which FBI and the HOME Menu show: makerom's -ver packs
+# it as major << 10 | minor << 4 | micro. A new version also makes the HOME
+# Menu read the icon and titles again instead of its cached ones.
+APP_VERSION_MAJOR	:= 1
+APP_VERSION_MINOR	:= 0
+APP_VERSION_MICRO	:= 0
 
 # The HOME Menu banner (the logo as a spinning 3D badge), its sound (the
 # game's siren) and the icon are made from the retail files by
@@ -200,6 +208,7 @@ cia: all
 	@"$(BANNERTOOL)" makebanner $(BANNER_ART) -o meta/banner.bnr
 	@"$(BANNERTOOL)" makesmdh -s "$(APP_TITLE)" -l "$(APP_DESCRIPTION)" -p "$(APP_AUTHOR)" -i $(BANNER_ICON) -o meta/icon.icn
 	@"$(MAKEROM)" -f cia -o "$(TARGET).cia" -DAPP_ENCRYPTED=false -target t \
+		-ver $$(( ($(APP_VERSION_MAJOR) << 10) | ($(APP_VERSION_MINOR) << 4) | $(APP_VERSION_MICRO) )) \
 		-elf "$(BUILD)/$(TARGET).elf" -icon meta/icon.icn -banner meta/banner.bnr \
 		-rsf meta/app.rsf
 	@echo built ... $(TARGET).cia

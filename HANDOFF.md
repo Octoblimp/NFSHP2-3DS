@@ -23540,3 +23540,82 @@ Then 37f-3, 37g, TASKS 61, 46, 60 and 59. Still to ask the user: the
 road's blink on the device (TASKS 64), 47's bridge, 52's popups, the
 next device log's `sends:` line for 65, and how the
 `-fno-strict-aliasing` build plays on the device.
+
+## Session 110, continued -- the banner as the user's 3DS showed it, fixed
+
+The user installed the CIA and sent a video of the HOME Menu. The icon
+showed in FBI, but the HOME Menu kept the old one, and the banner was
+"messed up": the logo "mirrored upside down", and the default chime
+played instead of the siren. They asked for the packaging of their
+ZombieOutbreakSim-3DS, whose icon and sound work, as the template, with
+"Octoblimp" as the developer and no description.
+
+### What the video showed, and why
+
+- **Every picture upside down.** The HOME Menu samples the first stored
+  texel row at v = 1. bannertool's own banner.cgfx stores its picture
+  top row first, but make_banner stored it bottom first. So the caps
+  sampled the atlas's bottom (the steel strip), and the walls sampled
+  logo texels.
+- **The whole model turning,** the background with it, at an even rate,
+  about once in 10 s, and none of the CANM's rests. The HOME Menu turns
+  every banner model about Y by itself; the GBAtemp guide below says the
+  same. A part that should keep facing the camera sits on a YAxial
+  billboard bone (mode 5) at identity, like the one bone of bannertool's
+  template.
+- **Nothing outside an oval** about 93% x 81% of the top screen. It was
+  the same size with the plate at the back or swung round to the front,
+  so it does not come from depth. It is a mask of the HOME Menu's; its
+  cause is not known.
+- **The default chime:** the WAV was mono. Zombie's sound, which plays,
+  is stereo, 16-bit, 32 kHz.
+- **The old icon,** and "NFS Hot Pursuit 2 port skeleton / NFSHP2-3DS
+  project" in the bubble: the HOME Menu's cache for the title ID. FBI
+  shows the CIA's own SMDH.
+
+The guide is "How to Make a 3D Banner Like an Official Nintendo 3DS
+Game" (gbatemp.net/threads/683412); its reference is the ClouDS Music
+FA repository (github.com/Epic0522/ClouDS-Music-FA). Both were read
+only, none of their code run.
+
+### What changed
+
+`tools/make_banner.py`:
+- Textures are stored top row first.
+- No CANM: the HOME Menu's turn is the spin.
+- The background is an oval plate with a steel rim: a 96-sided fan, 80%
+  x 62% of the screen, inside the mask. It is on bone "back" with
+  billboard 5.
+- Each mesh names its bone (the mesh node name), and the skeleton's
+  flags are the template's (2).
+- The letters are 26 units wide, centred on the screen.
+- The siren is resampled to 32 kHz (zero-padded spectrum) and written
+  stereo.
+
+`3DS Files/Makefile`:
+- APP_AUTHOR is Octoblimp, and APP_DESCRIPTION is the title.
+- The version is 1.0.0, set through makerom's `-ver` as in Zombie's
+  Makefile. It was 0.
+
+### Checks
+
+- The scratch reader now samples the first row at v = 1, and it turns
+  the model about every bone except the YAxial one. Over a whole turn
+  it draws no pixel outside the oval. `out/banner/banner_turn.gif` is
+  one turn of 10 s.
+- bannertool's output, read back:
+  - the CGFX is byte for byte make_banner's (396,544 bytes, 180,000
+    packed);
+  - the CWAV is PCM16, 32 kHz, 2 channels, 2.90 s;
+  - the SMDH has the title as both short and long title, publisher
+    Octoblimp, flags 0x105.
+- The CIA's title version is 1024 (1.0.0). check_3dsx and check_shbin
+  pass.
+- Not yet seen on a 3DS.
+
+For the install: delete the old title in FBI first, then install the
+CIA. The saves are on `sdmc:/NFSHP2/SAVES`, not in the title.
+
+### Next
+
+The user's look on their 3DS. Then 37f-3, 37g, TASKS 61, 46, 60 and 59.

@@ -3490,9 +3490,16 @@ phases.
         files into `3DS Files/meta/hp2` (git-ignored); build_cia.ps1
         runs it and the Makefile packs it, or the placeholder without
         it. HANDOFF.md Session 110.
-        - [ ] The user's look on their 3DS: the banner shows and turns,
-          the siren plays, the icon and title look right. Not on
-          Azahar and not from a NAND, the user's word (2026-10-15).
+        - [x] The user's first look (a video, 2026-10-15): every picture
+          upside down, the background turning with the badge, the
+          default chime, and the HOME Menu's cached icon. Fixed:
+          textures top row first, the background on a billboard, a
+          stereo WAV, publisher Octoblimp, no description, version
+          1.0.0. Session 110, continued.
+        - [ ] The user's next look on their 3DS, after deleting the old
+          title in FBI: the badge turns in front of the still oval, the
+          siren plays, the icon and title are new. Not on Azahar and
+          not from a NAND, the user's word (2026-10-15).
 
 ### The retail frontend
 
