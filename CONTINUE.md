@@ -110,6 +110,13 @@ on the 15.5 FPS of an earlier run: that was the fire on track 11, and
 TASKS 46 must reach a steady 30 there and in every place like it.
 Next: TASKS 37 (multi-card multiplayer).**
 
+**Now (Session 105, later): TASKS 65's slow second (world 186 s) was
+every stage with a mid-frame GPU send about 10 ms longer. The sends now
+flush the linear heap by the kernel's own call, not a request to GSP
+(`hangwatch.c` `flush_heap`, `app.rsf`), and are timed on a `sends:`
+line. Unverified on the device. Next: 37f, then 37g, TASKS 61, 46, 60
+and 59.**
+
 **Now (Session 105, 2026-10-14): TASKS 64's dark line down the
 mirror's right edge is fixed (the mask's column 0). The road's blink at
 track 31's cone corner was not found from the log and the data; the

@@ -59,6 +59,12 @@
 // FrameProfDraw.cars, carrenderinfo_render's and trackview's. Its line
 // follows the models'.
 //
+// The sends, hangwatch_gpu_send's parts of the frame handed to the GPU,
+// are timed too (TASKS 65): the linear heap's flush and the GX queue's
+// add and run, apart, and the longest single send. The device's slow
+// second at world 186 s had every stage with a send in it 10 ms long
+// and the rest as before. Their line follows the cars'.
+//
 // A line has the frame rate, the mean frame and the longest, each phase's
 // mean in milliseconds, the draw's stages, the two waits, citro3d's own two
 // times (the CPU's from C3D_FrameBegin to C3D_FrameEnd, and the GPU's), and
@@ -144,6 +150,10 @@ typedef struct FrameProfTicks {
     uint32_t models[3][FRAMEPROF_M_COUNT];  // the view's, the envmap's,
                                             // the mirror's
     uint32_t cars[FRAMEPROF_C_COUNT];
+    uint32_t sends;             // hangwatch_gpu_send's parts sent
+    uint32_t sendFlush;         // EE ticks in their flushes
+    uint32_t sendQueue;         // and in the GX queue's add and run
+    uint32_t sendWorst;         // the longest send, both
 } FrameProfTicks;
 
 extern FrameProfTicks FrameProfDraw;
@@ -170,6 +180,10 @@ typedef struct FrameProf {
     uint64_t jukeboxRead;
     uint64_t models[3][FRAMEPROF_M_COUNT];
     uint64_t cars[FRAMEPROF_C_COUNT];
+    uint64_t sends;
+    uint64_t sendFlush;
+    uint64_t sendQueue;
+    uint32_t sendWorst;                 // EE ticks
     uint32_t worst;                     // the longest frame, EE ticks
     float    c3dCpuMs;                  // summed
     float    c3dGpuMs;
@@ -188,7 +202,7 @@ void frameprof_add(FrameProf *fp, const MainLoopTimingStats *t,
 
 // Once the frames add up to a second: the line into buf, the sums reset,
 // and true. The models' line follows the frame's, after a newline, and
-// the cars' the models'.
+// the cars' the models', and the sends' the cars'.
 bool frameprof_line(FrameProf *fp, char *buf, size_t n);
 
 #endif

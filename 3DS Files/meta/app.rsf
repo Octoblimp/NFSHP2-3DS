@@ -151,6 +151,10 @@ AccessControlInfo:
     DuplicateHandle: 39
     ExitProcess: 3
     ExitThread: 9
+    # 0x54, added in TASKS 65 (2026-10-14): hangwatch.c's sends flush the
+    # linear heap with it themselves rather than through GSP, which makes
+    # the same call for us. A call not in this list ends the app.
+    FlushProcessDataCache: 84
     GetCurrentProcessorNumber: 17
     GetHandleInfo: 41
     GetProcessId: 53

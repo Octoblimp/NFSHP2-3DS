@@ -116,7 +116,9 @@ void hangwatch_gpu_sends_begin(bool on);
 
 // The commands drawn since the last send split off, the linear heap
 // flushed, as C3D_FrameEnd flushes it, and the list run. Nothing when the
-// frame is not sent in parts or nothing was drawn.
+// frame is not sent in parts or nothing was drawn. The flush is the
+// kernel's own call in the CIA, not a request to GSP (TASKS 65,
+// "KernelFlush"), and the send is timed for frameprof's sends line.
 void hangwatch_gpu_send(void);
 
 // Right before C3D_FrameEnd: the rest sent, and no more sends until the

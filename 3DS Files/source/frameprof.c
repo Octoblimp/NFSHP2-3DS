@@ -65,6 +65,11 @@ void frameprof_add(FrameProf *fp, const MainLoopTimingStats *t,
             d->models[s / FRAMEPROF_M_COUNT][s % FRAMEPROF_M_COUNT];
     for (s = 0; s < FRAMEPROF_C_COUNT; s++)
         fp->cars[s] += d->cars[s];
+    fp->sends += d->sends;
+    fp->sendFlush += d->sendFlush;
+    fp->sendQueue += d->sendQueue;
+    if (d->sendWorst > fp->sendWorst)
+        fp->sendWorst = d->sendWorst;
 
     fp->total += frame;
     if (frame > fp->worst)
@@ -152,7 +157,7 @@ bool frameprof_line(FrameProf *fp, char *buf, size_t n)
             len += models_part(fp, 2, buf + len, n - len);
     }
     if (len > 0 && (size_t)len < n)
-        snprintf(buf + len, n - len,
+        len += snprintf(buf + len, n - len,
                  "\ncars: %.1f drawn; setup %.1f, shadows %.1f, body %.1f, "
                  "wheels %.1f, lists %.1f",
                  (double)fp->cars[FRAMEPROF_C_CARS] / fp->frames,
@@ -161,6 +166,15 @@ bool frameprof_line(FrameProf *fp, char *buf, size_t n)
                  mean_ms(fp, fp->cars[FRAMEPROF_C_BODY]),
                  mean_ms(fp, fp->cars[FRAMEPROF_C_WHEELS]),
                  mean_ms(fp, fp->cars[FRAMEPROF_C_LISTS]));
+    // A frame's sends, their flushes' and queue's milliseconds a frame,
+    // and the longest one's (TASKS 65).
+    if (fp->sends != 0 && len > 0 && (size_t)len < n)
+        snprintf(buf + len, n - len,
+                 "\nsends: %.1f a frame; flush %.2f, queue %.2f, "
+                 "worst %.2f",
+                 (double)fp->sends / fp->frames,
+                 mean_ms(fp, fp->sendFlush), mean_ms(fp, fp->sendQueue),
+                 (double)fp->sendWorst / FRAMEPROF_TICKS_PER_MS);
     frameprof_reset(fp);
     return true;
 }

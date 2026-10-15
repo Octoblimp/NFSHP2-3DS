@@ -3347,6 +3347,26 @@ phases.
         while the chopper was busy (plan 4) and 264 flares were asked
         for, 132 drawn. Find what the frame waited on and fix it, as
         TASKS 46's rules say (lossless).
+        - [x] What it waited on, from the log (Session 105): not the
+          draw. Each stage with a mid-frame send in it was about 10 ms
+          longer (mirror, sky, models, bottom), every other stage as
+          before (envmap 2.9, scenery 1.5, cars 3.2, hud 0.9), and the
+          counts as in the seconds around it. The same corner on lap 2
+          and the chopper as close elsewhere were at the usual rate.
+          A send's flush was a request to GSP's thread
+          (`GSPGPU_FlushDataCache`), which makes the kernel's call for
+          us; GSP slow to answer for those 3 s fits.
+        - [x] The sends flush by the kernel's own call
+          (`svcFlushProcessDataCache`, `hangwatch.c` `flush_heap`), the
+          same work with no wait on GSP. `app.rsf` allows it
+          (`FlushProcessDataCache: 84`, checked in the built CIA's
+          exheader). A homebrew launcher's 3DSX still asks GSP; a
+          failed call goes back to GSP for good; "KernelFlush 0" turns
+          it off. Each send is timed: the log's `sends:` line, after
+          the cars' (`frame-profiler.md`, "The sends").
+        - [ ] The next device log: no slow second with the send stages up,
+          and the `sends:` line's flush and worst small. Not run on the
+          device or on Azahar (whose call does no cache work).
 
 ### The retail frontend
 

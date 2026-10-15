@@ -315,3 +315,53 @@ brackets after its words.
 On track 45 at the start, with eight cars in view: setup 0.2, shadows
 4.1, body 3.4, wheels 3.0, lists 7.4 ms. The 143 lit batches wrote 453
 words each, about half the view's 127,676.
+
+## The sends (TASKS 65, Session 105)
+
+Since TASKS 57 a race's frame goes to the GPU in five parts
+(`hangwatch_gpu_send`, `draw-cuts.md`). A send is the split, the
+linear heap's flush, and the list's add to the GX queue and the queue's
+run. The flush and the queue are timed apart, and the `sends:` line
+follows the cars':
+
+    sends: 5.0 a frame; flush 0.12, queue 0.04, worst 0.10
+
+- **a frame:** the parts sent, five in a race.
+- **flush:** the milliseconds a frame in the flushes.
+- **queue:** the milliseconds a frame in `GX_ProcessCommandList` and
+  `gxCmdQueueRun`, which can send GSP its trigger.
+- **worst:** the longest single send in the second, both together.
+
+The send is not in a stage of its own: each is inside the stage it
+ends. Those are mirror (the envmap's), sky (the mirror's), models (its
+own), bottom (the top screen's) and submit (the last).
+
+**Why.** The user's device log of 4988138 (track 31) has one slow
+second at world 186 s, 10.7 FPS after 23.1, then 20.2. The draw was
+70.5 ms where it was about 30: mirror 17.3, sky 13.0, models 15.8 and
+bottom 13.9, each about 10 ms over the seconds either side, and every
+other stage as before (envmap 2.9, scenery 1.5, cars 3.2, hud 0.9).
+Those four are the stages a mid-frame send ends. The models drawn, the
+words, the flares, the effects and the sprites were as in the seconds
+around it. The same corner on lap 2 ran at its usual rate, and the
+helicopter flies as close at other places without a dip. Only submit,
+which holds the last send and `C3D_FrameEnd`'s own flush, stayed at
+0.3 ms.
+
+A send's flush was a GSP request: `GSPGPU_FlushDataCache` asks GSP's
+thread on the system core to call `svcFlushProcessDataCache` on the
+range for us, and waits. Since TASKS 65 a send makes that call itself
+(`hangwatch.c`, `flush_heap`). The kernel's work is the same, on the
+same range, with no wait on GSP's thread. The CIA's exheader allows the
+call (`app.rsf`, `FlushProcessDataCache: 84`, checked in the built CIA's
+ACI and AccessDesc). A 3DSX from a homebrew launcher still asks GSP: its
+host title might not allow the call, and a call not allowed ends the
+app. A failed call goes back to GSP's for good, and says so in the log,
+as does the first send ("gpu sends: the linear heap flushed by the
+kernel"). "KernelFlush 0" asks GSP in the CIA too.
+
+Whether GSP's thread was what the sends waited on is not proven. The
+next device log's `sends:` line says: a slow second with the flush high
+and the kernel doing it would put the wait in the kernel's flush. Azahar
+does no cache work for the call (its `FlushProcessDataCache` returns
+success), so it cannot tell.

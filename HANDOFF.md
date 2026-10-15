@@ -22950,3 +22950,65 @@ The corner is world 57.1 to 62.1 s of `3DS Files/nfshp2_debug.txt`
 TASKS 65 (the FPS dip at world ~186 s), then 37f, 37g, TASKS 61, 46,
 60 and 59. Still to ask: 47's bridge, 52's popups, and the road's
 blink on the device again.
+
+## Session 105, continued -- TASKS 65, the sends' flush by the kernel
+
+The user's other report from 4988138: "there was a minor FPS slowdown
+too at one point, locate that and fix it too". The log's one slow
+second is world 186 s on lap 1 (`3DS Files/nfshp2_debug.txt` lines
+~6902 to 6936): 23.1, 10.7, then 20.2 FPS.
+
+### What the log shows
+
+- In the 10.7 FPS second, mirror 17.3, sky 13.0, models 15.8 and
+  bottom 13.9 ms: each about 10 ms over the seconds either side. Every
+  other stage was as before (envmap 2.9, scenery 1.5, cars 3.2, hud
+  0.9, submit 0.3), and so were the counts (models, words, flares,
+  effects, sprites).
+- Those four are the stages a mid-frame send ends: the envmap's in
+  mirror, the mirror's in sky, the models' own, the top screen's in
+  bottom. Submit holds the last send and `C3D_FrameEnd`'s own flush and
+  stayed at 0.3 ms.
+- The same corner on lap 2 ran at its usual rate. The chopper was 50 m
+  off (plan 4), but it flies as close elsewhere with no dip.
+- A send's flush was `GSPGPU_FlushDataCache`: a request to GSP's thread
+  on the system core, which calls `svcFlushProcessDataCache` on the
+  range for us. GSP slow to answer for 3 s fits; it is not proven.
+- Ruled out on the way: a queued `GX_FlushCacheRegions` (libctru: "This
+  command cannot be queued in a GX command queue"; the queue counts
+  interrupts, and a flush raises none). citro3d's `C3D_FrameEnd` makes
+  the same synchronous GSP request (disassembled `libcitro3dd.a`).
+
+### What changed
+
+- `hangwatch.c`: `flush_heap`, the sends' flush. The CIA calls
+  `svcFlushProcessDataCache(CUR_PROCESS_HANDLE, heap, size)` itself. A
+  3DSX from a homebrew launcher (`envIsHomebrew`) asks GSP, since its
+  host title might not allow the call and a call not allowed ends the
+  app. A failed call goes back to GSP for good. The first send logs
+  which ("gpu sends: the linear heap flushed by the kernel").
+- Each send is timed, the flush and the queue apart: `frameprof`'s new
+  `sends:` line after the cars' (`sends: 5.0 a frame; flush .., queue
+  .., worst ..`).
+- `app.rsf`: `FlushProcessDataCache: 84` in SystemCallAccess.
+- `configitems`: "KernelFlush" (1); "KernelFlush 0" asks GSP in the CIA.
+- `docs/formats/frame-profiler.md`, "The sends"; `draw-cuts.md` and
+  `hangwatch.h` point to it. TASKS 65 has the findings; it stays open
+  for the next device log.
+
+### Checks
+
+- tools/build_cia.ps1: built, relocations OK, 2 shaders each output
+  component written once.
+- The built CIA's exheader (scratchpad `cia_svcs.py`): 53 calls in both
+  the ACI and the AccessDesc, 0x54 among them.
+- The ELF's `hangwatch_gpu_send` passes 0xFFFF8001, `__ctru_linear_heap`
+  and its size to `svc 0x54`.
+- Not run: the device; Azahar (the user's word for TASKS 64, and its
+  `FlushProcessDataCache` does no cache work, so it could not tell).
+
+### Next
+
+37f, 37g, TASKS 61, 46, 60 and 59. Still to ask: the road's blink on
+the device again (TASKS 64), 47's bridge, 52's popups, and the next
+device log's `sends:` line for 65.

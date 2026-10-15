@@ -586,7 +586,9 @@ What was weighed, lossless only:
   the draws to its own target, and each send flushes the linear heap
   after its split (04aa510). Expected at the fire: about 4.4 + 50 ms a frame,
   where it was 23 + 50, so about 18 FPS from 13.8. Not measured on the
-  device yet. "GpuSends 0" sends the frame whole, as before.
+  device yet. "GpuSends 0" sends the frame whole, as before. Since
+  TASKS 65 a send flushes by the kernel's own call, not by a request to
+  GSP, and is timed (`frame-profiler.md`, "The sends").
 - **The smoke's fill.** The sprites are fill-bound (25 µs each, four
   vertices). A quad cut to its texture's non-zero alpha, over every mip
   level and with the filter's texel of margin, would draw the same

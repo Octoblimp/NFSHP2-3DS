@@ -10,6 +10,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "bticker.h"
+#include "configitems.h"
+#include "frameprof.h"
 #include "georender.h"
 #include "logwriter.h"
 
@@ -670,6 +673,42 @@ void hangwatch_gpu_frame_end(void)
 
 static bool s_sendsOn;     // this frame goes to the GPU in parts
 
+// How a send flushes the linear heap (TASKS 65): 0 not yet chosen, 1 the
+// kernel's svcFlushProcessDataCache from this thread, 2 GSP's
+// FlushDataCache. GSP's is a request to GSP's own thread on the system
+// core, which then makes the same kernel call on our range: a send waited
+// on that thread too. In the device's slow second (world 186 s, 10.7 FPS)
+// the four stages a send ends were each 10 ms longer, the rest as before.
+// The kernel's call does the same flush with no request: the CIA's
+// exheader allows it (app.rsf, FlushProcessDataCache), a 3DSX's host
+// title might not, and calling a call not allowed ends the app, so a 3DSX
+// from a homebrew launcher keeps GSP's. A failed kernel call, or
+// "KernelFlush 0", goes back to GSP's.
+static int s_flushBy;
+
+static void flush_heap(void)
+{
+    if (s_flushBy == 0) {
+        s_flushBy = ConfigKernelFlush && !envIsHomebrew() ? 1 : 2;
+        if (s_log)
+            s_log("gpu sends: the linear heap flushed by %s",
+                  s_flushBy == 1 ? "the kernel" : "GSP");
+    }
+    if (s_flushBy == 1) {
+        Result r = svcFlushProcessDataCache(CUR_PROCESS_HANDLE,
+                                            __ctru_linear_heap,
+                                            __ctru_linear_heap_size);
+
+        if (R_SUCCEEDED(r)) return;
+        s_flushBy = 2;
+        if (s_log)
+            s_log("gpu sends: the kernel's flush failed (%08lx), GSP's "
+                  "from now on", (unsigned long)r);
+    }
+    GSPGPU_FlushDataCache((const void *)__ctru_linear_heap,
+                          __ctru_linear_heap_size);
+}
+
 void hangwatch_gpu_sends_begin(bool on)
 {
     s_sendsOn = on && !s_timing;
@@ -677,17 +716,25 @@ void hangwatch_gpu_sends_begin(bool on)
 
 void hangwatch_gpu_send(void)
 {
-    u32 *list, words;
+    u32     *list, words;
+    uint32_t t0, t1, t2;
 
     if (!s_sendsOn || !C3Di_SplitFrame(&list, &words)) return;
     // The flush after the split, as time_stage has it: the split writes
     // the list's FINALIZE. All the heap, for the vertices written since.
-    GSPGPU_FlushDataCache((const void *)__ctru_linear_heap,
-                          __ctru_linear_heap_size);
+    t0 = bGetTicker();
+    flush_heap();
+    t1 = bGetTicker();
     // Into the queue, and the queue run: the GPU starts on it now, or once
     // the last part is done.
     GX_ProcessCommandList(list, words * 4, 0);
     gxCmdQueueRun(queue());
+    t2 = bGetTicker();
+    FrameProfDraw.sends++;
+    FrameProfDraw.sendFlush += t1 - t0;
+    FrameProfDraw.sendQueue += t2 - t1;
+    if (t2 - t0 > FrameProfDraw.sendWorst)
+        FrameProfDraw.sendWorst = t2 - t0;
 }
 
 void hangwatch_gpu_sends_end(void)

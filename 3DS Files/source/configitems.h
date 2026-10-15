@@ -79,6 +79,13 @@ extern int32_t ConfigDebugLog;              // 0
 // ever stop with it.
 extern int32_t ConfigGpuSends;              // 1
 
+// The port's own: each of those sends flushes the linear heap by the
+// kernel's svcFlushProcessDataCache, not by a request to GSP that makes
+// the same call (hangwatch.c, flush_heap; TASKS 65, 2026-10-14). A 3DSX
+// from a homebrew launcher always asks GSP. "KernelFlush 0" asks GSP in
+// the CIA too.
+extern int32_t ConfigKernelFlush;           // 1
+
 // The port's own: "ClusterCull 0" draws every batch whole, as before the
 // clusters (geocull.h), for a timing run to compare (2026-10-12).
 extern int32_t ConfigClusterCull;           // 1
