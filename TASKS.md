@@ -3496,10 +3496,10 @@ phases.
           textures top row first, the background on a billboard, a
           stereo WAV, publisher Octoblimp, no description, version
           1.0.0. Session 110, continued.
-        - [ ] The user's next look on their 3DS, after deleting the old
-          title in FBI: the badge turns in front of the still oval, the
-          siren plays, the icon and title are new. Not on Azahar and
-          not from a NAND, the user's word (2026-10-15).
+        - [x] The user's next look on their 3DS, after deleting the old
+          title in FBI: "It worked perfectly!" (2026-10-15). The badge
+          turns in front of the still oval, the siren plays, the icon
+          and title are new.
 
 ### The retail frontend
 

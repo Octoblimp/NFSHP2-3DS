@@ -119,9 +119,9 @@ Files/meta/hp2`; build_cia.ps1 runs it). The user's 3DS showed the
 first version with every picture upside down, the background turning
 with the badge and the default chime. Fixed: textures top row first, a
 billboard background, a stereo sound, publisher Octoblimp, version
-1.0.0. Waiting on the user's next look; they test the CIA on their 3DS
-(no NAND, no Azahar for the banner, their word). Next: 37f-3, 37g,
-TASKS 61, 46, 60 and 59. See HANDOFF.md's Session 110, continued.**
+1.0.0. The user's second look on their 3DS: "It worked perfectly!"
+TASKS 66 is done. Next: 37f-3, 37g, TASKS 61, 46, 60 and 59. See
+HANDOFF.md's Session 110, continued.**
 
 **Now (Session 109, 2026-10-15): the second race of a wireless Next
 Race draws its track again. The race's view no longer keeps a 3.1 MB

@@ -23619,3 +23619,6 @@ CIA. The saves are on `sdmc:/NFSHP2/SAVES`, not in the title.
 ### Next
 
 The user's look on their 3DS. Then 37f-3, 37g, TASKS 61, 46, 60 and 59.
+
+The user's second look, after deleting the old title in FBI: "It worked
+perfectly!" (2026-10-15). TASKS 66 is done; 37f-3 is next.
