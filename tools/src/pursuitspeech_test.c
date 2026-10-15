@@ -55,6 +55,7 @@ tCopManager     *pCopManager;
 RaceParameters   TheRaceParameters;
 RaceCoordinator *pRaceCoordinator;
 uint32_t         bDefaultSeed;
+uint32_t*        bViewSeed = &bDefaultSeed;
 int32_t        (*gCurrLanguageFn)(void);
 
 static tCopManager     mgr;

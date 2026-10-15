@@ -788,7 +788,7 @@ static int32_t chases_player(const tPursuit *p)
 
 void copmanager_set_next_speech_filler_gap(tCopManager *m)
 {
-    m->MaxSpeechGapTime = bRandomF(3.0f, &bDefaultSeed) + 9.0f;
+    m->MaxSpeechGapTime = bRandomF(3.0f, bViewSeed) + 9.0f;
     if (TheRaceParameters.BeACop != 0)
         m->MaxSpeechGapTime = m->MaxSpeechGapTime + 4.0f;
 }

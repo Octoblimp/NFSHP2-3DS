@@ -156,8 +156,8 @@ TrackCarCameraMover *track_car_camera_mover_init(
     c->duration = TRACK_CAR_FOCAL_TIME;
     // The focal cubic's start, then its seek to 0: SetVal and Seek,
     // inlined, each asking for a rebuild if the value moved.
-    r = bRandomI(19, &bDefaultSeed) + 26;
-    if (bRandomI(2, &bDefaultSeed) != 0)
+    r = bRandomI(19, bViewSeed) + 26;
+    if (bRandomI(2, bViewSeed) != 0)
         r = -r;
     c->val = (float)r;
     if (c->val != c->valDesired)

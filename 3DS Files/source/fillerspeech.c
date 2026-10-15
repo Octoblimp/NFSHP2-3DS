@@ -124,7 +124,7 @@ static int32_t cop_tactic_misc_ok(const tPursuit *p)
 
 static void cop_tactic_misc_speak(tPursuit *p)
 {
-    if (bRandomI(2, &bDefaultSeed) == 0)
+    if (bRandomI(2, bViewSeed) == 0)
         speechmgr_raise_tactic_divert(speechmgr_get_instance(),
                                       tpursuit_get_cop_speaker(p));
     else
@@ -223,7 +223,7 @@ int32_t try_filler_speech(tPursuit *p, uint32_t *cookie)
     }
     if (total == 0)
         return 0;
-    r = (uint32_t)bRandomI((int32_t)total, &bDefaultSeed);
+    r = (uint32_t)bRandomI((int32_t)total, bViewSeed);
     sum = 0;
     for (i = 0; i < n; i++) {
         sum += cand[i]->weight;

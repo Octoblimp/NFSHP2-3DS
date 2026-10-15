@@ -103,7 +103,7 @@ static uint32_t at(const uint32_t *t, int32_t n, int32_t i)
 // FlipCoinNoReplay: bRandom of 2 from the default seed, true on 0.
 static int32_t flip_coin(void)
 {
-    return bRandomI(2, &bDefaultSeed) == 0;
+    return bRandomI(2, bViewSeed) == 0;
 }
 
 // SingleP1OrP2's two: `single` unless the race has two players, then

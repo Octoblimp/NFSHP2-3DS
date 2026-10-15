@@ -44,6 +44,7 @@ RaceCoordinator *pRaceCoordinator;
 tCopManager     *pCopManager;
 struct Player   *PlayerPlayersByNumber[2];
 uint32_t         bDefaultSeed;
+uint32_t*        bViewSeed = &bDefaultSeed;
 int32_t        (*gRaceEventGetStatusFn)(void);
 
 static Race            race;

@@ -110,6 +110,17 @@ on the 15.5 FPS of an earlier run: that was the fire on track 11, and
 TASKS 46 must reach a steady 30 there and in every place like it.
 Next: TASKS 37 (multi-card multiplayer).**
 
+**Now (Session 102, 2026-10-14): TASKS 37e is done: each console hashes
+the world in seven parts after every frame (`lockhash.c`,
+`docs/formats/lockhash.md`), and at the first frame that differs logs
+the parts and the seed's draws of the 16 frames up to it. Speech,
+cameras and models' start times draw on a seed of their own in a
+wireless race (`bViewSeed`), since cop filler speech waits on each
+console's own audio. On Azahar races with cops, steering and a silent
+client kept every part the same as the host's. Next: TASKS 63 (Local
+Wireless on the main menu, the settings after Host), then 37f, 37g,
+TASKS 61, 46, 60 and 59.**
+
 **Now (Session 101, 2026-10-14): TASKS 37d is done: a wireless race
 runs in lockstep (`netstep.c`, `docs/formats/netstep.md`). Each console
 sends its pad 3 frames ahead, the host builds each frame's record with

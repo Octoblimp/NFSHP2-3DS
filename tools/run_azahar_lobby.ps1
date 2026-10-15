@@ -36,12 +36,25 @@
 # With -Race the race runs in lockstep (TASKS 37d, netstep.h): once every
 # copy is racing, each holds A, the gas, for -Drive seconds (30 unless
 # said; never the brake), a shot of each every 10 s, and every copy must
-# log the lockstep's start and its frames flowing. A checksum that differs
-# between copies is shown and counted, not failed: that is 37e's.
+# log the lockstep's start and its frames flowing.
+#
+# 37e: each copy logs the world's checksum in parts (lockhash.h) every 150
+# frames, and the parts and draws of the 16 frames up to the first frame
+# whose checksum differs. The verdict compares every copy's parts with the
+# host's frame by frame, and fails a copy at the first that differs, naming
+# the parts and showing both copies' draws on bDefaultSeed there (map the
+# addresses with arm-none-eabi-addr2line on the .elf). With -CopsOn the
+# walk goes through Hot Pursuit (Cops On Mode Select) to Challenge, so the
+# race has cops; with -Steer each copy also steers, left and right on the
+# D-pad by turns, its own period each (2 s for the host, 3 s for B, ...), so
+# the cars hit walls and each other.
 #
 # With -NoDsp the copies' cards have no DSP firmware, so ndsp fails and the
 # game must run silent: each copy has to log "Sound: ndsp unavailable", and
-# still pass with no unmapped read (a driver call through NULL).
+# still pass with no unmapped read (a driver call through NULL). With
+# -SilentClients only the host has sound (37e): cop speech waits for each
+# console's own audio, so a race of a loud and a silent console must still
+# have every part the same.
 #
 # With -WirelessOff (TASKS 62) each card's config has "WirelessOff 1", the
 # console's wireless communication taken as off (Azahar's never is): the
@@ -56,6 +69,8 @@
 #   powershell -File tools/run_azahar_lobby.ps1 -Consoles 2 -Race -NoDsp
 #   powershell -File tools/run_azahar_lobby.ps1 -Consoles 3 -Race -Cpu 0
 #   powershell -File tools/run_azahar_lobby.ps1 -Consoles 2 -WirelessOff
+#   powershell -File tools/run_azahar_lobby.ps1 -Consoles 2 -Race -CopsOn -Steer -Drive 120
+#   powershell -File tools/run_azahar_lobby.ps1 -Consoles 2 -Race -CopsOn -Steer -SilentClients
 #
 # Screenshots of each copy go to %TEMP%\nfshp2_lobby. Exit code 0 when
 # every copy reached Select Car from the lobby (with -Race: racing, every
@@ -66,7 +81,10 @@ param(
     [int]$Consoles = 2,           # the host and the rest
     [switch]$Race,                # on to a loaded race (37c)
     [switch]$NoDsp,               # no DSP firmware on the cards: silent
+    [switch]$SilentClients,       # the host with sound, the rest silent
     [switch]$WirelessOff,         # each console's wireless taken as off (62)
+    [switch]$CopsOn,              # through Hot Pursuit: a race with cops
+    [switch]$Steer,               # -Race: steer by turns while driving
     [ValidateRange(-1, 7)]
     [int]$Cpu = 2,                # the host's CPU racers; -1 as shown
     [int]$Drive = 30,             # -Race: seconds of gas once all race
@@ -205,7 +223,7 @@ function IsJunction([string]$path) {
 
 # The card's sdmc:/NFSHP2: a junction to each of the user's data folders,
 # and SAVES a folder of its own with the user's saves copied in.
-function LinkData([string]$user) {
+function LinkData([string]$user, [bool]$silent) {
     $nfs = Join-Path $user "sdmc\NFSHP2"
     New-Item -ItemType Directory -Force -Path $nfs | Out-Null
     foreach ($d in Get-ChildItem -Directory $dataRoot) {
@@ -232,7 +250,7 @@ function LinkData([string]$user) {
     # runs silent ("Sound: ndsp unavailable"), which -NoDsp asks for.
     $dspDir = Join-Path $user "sdmc\3ds"
     $dspCopy = Join-Path $dspDir "dspfirm.cdc"
-    if ($NoDsp) {
+    if ($silent) {
         if (Test-Path $dspCopy) {
             if (IsJunction $dspDir) { throw "$dspDir is a junction; it must be the copy's own" }
             Remove-Item -Path $dspCopy -Force
@@ -287,7 +305,7 @@ function Prepare([string]$name, [string]$nick, [bool]$isHost) {
     $lines = @("DebugLog 1")
     if ($WirelessOff) { $lines += "WirelessOff 1" }
     Set-Content -Path (Join-Path $user "sdmc\nfshp2_config.txt") -Encoding ASCII -Value $lines
-    LinkData $user
+    LinkData $user ($NoDsp -or ($SilentClients -and -not $isHost))
     $log = Join-Path $user "sdmc\nfshp2_debug.txt"
     Remove-Item $log -ErrorAction SilentlyContinue
     $azLog = Join-Path $user "log\azahar_log.txt"
@@ -430,6 +448,7 @@ function Step([string]$name, [hashtable]$h) {
     return $s
 }
 
+$modeSelect = if ($CopsOn) { "Cops On Mode Select" } else { "Cops Off Mode Select" }
 $boot = @(
     Step "main loop" @{ Pattern = "entering main loop"; Wait = 120 }
     Step "language" @{ Pattern = "flow enter Language Options Pre FE"; Wait = 30; Optional = $true; Settle = 1500 }
@@ -443,10 +462,12 @@ $boot = @(
     Step "title" @{ Pattern = "flow vis object b5761d00 b070dbc9 1"; Wait = 15; Optional = $true; Settle = 900 }
     Step "main menu" @{ Key = $VK_START; Pattern = "flow enter New Main Menu [0-9a-f]{8}"; Tries = 2 }
     Step "main menu up" @{ Pattern = "screen New Main Menu [0-9a-f]{8} .* last HIGHLIGHT"; Optional = $true; Settle = 1000 }
-    Step "world racing" @{ Key = $VK_DOWN; Pattern = "flow bracket 708a0bf1"; Tries = 2 }
-    Step "mode select" @{ Key = $VK_A; Pattern = "flow enter Cops Off Mode Select [0-9a-f]{8}"; Tries = 2 }
-    Step "mode select up" @{ Pattern = "screen Cops Off Mode Select [0-9a-f]{8} .* last HIGHLIGHT"; Optional = $true; Settle = 1000 }
+    Step "world racing" @{ Key = $VK_DOWN; Pattern = "flow bracket 708a0bf1"; Tries = 2; When = { -not $CopsOn } }
+    Step "mode select" @{ Key = $VK_A; Pattern = "flow enter $modeSelect [0-9a-f]{8}"; Tries = 2 }
+    Step "mode select up" @{ Pattern = "screen $modeSelect [0-9a-f]{8} .* last HIGHLIGHT"; Optional = $true; Settle = 1000 }
     Step "to challenge" @{ Key = $VK_DOWN; Settle = 700 }
+    # Hot Pursuit's has You're The Cop between: one more.
+    Step "to challenge 2" @{ Key = $VK_DOWN; Settle = 700; When = { $CopsOn } }
     Step "challenge" @{ Key = $VK_A; Pattern = "flow enter Challenge [0-9a-f]{8}"; Tries = 2 }
     Step "challenge up" @{ Pattern = "screen Challenge [0-9a-f]{8} .* last HIGHLIGHT"; Optional = $true; Settle = 1000;
                         Shot = "challenge" }
@@ -691,11 +712,29 @@ try {
     # -Race: the gas on every copy at once, the race in lockstep.
     if ($Race -and $Drive -gt 0 -and @($sides | Where-Object { $_.Failed }).Count -eq 0) {
         Write-Host ("  [{0,5:N0}s] driving: A held on every copy for {1} s" -f (Elapsed), $Drive)
-        $driveEnd = (Get-Date).AddSeconds($Drive)
+        $driveStart = Get-Date
+        $driveEnd = $driveStart.AddSeconds($Drive)
         $nextShot = (Get-Date).AddSeconds(10)
         $n = 0
         while ((Get-Date) -lt $driveEnd) {
             foreach ($s in $sides) { if (Alive $s) { [Hp2Lb]::KeyDown($s.Hwnd, $VK_A) } }
+            # -Steer: copy k by turns straight, left, straight, right, each
+            # for 2 + k seconds.
+            if ($Steer) {
+                $t = ((Get-Date) - $driveStart).TotalSeconds
+                for ($k = 0; $k -lt $sides.Count; $k++) {
+                    $s = $sides[$k]
+                    if (-not (Alive $s)) { continue }
+                    $phase = [int][math]::Floor($t / (2 + $k)) % 4
+                    if ($phase -eq 1) {
+                        [Hp2Lb]::KeyUp($s.Hwnd, $VK_RIGHT); [Hp2Lb]::KeyDown($s.Hwnd, $VK_LEFT)
+                    } elseif ($phase -eq 3) {
+                        [Hp2Lb]::KeyUp($s.Hwnd, $VK_LEFT); [Hp2Lb]::KeyDown($s.Hwnd, $VK_RIGHT)
+                    } else {
+                        [Hp2Lb]::KeyUp($s.Hwnd, $VK_LEFT); [Hp2Lb]::KeyUp($s.Hwnd, $VK_RIGHT)
+                    }
+                }
+            }
             if ((Get-Date) -ge $nextShot) {
                 $n++
                 foreach ($s in $sides) { Shot $s "drive-$n" }
@@ -703,7 +742,12 @@ try {
             }
             Start-Sleep -Milliseconds 150
         }
-        foreach ($s in $sides) { if (Alive $s) { [Hp2Lb]::KeyUp($s.Hwnd, $VK_A) } }
+        foreach ($s in $sides) {
+            if (Alive $s) {
+                [Hp2Lb]::KeyUp($s.Hwnd, $VK_A)
+                [Hp2Lb]::KeyUp($s.Hwnd, $VK_LEFT); [Hp2Lb]::KeyUp($s.Hwnd, $VK_RIGHT)
+            }
+        }
         foreach ($s in $sides) { if (-not (Alive $s) -and -not $s.Failed) { $s.Failed = "Azahar exited while driving" } }
     }
     # The log's last lines land up to ~7 s late.
@@ -724,8 +768,8 @@ foreach ($s in $sides) {
     LogLines $s "lobby: |netrace: |race start:|flow state RACING|flow enter (Challenge|Local Wireless|Select Car|Select Track|Wireless Race)|wireless:" |
         Select-Object -First 80 | ForEach-Object { Write-Host "  $_" }
     $silent = @(LogLines $s "^Sound: ndsp unavailable").Count -gt 0
-    if ($NoDsp) {
-        if (-not $silent -and -not $s.Failed) { $s.Failed = "sound up with -NoDsp" }
+    if ($NoDsp -or ($SilentClients -and $s -ne $sides[0])) {
+        if (-not $silent -and -not $s.Failed) { $s.Failed = "sound up on a silent card" }
     } elseif ($silent -and -not $s.Failed) {
         $s.Failed = "no sound: ndsp unavailable"
     }
@@ -765,28 +809,79 @@ if ($Race) {
     if ($h.Seen["to cpu"] -and $cpuRun -ne $Cpu -and -not $h.Failed) {
         $h.Failed = "started with $cpuRun CPU racers, not $Cpu"
     }
+    # The racers: the players and AI of race start's line (with -CopsOn the
+    # drivers also count the cops and traffic).
     $built = @(LogLines $h "netrace: built, track \d+, \d+ drivers")
-    if ($built.Count -eq 1) {
+    $start = @(LogLines $h "race start: .* \d+ player, \d+ AI")
+    if ($built.Count -eq 1 -and $start.Count -ge 1) {
         $n = [int]([regex]::Match($built[0], ", (\d+) drivers")).Groups[1].Value
-        Write-Host "Host: $cpuRun CPU racers, $n drivers"
-        if ($n -ne $Consoles + $cpuRun -and -not $h.Failed) {
-            $h.Failed = "$n drivers for $Consoles consoles and $cpuRun CPU racers"
+        $m = [regex]::Match($start[-1], " (\d+) player, (\d+) AI")
+        $racers = [int]$m.Groups[1].Value + [int]$m.Groups[2].Value
+        Write-Host "Host: $cpuRun CPU racers, $racers racers, $n drivers"
+        if ($racers -ne $Consoles + $cpuRun -and -not $h.Failed) {
+            $h.Failed = "$racers racers for $Consoles consoles and $cpuRun CPU racers"
         }
     }
 
-    # The lockstep (37d): started and flowing on every copy; checksums
-    # that differ are 37e's, shown and counted.
+    # The lockstep (37d): started and flowing on every copy.
     foreach ($s in $sides) {
         Write-Host "--- $($s.Name) netstep ---"
         $ns = @(LogLines $s "netstep: |clocks at GO")
         $ns | Select-Object -First 24 | ForEach-Object { Write-Host "  $_" }
         if ($ns.Count -gt 24) { Write-Host "  ... $($ns.Count - 24) more" }
         $differ = @($ns | Where-Object { $_ -match "differs from place" }).Count
-        if ($differ -gt 0) { Write-Host "  $differ checksum differences (37e)" }
+        if ($differ -gt 0) { Write-Host "  $differ checksum differences" }
         if (@($ns | Where-Object { $_ -match "netstep: start, place" }).Count -ne 1 -and -not $s.Failed) {
             $s.Failed = "no lockstep start"
         } elseif ($Drive -gt 0 -and @($ns | Where-Object { $_ -match "netstep: frames flow" }).Count -eq 0 -and -not $s.Failed) {
             $s.Failed = "lockstep frames never flowed"
+        }
+    }
+
+    # 37e: every copy's parts, frame by frame, against the host's: the
+    # logged ones every 150 frames and the window's at a difference.
+    $partNames = @("time", "seeds", "players", "racers", "cops", "traffic", "race")
+    function Parts($side) {
+        $m = @{}
+        foreach ($l in (LogLines $side "lockhash: (frame|parts) \d+ ")) {
+            $x = [regex]::Match($l, "lockhash: (?:frame|parts) (\d+) time (\w+) seeds (\w+) players (\w+) racers (\w+) cops (\w+) traffic (\w+) race (\w+)")
+            if ($x.Success) {
+                $m[[int]$x.Groups[1].Value] = @(2..8 | ForEach-Object { $x.Groups[$_].Value })
+            }
+        }
+        return $m
+    }
+    function Draws($side, [int]$f) {
+        return @(LogLines $side "lockhash: (draws|at) $($f):")
+    }
+    $hostParts = Parts $h
+    Write-Host "Host: parts of $($hostParts.Count) frames"
+    for ($i = 1; $i -lt $sides.Count; $i++) {
+        $s = $sides[$i]
+        $mine = Parts $s
+        $same = 0
+        $first = $null
+        foreach ($f in ($mine.Keys | Sort-Object)) {
+            if (-not $hostParts.ContainsKey($f)) { continue }
+            $bad = @()
+            for ($k = 0; $k -lt 7; $k++) {
+                if ($mine[$f][$k] -ne $hostParts[$f][$k]) { $bad += $partNames[$k] }
+            }
+            if ($bad.Count -eq 0) { $same++; continue }
+            $first = $f
+            Write-Host "$($s.Name): frame $f differs from the host's in $($bad -join ', ') ($same frames the same before)"
+            Write-Host "  host: $($hostParts[$f] -join ' ')"
+            Write-Host "  $($s.Name):    $($mine[$f] -join ' ')"
+            Write-Host "  host's draws:"
+            Draws $h $f | ForEach-Object { Write-Host "    $_" }
+            Write-Host "  $($s.Name)'s draws:"
+            Draws $s $f | ForEach-Object { Write-Host "    $_" }
+            if (-not $s.Failed) { $s.Failed = "frame $f differs in $($bad -join ', ')" }
+            break
+        }
+        if ($null -eq $first) { Write-Host "$($s.Name): $same frames' parts the same as the host's" }
+        if ($Drive -gt 0 -and $same -eq 0 -and $null -eq $first -and -not $s.Failed) {
+            $s.Failed = "no parts compared with the host's"
         }
     }
 

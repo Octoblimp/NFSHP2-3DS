@@ -2504,18 +2504,18 @@ MUTATIONS = [
      " || s == RCSTATE_REPLAY_DEMO_MODE || s == 6;"),
     ("cp_null", C, "    return p->pChasedCar->pPlayer != NULL;",
      "    return p->pChasedCar != NULL;"),
-    ("gap_9", C, "bRandomF(3.0f, &bDefaultSeed) + 9.0f;",
-     "bRandomF(3.0f, &bDefaultSeed) + 8.0f;"),
-    ("gap_range", C, "bRandomF(3.0f, &bDefaultSeed) + 9.0f;",
-     "bRandomF(4.0f, &bDefaultSeed) + 9.0f;"),
+    ("gap_9", C, "bRandomF(3.0f, bViewSeed) + 9.0f;",
+     "bRandomF(3.0f, bViewSeed) + 8.0f;"),
+    ("gap_range", C, "bRandomF(3.0f, bViewSeed) + 9.0f;",
+     "bRandomF(4.0f, bViewSeed) + 9.0f;"),
     ("gap_no_beacop", C,
      "        m->MaxSpeechGapTime = m->MaxSpeechGapTime + 4.0f;", ""),
     ("gap_beacop_3", C, "m->MaxSpeechGapTime + 4.0f;",
      "m->MaxSpeechGapTime + 3.0f;"),
     ("gap_beacop_inv", C,
-     "    m->MaxSpeechGapTime = bRandomF(3.0f, &bDefaultSeed) + 9.0f;\n"
+     "    m->MaxSpeechGapTime = bRandomF(3.0f, bViewSeed) + 9.0f;\n"
      "    if (TheRaceParameters.BeACop != 0)",
-     "    m->MaxSpeechGapTime = bRandomF(3.0f, &bDefaultSeed) + 9.0f;\n"
+     "    m->MaxSpeechGapTime = bRandomF(3.0f, bViewSeed) + 9.0f;\n"
      "    if (TheRaceParameters.BeACop == 0)"),
     ("fpp_idx_any", C, "        if (m->nPlayerCopIndex == -1)\n"
      "            return NULL;\n", ""),

@@ -33,7 +33,7 @@ static int32_t in_demo(void)
 
 static uint32_t random_below(int32_t n)
 {
-    return (uint32_t)bRandomI(n, &bDefaultSeed);
+    return (uint32_t)bRandomI(n, bViewSeed);
 }
 
 int32_t tpursuit_get_chased_car_colour(const tPursuit *p)

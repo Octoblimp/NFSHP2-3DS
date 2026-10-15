@@ -46,12 +46,13 @@ void emodel_reconnect_solid(eModel *m)
         return;
     m->RigidAnimationStartTime = (int16_t)0xc000;
     // Retail's: a solid so flagged starts at one of 256 times, drawn from
-    // the default seed, so that its copies do not move as one.
+    // the default seed, so that its copies do not move as one (the view
+    // seed in a wireless race: bmath.h).
     if (!(solid->Flags & SOLID_RANDOM_START))
         return;
     m->RigidAnimationStartTime = (int16_t)(
         (uint16_t)m->RigidAnimationStartTime
-        | (uint16_t)bRandomI(256, &bDefaultSeed));
+        | (uint16_t)bRandomI(256, bViewSeed));
 }
 
 void emodel_reconnect_texture_table(eModel *m)

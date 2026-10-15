@@ -55,6 +55,7 @@ struct RaceCoordinator {
 static RaceCoordinator fakerc;
 RaceCoordinator *pRaceCoordinator;
 uint32_t bDefaultSeed;
+uint32_t *bViewSeed = &bDefaultSeed;
 
 static const char *nname(const SpeechNoise *n)
 {

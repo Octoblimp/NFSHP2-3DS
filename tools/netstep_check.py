@@ -16,7 +16,8 @@ each record each console runs (the harness's header has the list):
     a lossy link;
   - a client gone, of two and of three; the host gone, of two and of
     three; every client gone; a second with nothing through;
-  - a checksum that differs, the host as fast and slower; a place not
+  - a checksum that differs, the host as fast and slower, and the
+    NetStepDifferFn told of each, as the line says (37e); a place not
     racing; the host stopping; netrace's messages on the same link,
     half of them shaped as netstep's.
 
@@ -125,6 +126,9 @@ MUTATIONS = [
     M("ns-check-cmp", "if (S->theirHash[p][i] == S->hash[i]) return;",
       "if (S->theirHash[p][i] != S->hash[i]) return;"),
     M("ns-check-mark", "    S->differs[p] = 1;\n", ""),
+    M("ns-check-tell", "    if (S->differ) S->differ(p, n);\n", ""),
+    M("ns-check-tell-place", "S->differ(p, n);", "S->differ(S->place, n);"),
+    M("ns-check-tell-frame", "S->differ(p, n);", "S->differ(p, n - 1);"),
     M("ns-takehash-none", "    if (n == NETSTEP_NONE) return;   // none run yet\n",
       ""),
     M("ns-takehash-hi",
@@ -244,9 +248,11 @@ MUTATIONS = [
     M("ns-clientpoll-resend",
       "now - S->lastSend[S->place] >= NETSTEP_RESEND_MS) sendPads",
       "now - S->lastSend[S->place] >= 4 * NETSTEP_RESEND_MS) sendPads"),
-    M("ns-start-on", "    S->on    = 1;\n", ""),
-    M("ns-start-host", "    S->host  = place == 0;\n",
-      "    S->host  = place == 1;\n"),
+    M("ns-start-on", "    S->on     = 1;\n", ""),
+    M("ns-start-host", "    S->host   = place == 0;\n",
+      "    S->host   = place == 1;\n"),
+    M("ns-start-differ", "    S->differ = differ;\n", ""),
+    M("ns-ondiffer", "    S->differ = fn;\n", ""),
     M("ns-start-peer", "S->peer[p] = p < consoles ? peer[p] : -1;",
       "S->peer[p] = peer[p];"),
     M("ns-start-padfor", "            S->padFor[p][i]   = NETSTEP_NONE;\n", ""),

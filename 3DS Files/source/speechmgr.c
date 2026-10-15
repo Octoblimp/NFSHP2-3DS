@@ -417,13 +417,13 @@ static void action_say(int32_t a, const SpeechContext *c)
         break;
     case A_DISPATCH_ROAD_BLOCK_UPDATE:
         // Where, half the time it is known.
-        if (RBL != 0 && bRandomI(2, &bDefaultSeed) == 0)
+        if (RBL != 0 && bRandomI(2, bViewSeed) == 0)
             spch_add_event_v(71, 1, RBL);
         else
             spch_add_event_v(171, 0);
         break;
     case A_DISPATCH_SPIKE_STRIP_SET:
-        if (RBL != 0 && bRandomI(2, &bDefaultSeed) == 0)
+        if (RBL != 0 && bRandomI(2, bViewSeed) == 0)
             spch_add_event_v(170, 1, RBL);
         else
             spch_add_event_v(73, 0);
@@ -1298,7 +1298,7 @@ void speechmgr_raise_dispatch_helicopter_na(SpeechMgr *m, uint32_t speaker)
 static void shuffle_array(uint32_t *a, uint32_t n)
 {
     while (n >= 2) {
-        int32_t  r = bRandomI((int32_t)n, &bDefaultSeed);
+        int32_t  r = bRandomI((int32_t)n, bViewSeed);
         uint32_t t = a[0];
 
         a[0] = a[r];

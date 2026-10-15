@@ -1981,7 +1981,7 @@ MUTATIONS = [
       "for (i = 1; i < cl->NumCameraShakes; i++)\n        if"),
     M("sh-n0", "    if (n == 0)\n        return NULL;\n    r = bRandomI",
       "    if (n == 0)\n        return cl->Shakes;\n    r = bRandomI"),
-    M("sh-rand", "r = bRandomI(n, &bDefaultSeed);", "r = bRandomI(n + 1, &bDefaultSeed);"),
+    M("sh-rand", "r = bRandomI(n, bViewSeed);", "r = bRandomI(n + 1, bViewSeed);"),
     M("sh-skip", "if (cl->Shakes[i].BankNumber != bank)\n            continue;",
       "if (cl->Shakes[i].BankNumber == bank)\n            continue;"),
     M("sh-r0", "if (r == 0)\n            return &cl->Shakes[i];",

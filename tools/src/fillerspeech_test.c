@@ -46,6 +46,7 @@ static float bf(uint32_t u)
 
 RaceParameters TheRaceParameters;
 uint32_t       bDefaultSeed;
+uint32_t*      bViewSeed = &bDefaultSeed;
 
 static uint64_t speech[4];
 static tPursuit ps[NP];

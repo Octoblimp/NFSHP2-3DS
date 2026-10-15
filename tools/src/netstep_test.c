@@ -170,6 +170,9 @@ typedef struct {
     int          numLines;
     int          lineCount;      // all of them, kept or not
     int          differs, goneLines, aloneLines, flowLines, hashLines;
+    int          told;           // NetStepDifferFn calls
+    int          saidPlace;      // the last "differs" line's, -1 none yet
+    unsigned long saidFrame;
     int          goneSaid[MAXC];
     uint8_t      q[MAXFRAMES + NETSTEP_DELAY + 2];   // its steps put
 } Console;
@@ -405,7 +408,14 @@ static void fLog(const char* line)
     if (k->numLines < LINES)
         snprintf(k->lines[k->numLines++], sizeof k->lines[0], "%s", line);
     k->lineCount++;
-    if (strstr(line, " differs from place ")) k->differs++;
+    if (strstr(line, " differs from place ")) {
+        k->differs++;
+        if (sscanf(line, "netstep: frame %lu differs from place %d's", &n, &p)
+            == 2) {
+            k->saidPlace = p;
+            k->saidFrame = n;
+        }
+    }
     if (sscanf(line, "netstep: place %d is gone, from frame %lu", &p, &n)
         == 2) {
         k->goneLines++;
@@ -423,6 +433,26 @@ static void fLog(const char* line)
         k->hashLines++;
         if (n % NETSTEP_LOG_EVERY) fault("a checksum logged at frame %lu", n);
     }
+}
+
+// Told just after the log's line, of its place and frame, and of a frame
+// this console made differ, or the place did.
+static void fDiffer(int place, uint32_t frame)
+{
+    Console* k = &C[g_cur];
+
+    k->told++;
+    if (k->saidPlace != place || k->saidFrame != frame)
+        fault("told of place %d, frame %lu; the line said %d, %lu", place,
+              (unsigned long)frame, k->saidPlace, k->saidFrame);
+    k->saidPlace = -1;
+    if (place < 0 || place >= S->consoles || place == g_cur)
+        fault("told of place %d", place);
+    else if (!(S->divergeAt[g_cur] && frame >= (uint32_t)S->divergeAt[g_cur])
+             && !(S->divergeAt[place]
+                  && frame >= (uint32_t)S->divergeAt[place]))
+        fault("told of frame %lu, before either diverged",
+              (unsigned long)frame);
 }
 
 static const NetStepNet kNet = {
@@ -633,6 +663,8 @@ static void finish(void)
             fault("said nothing of the checksum that differs");
         if (k->differs > (c == 0 ? S->consoles - 1 : 1))
             fault("said differs %d times", k->differs);
+        if (k->told != k->differs)
+            fault("told %d times of %d differences", k->told, k->differs);
         if (k->hashLines < 1) fault("no checksum logged");
         if (S->maxWait && k->maxWaited > (uint32_t)S->maxWait)
             fault("waited %lu ms on a frame", (unsigned long)k->maxWaited);
@@ -665,6 +697,9 @@ static void runScenario(const Scenario* s)
     for (c = 0; c < s->consoles; c++) {
         enter(c);
         netstep_init(&kNet, fLog);
+        // Before GO, as main.c: netstep_start keeps it.
+        netstep_on_differ(fDiffer);
+        C[c].saidPlace = -1;
         if ((s->notRacing >> c) & 1) {
             C[c].gone = 1;
             continue;

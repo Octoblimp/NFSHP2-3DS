@@ -96,6 +96,7 @@
 #include "configitems.h"
 #include "debugmenu.h"
 #include "lobby.h"
+#include "lockhash.h"
 #include "nameentry.h"
 #include "netrace.h"
 #include "netstep.h"
@@ -2818,6 +2819,14 @@ static void lobbyLog(const char* line)
     logLine("%s", line);
 }
 
+// A lockstep race's checksum differs from a place's (netstep.h): the
+// world's parts and the draws on bDefaultSeed up to that frame, once.
+static void lockDiffers(int place, uint32_t frame)
+{
+    (void)place;
+    lockhash_differs(frame);
+}
+
 // The console's wireless communication off (TASKS 62), or the config's
 // WirelessOff, Azahar's never being.
 static int lobbyNetRadioOff(void)
@@ -2933,6 +2942,7 @@ static void netRaceGoRacing(void)
         if (netrace_driver(p) >= 0) racing |= (uint8_t)(1u << p);
     racing |= (uint8_t)(1u << r->place);
     netstep_start(r->place, r->consoles, r->peer, racing);
+    lockhash_start(lobbyLog);
     netstep_rest(&rest);
     joyhid_from_wire(rest.ds2, last);
     g_lockWaiting = false;
@@ -7110,6 +7120,7 @@ int main(int argc, char** argv)
     lobby_init(&kLobbyNet, lobbyLog);
     netrace_init(&kNetRaceNet, &kNetRaceGame, lobbyLog);
     netstep_init(&kNetStepNet, lobbyLog);
+    netstep_on_differ(lockDiffers);
     lobby_on_start(netrace_begin);
     lobby_cpu_wish(lobbyCpuWish);
     gTrackFlowHoldRaceFn = netrace_hold;
@@ -7465,19 +7476,19 @@ int main(int argc, char** argv)
                 // one mover.
                 update_camera_movers();
             }
-            // The lockstep frame ran: the world's checksum after it, and
-            // on to the next. The race gone, lockstep ends (37f's end); not
-            // before its coordinator was ever up (the GO loop's flow makes
-            // it).
+            // The lockstep frame ran: the world's checksum after it, in
+            // parts (lockhash.h), and on to the next. The race gone,
+            // lockstep ends (37f's end); not before its coordinator was
+            // ever up (the GO loop's flow makes it).
             if (lockOn && raceStep) {
-                netstep_done(pCurrentWorld != NULL
-                             ? world_calculate_debug_checksum(pCurrentWorld)
-                             : 0);
+                netstep_done(lockhash_ran(netstep_frame(), pCurrentWorld));
                 g_lockRan = true;
                 if (pRaceCoordinator != NULL) g_lockRaced = true;
             }
-            if (netstep_on() && g_lockRaced && pRaceCoordinator == NULL)
+            if (netstep_on() && g_lockRaced && pRaceCoordinator == NULL) {
                 netstep_stop();
+                lockhash_stop();
+            }
 
             // The Begin of unloading deleted the coordinator and is
             // unloading the track's files: the view lets go of the bundle

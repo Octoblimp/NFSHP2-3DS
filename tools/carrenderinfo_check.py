@@ -1241,7 +1241,7 @@ MUTATIONS = [
     ("ctor-alpha", CRC, "    ri->AlphaOverridden = 0;" + NL
      + "    ri->pRideInfo = ride;", "    ri->AlphaOverridden = 1;" + NL
      + "    ri->pRideInfo = ride;"),
-    ("ctor-timebase", CRC, "bRandomI(8, &bDefaultSeed)", "bRandomI(16, &bDefaultSeed)"),
+    ("ctor-timebase", CRC, "bRandomI(8, bViewSeed)", "bRandomI(16, bViewSeed)"),
     ("ctor-skin-default", CRC,
      "cartypeinfo_get_skin_info(ride->Type, ride->SkinNumber, 1);",
      "cartypeinfo_get_skin_info(ride->Type, ride->SkinNumber, 0);"),

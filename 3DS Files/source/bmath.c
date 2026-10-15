@@ -103,10 +103,21 @@ uint32_t bSqrt32(uint32_t n)
 
 uint32_t bDefaultSeed = 0x12345678u;   // retail gp-14472 (0x00332068)
 
+void (*bDefaultSeedWatch)(void *at);
+uint32_t *bViewSeed = &bDefaultSeed;
+
+// The port's: a draw on bDefaultSeed told to the watch, with the address
+// it returns to.
+#define WATCH(seed)                                                 \
+    do {                                                            \
+        if ((seed) == &bDefaultSeed && bDefaultSeedWatch != NULL)   \
+            bDefaultSeedWatch(__builtin_return_address(0));         \
+    } while (0)
+
 // 0x00241cc8. The value handed back is the OLD seed reduced mod range, and
 // the state moves afterwards -- so the draw immediately after a reseed is
 // the seed itself, not a function of it.
-int32_t bRandomI(int32_t range, uint32_t *seed)
+static int32_t randomI(int32_t range, uint32_t *seed)
 {
     uint32_t s = *seed;
     uint32_t t, u, v;
@@ -121,19 +132,30 @@ int32_t bRandomI(int32_t range, uint32_t *seed)
     return (int32_t)(s % (uint32_t)range);
 }
 
+int32_t bRandomI(int32_t range, uint32_t *seed)
+{
+    WATCH(seed);
+    return randomI(range, seed);
+}
+
 // 0x00241cb8. Falls straight through into bRandom(1, seed), so it always
 // returns 0 -- and it advances the seed past the value just stored.
 int32_t bSetRandomSeed(uint32_t s, uint32_t *seed)
 {
+    WATCH(seed);
     *seed = s;
-    return bRandomI(1, seed);
+    return randomI(1, seed);
 }
 
 // 0x00241d08. 0x30000000 is 2**-31.
 float bRandomF(float f, uint32_t *seed)
 {
-    int32_t r = bRandomI(0x7fffffff, seed);
-    float k = f * 4.656612873e-10f;
+    int32_t r;
+    float   k;
+
+    WATCH(seed);
+    r = randomI(0x7fffffff, seed);
+    k = f * 4.656612873e-10f;
 
     if (r < 0) {
         // Unreachable: bRandomI(0x7fffffff, ...) is at most 0x7ffffffe. The

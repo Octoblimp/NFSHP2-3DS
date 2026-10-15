@@ -80,6 +80,18 @@ float   bRandomF(float f, uint32_t *seed);
 // own. 0x12345678 in the image.
 extern uint32_t bDefaultSeed;
 
+// The port's (TASKS 37e, lockhash.h): told of every draw on bDefaultSeed,
+// bSetRandomSeed's too, with the address the draw returns to, while set.
+// NULL, as at boot: nothing told, and no draw changes.
+extern void (*bDefaultSeedWatch)(void *at);
+
+// The port's (TASKS 37e): the seed what is only heard or shown draws on --
+// speech, cameras, a model's start time. &bDefaultSeed, so every draw is
+// retail's, except in a wireless race in lockstep, where lockhash_start
+// points it at a seed of its own: what one console's audio plays never
+// moves the world's seed then.
+extern uint32_t *bViewSeed;
+
 // ------------------------------------------------------------------- modulo
 
 // Floored, not truncated: the result is always in [0, |b|).

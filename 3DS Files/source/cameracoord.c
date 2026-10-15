@@ -211,7 +211,7 @@ CameraShake *camera_loader_find_random_camera_shake(CameraLoader *cl,
             n++;
     if (n == 0)
         return NULL;
-    r = bRandomI(n, &bDefaultSeed);
+    r = bRandomI(n, bViewSeed);
     for (i = 0; i < cl->NumCameraShakes; i++) {
         if (cl->Shakes[i].BankNumber != bank)
             continue;

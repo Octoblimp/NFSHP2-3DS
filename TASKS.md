@@ -2556,7 +2556,7 @@ phases.
                   pause from either console, which goes to 37f.
                 - 37d-2: places past the two players' show player
                   0's view, and their cars are AI for now.
-          - [ ] 37e: determinism. The per-frame hashes (cars, cops,
+          - [x] 37e: determinism. The per-frame hashes (cars, cops,
                 traffic, seeds, the race coordinator) compared, each
                 part's hash logged at a mismatch, and every source of
                 drift fixed.
@@ -2573,6 +2573,36 @@ phases.
                   seed at the hold matched the host's. bDefaultSeed
                   feeds the drawing and the speech as well as the
                   simulation, and cop filler speech waits on playback.
+                - Done in Session 102 (`docs/formats/lockhash.md`).
+                  `lockhash.c` hashes the world in seven parts after
+                  each frame (time, seeds, players, AI racers, cops
+                  with the helicopter, traffic, the race) and folds
+                  them into netstep's checksum; every 150 frames it
+                  logs them, and at the first frame that differs,
+                  once a race, the parts and the draws on
+                  bDefaultSeed of the 16 frames up to it, each by the
+                  address that drew (`bDefaultSeedWatch`). Each
+                  console runs every player's logic as retail ran its
+                  two, so the one source of drift the code shows is
+                  cop filler speech, which waits for the console's
+                  own audio: speech,
+                  cameras and models' start times now draw on
+                  `bViewSeed`, a seed of its own from GO in a
+                  wireless race (bDefaultSeed elsewhere, so retail's
+                  draws are unchanged). lockhash_check: faults 0, 77
+                  mutations, 73 caught, 4 equivalent; the twelve
+                  harnesses of the moved draws 0 differ.
+                - On Azahar (track 11, 2 laps, 4 cops, 2 consoles,
+                  2 CPU racers, gas and steering for 240 s): every
+                  part the same as the host's on all 39 frames
+                  logged, with both consoles' sound and with only the
+                  host's (the client "ndsp unavailable", its speech
+                  bank not loaded). Two control runs with bViewSeed
+                  left on bDefaultSeed kept in step as well: filler
+                  speech needs a chase of a player, and no scripted
+                  drive drew one (with no CPU racers, no chase at
+                  all), so the speech drift is shown by the code and
+                  the harnesses, not on Azahar.
           - [ ] 37f: the end. Results and points on each console, back
                 to the lobby or a rematch, and a player leaving
                 mid-race.
@@ -3212,6 +3242,25 @@ phases.
           `run_azahar_lobby.ps1 -Consoles 2 -WirelessOff` passed (host
           and joiner each showed the line, no "wireless: up", OK back
           to Host or Join). Without it, `run_azahar_lobby.ps1 -Consoles 2` still passed: Azahar's state does not read as off.
+63. [ ] **Local Wireless on the main menu, the settings after Host.**
+        Asked for on 2026-10-14: a top-level "Local Wireless" entry, and
+        the race's settings chosen once Host is pressed, not before.
+        Setting a race up and then picking Players, Local Wireless and
+        OK confuses people.
+        - The flow: New Main Menu, "Local Wireless", then Host or Join.
+          Host goes to the mode: Hot Pursuit or World Racing, then
+          Single Race, Knockout, Lap Knockout, Free Run or You're The
+          Cop. Then retail's setup screen for that mode, and only then
+          the lobby opens to players. Join searches and joins as now,
+          and takes the host's settings.
+        - Challenge's Players row goes back to 1 alone. There is no
+          split screen on the 3DS (TASKS 30), and Local Wireless is no
+          longer reached from there.
+        - First find how New Main Menu's items are built (retail's
+          Flailer screen) and how to add a port item to it in retail's
+          style, as bsetup.c's "Local Wireless" label was.
+        - Comes right after 37e and before 37f, 37g and 61, which build
+          on where the lobby and the setup are: one task at a time.
 
 ### The retail frontend
 

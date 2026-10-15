@@ -481,7 +481,7 @@ CarRenderInfo *carrenderinfo_construct(CarRenderInfo *ri, RideInfo *ride,
     ri->pAlphaInfo = NULL;
     ri->AlphaOverridden = 0;
     ri->pRideInfo = ride;
-    ri->CarTimebaseStart = (uint32_t)bRandomI(8, &bDefaultSeed);
+    ri->CarTimebaseStart = (uint32_t)bRandomI(8, bViewSeed);
 
     ct = cartypeinfo_get(ride->Type);
     skin = cartypeinfo_get_skin_info(ride->Type, ride->SkinNumber, 1);

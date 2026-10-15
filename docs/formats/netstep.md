@@ -32,8 +32,9 @@ From GO on, each loop of `main.c` (`lockFrame`):
    place's presses for the flow on its port (`lockFlowInput`).
    `bgf_frame`, `raceFrame` and the UI's timer run only on such a frame,
    and the clocks advance only after one (`g_lockRan`).
-5. Gives the world's checksum after it (`netstep_done`,
-   `world_calculate_debug_checksum`).
+5. Gives the world's checksum after it (`netstep_done`, `lockhash_ran`:
+   the fold of seven parts, retail's debug checksum among them; see
+   `lockhash.md`).
 
 Frames 0 to 2 need no wait: no pad is in for them, and each console
 makes them as the host would, every pad at rest, each step 120 (1/30 s).
@@ -137,8 +138,10 @@ place and the rest at rest. What more a race does then is 37f's and
 Every message carries the sender's checksum of the last frame it ran.
 Each console keeps a ring of its own and compares a frame once both are
 in, saying in the log once per place where one differs ("frame n
-differs from place p's"). Every 150 frames each logs its own ("frame n
-hash h"). Making them agree is 37e's.
+differs from place p's"), and tells the `NetStepDifferFn` set with
+`netstep_on_differ`: main.c's has lockhash log the parts and draws of the
+16 frames up to it (37e, `lockhash.md`). Every 150 frames each logs its
+own ("frame n hash h").
 
 ## The check
 
@@ -157,8 +160,8 @@ equivalent (named in the check).
 `tools/run_azahar_lobby.ps1 -Consoles 2 -Race` takes two copies from the
 lobby to the race, then holds A (the gas) on both for `-Drive` seconds
 (30), a shot of each every 10 s. Every copy must log the lockstep's
-start and its frames flowing; checksums that differ are shown and
-counted, not failed.
+start and its frames flowing; since 37e every copy's parts must match
+the host's, frame by frame (`lockhash.md`).
 
 The first run (Session 101): track 11, 2 laps, the host, the client and
 2 CPU racers, GO on seed 793ca5cb. The clocks at GO differed (real

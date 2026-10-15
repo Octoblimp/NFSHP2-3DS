@@ -22738,3 +22738,82 @@ bridge and 52's popups.
 
 37e (determinism), 37f and 37g, then TASKS 61, 46, 60 and 59. Still to
 ask the user: TASKS 47's bridge and 52's popups.
+
+## Session 102 -- 37e, determinism (done)
+
+`docs/formats/lockhash.md` has the whole of it.
+
+### What changed
+
+- `lockhash.c`/`.h` (new): the world's checksum in seven parts after
+  each frame (time, seeds, players, AI racers, cops with the
+  helicopter, traffic, the race and coordinator), folded into
+  netstep's 16-bit checksum. Every 150 frames it logs the parts. At the
+  first frame netstep finds differing, once a race, it logs the parts
+  and the draws on bDefaultSeed of the 16 frames up to it, each draw by
+  the address that made it.
+- `bmath.c`/`.h`: `bDefaultSeedWatch`, told of each draw on
+  bDefaultSeed while set; `bViewSeed`, the seed of speech, cameras
+  and models' start times, `&bDefaultSeed` except from GO to the end
+  of a wireless race.
+- On `bViewSeed`: copmgr.c's filler gap, fillerspeech.c's two draws,
+  racespeech.c's coin, pursuitspeech.c's random_below, speechmgr.c's
+  three, cameracoord.c's shake, trackcarcam.c's focal start, emodel.c's
+  start time and carrenderinfo.c's timebase. Cop filler speech waits
+  for the console's own audio to be quiet, so a console that plays a
+  line longer, or has no sound, drew those at another frame and moved
+  the world's seed.
+- `netstep.c`/`.h`: `netstep_on_differ`, the NetStepDifferFn told of
+  each "differs" line. main.c's has lockhash log the window.
+- `main.c`: lockhash started after netstep at GO and stopped with it;
+  `netstep_done(lockhash_ran(...))`.
+- `tools/lockhash_check.py` and `tools/src/lockhash_test.c` (new);
+  netstep_test checks the differ callback (5 more mutations); the four
+  speech harnesses with a bDefaultSeed of their own got a bViewSeed;
+  nine checkers' mutation strings name bViewSeed.
+- `tools/run_azahar_lobby.ps1`: `-CopsOn` (through Hot Pursuit),
+  `-Steer` (left and right by turns, each copy its own period),
+  `-SilentClients` (only the host has sound); the verdict compares
+  every copy's parts with the host's frame by frame and fails a copy at
+  the first difference, with both copies' parts and draws; the racers
+  counted from race start's players and AI (the drivers count cops and
+  traffic too).
+- `docs/formats/lockhash.md` (new); `netstep.md` points to it.
+- TASKS 63 (new, from the user): Local Wireless on the main menu, the
+  settings after Host.
+
+### Checks
+
+- lockhash_check: faults 0; `--mutate`: 77 mutations, 73 caught, 4
+  equivalent (the mix's xor and shift, the NULL helicopter's and
+  race's marks).
+- netstep_check: faults 0; the 5 new mutations caught.
+- copmanager, cop, pursuit, fillerspeech, racespeech, pursuitspeech,
+  speechmgr, cameracoord, democam, trackcarcam, carrenderinfo,
+  loadertable: 0 differ; the 19 mutations whose strings changed all
+  caught.
+- tools/build_cia.ps1: built, relocations and shaders OK.
+- Azahar, `run_azahar_lobby.ps1 -Consoles 2 -Race -CopsOn -Steer
+  -Drive 240` (track 11, 2 laps, 4 cops, 2 CPU racers): both PASS, GO
+  on seed 1d32acf8, B's parts the same as the host's on all 39 frames
+  logged (0..5700). A CPU racer was busted; the host 3rd, B 4th, both
+  on 3:22 of lap 1.
+- The same with `-SilentClients`: B "ndsp unavailable, running
+  silent", its speech bank not loaded; both PASS, GO on seed 825af1a5,
+  39 frames the same; both screens 3rd and 4th, the same gaps.
+- Controls, built with lockhash_start leaving bViewSeed on bDefaultSeed
+  (rebuilt with it afterwards, checked in the .elf): `-SilentClients`
+  again, 34 frames the same, one chase most of the race; with `-Cpu 0`,
+  38 frames the same and no chase at all. Filler speech needs a chase
+  of a player (`copmanager_find_player_pursuit`), and the scripted
+  drives, gas and steering into the trees, never drew one, so the
+  speech drift was not reached on Azahar: the code path and the
+  harnesses are what show it.
+- netstep_check `--mutate` in full: 112 mutations, 109 caught, 3
+  equivalent, 0 unexplained.
+
+### Next
+
+TASKS 63 (Local Wireless on the main menu, the settings after Host),
+then 37f and 37g, then TASKS 61, 46, 60 and 59. Still to ask the user:
+TASKS 47's bridge and 52's popups.

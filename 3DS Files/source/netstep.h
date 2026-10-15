@@ -35,7 +35,8 @@
 //
 // Each console also says, in every message, its checksum of the world
 // after the last frame it ran. A console that has run that frame itself
-// and has another says so in the log, once for each place (37e's).
+// and has another says so in the log, once for each place, and tells its
+// NetStepDifferFn (37e: lockhash.h logs the world's parts then).
 //
 // Host-buildable: the link is the NetStepNet's and the time is given, so
 // tools/src/netstep_test.c can run eight consoles in one process
@@ -86,9 +87,15 @@ typedef struct NetStepNet {
 
 typedef void (*NetStepLogFn)(const char* line);
 
+// Told after the log's line that place `place`'s checksum of frame
+// `frame` differs from this console's: once for each place (37e,
+// lockhash_differs).
+typedef void (*NetStepDifferFn)(int place, uint32_t frame);
+
 typedef struct NetStep {
     NetStepNet   net;
     NetStepLogFn log;
+    NetStepDifferFn differ;
     int          on;
     int          host;
     int          place;
@@ -126,6 +133,10 @@ typedef struct NetStep {
 void netstep_bind(NetStep* s);
 
 void netstep_init(const NetStepNet* net, NetStepLogFn log);
+
+// Who is told of a checksum that differs (NULL: no one). Kept from GO to
+// GO, as the link and the log are.
+void netstep_on_differ(NetStepDifferFn fn);
 
 // GO: this console's place, the link's peer of each place (-1 for none;
 // past `consoles` not read), and the places racing, this one among them.

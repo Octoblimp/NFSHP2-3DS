@@ -155,6 +155,7 @@ static void checkHash(int p, uint32_t n)
     S->differs[p] = 1;
     say("netstep: frame %lu differs from place %d's: %04x here, %04x there",
         (unsigned long)n, p, S->hash[i], S->theirHash[p][i]);
+    if (S->differ) S->differ(p, n);
 }
 
 static void takeHash(int p, const uint8_t* b)
@@ -352,20 +353,27 @@ void netstep_init(const NetStepNet* net, NetStepLogFn log)
     S->log = log;
 }
 
+void netstep_on_differ(NetStepDifferFn fn)
+{
+    S->differ = fn;
+}
+
 void netstep_start(int place, int consoles, const int peer[NETSTEP_MAX],
                    uint8_t racing)
 {
-    NetStepNet   net = S->net;
-    NetStepLogFn log = S->log;
+    NetStepNet      net    = S->net;
+    NetStepLogFn    log    = S->log;
+    NetStepDifferFn differ = S->differ;
     uint32_t     n;
     int          p, i;
 
     memset(S, 0, sizeof *S);
-    S->net   = net;
-    S->log   = log;
-    S->on    = 1;
-    S->host  = place == 0;
-    S->place = place;
+    S->net    = net;
+    S->log    = log;
+    S->differ = differ;
+    S->on     = 1;
+    S->host   = place == 0;
+    S->place  = place;
     for (p = 0; p < NETSTEP_MAX; p++) {
         S->peer[p] = p < consoles ? peer[p] : -1;
         for (i = 0; i < NETSTEP_RING; i++) {

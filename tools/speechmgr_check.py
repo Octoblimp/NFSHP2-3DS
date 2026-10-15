@@ -739,21 +739,21 @@ MUTATIONS = _say_mutations(_SRC) + _table_mutations(_SRC) + \
        "    action_say", "        ;\n    action_say"),
     _m("say-sup", "#define SUP     (c->isSupervisorActive != 0)",
        "#define SUP     (c->isSupervisorActive)"),
-    _m("say-rbl-test", "        if (RBL != 0 && bRandomI(2, &bDefaultSeed) == 0)\n"
+    _m("say-rbl-test", "        if (RBL != 0 && bRandomI(2, bViewSeed) == 0)\n"
        "            spch_add_event_v(71,",
-       "        if (bRandomI(2, &bDefaultSeed) == 0)\n"
+       "        if (bRandomI(2, bViewSeed) == 0)\n"
        "            spch_add_event_v(71,"),
-    _m("say-rbl-rand", "        if (RBL != 0 && bRandomI(2, &bDefaultSeed) == 0)\n"
+    _m("say-rbl-rand", "        if (RBL != 0 && bRandomI(2, bViewSeed) == 0)\n"
        "            spch_add_event_v(71,",
-       "        if (RBL != 0 && bRandomI(2, &bDefaultSeed) == 1)\n"
+       "        if (RBL != 0 && bRandomI(2, bViewSeed) == 1)\n"
        "            spch_add_event_v(71,"),
-    _m("say-spike-test", "        if (RBL != 0 && bRandomI(2, &bDefaultSeed) == 0)\n"
+    _m("say-spike-test", "        if (RBL != 0 && bRandomI(2, bViewSeed) == 0)\n"
        "            spch_add_event_v(170,",
-       "        if (bRandomI(2, &bDefaultSeed) == 0)\n"
+       "        if (bRandomI(2, bViewSeed) == 0)\n"
        "            spch_add_event_v(170,"),
-    _m("say-spike-n", "        if (RBL != 0 && bRandomI(2, &bDefaultSeed) == 0)\n"
+    _m("say-spike-n", "        if (RBL != 0 && bRandomI(2, bViewSeed) == 0)\n"
        "            spch_add_event_v(170,",
-       "        if (RBL != 0 && bRandomI(3, &bDefaultSeed) == 0)\n"
+       "        if (RBL != 0 && bRandomI(3, bViewSeed) == 0)\n"
        "            spch_add_event_v(170,"),
     _m("say-racing", "        if (LOC != 0)\n            spch_add_event_v(83",
        "        if (1)\n            spch_add_event_v(83"),
@@ -915,8 +915,8 @@ MUTATIONS = _say_mutations(_SRC) + _table_mutations(_SRC) + \
     _m("id-tto", "    return id_of(gToIdTable, c->copTargetUnitId);",
        "    return id_of(gCopIdTable, c->copTargetUnitId);"),
     _m("sh-n", "    while (n >= 2) {", "    while (n >= 3) {"),
-    _m("sh-range", "bRandomI((int32_t)n, &bDefaultSeed);",
-       "bRandomI((int32_t)n - 1, &bDefaultSeed);"),
+    _m("sh-range", "bRandomI((int32_t)n, bViewSeed);",
+       "bRandomI((int32_t)n - 1, bViewSeed);"),
     _m("sh-swap", "        a[0] = a[r];\n", ""),
     _m("sh-swap2", "        a[r] = t;\n", ""),
     _m("sh-step", "        n--;\n        a++;", "        n--;"),

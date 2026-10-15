@@ -853,7 +853,7 @@ MUTATIONS = _conv_mutations() + _case_mutations() + [
      "CurrentRCState\n                      - RCSTATE_AI_DEMO_MODE) < 2u;",
      "    return (int32_t)(pRaceCoordinator->CurrentRCState\n"
      "                      - RCSTATE_AI_DEMO_MODE) < 2;"),
-    ("rnd-seed", P, "bRandomI(n, &bDefaultSeed)", "bRandomI(n, NULL)"),
+    ("rnd-seed", P, "bRandomI(n, bViewSeed)", "bRandomI(n, NULL)"),
     # ---- GetChasedCarColour
     ("col-def", P, "ride->SkinNumber, 1)", "ride->SkinNumber, 0)"),
     ("col-skin", P, "ride->SkinNumber, 1)", "(uint8_t)ride->SkinNumber, 1)"),

@@ -869,8 +869,8 @@ def _m(name, old, new, f=S):
 
 HAND = [
     # ---- FlipCoinNoReplay and the player pickers
-    _m("fc-ne", "bRandomI(2, &bDefaultSeed) == 0", "bRandomI(2, &bDefaultSeed) != 0"),
-    _m("fc-3", "bRandomI(2, &bDefaultSeed)", "bRandomI(3, &bDefaultSeed)"),
+    _m("fc-ne", "bRandomI(2, bViewSeed) == 0", "bRandomI(2, bViewSeed) != 0"),
+    _m("fc-3", "bRandomI(2, bViewSeed)", "bRandomI(3, bViewSeed)"),
     _m("sp-n1", SP, SP.replace("!= 2", "!= 1")),
     _m("sp-swap", SP, SP.replace("? one : two", "? two : one")),
     _m("sp-ppn1", SP, SP.replace("ByNumber[0]", "ByNumber[1]")),
