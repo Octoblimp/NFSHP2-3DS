@@ -22,6 +22,13 @@ const char* const kLockHashParts[LOCKHASH_PARTS] = {
     "time", "seeds", "players", "racers", "cops", "traffic", "race",
 };
 
+const char* const kLockHashFields[LOCKHASH_FIELDS] = {
+    "modes", "place", "motion", "body", "spin", "wheelmats", "wheels",
+    "drive", "rel",
+};
+
+_Static_assert(LOCKHASH_CARS == WORLD_MAX_CARS, "a LockHash per slot");
+
 typedef struct Draw {
     uint32_t frame;
     uint32_t at;
@@ -86,6 +93,42 @@ static uint32_t mixCar(uint32_t h, const Car* c)
                     SPAN(CarState, GeometryPosition, DistanceMoved));
 }
 
+// The CarState's pieces after the modes, each from its first field to the
+// next piece's: together GeometryPosition to DistanceMoved, as mixCar.
+static const uint16_t kCarCuts[LOCKHASH_FIELDS] = {
+    offsetof(CarState, GeometryPosition),
+    offsetof(CarState, Velocity),
+    offsetof(CarState, BodyMatrix),
+    offsetof(CarState, AngularVelocity),
+    offsetof(CarState, WheelMatrix),
+    offsetof(CarState, WheelAngularVelocity),
+    offsetof(CarState, Angle),
+    offsetof(CarState, RelCoordMatrix),
+    offsetof(CarState, DistanceMoved) + sizeof(float),
+};
+
+static void carFields(const Car* c, uint32_t* f)
+{
+    const uint8_t* s = (const uint8_t*)&c->State;
+    int            i;
+
+    f[LOCKHASH_MODES] = mix(mix(0x811c9dc5u, (uint32_t)c->TheControlMode),
+                            (uint32_t)c->TheMovementMode);
+    for (i = 1; i < LOCKHASH_FIELDS; i++)
+        f[i] = mixBytes(0x811c9dc5u, s + kCarCuts[i - 1],
+                        (size_t)(kCarCuts[i] - kCarCuts[i - 1]));
+}
+
+// A slot's pieces as one word, for the window's line of cars.
+static uint32_t slotHash(const uint32_t* f)
+{
+    uint32_t h = 0x811c9dc5u;
+    int      i;
+
+    for (i = 0; i < LOCKHASH_FIELDS; i++) h = mix(h, f[i]);
+    return h;
+}
+
 // The cars of the table from `first` to `last`, each with its slot.
 static uint32_t mixCars(const World* w, int32_t first, int32_t last)
 {
@@ -141,6 +184,7 @@ static uint32_t mixRace(const Race* r, const RaceCoordinator* rc)
 void lockhash_world(World* w, LockHash* h)
 {
     uint32_t t;
+    int32_t  i;
 
     memset(h, 0, sizeof *h);
     if (w == NULL) return;
@@ -158,6 +202,11 @@ void lockhash_world(World* w, LockHash* h)
     h->part[LOCKHASH_TRAFFIC] =
         mixCars(w, w->TrafficCarPos, w->TotalNumCars);
     h->part[LOCKHASH_RACE] = mixRace(pCurrentRace, pRaceCoordinator);
+
+    h->clock[0] = (uint32_t)WorldTimer;
+    h->clock[1] = (uint32_t)WorldLoopCounter;
+    for (i = 0; i < LOCKHASH_CARS && i < w->TotalNumCars; i++)
+        if (w->CarTable[i] != NULL) carFields(w->CarTable[i], h->car[i]);
 }
 
 uint16_t lockhash_fold(const LockHash* h)
@@ -256,6 +305,44 @@ static void logDraws(uint32_t n)
     if (onLine) say("%s", line);
 }
 
+// Frame n's clocks and a word for each slot, LOCKHASH_CARS of them.
+static void logCars(uint32_t n, const LockHash* h)
+{
+    char   line[256];
+    size_t len;
+    int    i;
+
+    len = (size_t)snprintf(line, sizeof line,
+                           "lockhash: cars %lu timer %08lx loop %08lx:",
+                           (unsigned long)n, (unsigned long)h->clock[0],
+                           (unsigned long)h->clock[1]);
+    for (i = 0; i < LOCKHASH_CARS; i++)
+        len += (size_t)snprintf(line + len, sizeof line - len, " %08lx",
+                                (unsigned long)slotHash(h->car[i]));
+    say("%s", line);
+}
+
+// Frame n's cars in pieces, a line for each slot that has one.
+static void logFields(uint32_t n, const LockHash* h)
+{
+    char   line[256];
+    size_t len;
+    int    i, k;
+
+    for (i = 0; i < LOCKHASH_CARS; i++) {
+        uint32_t any = 0;
+
+        for (k = 0; k < LOCKHASH_FIELDS; k++) any |= h->car[i][k];
+        if (any == 0) continue;
+        len = (size_t)snprintf(line, sizeof line, "lockhash: fields %lu %d:",
+                               (unsigned long)n, i);
+        for (k = 0; k < LOCKHASH_FIELDS; k++)
+            len += (size_t)snprintf(line + len, sizeof line - len, " %08lx",
+                                    (unsigned long)h->car[i][k]);
+        say("%s", line);
+    }
+}
+
 void lockhash_differs(uint32_t n)
 {
     uint32_t k;
@@ -271,5 +358,7 @@ void lockhash_differs(uint32_t n)
         if (L.ringFor[f & MASK] != f) continue;
         logParts("parts", f, &L.ring[f & MASK]);
         logDraws(f);
+        logCars(f, &L.ring[f & MASK]);
     }
+    if (L.ringFor[n & MASK] == n) logFields(n, &L.ring[n & MASK]);
 }

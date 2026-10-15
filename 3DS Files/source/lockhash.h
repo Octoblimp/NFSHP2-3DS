@@ -24,8 +24,11 @@
 // draws on bDefaultSeed by frame with the address that drew (bmath.h's
 // bDefaultSeedWatch). Told that a frame differs, it logs the parts and the
 // draws of the LOCKHASH_WINDOW frames up to it, once a race, so the two
-// consoles' logs show which part went first and what drew. Every
-// NETSTEP_LOG_EVERY frames it logs the parts too, as netstep its checksum.
+// consoles' logs show which part went first and what drew. With them go
+// the clocks and a hash of each slot's car, and at the frame itself each
+// car in pieces (LOCKHASH_FIELDS), so the logs show which car went and in
+// what. Every NETSTEP_LOG_EVERY frames it logs the parts too, as netstep
+// its checksum.
 //
 // From GO to the race's end it also points bmath.h's bViewSeed at a seed of
 // its own. Each console runs every player's logic as retail ran its two
@@ -62,9 +65,30 @@ enum {
 #define LOCKHASH_WINDOW 16     // frames logged up to the one that differs
 #define LOCKHASH_DRAWS  1024   // draws kept, a power of two
 #define LOCKHASH_LINE   8      // draws on a line of the log
+#define LOCKHASH_CARS   14     // the World's slots, WORLD_MAX_CARS
+
+// A car in pieces, for the window: its control and movement modes, then
+// its CarState from GeometryPosition to DistanceMoved in eight spans.
+enum {
+    LOCKHASH_MODES,     // TheControlMode, TheMovementMode
+    LOCKHASH_PLACE,     // GeometryPosition, Position
+    LOCKHASH_MOTION,    // Velocity, Acceleration
+    LOCKHASH_BODY,      // BodyMatrix
+    LOCKHASH_SPIN,      // AngularVelocity, AngularAcceleration
+    LOCKHASH_WHEELMATS, // WheelMatrix, BrakeMatrix
+    LOCKHASH_WHEELS,    // WheelAngularVelocity to WheelTractionUsage
+    LOCKHASH_DRIVE,     // Angle to BurnOutAllow: steering, gear, throttle
+    LOCKHASH_REL,       // RelCoordMatrix to DistanceMoved
+    LOCKHASH_FIELDS
+};
 
 typedef struct LockHash {
     uint32_t part[LOCKHASH_PARTS];
+    // Not in the fold, only for the window: WorldTimer and
+    // WorldLoopCounter as the frame left them, and each slot's car in
+    // pieces (0 for a NULL slot or one past TotalNumCars).
+    uint32_t clock[2];
+    uint32_t car[LOCKHASH_CARS][LOCKHASH_FIELDS];
 } LockHash;
 
 typedef void (*LockHashLogFn)(const char* line);
@@ -88,8 +112,12 @@ void lockhash_stop(void);
 // what draws next is frame n + 1's. The checksum for netstep_done.
 uint16_t lockhash_ran(uint32_t n, struct World* w);
 
-// Frame `n` differs from another console's: the window's parts and draws,
-// once a race.
+// Frame `n` differs from another console's: the window's parts, draws,
+// clocks and cars (a hash of each slot), once a race, and frame n's cars
+// in pieces.
 void lockhash_differs(uint32_t n);
+
+// The names of a car's pieces in the log, in order.
+extern const char* const kLockHashFields[LOCKHASH_FIELDS];
 
 #endif

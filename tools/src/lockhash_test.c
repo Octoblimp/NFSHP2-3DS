@@ -17,6 +17,11 @@
 //     last frame's ran and its own, LOCKHASH_LINE to a line, with the
 //     address each returned to; a frame not run, or not run since start,
 //     not logged; nothing before start or after stop;
+//   - each car's pieces: a change to a field moves its own slot's own
+//     piece and no other; a pointer, the tail or the hole none; a NULL
+//     slot or one past TotalNumCars all 0; the clocks WorldTimer and
+//     WorldLoopCounter; the window logs each frame's clocks and a word
+//     for each slot, and the frame's own cars in pieces;
 //   - bViewSeed: on a seed of its own from start, whose draws are not
 //     the frame's and move no part, and on bDefaultSeed again after stop;
 //   - bDefaultSeedWatch: told of bRandomI, bRandomF and bSetRandomSeed on
@@ -43,6 +48,7 @@
 // ------------------------------------------------------- what it reads
 
 int32_t          WorldTimer;
+int32_t          WorldLoopCounter;
 Race*            pCurrentRace;
 RaceCoordinator* pRaceCoordinator;
 
@@ -266,6 +272,121 @@ static void pRcBefore(void) { g_rc.BeforePauseRCState ^= 1; }
 static void pRcPort(void) { g_rc.PausedJoystickPort ^= 1; }
 static void pNoRc(void) { pRaceCoordinator = NULL; }
 
+// ------------------------------------------------------------ the pieces
+
+#define MO  LOCKHASH_MODES
+#define PC  LOCKHASH_PLACE
+#define MT  LOCKHASH_MOTION
+#define BD  LOCKHASH_BODY
+#define SP  LOCKHASH_SPIN
+#define WM  LOCKHASH_WHEELMATS
+#define WH  LOCKHASH_WHEELS
+#define DR  LOCKHASH_DRIVE
+#define RL  LOCKHASH_REL
+#define NONE (-1)
+
+static void qGeometry(void) { flip(&g_cars[1].State.GeometryPosition.x); }
+static void qPosition(void) { flip(&g_cars[2].State.Position.pad); }
+static void qVelocity(void) { flip(&g_cars[2].State.Velocity.y); }
+static void qAccel(void) { flip(&g_cars[3].State.Acceleration.pad); }
+static void qBody(void) { flip(&g_cars[3].State.BodyMatrix.v0.x); }
+static void qAngVel(void) { flip(&g_cars[4].State.AngularVelocity.x); }
+static void qAngAcc(void) { flip(&g_cars[4].State.AngularAcceleration.pad); }
+static void qWheelMat(void) { flip(&g_cars[5].State.WheelMatrix[0].v0.x); }
+static void qBrakeMat(void) { flip(&g_cars[5].State.BrakeMatrix[3].v3.w); }
+static void qWheelAV(void) { flip(&g_cars[6].State.WheelAngularVelocity[0]); }
+static void qTraction(void) { flip(&g_cars[6].State.WheelTractionUsage[3]); }
+static void qAngle(void) { g_cars[7].State.Angle ^= 1; }
+static void qSteer(void) { g_cars[7].State.SteeringAngle ^= 1; }
+static void qThrottle(void) { flip(&g_cars[0].State.Throttle); }
+static void qBurnOut(void) { flip(&g_cars[0].State.BurnOutAllow); }
+static void qRel(void) { flip(&g_cars[1].State.RelCoordMatrix.v0.x); }
+static void qValid(void) { g_cars[1].State.MatrixValid ^= 1; }
+static void qMoved(void) { flip(&g_cars[2].State.DistanceMoved); }
+static void qControl(void) { g_cars[3].TheControlMode ^= 1; }
+static void qMovement(void) { g_cars[4].TheMovementMode ^= 1; }
+
+// A change by `poke`: exactly slot `slot`'s piece `piece` must move, or
+// nothing for NONE.
+static void piece(const char* what, Poke poke, int slot, int pieceAt)
+{
+    LockHash a, b;
+    int      i, k;
+
+    g_what = what;
+    build();
+    lockhash_world(&g_world, &a);
+    poke();
+    lockhash_world(&g_world, &b);
+    for (i = 0; i < LOCKHASH_CARS; i++)
+        for (k = 0; k < LOCKHASH_FIELDS; k++) {
+            int moved = a.car[i][k] != b.car[i][k];
+            int must  = i == slot && k == pieceAt;
+
+            if (moved != must)
+                fault("slot %d's %s %s", i, kLockHashFields[k],
+                      moved ? "moved" : "did not move");
+        }
+    if (a.clock[0] != b.clock[0] || a.clock[1] != b.clock[1])
+        fault("the clocks moved");
+}
+
+static void pieces(void)
+{
+    LockHash h;
+    int      i, k;
+
+    piece("GeometryPosition", qGeometry, 1, PC);
+    piece("Position", qPosition, 2, PC);
+    piece("Velocity", qVelocity, 2, MT);
+    piece("Acceleration", qAccel, 3, MT);
+    piece("BodyMatrix", qBody, 3, BD);
+    piece("AngularVelocity", qAngVel, 4, SP);
+    piece("AngularAcceleration", qAngAcc, 4, SP);
+    piece("WheelMatrix", qWheelMat, 5, WM);
+    piece("BrakeMatrix", qBrakeMat, 5, WM);
+    piece("WheelAngularVelocity", qWheelAV, 6, WH);
+    piece("WheelTractionUsage", qTraction, 6, WH);
+    piece("Angle", qAngle, 7, DR);
+    piece("SteeringAngle", qSteer, 7, DR);
+    piece("Throttle", qThrottle, 0, DR);
+    piece("BurnOutAllow", qBurnOut, 0, DR);
+    piece("RelCoordMatrix", qRel, 1, RL);
+    piece("MatrixValid", qValid, 1, RL);
+    piece("DistanceMoved", qMoved, 2, RL);
+    piece("TheControlMode", qControl, 3, MO);
+    piece("TheMovementMode", qMovement, 4, MO);
+    piece("pCarInfo", pPlayerInfo, 0, NONE);
+    piece("pTopologyCoordinate", pPlayerTopo, 0, NONE);
+    piece("the CarState's tail", pPlayerTail, 0, NONE);
+    piece("the CarState's hole", pPlayerHole, 0, NONE);
+    piece("CarIndex", pPlayerIndex, 0, NONE);
+
+    g_what = "the slots";
+    build();
+    g_world.CarTable[6]  = NULL;
+    g_world.TotalNumCars = 7;
+    WorldTimer       = 1234;
+    WorldLoopCounter = 100077;
+    lockhash_world(&g_world, &h);
+    for (i = 0; i < LOCKHASH_CARS; i++) {
+        uint32_t any = 0;
+
+        for (k = 0; k < LOCKHASH_FIELDS; k++) any |= h.car[i][k];
+        if ((i < 7 && i != 6) != (any != 0))
+            fault("slot %d %s", i, any ? "has pieces" : "has none");
+    }
+    if (h.clock[0] != 1234 || h.clock[1] != 100077)
+        fault("the clocks %lu %lu", (unsigned long)h.clock[0],
+              (unsigned long)h.clock[1]);
+    memset(&h, 0xff, sizeof h);
+    lockhash_world(NULL, &h);
+    for (i = 0; i < LOCKHASH_CARS; i++)
+        for (k = 0; k < LOCKHASH_FIELDS; k++)
+            if (h.car[i][k] != 0) fault("no World: slot %d not 0", i);
+    if (h.clock[0] != 0 || h.clock[1] != 0) fault("no World: clocks not 0");
+}
+
 static void parts(void)
 {
     LockHash h;
@@ -438,6 +559,10 @@ static int partsLine(const char* what, uint32_t n, const LockHash* want)
 static void frameWorld(uint32_t n)
 {
     WorldTimer   = (int32_t)(1000 + n * 133);
+    WorldLoopCounter = (int32_t)(100000 + n);
+    // Each frame one car, by its first piece or its last.
+    if (n & 1) g_cars[n % 8].State.DistanceMoved = (float)n;
+    else g_cars[n % 8].TheControlMode = (ControlMode)n;
     bDefaultSeed = 0x9e3779b9u * (n + 1);
 }
 
@@ -518,6 +643,61 @@ static void logs(void)
                 break;
             }
     }
+    if (count("lockhash: cars ") != LOCKHASH_WINDOW)
+        fault("%d cars lines, not %d", count("lockhash: cars "),
+              LOCKHASH_WINDOW);
+    for (n = 155 - (LOCKHASH_WINDOW - 1); n <= 155; n++) {
+        const char* c;
+
+        snprintf(line, sizeof line, "lockhash: cars %lu timer %08lx loop %08lx:",
+                 (unsigned long)n, (unsigned long)want[n].clock[0],
+                 (unsigned long)want[n].clock[1]);
+        c = find(line);
+        if (c == NULL) {
+            fault("no \"%s\"", line);
+            continue;
+        }
+        c += strlen(line);
+        if (strlen(c) != 9 * LOCKHASH_CARS)
+            fault("frame %lu: a cars line of %d characters", (unsigned long)n,
+                  (int)strlen(c));
+        // Each slot's word moves with its pieces: frame n flipped car
+        // n % 8, so only that slot's word differs from frame n - 1's.
+        if (n > 155 - (LOCKHASH_WINDOW - 1)) {
+            char prev[64];
+            const char* d;
+
+            snprintf(prev, sizeof prev, "lockhash: cars %lu ",
+                     (unsigned long)(n - 1));
+            d = find(prev);
+            if (d != NULL) {
+                d = strrchr(d, ':') + 1;
+                for (k = 0; k < LOCKHASH_CARS; k++) {
+                    int moved = strncmp(c + 9 * k, d + 9 * k, 9) != 0;
+
+                    if (moved != (k == (int)(n % 8)))
+                        fault("frame %lu: slot %d's word %s", (unsigned long)n,
+                              k, moved ? "moved" : "did not move");
+                }
+            }
+        }
+    }
+    if (count("lockhash: fields ") != 8)
+        fault("%d fields lines, not 8", count("lockhash: fields "));
+    for (i = 0; i < 8; i++) {
+        char want8[256];
+        size_t len;
+
+        len = (size_t)snprintf(want8, sizeof want8, "lockhash: fields 155 %d:",
+                               i);
+        for (k = 0; k < LOCKHASH_FIELDS; k++)
+            len += (size_t)snprintf(want8 + len, sizeof want8 - len, " %08lx",
+                                    (unsigned long)want[155].car[i][k]);
+        if (!find(want8)) fault("no \"%s\"", want8);
+    }
+    if (count("lockhash: fields 15") != count("lockhash: fields 155 "))
+        fault("fields of a frame not the one that differs");
+
     g_numLines = 0;
     lockhash_differs(158);
     if (g_numLines) fault("a second window in one race");
@@ -538,6 +718,21 @@ static void logs(void)
         fault("%d parts lines for frames 0 to 3", count("lockhash: parts "));
     if (count("lockhash: parts 4 ") || count("lockhash: parts 5 "))
         fault("parts of a frame not run");
+    if (count("lockhash: cars ") != 4)
+        fault("%d cars lines for frames 0 to 3", count("lockhash: cars "));
+    if (count("lockhash: fields "))
+        fault("pieces of frame 5, not run");
+
+    // A frame not run whose ring slot has one 64 frames before: no
+    // pieces of that one.
+    lockhash_start(fLog);
+    for (n = 0; n < 70; n++) (void)lockhash_ran(n, &g_world);
+    g_numLines = 0;
+    lockhash_differs(70);
+    if (count("lockhash: parts ") != LOCKHASH_WINDOW - 1)
+        fault("%d parts lines for frames 55 to 69", count("lockhash: parts "));
+    if (count("lockhash: fields "))
+        fault("pieces of frame 6 for frame 70");
 
     lockhash_stop();
     if (bDefaultSeedWatch != NULL) fault("the watch kept after stop");
@@ -595,6 +790,8 @@ int main(void)
 {
     parts();
     printf("parts: faults %d\n", g_faults);
+    pieces();
+    printf("pieces: faults %d\n", g_faults);
     logs();
     printf("log: faults %d\n", g_faults);
     watchCheck();

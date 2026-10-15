@@ -70,6 +70,7 @@ void (*gEDeleteAllDuplicatedSolidsFn)(void);
 void (*gDemoModeReplayLoadFn)(void);
 void (*gLoadSoundRegionsInGameFn)(void (*done)(intptr_t), intptr_t param);
 int (*gTrackFlowHoldRaceFn)(void);
+void (*gTrackFlowViewUnloadFn)(void);
 
 #define CALL(fn) do { if ((fn) != NULL) (fn)(); } while (0)
 
@@ -400,6 +401,8 @@ void BeginGameFlowUnloadingTrackSpecific(void)
     InGameFlag = 0;
     set_loading_screen(FLAILER_SCREEN_VISIBLE);
     CALL(gEWaitUntilRenderingDoneFn);
+    // The port's view of the track (trackflow.h).
+    CALL(gTrackFlowViewUnloadFn);
 
     // The pointer is cleared in UnloadAllTexturesFromFile's delay slot:
     // after the delete, before the HUD pack goes.

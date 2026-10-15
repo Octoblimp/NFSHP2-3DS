@@ -23242,3 +23242,97 @@ again. Still to ask the user: the road's blink on the device again
 (TASKS 64), 47's bridge, 52's popups, the next device log's `sends:`
 line for 65, and how the `-fno-strict-aliasing` build plays on the
 device (FPS, props).
+
+## Session 108 -- 37f-2's Next Race on two Azahars
+
+The user let the Azahar runs go on again ("you can continue the Azahar
+runs now") and said not to stop working while one runs.
+
+### Next Race
+
+`run_azahar_lobby.ps1 -Consoles 2 -Race -NextRace -Drive 30`: Knockout,
+the race finished on lockstep frame 1800 (`WirelessTestFinish`), the
+results passed with the host's A, Next Race, OK, each copy's save, race
+2 loaded, GO on the host's seed and racing in step.
+
+- First run: no "save yes". The save's question opens on No (BUTTON2,
+  `e0105664`), as retail's DisplayYesNoMessage does; the script now
+  waits for it, moves Left to Yes (BUTTON1, `e0105663`) and says A.
+- Second run: both copies saved, then both Azahars exited:
+  `bMalloc: 8995308 bytes for TRACKS\TRACKB11.LZC` in stderr. The race's
+  view of the track (`trackview`, attached to the flow's bundles) was
+  let go only by the main loop once the coordinator was gone, on a
+  later pass; Next Race's UNLOADING_TRACK_SPECIFIC goes straight on to
+  LOADING_TRACK_SPECIFIC in the same pass, so the second TRACKB found
+  the first race's view still on the heap (46.7 MB used at the
+  unload's Begin).
+- The fix: `trackflow.h`'s `gTrackFlowViewUnloadFn`, the port's seam,
+  called in BeginGameFlowUnloadingTrackSpecific after
+  eWaitUntilRenderingDone; `main.c` binds `raceDetachTrack`, which waits
+  for citro3d's GX queue (`gxCmdQueueWait` on `__C3D_Context`, 0.5 s
+  at most: the queue runs from C3D_FrameEnd into the flow's update) and
+  runs `trackview_free`, logging "race: track detached (heap ...)". The
+  main loop's own detach stays for a race gone without the unload.
+  `gEWaitUntilRenderingDoneFn` and `gBCountFreeMemoryFn` stay unbound:
+  binding them would add GPU waits at every car and resource delete,
+  and change racecoord's PRERACEANIM unload.
+- Third run: both PASS on seeds 0e7236cd and 3b4c87d1. Finish on 1800,
+  stop on 3023, "race: track detached (heap: 42869 KB used; linear
+  61235 KB free)", then LOADING_TRACK_SPECIFIC at 27737 KB used and
+  62563 KB linear free (the first load: 27885 and 62900). B's 28
+  logged frames' parts the host's.
+
+### The difference after the finish (open)
+
+The second run had one: "frame 1809 differs", nine frames after the
+test's finish, in the time and racers parts (host aae84c74 ... 51915b29,
+B dae8d0e4 ... 53b52d1d; seeds, players, cops, traffic and race the
+same), no draws on bDefaultSeed in that frame, and every later frame
+differing. The time part holds retail's x + y of each car, so an AI
+racer's car went two ways and nothing else. The first and third runs
+had none. Not found yet: POSTRACE's world, the end game screens (FE,
+real time) and the demo camera were read; nothing of them writes the
+racers' state. lockhash's window now logs each frame's WorldTimer,
+WorldLoopCounter and a word for each slot's car ("lockhash: cars"),
+and at the frame itself each car in nine pieces ("lockhash: fields":
+modes, place, motion, body, spin, wheelmats, wheels, drive, rel), so
+the next time shows which car and in what.
+
+### What changed
+
+- `trackflow.c/h`: `gTrackFlowViewUnloadFn`. `main.c`:
+  `waitRenderingDone`, `raceDetachTrack`, bound to it.
+- `lockhash.c/h`: each frame's clocks and cars in nine pieces
+  (`LOCKHASH_FIELDS`), the window's "cars" and "fields" lines.
+- `tools/src/lockhash_test.c`, `tools/lockhash_check.py`: the pieces'
+  checks and 21 new mutations.
+- `tools/run_azahar_lobby.ps1`: the save's Left to Yes; at a
+  difference, the clocks and each slot that differs with its pieces.
+- Docs: `track-flow.md` ("The race's view"), `netstep.md`,
+  `netrace.md`, `lockhash.md`.
+
+### Checks
+
+- lockhash_check: total faults 0; `--mutate` 98, 94 caught, 4
+  equivalent, 0 unexplained.
+- trackflow_check: 22 scenarios, 749 ops, 2333 lines, 0 differ.
+- tools/build_cia.ps1: built, relocations OK, shaders OK.
+- Two Azahars, `-NextRace`: PASS on both (above).
+
+### Noted
+
+- At the unload: "DeleteSlotPool() called on nonempty SlotPool
+  CollisionSampleSounds (1 slots allocated)". Retail's UnRegister
+  frees only the free list's samples; one playing at the race's end
+  stays. Harmless; not 37f's.
+- The save's text says "Memory Card (PS2) ... MEMORY CARD slot 1":
+  the 3DS's wording is a later fix.
+
+### Next
+
+The checksum difference (lockhash's new lines, then more runs), then
+37f-3 (the pause's screens driven by the pad that paused, on every
+console), 37g, TASKS 61, 46, 60 and 59. Still to ask the user: the
+road's blink on the device again (TASKS 64), 47's bridge, 52's popups,
+the next device log's `sends:` line for 65, and how the
+`-fno-strict-aliasing` build plays on the device (FPS, props).

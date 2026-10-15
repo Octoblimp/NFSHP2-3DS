@@ -151,6 +151,13 @@ extern void (*gLoadSoundRegionsInGameFn)(void (*done)(intptr_t),
 // goes on with trackflow_go_racing. NULL holds nothing, as retail.
 extern int (*gTrackFlowHoldRaceFn)(void);
 
+// The port's: the race's view of the track (main.c, trackview.h) lets go
+// of its meshes, textures and heap as the Begin of unloading the track
+// starts, while the bundle it reads is still in. Next Race's unload goes
+// on to the next race's load in the same pass of the flow, so nothing
+// between them would. NULL does nothing, as retail.
+extern void (*gTrackFlowViewUnloadFn)(void);
+
 // ------------------------------------------------------------- the steps
 
 // BeginGameFlowLoadingTrackCommon, 0x00168db8.

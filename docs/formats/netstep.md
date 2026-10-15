@@ -259,5 +259,25 @@ and the race's CPU stages averaged a little less than before (24.1 and
 frame on every copy (`WirelessTestFinish`, `netrace.md`), passes the
 results with the host's A to Next Race and OK, says Yes to each copy's
 save, and must see race 2 loaded, a second GO on the host's seed and
-every copy racing again in step. It was never run through: the user
-stopped the Azahar runs on 2026-10-15 while its first run was going.
+every copy racing again in step. The user stopped the Azahar runs on
+2026-10-15 while its first run was going, and let them go on again the
+same day.
+
+Session 108 ran it through. The save's question opens on No, as
+retail's DisplayYesNoMessage does (`memcard.c`), so the script moves
+Left to Yes before its A. The run after that aborted both copies at the
+second load: `bMalloc: 8995308 bytes for TRACKS\TRACKB11.LZC`, the heap
+still holding the first race's view of the track, which the main loop
+let go of only on a later pass; Next Race's unload goes on to the next
+load in the same pass. The view now lets go in the Begin of unloading
+(`track-flow.md`, "The race's view"), and the next run passed on seeds
+0e7236cd and 3b4c87d1: both copies finished on frame 1800, stopped on
+3023, saved, loaded race 2 with the heap back where the first load had
+it (27.7 MB used and 62.5 MB linear free, against 27.9 and 62.9) and
+raced it in step, all 28 logged frames' parts the host's.
+
+The run that aborted had one checksum difference first: frame 1809,
+nine frames after the test's finish, in the time and racers parts (an
+AI racer's car, and with it retail's x + y), and every frame after it
+differed too. The runs before and after it had none. Finding it is
+still open (TASKS 37f-2).

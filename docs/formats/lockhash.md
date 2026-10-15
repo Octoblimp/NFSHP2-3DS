@@ -48,7 +48,39 @@ of frame n are frame n's.
   (`netstep_on_differ`), once a race: `lockhash: frame N differs; the 16
   frames up to it`, then for each of those frames that this console has
   run, `lockhash: parts N ...` and `lockhash: draws N: count`, then
-  `lockhash: at N: a1 a2 ...`, eight addresses to a line.
+  `lockhash: at N: a1 a2 ...`, eight addresses to a line, then
+  `lockhash: cars N timer t loop l: w0 ... w13`: WorldTimer and
+  WorldLoopCounter as the frame left them, and a word for each of the
+  World's 14 slots. Last, if the frame itself has run, `lockhash: fields
+  N s: p0 ... p8` for each slot with a car: the car in nine pieces.
+
+## The cars in pieces
+
+Not in the fold, only for the window (Session 108): a frame that differs
+in a cars part says which part, not which car or what in it. Each frame
+also keeps, for each slot, the car in nine pieces, each FNV-1a as the
+parts are:
+
+| piece | what |
+|---|---|
+| modes | `TheControlMode`, `TheMovementMode` |
+| place | `GeometryPosition`, `Position` |
+| motion | `Velocity`, `Acceleration` |
+| body | `BodyMatrix` |
+| spin | `AngularVelocity`, `AngularAcceleration` |
+| wheelmats | `WheelMatrix`, `BrakeMatrix` |
+| wheels | `WheelAngularVelocity` to `WheelTractionUsage` |
+| drive | `Angle` to `BurnOutAllow`: steering, odometer, gear, throttle, RPM |
+| rel | `RelCoordMatrix` to `DistanceMoved` |
+
+The eight CarState pieces together are the span the parts read, cut at
+the fields named. A NULL slot, or one past `TotalNumCars`, is all 0, and
+the cars line folds each slot's nine into one word. `run_azahar_lobby.ps1`
+compares them with the host's at the first frame that differs and names
+each slot that differs and its pieces, so "slot 2: differs in drive"
+says an AI racer's steering or throttle went first, which only its
+controller sets, and "place" with nothing else a move from outside the
+physics.
 
 Map an address with `arm-none-eabi-addr2line -f -e "3DS Files/build/..."`
 on the .elf of that build.
@@ -98,8 +130,13 @@ field it reads and with no other, that every bit of every part moves the
 fold, the frame lines and the window (once a race, frames not run left
 out, nothing before start or after stop), each draw's address, the view
 seed from start to stop, and that a watched draw gives what an unwatched
-one does. Faults 0. `--mutate`: 77 mutations, 73 caught, 4 equivalent
-(named in the check).
+one does. Since Session 108 it also checks the cars in pieces: a change
+to each field moves its own slot's own piece and no other, a pointer,
+the tail or the hole none, a NULL slot or one past `TotalNumCars` is 0,
+the clocks are the frame's, and the window's cars lines (one a frame, a
+slot's word moving with its car alone) and the frame's fields lines,
+never a frame not run whose ring slot holds an older one. Faults 0.
+`--mutate`: 98 mutations, 94 caught, 4 equivalent (named in the check).
 
 Moving the draws to `bViewSeed` changed no harness's model: with the
 pointer on `bDefaultSeed` each draw is the one it was, and copmanager,
@@ -111,7 +148,8 @@ gave 0 differ.
 
 `tools/run_azahar_lobby.ps1 -Race` compares every copy's parts with the
 host's, frame by frame, and fails a copy at the first that differs,
-printing both copies' parts and draws there. `-CopsOn` walks through Hot
+printing both copies' parts and draws there, then the clocks if they
+differ and each car slot that differs with its pieces. `-CopsOn` walks through Hot
 Pursuit, so the race has cops; `-Steer` steers each copy left and right
 by turns, its own period each.
 

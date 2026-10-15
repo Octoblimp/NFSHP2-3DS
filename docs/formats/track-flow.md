@@ -267,6 +267,24 @@ second car of the player's type drew its wheels alone.
 Begin of unloading with Find and Unload seams over the viewer's files,
 newest first, each unloaded the way `~ResourceFile` does it.
 
+### The race's view
+
+In a race `main.c` attaches a view to the track the flow loaded
+(`raceAttachTrack`): meshes, textures and heap of its own, read out of
+the bundles the flow keeps in. `gTrackFlowViewUnloadFn`, the port's own
+seam, called right after step 3 (eWaitUntilRenderingDone), lets go of it
+while those bundles are still in: `raceDetachTrack` waits for the GPU's
+queue (`gxCmdQueueWait`, half a second at most) and runs
+`trackview_free`, which for an attached view frees only what the view
+made. NULL does nothing, as retail; the viewer leaves it NULL.
+
+Before Session 108 the main loop let go of the view only once the
+coordinator was gone, on its next pass. Next Race's unload goes on to
+the next race's load in the same pass of the flow, so the second load's
+TRACKB (9 MB) found the heap still holding the first race's view, and
+both Azahars aborted (`bMalloc: 8995308 bytes for TRACKS\TRACKB11.LZC`).
+The main loop's check stays, for a race gone some other way.
+
 ## Checking it
 
 ```bash

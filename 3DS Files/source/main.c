@@ -4569,6 +4569,42 @@ static double ticksMs(uint64_t ticks)
 // so the frames' wait is only for a stream that takes longer.
 static bool raceAttachGaveUp;
 
+// The GPU done with the frame C3D_FrameEnd sent, so what that frame reads
+// can be freed. citro3d's context starts with its GX queue (hangwatch.c
+// reads it the same way), and the queue runs from the frame's end to the
+// next C3D_FrameBegin, which the flow's pass is between. Half a second at
+// most.
+extern u8 __C3D_Context[];
+
+static void waitRenderingDone(void)
+{
+    gxCmdQueue_s* q = (gxCmdQueue_s*)(void*)__C3D_Context;
+
+    if (!gxCmdQueueWait(q, 500000000LL))
+        logLine("race: the GPU not done in 0.5 s at the track's unload");
+}
+
+// gTrackFlowViewUnloadFn: the race's view lets go as the Begin of
+// unloading the track starts, before the track's files go
+// (trackflow.h). The loop's check for a race gone came after the flow's
+// pass, and Next Race's unload goes on to the next race's load in that
+// same pass: the view kept its meshes and textures (about 49 MB of the
+// linear heap) and its heap through the next load, still pointing into
+// the freed bundle, and TRACKB's 9 MB found no room left whole (TASKS
+// 37f-2). The last frame drawn may still be on the GPU.
+static void raceDetachTrack(void)
+{
+    struct mallinfo mi;
+
+    if (!g_track.attached) return;
+    waitRenderingDone();
+    trackview_free(&g_track);
+    mi = mallinfo();
+    logLine("race: track detached (heap: %lu KB used; linear %lu KB free)",
+            (unsigned long)mi.uordblks / 1024,
+            (unsigned long)linearSpaceFree() / 1024);
+}
+
 static bool raceAttachTrack(void)
 {
     static int    waits;
@@ -7262,6 +7298,7 @@ int main(int argc, char** argv)
     lobby_on_setup(lobbySetup);
     lobby_cpu_wish(lobbyCpuWish);
     gTrackFlowHoldRaceFn = netrace_hold;
+    gTrackFlowViewUnloadFn = raceDetachTrack;
 
     BCarSelHooks carselHooks;
     memset(&carselHooks, 0, sizeof(carselHooks));
@@ -7640,17 +7677,11 @@ int main(int argc, char** argv)
                 g_lockEnd = false;
             }
 
-            // The Begin of unloading deleted the coordinator and is
-            // unloading the track's files: the view lets go of the bundle
-            // before anything else can read it.
+            // The view let go in the Begin of unloading
+            // (raceDetachTrack); this is only for a race gone without it.
             if (pRaceCoordinator == NULL) raceAttachGaveUp = false;
-            if (pRaceCoordinator == NULL && g_track.attached) {
-                trackview_free(&g_track);
-                struct mallinfo mi = mallinfo();
-                logLine("race: track detached (heap: %lu KB used; linear "
-                        "%lu KB free)", (unsigned long)mi.uordblks / 1024,
-                        (unsigned long)linearSpaceFree() / 1024);
-            }
+            if (pRaceCoordinator == NULL && g_track.attached)
+                raceDetachTrack();
 
             // This used to be five lines of console on the bottom screen.
             // The bottom screen is the blurb's now, and the flow's state is

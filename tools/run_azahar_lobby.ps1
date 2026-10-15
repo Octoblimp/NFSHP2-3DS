@@ -45,7 +45,9 @@
 # whose checksum differs. The verdict compares every copy's parts with the
 # host's frame by frame, and fails a copy at the first that differs, naming
 # the parts and showing both copies' draws on bDefaultSeed there (map the
-# addresses with arm-none-eabi-addr2line on the .elf). With -CopsOn the
+# addresses with arm-none-eabi-addr2line on the .elf), the clocks if they
+# differ, and each car slot that differs with the pieces it differs in
+# (lockhash's "cars" and "fields" lines, Session 108). With -CopsOn the
 # host hosts Hot Pursuit, so the race has cops, and every joiner must be
 # told so; with -Steer each copy also steers, left and right on the
 # D-pad by turns, its own period each (2 s for the host, 3 s for B, ...), so
@@ -719,8 +721,10 @@ $restartJoin = $restartAll
 # passed with the host's A (every copy on the host's pads), to the End
 # Game Menu, Next Race (MENUITEM_1, its first item) and OK, which ends
 # lockstep at the save's question. Each copy then answers its own save:
-# Yes, the first button, where its bloom opens, to the copy's own card.
-# Then the event's next race, its hold, GO and racing.
+# the question opens on No (BUTTON2, e0105664), as retail's
+# DisplayYesNoMessage does, so left to Yes (BUTTON1, e0105663) and A, to
+# the copy's own card. Then the event's next race, its hold, GO and
+# racing.
 function EndMenuOn($side, [int]$item) {
     $l = @(LogLines $side "flow state .* screen End Game Menu [0-9a-f]{8} .* item -?\d+ ")
     if ($l.Count -eq 0) { return $false }
@@ -728,8 +732,10 @@ function EndMenuOn($side, [int]$item) {
 }
 $nextAll = @(
     Step "autosave" @{ Pattern = "flow enter Autosave"; Wait = 60; Settle = 3000; Shot = "autosave" }
-    Step "save ask" @{ Pattern = "flow popup \d+ bloom [0-9a-f]{8} e0105663"; Wait = 30; Settle = 1500;
+    Step "save ask" @{ Pattern = "flow popup \d+ bloom [0-9a-f]{8} e0105664"; Wait = 30; Settle = 1500;
                       Shot = "save-ask" }
+    Step "to yes" @{ Key = $VK_LEFT; Pattern = "flow popup \d+ bloom [0-9a-f]{8} e0105663"; Wait = 12;
+                    Settle = 1000; Shot = "save-yes" }
     Step "save yes" @{ Key = $VK_A; Pattern = "memcard: saved"; Wait = 20; Tries = 2 }
     Step "race 2" @{ Pattern = "netrace: race 2 loaded"; Wait = 240 }
     Step "go again" @{ Pattern = "netrace: go, seed"; Wait = 240 }
@@ -786,7 +792,7 @@ function Advance($side) {
                 $side.Seen[$step.Name] = $true
                 $side.SettleUntil = $now.AddMilliseconds($step.Settle)
                 $side.Phase = "settle"
-                if ($step.Name -match "^(lobby|host|mode|challenge|set up|the host's mode|search|found|join|started|car select|all in|start|track select|host start|built|car sent|taken|go|racing|race on|host off|join off|ok|pause|to quit|quit|to ok|quit ok|race over|back|every back|start again|started again|car select again|to race type|to players|to restart|restart|restart ok|restarted|racing again|finished|results|to the menu|on next race|next race|next ok|autosave|save ask|save yes|race 2|go again)$") {
+                if ($step.Name -match "^(lobby|host|mode|challenge|set up|the host's mode|search|found|join|started|car select|all in|start|track select|host start|built|car sent|taken|go|racing|race on|host off|join off|ok|pause|to quit|quit|to ok|quit ok|race over|back|every back|start again|started again|car select again|to race type|to players|to restart|restart|restart ok|restarted|racing again|finished|results|to the menu|on next race|next race|next ok|autosave|save ask|to yes|save yes|race 2|go again)$") {
                     Say $side $step.Name
                 }
             } elseif ($now -gt $side.Deadline) {
@@ -1059,6 +1065,51 @@ if ($Race) {
     function Draws($side, [int]$f) {
         return @(LogLines $side "lockhash: (draws|at) $($f):")
     }
+    # The window's cars: "race/frame" to the clocks and a word for each
+    # slot, and "race/frame/slot" to that car's pieces at the frame.
+    $pieceNames = @("modes", "place", "motion", "body", "spin", "wheelmats", "wheels", "drive", "rel")
+    function Cars($side) {
+        $m = @{}
+        $race = 0
+        foreach ($l in (LogLines $side "netstep: start, place|lockhash: (cars|fields) \d+ ")) {
+            if ($l -match "netstep: start, place") { $race++; continue }
+            $x = [regex]::Match($l, "lockhash: cars (\d+) timer (\w+) loop (\w+):((?: \w+)+)")
+            if ($x.Success) {
+                $m["$race/$([int]$x.Groups[1].Value)"] = @{
+                    Clock = "timer $($x.Groups[2].Value) loop $($x.Groups[3].Value)"
+                    Slots = @($x.Groups[4].Value.Trim() -split " ")
+                }
+                continue
+            }
+            $x = [regex]::Match($l, "lockhash: fields (\d+) (\d+):((?: \w+)+)")
+            if ($x.Success) {
+                $m["$race/$([int]$x.Groups[1].Value)/$([int]$x.Groups[2].Value)"] = @($x.Groups[3].Value.Trim() -split " ")
+            }
+        }
+        return $m
+    }
+    function CarsDiffer($hc, $mc, $f, $name) {
+        if (-not $hc.ContainsKey($f) -or -not $mc.ContainsKey($f)) {
+            Write-Host "  no cars line at $f on both"
+            return
+        }
+        if ($hc[$f].Clock -ne $mc[$f].Clock) {
+            Write-Host "  clocks: host's $($hc[$f].Clock), $($name)'s $($mc[$f].Clock)"
+        }
+        for ($k = 0; $k -lt $hc[$f].Slots.Count; $k++) {
+            if ($hc[$f].Slots[$k] -eq $mc[$f].Slots[$k]) { continue }
+            $hp = $hc["$f/$k"]; $mp = $mc["$f/$k"]
+            if ($null -eq $hp -or $null -eq $mp) {
+                Write-Host "  slot $($k): differs (pieces on one side only)"
+                continue
+            }
+            $bad = @()
+            for ($j = 0; $j -lt $pieceNames.Count; $j++) {
+                if ($hp[$j] -ne $mp[$j]) { $bad += $pieceNames[$j] }
+            }
+            Write-Host "  slot $($k): differs in $($bad -join ', ')"
+        }
+    }
     $hostParts = Parts $h
     Write-Host "Host: parts of $($hostParts.Count) frames"
     for ($i = 1; $i -lt $sides.Count; $i++) {
@@ -1081,6 +1132,7 @@ if ($Race) {
             Draws $h ([int]($f -split "/")[1]) | ForEach-Object { Write-Host "    $_" }
             Write-Host "  $($s.Name)'s draws:"
             Draws $s ([int]($f -split "/")[1]) | ForEach-Object { Write-Host "    $_" }
+            CarsDiffer (Cars $h) (Cars $s) $f $s.Name
             if (-not $s.Failed) { $s.Failed = "race/frame $f differs in $($bad -join ', ')" }
             break
         }

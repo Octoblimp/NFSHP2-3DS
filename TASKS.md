@@ -2670,11 +2670,24 @@ phases.
                   - Two Azahars, `-Restart`: both passed on seed
                   0ecec47b, restarted in lockstep and raced again, no
                   unmapped reads; the CPU stages a little faster.
-                  - Not run: Next Race and Restart Event on Azahar
-                  (`-NextRace`); the user stopped the Azahar runs on
-                  2026-10-15. The harness covers them. Not seen on the
-                  device either: the smokeables now freed, and any FPS
-                  change from the flag.
+                  - Two Azahars, `-NextRace` (Session 108): both
+                  passed on seeds 0e7236cd and 3b4c87d1: the finish on
+                  frame 1800, the stop on 3023, each copy's save, race
+                  2 loaded and raced in step. Two fixes on the way:
+                  the script moves to Yes (the save's question opens
+                  on No, as retail), and the race's view of the track
+                  lets go in the Begin of unloading
+                  (`gTrackFlowViewUnloadFn`); before, the second load
+                  aborted on the first race's heap (`bMalloc:
+                  8995308 bytes for TRACKS\TRACKB11.LZC`).
+                  - [ ] One run of three had a checksum difference
+                  nine frames after the test's finish (frame 1809, the
+                  time and racers parts: an AI racer's car), every
+                  frame after it too. Find it: lockhash now logs each
+                  slot's car and, at the frame, its pieces.
+                  - Not run: Restart Event on Azahar; the harness
+                  covers it. Not seen on the device: the smokeables
+                  now freed, and any FPS change from the flag.
                 - 37f-3: the pause's screens are driven by the pad
                   that paused, on every console, so one player's Quit
                   Race ends the race for all, as retail's split screen

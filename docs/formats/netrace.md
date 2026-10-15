@@ -240,8 +240,10 @@ Restart Race, from the pause or the End Game Menu, resets the race in
 place without the save: the coordinator stays, and so does lockstep,
 with nothing of netrace's. On two Azahars (Session 107) it did, once
 the race's reset stopped leaking smokeables (`smokeable.md`, "Where the
-port differs"); Next Race and Restart Event are checked by the harness
-only, since the user stopped the Azahar runs before them.
+port differs"). Next Race passed on two Azahars in Session 108
+(`netstep.md`), once the race's view of the track let go in the Begin
+of unloading (`track-flow.md`, "The race's view"); Restart Event is
+checked by the harness only.
 
 For Azahar, where the gas alone never finishes a race,
 `WirelessTestFinish n` in `nfshp2_config.txt` finishes a wireless race
