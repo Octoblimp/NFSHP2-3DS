@@ -23336,3 +23336,116 @@ console), 37g, TASKS 61, 46, 60 and 59. Still to ask the user: the
 road's blink on the device again (TASKS 64), 47's bridge, 52's popups,
 the next device log's `sends:` line for 65, and how the
 `-fno-strict-aliasing` build plays on the device (FPS, props).
+
+## Session 109 -- the second race's track, the heap's top, the driver piece
+
+The user, on a screenshot of race 2 with the HUD and no track drawn:
+"Well that's a problem". They asked that once 37f-2's fixes are done,
+the icon, banner and sound become Hot Pursuit 2's before 37f-3.
+
+### Race 2 with no track
+
+B's log had "race: track not attached: out of memory for the tables".
+Two causes:
+
+- The race's view makes its tables in one calloc as the track's load
+  ends, with the heap at its fullest, and 3.1 MB of it was the meshes'
+  `GeoBatch[GEO_MAX_BATCHES]` (1,536 of a TrackSolid's 1,612 bytes, 2,048
+  TrackSolids). Now a mesh's batches are in its vertex block on the
+  linear heap, as many as the solid has (`geobake.c`, `geobake.h`).
+  geobake_check: 44 files, 518 solids, faults 0.
+- The main loop's attach ran after raceFrame's coordinator tick, which
+  on Next Race runs the unload's Begin and the next load's Begin. The
+  attach found the next TRACKB only begun, failed in geo_open and freed
+  its 3.6 MB of tables in the middle of the load. It now waits while
+  `pRaceCoordinator` is NULL, as the unload's Begin leaves it
+  (`track-flow.md`, "The race's view").
+
+### The heap's top
+
+A run of B stopped before race 2 on `bMalloc` of
+`TRACKS\TEX11LOCATION.BIN`: 21 MB of the heap free and no 5 MB of it
+whole. Retail's bMalloc takes pool bit 8 from the top of its bank: a
+packed copy is read there and freed once expanded below, and so are
+pool 72's reads (USE_TEMPORARY_MEMORY, freed once loaded). With one
+malloc heap and no top those left holes of megabytes between the blocks
+kept.
+
+- `bmem.c/h`: hooks for the top (`gBMemTopAllocFn`, `gBMemTopFreeFn`),
+  for names (`gBMemNoteFn`, `gBMemForgetFn`) and for a failed bMalloc
+  (`gBMemFailFn`).
+- `main.c`: bMallocTop takes the top from the linear heap, never its
+  last 8 MB (a block that would comes from malloc); bFreeTop knows one
+  by its address. bMallocFailed writes the heap's map to stderr before
+  the abort.
+- `heapmap.c/h` (new): a walk of newlib's malloc heap (its free chunks,
+  the runs in use between them, named when bMalloc made them) and the
+  names of bMalloc's blocks of 64 KB or more. `heapmap_named` lists the
+  named blocks in an address range: the race's attach logs the top's
+  blocks in the linear heap and their bytes.
+- That log showed the top holding 8.8 MB of the linear heap through the
+  race: `TRACKS\TRACKB11.LZC`, the whole bundle. The card holds the
+  tracks' TRACKB expanded, as .BUN (`bfile.c` reads a missing .LZC from
+  its .BUN), so the "packed copy" is the bundle and never freed, and the
+  race's prepare left out 52 to 61 textures (6 before). `bfile.c`'s
+  `bFileIsExpanded` says when a .LZC is read from its .BUN, and the
+  ResourceFile constructor asks for the top only when the file is
+  packed on the card (`resource-file.md`). resource_check: 10
+  scenarios, 0 differ (its file system holds files as named, so the
+  expanded case is the port's alone); texturestream_check and
+  sedwedge_check 0 differ.
+
+### The driver piece
+
+Run 5 split at frame 1809 in the time and players parts: slot 0 alone,
+the host's car, which the AI drives after the finish
+(`race_finish_car`), in every CarState piece but rel and its modes the
+same. What the AI chose went into the CarState the frame it drove, so
+the pieces only say when. lockhash's cars have a tenth piece, the
+driver: the CarDriver's Steering to NitroFlag and its DriveTarget's
+NumPoints and points and speeds up to it (`lockhash.md`). It is in no
+part. `run_azahar_lobby.ps1` names, for each slot that differs, the
+first frame of the window where its word differed. lockhash_check:
+total faults 0; `--mutate` 105, 101 caught, 4 equivalent.
+
+### Runs
+
+`run_azahar_lobby.ps1 -Consoles 2 -Race -NextRace -Drive 30`, track
+11, the finish on frame 1800:
+
+- Run 5: A PASS, B FAIL at frame 1809 (the split above).
+- Run 6, the batches in the vertex blocks and the attach's gate: PASS
+  on both, seeds abb176de and 08becd5b, race 2 drawn on both; the main
+  heap 14.2 MB free after the attach (2.4 MB before). But the linear
+  heap at the attach was 19.8 MB free (28.6 MB before), and the
+  prepare left out 43 to 66 textures.
+- Run 7, the top's log: PASS on both, seeds afd5b72d and 400434da. The
+  top held 8,784 KB live at both attaches of both copies, all of it
+  `TRACKS\TRACKB11.LZC`; 52 to 61 textures left out.
+- Run 8, the bundle off the top: B's first try sat on the main menu
+  (Azahar dropped the press on Local Wireless) and was stopped. The
+  second: PASS on both, seeds 494a70f2 and 4529067b, race 2 drawn on
+  both. At each attach no top block live (978 KB the most, through the
+  load), 5 to 7 textures left out, 12.6 MB of the linear heap and 5.4
+  MB of the main heap free; race 2's load began with 21.4 MB of the
+  main heap free, 14.1 MB of it whole.
+
+### What changed
+
+- `geobake.c/h`, `main.c` (the attach's gate, bMallocTop, bFreeTop,
+  bMallocFailed, the top's log), `bmem.c/h`, `heapmap.c/h`, `bfile.c/h`,
+  `resource.c`, `lockhash.c/h`.
+- `tools/src/lockhash_test.c`, `tools/lockhash_check.py` (7 new
+  mutations), `tools/src/resource_test.c` (the new call, silent),
+  `tools/run_azahar_lobby.ps1`.
+- Docs: `lockhash.md`, `resource-file.md`, `track-flow.md`,
+  `track-render.md`.
+
+### Next
+
+Hot Pursuit 2's icon, banner (a spinning 3D logo) and banner sound
+(an engine's rev or a siren), as the user asked; then 37f-3, 37g, TASKS
+61, 46, 60 and 59. The split after the finish stays open for its next
+showing. Still to ask the user: the road's blink on the device (TASKS
+64), 47's bridge, 52's popups, the next device log's `sends:` line for
+65, and how the `-fno-strict-aliasing` build plays on the device.

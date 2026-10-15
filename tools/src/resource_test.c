@@ -370,6 +370,14 @@ int32_t bFileSize(bFile *f)
     return f->size;
 }
 
+// The port's own: the fake file system holds each file as it is named,
+// and retail's image has no such call, so it says nothing.
+int bFileIsExpanded(const char *name)
+{
+    (void)name;
+    return 0;
+}
+
 int32_t bFileSizeName(const char *name)
 {
     FsEntry *e = fs_find(name);

@@ -45,6 +45,9 @@ void    bClose(bFile *f);
 int32_t bFileSize(bFile *f);
 // -1 for a file that is not there.
 int32_t bFileSizeName(const char *name);
+// The port's: 1 when a .LZC is not on the card and its .BUN, the bundle
+// expanded, is read in its place.
+int     bFileIsExpanded(const char *name);
 // SEEK_SET, SEEK_CUR or SEEK_END's numbers: 0, 1, 2.
 void    bSeek(bFile *f, int32_t pos, int32_t whence);
 void    bReadAsync(bFile *f, void *buf, int32_t n, bFileCallback cb,

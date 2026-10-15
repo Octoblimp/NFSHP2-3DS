@@ -57,6 +57,7 @@
 #include "beltmover.h"
 #include "bmath.h"
 #include "bmem.h"
+#include "heapmap.h"
 #include "bmenu.h"
 #include "bsnd.h"
 #include "bslotpool.h"
@@ -2127,6 +2128,76 @@ static void logRaceStart(void)
     }
 }
 
+// The heap in pieces (heapmap.h): each free piece of 256 KB or more and
+// what is in use before it. A second race's bundles need theirs whole.
+static void logHeapLine(const char* text) { logLine("%s", text); }
+static void logHeapMap(void) { heapmap_lines(logHeapLine, 256u * 1024); }
+
+// bMalloc's last word before its abort (bmem.h): the map, to stderr, the
+// file a device keeps when the debug log is off (nfshp2_stderr.txt).
+static void stderrHeapLine(const char* text)
+{
+    fprintf(stderr, "%s\n", text);
+}
+
+static void bMallocFailed(int size, const char* name)
+{
+    HeapMap hm;
+
+    (void)size;
+    (void)name;
+    heapmap_take(&hm);
+    fprintf(stderr, "heap: %lu KB used, %lu KB free, %lu KB the largest of "
+            "%lu pieces\n", (unsigned long)hm.used / 1024,
+            (unsigned long)hm.free / 1024, (unsigned long)hm.largest / 1024,
+            (unsigned long)hm.pieces);
+    heapmap_lines(stderrHeapLine, 64u * 1024);
+    fflush(stderr);
+}
+
+// The pool's top (bmem.h): the image's temporaries, from the linear heap.
+// They live through a load, and the linear heap is near empty then (63 MB
+// free as a track's own load begins, on Azahar's smallest); the view's
+// meshes and textures come after the bundles are in, the temporaries
+// gone. Never the last LINEAR_TOP_SPARE of it, for the GPU's: a block
+// that would take that comes from malloc's, as every block did before.
+#define LINEAR_TOP_SPARE (8u * 1024 * 1024)
+
+extern u32 __ctru_linear_heap;
+extern u32 __ctru_linear_heap_size;
+
+static u32 g_topLive, g_topLiveMost;
+
+static void* bMallocTop(size_t size, size_t align)
+{
+    void* p;
+
+    if ((size_t)linearSpaceFree() < size + LINEAR_TOP_SPARE) return NULL;
+    p = linearMemAlign(size, align);
+    if (p != NULL) {
+        g_topLive += linearGetSize(p);
+        if (g_topLive > g_topLiveMost) g_topLiveMost = g_topLive;
+    }
+    return p;
+}
+
+static int bFreeTop(void* p)
+{
+    u32 a = (u32)(uintptr_t)p;
+
+    if (a < __ctru_linear_heap
+        || a - __ctru_linear_heap >= __ctru_linear_heap_size)
+        return 0;
+    g_topLive -= linearGetSize(p);
+    linearFree(p);
+    return 1;
+}
+
+static void logTopLine(const char* text)
+{
+    logLine("race: top block %s", text);
+}
+
 static void hookTrace(void* user, const char* line)
 {
     (void)user;
@@ -2135,10 +2206,16 @@ static void hookTrace(void* user, const char* line)
     // aborts.
     if (strncmp(line, "begin ", 6) == 0) {
         struct mallinfo mi = mallinfo();
-        logLine("flow %s (heap: %lu KB used, %lu KB free; linear %lu KB free)",
+        HeapMap         hm;
+
+        heapmap_take(&hm);
+        logLine("flow %s (heap: %lu KB used, %lu KB free, %lu KB the "
+                "largest of %lu pieces; linear %lu KB free)",
                 line, (unsigned long)mi.uordblks / 1024,
                 (unsigned long)(g_heapInfo.heapGot - mi.uordblks) / 1024,
+                (unsigned long)hm.largest / 1024, (unsigned long)hm.pieces,
                 (unsigned long)linearSpaceFree() / 1024);
+        if (strstr(line, "TRACK_SPECIFIC") != NULL) logHeapMap();
         return;
     }
     // A screen's TICK is every frame's, and would be most of the log: the
@@ -4603,6 +4680,7 @@ static void raceDetachTrack(void)
     logLine("race: track detached (heap: %lu KB used; linear %lu KB free)",
             (unsigned long)mi.uordblks / 1024,
             (unsigned long)linearSpaceFree() / 1024);
+    logHeapMap();
 }
 
 static bool raceAttachTrack(void)
@@ -4641,6 +4719,11 @@ static bool raceAttachTrack(void)
         return false;
     }
     logTrackView("attached to");
+    logLine("race: the top's blocks in the linear heap: %lu KB live, %lu KB "
+            "the most", (unsigned long)g_topLive / 1024,
+            (unsigned long)g_topLiveMost / 1024);
+    heapmap_named(logTopLine, __ctru_linear_heap,
+                  __ctru_linear_heap + __ctru_linear_heap_size);
     t0      = svcGetSystemTick();
     bakes   = g_track.bakes;
     uploads = g_track.uploads;
@@ -6134,6 +6217,15 @@ int main(int argc, char** argv)
     // last first: the guard, the watchdog, then the log's writer above.
     atexit(hangwatch_stop);
     atexit(threadguard_stop);
+
+    // bMalloc's, before its first block (bmem.h): the pool's top from the
+    // linear heap, the large blocks' names for the heap's map, and a
+    // bMalloc that fails puts the map in stderr before its abort.
+    gBMemTopAllocFn = bMallocTop;
+    gBMemTopFreeFn  = bFreeTop;
+    gBMemNoteFn     = heapmap_note;
+    gBMemForgetFn   = heapmap_forget;
+    gBMemFailFn     = bMallocFailed;
 
     // The original runs every _GLOBAL_$I$ through __main before main()
     // does anything of its own; sinit_run() is that walk over the ported
@@ -7641,8 +7733,13 @@ int main(int argc, char** argv)
                 } else if (flowInput(menuDown, 0)) {
                     redraw = 1;
                 }
+                // Not when the coordinator's own tick went on to the
+                // unload: a Next Race's Begins of unloading and loading
+                // run in it, and the attach found the next track's bundle
+                // only begun, failed in geo_open, and freed its 3.6 MB of
+                // tables in the middle of the load (Session 109).
                 frameMark("race: the track's attach");
-                (void)raceAttachTrack();
+                if (pRaceCoordinator != NULL) (void)raceAttachTrack();
             } else if (raceUp) {
                 // The coordinator went in the flow's pass (Quit Race's
                 // unloading): the pad is the screen's that is up.

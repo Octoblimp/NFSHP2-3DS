@@ -1067,7 +1067,7 @@ if ($Race) {
     }
     # The window's cars: "race/frame" to the clocks and a word for each
     # slot, and "race/frame/slot" to that car's pieces at the frame.
-    $pieceNames = @("modes", "place", "motion", "body", "spin", "wheelmats", "wheels", "drive", "rel")
+    $pieceNames = @("modes", "place", "motion", "body", "spin", "wheelmats", "wheels", "drive", "rel", "driver")
     function Cars($side) {
         $m = @{}
         $race = 0
@@ -1108,6 +1108,17 @@ if ($Race) {
                 if ($hp[$j] -ne $mp[$j]) { $bad += $pieceNames[$j] }
             }
             Write-Host "  slot $($k): differs in $($bad -join ', ')"
+            # The window's words fold the driver too: the first frame
+            # the slot's word differs is where it went.
+            $rf = $f -split "/"
+            for ($g = [int]$rf[1] - 15; $g -le [int]$rf[1]; $g++) {
+                $wk = "$($rf[0])/$g"
+                if (-not $hc.ContainsKey($wk) -or -not $mc.ContainsKey($wk)) { continue }
+                if ($hc[$wk].Slots[$k] -ne $mc[$wk].Slots[$k]) {
+                    Write-Host "  slot $($k): its word first differs at frame $g"
+                    break
+                }
+            }
         }
     }
     $hostParts = Parts $h

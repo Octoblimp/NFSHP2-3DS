@@ -100,6 +100,21 @@ int32_t bFileSize(bFile *f)
     return f->size;
 }
 
+int bFileIsExpanded(const char *name)
+{
+    char  path[GAMEDATA_MAX_PATH];
+    FILE *fp;
+
+    if (full_path(name, path) && (fp = fopen(path, "rb")) != NULL) {
+        fclose(fp);
+        return 0;
+    }
+    if ((fp = open_on_card(name)) == NULL)
+        return 0;
+    fclose(fp);
+    return 1;
+}
+
 int32_t bFileSizeName(const char *name)
 {
     bFile  *f = bOpen(name);

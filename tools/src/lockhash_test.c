@@ -38,6 +38,7 @@
 
 #include "bmath.h"
 #include "car.h"
+#include "cardriver.h"
 #include "chopper.h"
 #include "lockhash.h"
 #include "race.h"
@@ -64,6 +65,7 @@ uint16_t world_calculate_debug_checksum(World* w)
 
 static World           g_world;
 static Car             g_cars[8];
+static CarDriver       g_drivers[8];
 static struct Chopper  g_chopper;
 static Race            g_race;
 static RaceCoordinator g_rc;
@@ -103,10 +105,14 @@ static void build(void)
     fill(&g_chopper, sizeof g_chopper, 2);
     fill(&g_race, sizeof g_race, 3);
     fill(&g_rc, sizeof g_rc, 4);
+    fill(&g_drivers, sizeof g_drivers, 5);
     for (i = 0; i < 8; i++) {
         g_world.CarTable[i] = &g_cars[i];
         g_race.RacingCarTable[i].pCar = &g_cars[i];
+        g_cars[i].pCarDriver = &g_drivers[i];
+        g_drivers[i].MyDriveTarget.NumPoints = 3;
     }
+    g_cars[7].pCarDriver = NULL;
     g_world.TotalNumCars  = 8;
     g_world.AICarPos      = 2;
     g_world.CopCarPos     = 4;
@@ -283,6 +289,7 @@ static void pNoRc(void) { pRaceCoordinator = NULL; }
 #define WH  LOCKHASH_WHEELS
 #define DR  LOCKHASH_DRIVE
 #define RL  LOCKHASH_REL
+#define DV  LOCKHASH_DRIVER
 #define NONE (-1)
 
 static void qGeometry(void) { flip(&g_cars[1].State.GeometryPosition.x); }
@@ -304,6 +311,17 @@ static void qRel(void) { flip(&g_cars[1].State.RelCoordMatrix.v0.x); }
 static void qValid(void) { g_cars[1].State.MatrixValid ^= 1; }
 static void qMoved(void) { flip(&g_cars[2].State.DistanceMoved); }
 static void qControl(void) { g_cars[3].TheControlMode ^= 1; }
+static void qDrvSteer(void) { g_drivers[5].Steering ^= 1; }
+static void qDrvThrottle(void) { flip(&g_drivers[2].Throttle); }
+static void qDrvNitro(void) { g_drivers[3].NitroFlag ^= 1; }
+static void qDrvPoint(void) { flip(&g_drivers[4].MyDriveTarget.Points[2].z); }
+static void qDrvSpeed(void) { flip(&g_drivers[4].MyDriveTarget.CalculatedSpeed[0]); }
+static void qDrvCount(void) { g_drivers[6].MyDriveTarget.NumPoints = 2; }
+static void qDrvPast(void) { flip(&g_drivers[4].MyDriveTarget.Points[3].x); }
+static void qDrvLane(void) { flip(&g_drivers[4].MyDriveTarget.Points[1].pad); }
+static void qDrvSpeedPast(void) { flip(&g_drivers[4].MyDriveTarget.CalculatedSpeed[3]); }
+static void qDrvRoute(void) { g_drivers[4].MyDriveTarget.TType ^= 1; }
+static void qDrvNone(void) { g_cars[6].pCarDriver = NULL; }
 static void qMovement(void) { g_cars[4].TheMovementMode ^= 1; }
 
 // A change by `poke`: exactly slot `slot`'s piece `piece` must move, or
@@ -355,6 +373,17 @@ static void pieces(void)
     piece("MatrixValid", qValid, 1, RL);
     piece("DistanceMoved", qMoved, 2, RL);
     piece("TheControlMode", qControl, 3, MO);
+    piece("the driver's Steering", qDrvSteer, 5, DV);
+    piece("the driver's Throttle", qDrvThrottle, 2, DV);
+    piece("the driver's NitroFlag", qDrvNitro, 3, DV);
+    piece("a target point", qDrvPoint, 4, DV);
+    piece("a target speed", qDrvSpeed, 4, DV);
+    piece("the target's NumPoints", qDrvCount, 6, DV);
+    piece("a target point past NumPoints", qDrvPast, 4, NONE);
+    piece("a target point's fourth lane", qDrvLane, 4, NONE);
+    piece("a target speed past NumPoints", qDrvSpeedPast, 4, NONE);
+    piece("the target's TType", qDrvRoute, 4, NONE);
+    piece("no driver", qDrvNone, 6, DV);
     piece("TheMovementMode", qMovement, 4, MO);
     piece("pCarInfo", pPlayerInfo, 0, NONE);
     piece("pTopologyCoordinate", pPlayerTopo, 0, NONE);
@@ -404,6 +433,8 @@ static void parts(void)
     expect("WorldRandomSeed", pWorldSeed, SD);
     expect("Teleporter", pTeleporter, 0);
     expect("a player's GeometryPosition", pPlayerPos, PL);
+    expect("a driver's Throttle", qDrvThrottle, 0);
+    expect("a target point", qDrvPoint, 0);
     expect("a player's DistanceMoved", pPlayerMoved, PL);
     expect("a player's TheControlMode", pPlayerMode, PL);
     expect("a player's TheMovementMode", pPlayerMove, PL);

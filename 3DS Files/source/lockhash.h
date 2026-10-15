@@ -68,7 +68,13 @@ enum {
 #define LOCKHASH_CARS   14     // the World's slots, WORLD_MAX_CARS
 
 // A car in pieces, for the window: its control and movement modes, then
-// its CarState from GeometryPosition to DistanceMoved in eight spans.
+// its CarState from GeometryPosition to DistanceMoved in eight spans, and
+// its driver. The driver is in no part: what it holds goes into the
+// CarState on the frame it drives, so a part would only say it sooner.
+// The window's line of cars does, as each slot's word folds every piece:
+// the frame the driver first went is the first where the word differs
+// (Session 109, the post-finish split with every CarState piece of slot
+// 0 differing at once).
 enum {
     LOCKHASH_MODES,     // TheControlMode, TheMovementMode
     LOCKHASH_PLACE,     // GeometryPosition, Position
@@ -79,6 +85,7 @@ enum {
     LOCKHASH_WHEELS,    // WheelAngularVelocity to WheelTractionUsage
     LOCKHASH_DRIVE,     // Angle to BurnOutAllow: steering, gear, throttle
     LOCKHASH_REL,       // RelCoordMatrix to DistanceMoved
+    LOCKHASH_DRIVER,    // the CarDriver's inputs and its target's points
     LOCKHASH_FIELDS
 };
 

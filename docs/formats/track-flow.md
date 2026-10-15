@@ -285,6 +285,14 @@ TRACKB (9 MB) found the heap still holding the first race's view, and
 both Azahars aborted (`bMalloc: 8995308 bytes for TRACKS\TRACKB11.LZC`).
 The main loop's check stays, for a race gone some other way.
 
+The same pass is why the main loop attaches only while there is a
+coordinator (Session 109). raceFrame's coordinator tick is where Next
+Race's unload Begin and the next load's Begin run; the attach after it
+found the next track's TRACKB only begun, failed in `geo_open`, and
+freed the 3.6 MB of tables it had made, in the middle of the load. The
+unload's Begin sets `pRaceCoordinator` to NULL, so the attach now waits
+for the next race's coordinator.
+
 ## Checking it
 
 ```bash

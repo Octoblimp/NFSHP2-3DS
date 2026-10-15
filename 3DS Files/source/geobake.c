@@ -212,6 +212,7 @@ static GeoMeshEdit* edit_alloc(int numStrips, int numRemap, int numToggles,
 
 static bool bake(const GeoSolid* solid, GeoMesh* out, bool editable)
 {
+    GeoBatch       batches[GEO_MAX_BATCHES];
     StripOrder*    order;
     GeoStrip*      strip;
     VertexSet      set     = { 0 };
@@ -238,6 +239,8 @@ static bool bake(const GeoSolid* solid, GeoMesh* out, bool editable)
     if (solid->numStrips <= 0) {
         return true;
     }
+    // Here until the block is made, and then copied into it.
+    out->batch = batches;
 
     // NumVerts and NumPolys from the entry table are the header's, so the
     // buffers can be sized without decoding anything: no more vertices than
@@ -254,6 +257,7 @@ static bool bake(const GeoSolid* solid, GeoMesh* out, bool editable)
         numTris += entry.numPolys;
     }
     if (numTris <= 0 || cap <= 0) {
+        out->batch = NULL;
         return true;
     }
 
@@ -279,6 +283,7 @@ static bool bake(const GeoSolid* solid, GeoMesh* out, bool editable)
         scratch_free(idx);
         scratch_free(vertFirst);
         scratch_free(toggle);
+        out->batch = NULL;
         return false;
     }
     memset(set.slot, 0xff, (size_t)size * sizeof *set.slot);
@@ -305,6 +310,7 @@ static bool bake(const GeoSolid* solid, GeoMesh* out, bool editable)
             scratch_free(idx);
             scratch_free(vertFirst);
             scratch_free(toggle);
+            out->batch = NULL;
             return false;
         }
         memset(remap, 0xff, (size_t)(vertFirst[solid->numStrips] + 1)
@@ -464,7 +470,7 @@ static bool bake(const GeoSolid* solid, GeoMesh* out, bool editable)
     }
 
     // The vertices, then the indices from the next 16 bytes, then the
-    // batches' boxes, in one block.
+    // batches' boxes, and the batches, in one block.
     for (i = 0; i < out->numBatches; i++) {
         out->batch[i].cluster = numClusters;
         numClusters += geocull_count(out->batch[i].count);
@@ -473,12 +479,16 @@ static bool bake(const GeoSolid* solid, GeoMesh* out, bool editable)
     ibytes   = ((size_t)at * sizeof *idx + 3u) & ~(size_t)3u;
     out->vbo = set.n > 0 && (!editable || out->edit != NULL)
              ? (GeoRenderVertex*)block_alloc(
-                   vbytes + ibytes + (size_t)numClusters * sizeof(GeoCluster))
+                   vbytes + ibytes + (size_t)numClusters * sizeof(GeoCluster)
+                   + (size_t)out->numBatches * sizeof(GeoBatch))
              : NULL;
     if (out->vbo) {
         GeoCluster* clusters = (GeoCluster*)((uint8_t*)out->vbo + vbytes
                                              + ibytes);
 
+        out->batch = (GeoBatch*)(clusters + numClusters);
+        memcpy(out->batch, batches,
+               (size_t)out->numBatches * sizeof(GeoBatch));
         memcpy(out->vbo, set.vert, (size_t)set.n * sizeof *set.vert);
         out->ibo = (uint16_t*)((uint8_t*)out->vbo + vbytes);
         memcpy(out->ibo, idx, (size_t)at * sizeof *idx);
@@ -492,6 +502,9 @@ static bool bake(const GeoSolid* solid, GeoMesh* out, bool editable)
                           idx + b->first, b->count, clusters + b->cluster);
         }
         out->clusters = numClusters > 0 ? clusters : NULL;
+    } else {
+        out->batch      = NULL;
+        out->numBatches = 0;
     }
 
     scratch_free(order);

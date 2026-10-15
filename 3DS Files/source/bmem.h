@@ -14,8 +14,8 @@
 // What the pool word says about the block itself is kept: bMalloc(int,
 // int) (0x0023ef98; retail's 0x00257690 differs only in its out-of-memory
 // message) aligns it to 128 bytes for 0x40, else 64 for 0x20, else 32 for
-// 0x10, else 4. Its low three bits pick the bank and 8 its top, which the
-// port has no use for.
+// 0x10, else 4. Its low three bits pick the bank, which the port has no
+// use for, and 8 its top, which it has (below).
 // ResourceFile's 0x40 is what LoadChunks needs: a bundle's chunks keep
 // their file offsets' 16-byte residues in memory.
 //
@@ -44,5 +44,25 @@ typedef void *(*BMemMallocHook)(int size, const char *name, int flags,
 typedef void  (*BMemFreeHook)(void *p);
 
 void bSetMemoryHooks(BMemMallocHook m, BMemFreeHook f);
+
+// The pool's top, the word's 8: the image's temporaries -- an LZC bundle
+// still packed (ResourceFile's AllocateMemory), a file freed once loaded
+// (pool 72), a pack's texture table read whole -- which the PS2's banks
+// put at the top, away from the blocks made while they live and kept
+// after. In one malloc heap each left a hole of megabytes under those,
+// and a second race found 21 MB free and no 5 MB of it whole (Session
+// 109). The 3DS gives the top a heap of its own (main.c's bMallocTop):
+// a top block comes from TopAlloc, or from malloc when that answers
+// NULL, and bFree hands every block to TopFree first, which frees it and
+// answers 1 when it was the top's. NULL in a harness: all from malloc.
+extern void *(*gBMemTopAllocFn)(size_t size, size_t align);
+extern int   (*gBMemTopFreeFn)(void *p);
+
+// The 3DS's heap map (heapmap.h), NULL in a harness: a block bMalloc made
+// and its name, the block bFree gives back, and a bMalloc that failed,
+// before its abort. Not through the hooks above.
+extern void (*gBMemNoteFn)(void *p, int size, const char *name);
+extern void (*gBMemForgetFn)(void *p);
+extern void (*gBMemFailFn)(int size, const char *name);
 
 #endif

@@ -64,12 +64,18 @@ typedef struct {
 // Where an editable mesh's strips went (georender_bake_editable).
 typedef struct GeoMeshEdit GeoMeshEdit;
 
+// The batches are in vbo's block too, after the boxes, as many as the
+// solid has. A GeoBatch[GEO_MAX_BATCHES] in the mesh itself was 1,536
+// bytes of a 1,612-byte TrackSolid, and the race's view has 2,048 of
+// those: 3.1 MB of the main heap in one calloc, made as the track's
+// load ends, the heap at its fullest. A Next Race found no 3.1 MB of it
+// whole, and the second race drew no track (Session 109).
 typedef struct {
     GeoRenderVertex* vbo;               // linearAlloc'd; georender_free owns it
     uint16_t*        ibo;               // in vbo's block, after the vertices
     int              numVerts;
     int              numIndices;
-    GeoBatch         batch[GEO_MAX_BATCHES];
+    GeoBatch*        batch;             // in vbo's block; NULL with no vbo
     int              numBatches;
     int              numTris;
     int              skippedStrips;     // strips geometry.c could not decode

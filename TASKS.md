@@ -2685,6 +2685,34 @@ phases.
                   time and racers parts: an AI racer's car), every
                   frame after it too. Find it: lockhash now logs each
                   slot's car and, at the frame, its pieces.
+                  Session 109: once more in four runs, frame 1809 in
+                  the time and players parts, slot 0 alone (the host's
+                  car, the AI's after the finish) differing in every
+                  CarState piece but rel, its modes the same. So what
+                  the AI chose went first. lockhash's cars now have a
+                  tenth piece, the driver (its inputs and its target's
+                  points), and the script names the frame where the
+                  slot's word first differed; the next split will say
+                  which.
+                  - Session 109, the second race on two Azahars (the
+                  user's screenshot of race 2 with the HUD and no
+                  track): B's view found no 3.1 MB whole for its
+                  tables ("out of memory for the tables"), and the
+                  main loop's attach ran in the same pass as the
+                  unload and the next load's Begins. Fixed: the attach
+                  waits for the next race's coordinator, and a mesh's
+                  batches live in its vertex block on the linear heap
+                  (`track-render.md`). The Next Race abort on
+                  `TEX11LOCATION.BIN` (21 MB free, no 5 MB of it
+                  whole): bMalloc's top, the packed copies and pool
+                  72's reads, goes to the linear heap
+                  (`resource-file.md`), never its last 8 MB, and the
+                  card's expanded TRACKB is not the top's.
+- Two Azahars, `-NextRace` (Session 109): PASS on
+                  both, seeds 494a70f2 and 4529067b, race 2 drawn on
+                  both; at each attach no top block live, 5 to 7
+                  textures left out at the prepare (52 to 61 with the
+                  bundle on the top), 5.4 MB of the main heap free.
                   - Not run: Restart Event on Azahar; the harness
                   covers it. Not seen on the device: the smokeables
                   now freed, and any FPS change from the flag.

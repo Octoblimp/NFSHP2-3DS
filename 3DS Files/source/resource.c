@@ -94,7 +94,12 @@ static ResourceFile *construct(ResourceFile *rf, const char *name,
         rf->SizeofChunks = 0;
     rf->pFirstChunk = NULL;
     if (rf->SizeofChunks != 0) {
-        allocate_memory(rf, rf->Flags & RESOURCE_FILE_FLAG_LZCOMPRESSED);
+        // The top for the packed copy, freed once expanded. The card holds
+        // the tracks' TRACKB<n>.LZC expanded (bfile.c), and what is read is
+        // the bundle itself, kept for the race: not the top's, which on the
+        // 3DS is the linear heap the track's textures go to (Session 109).
+        allocate_memory(rf, (rf->Flags & RESOURCE_FILE_FLAG_LZCOMPRESSED)
+                                && !bFileIsExpanded(rf->Filename));
         rf->FileTransfersInProgress++;
         change_queued_file_params(
             add_queued_file(rf->pFirstChunk, rf->Filename, 0,

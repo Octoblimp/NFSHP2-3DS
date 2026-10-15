@@ -52,13 +52,13 @@ of frame n are frame n's.
   `lockhash: cars N timer t loop l: w0 ... w13`: WorldTimer and
   WorldLoopCounter as the frame left them, and a word for each of the
   World's 14 slots. Last, if the frame itself has run, `lockhash: fields
-  N s: p0 ... p8` for each slot with a car: the car in nine pieces.
+  N s: p0 ... p9` for each slot with a car: the car in ten pieces.
 
 ## The cars in pieces
 
 Not in the fold, only for the window (Session 108): a frame that differs
 in a cars part says which part, not which car or what in it. Each frame
-also keeps, for each slot, the car in nine pieces, each FNV-1a as the
+also keeps, for each slot, the car in ten pieces, each FNV-1a as the
 parts are:
 
 | piece | what |
@@ -72,15 +72,29 @@ parts are:
 | wheels | `WheelAngularVelocity` to `WheelTractionUsage` |
 | drive | `Angle` to `BurnOutAllow`: steering, odometer, gear, throttle, RPM |
 | rel | `RelCoordMatrix` to `DistanceMoved` |
+| driver | the `CarDriver`'s `Steering` to `NitroFlag`, and its `DriveTarget`'s `NumPoints` and each point's x, y, z and speed up to it |
 
 The eight CarState pieces together are the span the parts read, cut at
 the fields named. A NULL slot, or one past `TotalNumCars`, is all 0, and
-the cars line folds each slot's nine into one word. `run_azahar_lobby.ps1`
+the cars line folds each slot's ten into one word. `run_azahar_lobby.ps1`
 compares them with the host's at the first frame that differs and names
 each slot that differs and its pieces, so "slot 2: differs in drive"
 says an AI racer's steering or throttle went first, which only its
 controller sets, and "place" with nothing else a move from outside the
-physics.
+physics. It then finds the first frame of the window where the slot's
+word differs.
+
+The driver piece came in Session 109. A Next Race run split after the
+finish, with only slot 0, the host's car, differing, in every CarState
+piece at once and its modes the same: after the finish the car is the
+AI's (`race_finish_car`), and what the AI chose went into the CarState
+the frame it drove, so a CarState piece only says when. The driver is in
+no part: a part with it would only say the same frame sooner, and a
+driver's target is made on the stack and copied in, its fourth lanes and
+the points past `NumPoints` whatever the stack held. In the window,
+though, the slot's word folds the driver, so the frame the AI's choice
+first went is the first where the word differs, and the fields line
+says whether it was the driver.
 
 Map an address with `arm-none-eabi-addr2line -f -e "3DS Files/build/..."`
 on the .elf of that build.
@@ -133,10 +147,14 @@ seed from start to stop, and that a watched draw gives what an unwatched
 one does. Since Session 108 it also checks the cars in pieces: a change
 to each field moves its own slot's own piece and no other, a pointer,
 the tail or the hole none, a NULL slot or one past `TotalNumCars` is 0,
+the driver's inputs, its points and speeds up to `NumPoints`, and
+`NumPoints` itself move the driver piece, as a car with no driver does;
+the points past it, the fourth lanes and the target's route move none;
 the clocks are the frame's, and the window's cars lines (one a frame, a
 slot's word moving with its car alone) and the frame's fields lines,
 never a frame not run whose ring slot holds an older one. Faults 0.
-`--mutate`: 98 mutations, 94 caught, 4 equivalent (named in the check).
+`--mutate`: 105 mutations, 101 caught, 4 equivalent
+(named in the check); Session 109's driver piece added 7, all caught.
 
 Moving the draws to `bViewSeed` changed no harness's model: with the
 pointer on `bDefaultSeed` each draw is the one it was, and copmanager,

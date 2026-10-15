@@ -110,6 +110,17 @@ on the 15.5 FPS of an earlier run: that was the fire on track 11, and
 TASKS 46 must reach a steady 30 there and in every place like it.
 Next: TASKS 37 (multi-card multiplayer).**
 
+**Now (Session 109, 2026-10-15): the second race of a wireless Next
+Race draws its track again. The race's view no longer keeps a 3.1 MB
+table of batches in the main heap (they are in each mesh's vertex
+block), and the attach waits for the next race's coordinator. bMalloc's
+top (packed copies, pool 72's reads) is the linear heap, which ended a
+Next Race abort on a fragmented heap, and the card's expanded TRACKB is
+not the top's. lockhash's cars have a driver piece for the split after
+the finish, still open. Next: Hot Pursuit 2's icon, banner (a spinning
+3D logo) and banner sound, as the user asked; then 37f-3, 37g, TASKS
+61, 46, 60 and 59. See HANDOFF.md's Session 109.**
+
 **Now (Session 108, 2026-10-15): the user let the Azahar runs go on
 again. Next Race passed on two Azahars: the race's view of the track
 now lets go in the Begin of unloading (gTrackFlowViewUnloadFn), where

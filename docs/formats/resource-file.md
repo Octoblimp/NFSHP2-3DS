@@ -261,10 +261,31 @@ ServiceQueuedFiles()
   and its callback waits for the next bServiceFileSystem. That way no
   callback runs before bReadAsync returns, as on the console, and bClose
   straight after bReadAsync is safe. A missing file gives a NULL bOpen
-  and -1 from `bFileSizeName`.
+  and -1 from `bFileSizeName`. The card holds the tracks' big
+  `TRACKB<n>.LZC` expanded, as `TRACKB<n>.BUN`: a .LZC that is not on
+  the card is read from its .BUN, which has no `COMP` header and so
+  loads as it is. `bFileIsExpanded` says so for a name.
 - The decompressor is lzc.c's, which checks its bounds; LZDecompress does
   not. For a whole block, as on the disc, they write the same bytes.
-- `bMalloc` keeps the pool word's alignment (`bmem.c`, via memalign).
+- `bMalloc` keeps the pool word's alignment (`bmem.c`, via memalign),
+  and its top, bit 8, as a heap of its own (Session 109). With one
+  malloc heap and no top, a packed copy freed after its expansion left
+  a hole of megabytes under the expanded block, and so did every file
+  read with USE_TEMPORARY_MEMORY (pool 72) and freed once loaded; the
+  blocks made while those lived, and kept after, sat between the holes.
+  On the 3DS the top is the linear heap (`main.c`'s bMallocTop), which a
+  load leaves near empty until the track's meshes and textures go in,
+  after the temporaries are freed. It never takes the last 8 MB of it;
+  a block that would comes from malloc. bFree knows a top block by its
+  address.
+- The constructor asks for the top for a compressed file only when the
+  card holds it packed (`bFileIsExpanded`). Read from its .BUN, the
+  block is the bundle itself, kept for the race: on the top it held
+  8.8 MB of the linear heap through the race (TRACKB11), and the
+  race's prepare left out 52 to 61 of the track's textures; with the
+  bundle in the main heap it leaves out 5 to 7.
+  `resource_check`'s file system holds each file as named, so it checks
+  the packed case alone.
 - A name of 80 characters or more is cut at 79. The image's bStrCpy would
   run it into HotFilename, and a QueuedFile's name past 47 into FilePos.
   The disc's names are far shorter.

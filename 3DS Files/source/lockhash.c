@@ -9,6 +9,7 @@
 
 #include "bmath.h"
 #include "car.h"
+#include "cardriver.h"
 #include "chopper.h"
 #include "race.h"
 #include "racecoord.h"
@@ -24,7 +25,7 @@ const char* const kLockHashParts[LOCKHASH_PARTS] = {
 
 const char* const kLockHashFields[LOCKHASH_FIELDS] = {
     "modes", "place", "motion", "body", "spin", "wheelmats", "wheels",
-    "drive", "rel",
+    "drive", "rel", "driver",
 };
 
 _Static_assert(LOCKHASH_CARS == WORLD_MAX_CARS, "a LockHash per slot");
@@ -95,7 +96,7 @@ static uint32_t mixCar(uint32_t h, const Car* c)
 
 // The CarState's pieces after the modes, each from its first field to the
 // next piece's: together GeometryPosition to DistanceMoved, as mixCar.
-static const uint16_t kCarCuts[LOCKHASH_FIELDS] = {
+static const uint16_t kCarCuts[LOCKHASH_DRIVER] = {
     offsetof(CarState, GeometryPosition),
     offsetof(CarState, Velocity),
     offsetof(CarState, BodyMatrix),
@@ -107,6 +108,29 @@ static const uint16_t kCarCuts[LOCKHASH_FIELDS] = {
     offsetof(CarState, DistanceMoved) + sizeof(float),
 };
 
+// The CarDriver's inputs, Steering to NitroFlag, and its DriveTarget's
+// points and speeds as far as NumPoints, each point's x, y and z. A
+// target is made on the stack and copied in, so what lies past NumPoints
+// and in the fourth lanes is whatever the stack held.
+static uint32_t driverHash(const CarDriver* d)
+{
+    uint32_t h = 0x811c9dc5u;
+    int      i, n;
+
+    if (d == NULL) return mix(h, 0);
+    h = mix(h, (uint32_t)d->Steering);
+    h = mixBytes(h, &d->Throttle, SPAN(CarDriver, Throttle, NitroFlag));
+    n = d->MyDriveTarget.NumPoints;
+    if (n < 0) n = 0;
+    if (n > DRIVETARGET_MAX_POINTS) n = DRIVETARGET_MAX_POINTS;
+    h = mix(h, (uint32_t)n);
+    for (i = 0; i < n; i++) {
+        h = mixBytes(h, &d->MyDriveTarget.Points[i], 3 * sizeof(float));
+        h = mixBytes(h, &d->MyDriveTarget.CalculatedSpeed[i], sizeof(float));
+    }
+    return h;
+}
+
 static void carFields(const Car* c, uint32_t* f)
 {
     const uint8_t* s = (const uint8_t*)&c->State;
@@ -114,9 +138,10 @@ static void carFields(const Car* c, uint32_t* f)
 
     f[LOCKHASH_MODES] = mix(mix(0x811c9dc5u, (uint32_t)c->TheControlMode),
                             (uint32_t)c->TheMovementMode);
-    for (i = 1; i < LOCKHASH_FIELDS; i++)
+    for (i = 1; i < LOCKHASH_DRIVER; i++)
         f[i] = mixBytes(0x811c9dc5u, s + kCarCuts[i - 1],
                         (size_t)(kCarCuts[i] - kCarCuts[i - 1]));
+    f[LOCKHASH_DRIVER] = driverHash(c->pCarDriver);
 }
 
 // A slot's pieces as one word, for the window's line of cars.

@@ -149,6 +149,15 @@ with A, B and D taken from Cs, Cd and 0, and C from As, Ad and FIX:
   It draws each one with its own matrix.
 - The frame puts the alpha test and blend back for citro2d afterwards.
 
+- **A mesh's batches are in its vertex block** (`geobake.c`'s bake),
+  after the vertices, the indices and the batches' boxes, as many as the
+  solid has, and `GeoMesh.batch` points at them. Until Session 109 each
+  mesh held a `GeoBatch[GEO_MAX_BATCHES]`, 1,536 of a TrackSolid's 1,612
+  bytes; the race's view has 2,048 TrackSolids, so 3.1 MB of the main
+  heap in one calloc, made as the track's load ends with the heap at its
+  fullest. A wireless Next Race found no 3.1 MB of it whole ("out of
+  memory for the tables") and the second race drew no track.
+
 A typical frame holds back 20 to 70 batches, of which 1 to 12 are sorted.
 Stop 2 is the busiest: 380 draws, 27,838 triangles and 139,068 of the
 command buffer's 262,144 words.
