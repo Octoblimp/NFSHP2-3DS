@@ -152,6 +152,9 @@ typedef struct NetRace {
     size_t       setupLen, setupGot;
     uint32_t     seed;                             // GO's
     int          lastGone;                         // the place, or -1
+    // Each place's console, Latin-1: the host's own, and every client's
+    // from the setup (37g).
+    char         names[WIRELESS_MAX_CONSOLES][WIRELESS_NAME_MAX];
     // "Wireless Race"
     int          popup;
     int          quiet;
@@ -180,6 +183,19 @@ int netrace_driver(int p);
 // The race as the lobby's Start handed it on: the consoles, their peers
 // and this console's place.
 const LobbyRace* netrace_race(void);
+
+// Place `p`'s console name, Latin-1, once the race is built; else "".
+const char* netrace_place_name(int p);
+
+// The lines over a race held for consoles lost (37g, netstep_held): the
+// link to those of `places` lost, and the time left, m:ss. '@' breaks a
+// line, as in retail's text.
+void netrace_held_text(const BGameFlow* gf, uint8_t places, uint32_t msLeft,
+                       char* out, size_t cap);
+
+// Past the hold: that the CPU drives each of `places`' cars now.
+void netrace_cpu_text(const BGameFlow* gf, uint8_t places, char* out,
+                      size_t cap);
 
 // Each frame, after the link's pump, wherever the flow is: what came in,
 // the setup moved on, and "Wireless Race"'s popup kept up.

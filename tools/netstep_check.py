@@ -28,7 +28,15 @@ each record each console runs (the harness's header has the list):
     netstep; the parted ends (the host's stop alone, the client's
     alone, the client's first, the host's lobby before the client's
     stop); the client's stop unheard, given up on or heard by its
-    lobby's message.
+    lobby's message;
+  - the hold (37g): a console lost holds every console for the hold,
+    then is built without (a client, of two and of three, on a lossy
+    link), each line and netstep_held checked every ms against it; a
+    place gone at the start, and the host gone at the start, not held
+    for; a client's loop frozen 6 s and 2 s, the host's 5 s, place 2's
+    5 s on a lossy link; place 2 lost to the host and then the host
+    lost while it holds, the client held on its word, then for it, then
+    alone; nothing sent over a lost link.
 
 The harness prints "faults 0" after each scenario that holds and "total
 faults 0" at the end. A mutant is caught only when the harness finds a
@@ -175,17 +183,21 @@ MUTATIONS = [
       "            if (!((r->live >> q) & 1)) continue;\n", ""),
     M("ns-sendframes-count",
       "    b[8] = (uint8_t)count;\n    putHash(b + 9);\n"
-      "    put32(b + 15, S->stopAt);\n    if (!S->net.send(S->peer[p]",
+      "    put32(b + 15, S->stopAt);\n    b[19] = hostHeld(",
       "    b[8] = (uint8_t)(count ? count - 1 : 0);\n    putHash(b + 9);\n"
-      "    put32(b + 15, S->stopAt);\n    if (!S->net.send(S->peer[p]"),
+      "    put32(b + 15, S->stopAt);\n    b[19] = hostHeld("),
     M("ns-sendframes-hash",
       "    putHash(b + 9);\n    put32(b + 15, S->stopAt);\n"
-      "    if (!S->net.send(S->peer[p]",
+      "    b[19] = hostHeld(",
       "    memset(b + 9, 0xff, 6);\n    put32(b + 15, S->stopAt);\n"
-      "    if (!S->net.send(S->peer[p]"),
+      "    b[19] = hostHeld("),
     M("ns-sendframes-stop",
-      "    put32(b + 15, S->stopAt);\n    if (!S->net.send(S->peer[p]",
-      "    put32(b + 15, NETSTEP_NONE);\n    if (!S->net.send(S->peer[p]"),
+      "    put32(b + 15, S->stopAt);\n    b[19] = hostHeld(",
+      "    put32(b + 15, NETSTEP_NONE);\n    b[19] = hostHeld("),
+    M("ns-sendframes-held", "    b[19] = hostHeld(now, &left);\n",
+      "    b[19] = 0;\n    (void)hostHeld(now, &left);\n"),
+    M("ns-sendframes-heldleft", "b[20] = (uint8_t)((left + 999) / 1000);",
+      "b[20] = (uint8_t)(left / 1000);"),
     M("ns-sendframes-type",
       "S->net.send(S->peer[p], NETSTEP_MSG_FRAMES, b, o)",
       "S->net.send(S->peer[p], NETSTEP_MSG_PADS, b, o)"),
@@ -201,16 +213,39 @@ MUTATIONS = [
     M("ns-hostread-goneon",
       "                S->left[p] = 1;\n                say(\"netstep: place %d has gone on",
       "                say(\"netstep: place %d has gone on"),
-    M("ns-hostpoll-left", "        if (S->left[p])\n            say(\"netstep: place %d left",
-      "        if (0)\n            say(\"netstep: place %d left"),
-    M("ns-hostpoll-alive", "        else if (!alive(p))\n            say(",
-      "        else if (0)\n            say("),
+    M("ns-hostpoll-left",
+      "        if (S->left[p]) {\n            say(\"netstep: place %d left",
+      "        if (0) {\n            say(\"netstep: place %d left"),
+    M("ns-hostpoll-alive", "        } else if (alive(p)) {\n            continue;",
+      "        } else if (1) {\n            continue;"),
     M("ns-hostpoll-drop", "        S->live &= (uint8_t)~(1u << p);\n", ""),
     M("ns-hostpoll-build", "    hostBuild();\n    for", "    for"),
     M("ns-hostpoll-sendlive",
-      "if (p == S->place || !((S->live >> p) & 1)) continue;\n"
+      "if (p == S->place || !((S->live >> p) & 1) || S->lost[p]) continue;\n"
       "        if (S->fresh[p]",
-      "if (p == S->place) continue;\n        if (S->fresh[p]"),
+      "if (p == S->place || S->lost[p]) continue;\n        if (S->fresh[p]"),
+    # -- the hold (37g)
+    M("ns-start-hold", "    S->holdMs = holdMs;\n", ""),
+    M("ns-poll-polled", "    S->polled = 1;\n", ""),
+    M("ns-hostpoll-polled", "        } else if (!S->polled) {",
+      "        } else if (0) {"),
+    M("ns-hostpoll-lostmark",
+      "            S->lost[p]   = 1;\n            S->lostAt[p] = now;\n",
+      "            S->lostAt[p] = now;\n"),
+    M("ns-hostpoll-lostat",
+      "            S->lostAt[p] = now;\n            say(\"netstep: place %d lost",
+      "            say(\"netstep: place %d lost"),
+    M("ns-hostpoll-hold", "        } else if (now - S->lostAt[p] < S->holdMs) {",
+      "        } else if (now - S->lostAt[p] < S->holdMs / 2) {"),
+    M("ns-hostpoll-sendlost",
+      " || S->lost[p]) continue;\n        if (S->fresh[p]",
+      ") continue;\n        if (S->fresh[p]"),
+    M("ns-hostheld-left",
+      "        since = since < S->holdMs ? S->holdMs - since : 0;\n",
+      "        since = S->holdMs;\n"),
+    M("ns-hostheld-min", "if (!mask || since < left) left = since;",
+      "left = since;"),
+    M("ns-hostheld-mark", "        mask |= (uint8_t)(1u << p);\n", ""),
     M("ns-hostpoll-resend",
       "if (S->fresh[p] || now - S->lastSend[p] >= NETSTEP_RESEND_MS)\n"
       "            sendFrames(p, now);\n    }\n}",
@@ -283,12 +318,12 @@ MUTATIONS = [
       "uint32_t end = S->put;"),
     M("ns-sendpads-count",
       "    b[8] = (uint8_t)count;\n    putHash(b + 9);\n"
-      "    put32(b + 15, S->stopAt);\n    if (!S->net.send(S->peer[0]",
+      "    put32(b + 15, S->stopAt);\n    b[19] = 0;",
       "    b[8] = (uint8_t)(count ? count - 1 : 0);\n    putHash(b + 9);\n"
-      "    put32(b + 15, S->stopAt);\n    if (!S->net.send(S->peer[0]"),
+      "    put32(b + 15, S->stopAt);\n    b[19] = 0;"),
     M("ns-sendpads-stop",
-      "    put32(b + 15, S->stopAt);\n    if (!S->net.send(S->peer[0]",
-      "    put32(b + 15, NETSTEP_NONE);\n    if (!S->net.send(S->peer[0]"),
+      "    put32(b + 15, S->stopAt);\n    b[19] = 0;",
+      "    put32(b + 15, NETSTEP_NONE);\n    b[19] = 0;"),
     M("ns-sendpads-own", "encodePad(b + o, &S->pads[S->place][n & MASK]);",
       "encodePad(b + o, &S->pads[0][n & MASK]);"),
     M("ns-sendpads-type", "S->net.send(S->peer[0], NETSTEP_MSG_PADS, b, o)",
@@ -320,9 +355,34 @@ MUTATIONS = [
       "    sendPads(now);\n    if (--S->tells"),
     M("ns-tell-count", "    if (--S->tells == 0) say(", "    if (S->tells == 0) say("),
     M("ns-clientpoll-alive", "        if (!alive(0)) {\n", "        if (0) {\n"),
-    M("ns-clientpoll-alone", "            S->alone = 1;\n", ""),
+    M("ns-clientpoll-alone", "                S->alone   = 1;\n", ""),
     M("ns-clientpoll-alone-live",
-      "            S->live  = (uint8_t)(1u << S->place);\n", ""),
+      "                S->live    = (uint8_t)(1u << S->place);\n", ""),
+    M("ns-clientpoll-polled", "            if (S->polled && !S->lost[0]) {",
+      "            if (!S->lost[0]) {"),
+    M("ns-clientpoll-lostmark",
+      "                S->lost[0]   = 1;\n                S->lostAt[0] = now;\n",
+      "                S->lostAt[0] = now;\n"),
+    M("ns-clientpoll-lostat",
+      "                S->lostAt[0] = now;\n"
+      "                say(\"netstep: the host lost",
+      "                say(\"netstep: the host lost"),
+    M("ns-clientpoll-hold", "now - S->lostAt[0] >= S->holdMs) {",
+      "now - S->lostAt[0] >= S->holdMs / 2) {"),
+    M("ns-clientpoll-nopads", "    if (S->lost[0]) return;\n", ""),
+    M("ns-takeframes-held", "    S->held     = d[19];\n", ""),
+    M("ns-takeframes-heldleft", "    S->heldLeft = d[20];\n", ""),
+    M("ns-held-on", "    if (!S->on || S->alone) return 0;\n",
+      "    if (!S->on) return 0;\n"),
+    M("ns-held-host", "    if (S->host) return hostHeld(now, msLeft);\n", ""),
+    M("ns-held-client-left",
+      "        if (msLeft) *msLeft = (uint32_t)S->heldLeft * 1000u;\n", ""),
+    M("ns-held-client", "        return S->held;\n", "        return 0;\n"),
+    M("ns-held-lost-left",
+      "    if (msLeft) *msLeft = since < S->holdMs ? S->holdMs - since : 0;\n"
+      "    return 1;",
+      "    if (msLeft) *msLeft = S->holdMs;\n    return 1;"),
+    M("ns-held-lost", "    return 1;\n}", "    return S->held;\n}"),
     M("ns-clientpoll-alone-return", "        aloneBuild();\n        return;\n",
       "        aloneBuild();\n"),
     # -- the race's
@@ -396,6 +456,11 @@ EQUIVALENT = {
     # The peers past the consoles are never read: every loop over the
     # places goes by the places racing, which netrace gives inside them.
     "ns-start-peer",
+    # A place out of the live bits is one that left (the next test), one
+    # whose link was lost for good, held for and dropped, or one never
+    # racing, its link never up: alive() is 0 for the last two, as a link
+    # lost never comes back (wireless.c; until 37g-2's re-peering).
+    "ns-serving-live",
 }
 
 

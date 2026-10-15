@@ -28,10 +28,16 @@
 // netrace's patience until frames have flowed for NETSTEP_SETTLE, past
 // the first frame's long drawing, and then has its own timeout back.
 //
-// A console gone: the host builds without a client whose link is lost,
-// its pad at rest from then on (what more a race does is 37g's). A client
-// that loses the host goes on alone, its own pad on its place and the
-// rest at rest.
+// A console lost (37g): the host builds no record without a client
+// whose link is lost, so the race holds on every console, for the hold
+// (NETSTEP_HOLD_MS, netstep_set_hold). Each message of the host's says
+// which places are waited for and the seconds left (netstep_held), for
+// the screen. Past the hold the host builds without the place, its pad at
+// rest, and every console hands its car to the CPU on the first record
+// without its bit. A client that loses the host holds the same way, then
+// goes on alone: its own pad on its place, the rest at rest, every other
+// car the CPU's. A console already gone at the first poll is not waited
+// for.
 //
 // The end (37f). Each console stops where its race leaves lockstep
 // (netstep_stop: the race gone, or the end's save, main.c), all of them
@@ -74,6 +80,7 @@
 #define NETSTEP_LOG_EVERY  150    // frames between the log's checksums
 #define NETSTEP_TELLS      30     // a client's stop said this many times
 #define NETSTEP_DRAIN_MS   10000  // the host's last frames served at most
+#define NETSTEP_HOLD_MS    90000  // a lost console waited for (37g)
 #define NETSTEP_NONE       0xffffffffu
 
 // The race's unreliable messages, after netrace's.
@@ -144,6 +151,15 @@ typedef struct NetStep {
     uint32_t     theirFor[NETSTEP_MAX][NETSTEP_RING];
     int          differs[NETSTEP_MAX];       // said once
     uint32_t     sendFails;
+    // The hold (37g). By place, a link lost and when (ms): the host's of
+    // each client, a client's of the host (place 0). A client's: what the
+    // host's last message said it holds for, and the seconds left.
+    uint32_t     holdMs;
+    int          polled;                     // the first poll made
+    int          lost[NETSTEP_MAX];
+    uint32_t     lostAt[NETSTEP_MAX];
+    uint8_t      held;
+    uint8_t      heldLeft;
     // The end. stopAt: the frames run when this console left lockstep,
     // by its stop or a client's going alone past the host's, which every
     // message says; NETSTEP_NONE before. The host's, by place: each that
@@ -165,6 +181,10 @@ void netstep_init(const NetStepNet* net, NetStepLogFn log);
 // Who is told of a checksum that differs (NULL: no one). Kept from GO to
 // GO, as the link and the log are.
 void netstep_on_differ(NetStepDifferFn fn);
+
+// How long a lost console is waited for, in ms (0: NETSTEP_HOLD_MS). Kept
+// from GO to GO.
+void netstep_set_hold(uint32_t ms);
 
 // GO: this console's place, the link's peer of each place (-1 for none;
 // past `consoles` not read), and the places racing, this one among them.
@@ -199,5 +219,9 @@ uint32_t netstep_frame(void);
 
 // The pad of a place at rest.
 void netstep_rest(NetStepPad* pad);
+
+// The places the race holds for, their links lost, a bit each (0: none),
+// and the ms left before it goes on without them.
+uint8_t netstep_held(uint32_t now, uint32_t* msLeft);
 
 #endif

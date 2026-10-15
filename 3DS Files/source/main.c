@@ -2943,6 +2943,15 @@ static bool g_lockRaced;    // a lockstep frame ran with the coordinator up
 static bool g_lockEnd;      // the frame asked for the end's save (37f)
 static u32  g_lockMenu;     // the flow's presses since the last begin
 static bool g_lockFinished; // WirelessTestFinish's finish made (37f-2)
+// A console lost (37g): the places racing at GO, those dropped since
+// (their cars the CPU's), the CPU's notice (its places, when it went up,
+// in ms) and the hold's mute.
+#define LOCK_NOTE_MS 4000
+static uint8_t  g_lockLive;
+static uint8_t  g_lockCpu;
+static uint8_t  g_lockNote;
+static uint32_t g_lockNoteAt;
+static bool     g_lockMuted;
 
 static const LobbyNet kLobbyNet = {
     .start      = lobbyNetStart,
@@ -3066,6 +3075,9 @@ static void netRaceGoRacing(void)
     g_lockEnd = false;
     g_lockMenu = 0;
     g_lockFinished = false;
+    g_lockLive = racing;
+    g_lockCpu = 0;
+    g_lockNote = 0;
     logLine("netstep: clocks at GO: real %ld frames %ld, world %ld frames "
             "%ld", (long)RealTimer, (long)RealTimeFrames, (long)WorldTimer,
             (long)WorldTimeFrames);
@@ -5368,6 +5380,88 @@ static int32_t joypadRead(int32_t port, uint8_t* buf)
     return 1;
 }
 
+// A pause whose port's place is dropped (37g) goes, with its popup, to the
+// lowest place still racing that has a port, on every console alike: else
+// no pad would reach the pause's screens (pause_menu_enter_pause filters
+// them to the pauser's port), and the race would stay paused for good.
+static void lockPauseHandOver(uint8_t live)
+{
+    RaceCoordinator* rc = pRaceCoordinator;
+    int              from = -1, to = -1;
+
+    if (rc == NULL || ThePauseMenu == NULL) return;
+    if (ThePauseMenu->State != PAUSE_MENU_STATE_NONE)
+        from = ThePauseMenu->Port;
+    else if (rc->CurrentRCState == RCSTATE_PAUSE)
+        from = rc->PausedJoystickPort;
+    if (from < 0 || from >= JOYSTICK_PORTS || ((live >> from) & 1)) return;
+    for (int p = 0; p < JOYSTICK_PORTS && to < 0; p++)
+        if ((live >> p) & 1) to = p;
+    if (to < 0) return;
+    rc->PausedJoystickPort = to;
+    if (ThePauseMenu->State != PAUSE_MENU_STATE_NONE)
+        pause_menu_enter_pause(ThePauseMenu, to);
+    for (int i = 0; i < BPOPUP_COUNT; i++) {
+        BPopup* pp = &g_flow.popups[i];
+
+        if (!pp->active || pp->cfg.joyPort != from) continue;
+        pp->cfg.joyPort = to;
+        for (int b = 0; b < 3; b++) pp->items[b].joyPort = to;
+    }
+    logLine("lockstep: frame %lu, the pause from port %d to port %d",
+            (unsigned long)netstep_frame(), from, to);
+}
+
+// The cars of the places dropped from the record (37g: a console lost past
+// its hold, or gone) go to the CPU on the frame of the first record without
+// them, before its world step: the same frame on every console. A car not
+// made yet, or not yet a player's, is tried again each frame. A cop's car
+// waits for TASKS 61. The CPU's notice is shown a few seconds.
+static void lockHandOver(void)
+{
+    const NetStepFrame* r = netstep_current();
+    uint8_t             gone;
+
+    if (r == NULL) return;
+    gone = (uint8_t)(g_lockLive & ~r->live & ~g_lockCpu);
+    if (gone) {
+        uint32_t now = (uint32_t)osGetTime();
+
+        logLine("lockstep: frame %lu, places %02x dropped",
+                (unsigned long)netstep_frame(), (unsigned)gone);
+        if (now - g_lockNoteAt >= LOCK_NOTE_MS) g_lockNote = 0;
+        g_lockNote |= gone;
+        g_lockNoteAt = now;
+        g_lockCpu |= gone;
+        lockPauseHandOver(r->live);
+    }
+    if (g_lockCpu == 0 || pCurrentWorld == NULL) return;
+    for (int p = 0; p < NETSTEP_MAX; p++) {
+        int  driver = netrace_driver(p);
+        Car* car;
+
+        if (!((g_lockCpu >> p) & 1) || driver < 0) continue;
+        car = world_get_car_by_driver_number(driver);
+        if (car == NULL || car->TheControlMode != REAL_CONTROL) continue;
+        car_set_control_mode(car, AI_CONTROL);
+        logLine("lockstep: frame %lu, place %d's car (driver %d) to the CPU",
+                (unsigned long)netstep_frame(), p, driver);
+    }
+}
+
+// The race held for a lost console (37g) is muted, as the pause mutes it,
+// unless it was muted already; the hold's end, or lockstep's, unmutes it.
+// No lockstep frame runs in a hold, so the pause cannot change it under.
+static void raceSoundMute(int32_t on);
+
+static void lockHoldMute(bool held)
+{
+    if (held == g_lockMuted) return;
+    if (held && (gSoundModule.jb == NULL || gSoundModule.jb->muted)) return;
+    raceSoundMute(held ? 1 : 0);
+    g_lockMuted = held;
+}
+
 // A wireless race's frame in lockstep (netstep.h), at the top of the loop
 // where the real step is measured. A frame begins by putting this
 // console's pad and its step -- from the last frame's begin to this one's
@@ -5407,6 +5501,7 @@ static bool lockFrame(uint32_t* ticker)
     RealTimeElapsedQuantized = r->q;
     RealTimeElapsed = GetRealTimeElapsedFromQuantized(r->q);
     g_lockWaiting = false;
+    lockHandOver();
     return true;
 }
 
@@ -5555,6 +5650,44 @@ static void drawBotPanel(UIRenderer* ui, const char* title, const char* body,
     if (hint && *hint)
         uirender_draw_wrapped(ui, hint, 0, &small, BOT_PAD, BOT_FOOT + 9.0f,
                               boxW, 1.0f);
+}
+
+// Over a wireless race held for a lost console (37g), a box across the top
+// screen: whose link was lost and the time left. Past the hold, for a few
+// seconds, whose car the CPU drives now. The port's own, in the panel's
+// colours: retail had no link to lose.
+#define HELD_BOX_X   24.0f
+#define HELD_BOX_PAD 10.0f
+#define HELD_BACK    RGBA8(0x0b, 0x0d, 0x12, 0xe0)
+
+static void drawLockHeld(UIRenderer* ui)
+{
+    char        text[320];
+    uint32_t    now = (uint32_t)osGetTime(), left;
+    uint8_t     held = netstep_held(now, &left);
+    UIWrapStyle st;
+    float       boxW = 400.0f - HELD_BOX_X * 2.0f, textW, h, y;
+
+    if (held)
+        netrace_held_text(&g_flow, held, left, text, sizeof text);
+    else if (g_lockNote && now - g_lockNoteAt < LOCK_NOTE_MS)
+        netrace_cpu_text(&g_flow, g_lockNote, text, sizeof text);
+    else
+        return;
+    // '@' breaks a line in retail's text; the wrap breaks at a newline.
+    for (char* c = text; *c; c++)
+        if (*c == '@') *c = '\n';
+    st = botStyle(ui, BOT_TEXT, 16.0f, true);
+    st.lineGap = 3.0f;
+    textW = boxW - HELD_BOX_PAD * 2.0f;
+    h = uirender_wrap_height(ui, text, 0, &st, textW);
+    if (h <= 0.0f) return;
+    y = (240.0f - h) * 0.5f - HELD_BOX_PAD;
+    C2D_DrawRectSolid(HELD_BOX_X, y, 0.0f, boxW, h + HELD_BOX_PAD * 2.0f,
+                      HELD_BACK);
+    C2D_DrawRectSolid(HELD_BOX_X, y, 0.0f, boxW, 2.0f, BOT_ACCENT);
+    uirender_draw_wrapped(ui, text, 0, &st, HELD_BOX_X + HELD_BOX_PAD,
+                          y + HELD_BOX_PAD, textW, 1.0f);
 }
 
 // Wheel and MellowMover ask for the ground through a seam shaped for the
@@ -7385,6 +7518,8 @@ int main(int argc, char** argv)
     lobby_init(&kLobbyNet, lobbyLog);
     netrace_init(&kNetRaceNet, &kNetRaceGame, lobbyLog);
     netstep_init(&kNetStepNet, lobbyLog);
+    netstep_set_hold(ConfigWirelessHoldSeconds > 0
+                     ? (uint32_t)ConfigWirelessHoldSeconds * 1000u : 0u);
     netstep_on_differ(lockDiffers);
     lobby_on_start(lobbyStarted);
     lobby_on_setup(lobbySetup);
@@ -7622,10 +7757,12 @@ int main(int argc, char** argv)
         g_lockRan = false;
         clockStarted = true;
         FrameCounter = (int32_t)C3D_FrameCounter(0);
-        if (lockOn)
+        if (lockOn) {
             raceStep = lockFrame(&frameTicker);
-        else
+            lockHoldMute(netstep_held((uint32_t)osGetTime(), NULL) != 0);
+        } else {
             prepare_real_timestep_from_ticker(&frameTicker);
+        }
 
         if (raceStep) uiTimer += (uint32_t)(int)(RealTimeElapsed * 4000.0f);
         uirender_set_time(&ui, (float)uiTimer * 0.00025f);
@@ -7772,6 +7909,7 @@ int main(int argc, char** argv)
                 netrace_end();
                 netstep_drain(now);
                 g_lockEnd = false;
+                lockHoldMute(false);
             }
 
             // The view let go in the Begin of unloading
@@ -7888,6 +8026,7 @@ int main(int argc, char** argv)
                 drawCarSelTop(&ui);
             else
                 uirender_draw_visible(&ui, 1.0f);
+            if (g_track.attached && netstep_on()) drawLockHeld(&ui);
             C2D_Flush();
             hangwatch_gpu_stage("the top screen's HUD");
             FRAMEPROF_STAMP(FRAMEPROF_HUD);

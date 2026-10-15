@@ -124,6 +124,11 @@ extern int32_t ConfigWirelessOff;           // 0
 // results and Next Race (TASKS 37f-2). Off by default (2026-10-15).
 extern int32_t ConfigWirelessTestFinish;    // 0
 
+// The port's own: a console lost mid-race is waited for this long, the
+// race held on every console, before its car is the CPU's (netstep's hold,
+// TASKS 37g). 0 is netstep's own, 90 s. Azahar runs set it short.
+extern int32_t ConfigWirelessHoldSeconds;   // 90
+
 // SkipFE as the image reads it, `lw -23220(gp)`: gameflow's skipFE
 // through gPlayerCamSkipFE, 0 while that is unset.
 int32_t config_skip_fe(void);

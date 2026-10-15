@@ -1002,6 +1002,63 @@ static CharacterInfo* gCharacterInfo(int32_t c)
     return c >= 0 && c < NUM_CHARS ? &g_chars[g_cur][c] : NULL;
 }
 
+// `tmpl` with "$N" put in, once.
+static void fillN(char* out, size_t cap, const char* tmpl, const char* n)
+{
+    const char* at = strstr(tmpl, "$N");
+    if (!at) snprintf(out, cap, "%s", tmpl);
+    else snprintf(out, cap, "%.*s%s%s", (int)(at - tmpl), tmpl, n, at + 2);
+}
+
+// 37g: each place's console name as the host has it, Latin-1, on every
+// console that races; and the lines over a hold and past it, made of them.
+static void checkNames(Console* k)
+{
+    char    want[WIRELESS_NAME_MAX], names[256], line[256], exp[600];
+    char    got[600], clock[16];
+    uint8_t mask = 0;
+    int     p, n;
+
+    for (p = 0; p < S->consoles; p++) {
+        lobby_latin1(want, sizeof want, S->names[p]);
+        if (strcmp(netrace_place_name(p), want))
+            fault("place %d named \"%s\", not \"%s\"", p,
+                  netrace_place_name(p), want);
+    }
+    if (netrace_place_name(-1)[0] || netrace_place_name(MAXC)[0])
+        fault("a name for no place");
+
+    // Every place but the host's lost, 75.5 s left: 1:16.
+    names[0] = 0;
+    for (p = 1; p < S->consoles; p++) {
+        lobby_latin1(want, sizeof want, S->names[p]);
+        if (names[0]) strcat(names, ", ");
+        strcat(names, want);
+        mask |= (uint8_t)(1u << p);
+    }
+    if (!mask) return;
+    fillName(line, sizeof line, text(PORTLANG_LINK_LOST), names);
+    snprintf(clock, sizeof clock, "1:16");
+    n = snprintf(exp, sizeof exp, "%s@", line);
+    fillN(exp + n, sizeof exp - (size_t)n, text(PORTLANG_RECONNECTING), clock);
+    netrace_held_text(&k->gf, mask, 75500, got, sizeof got);
+    if (strcmp(got, exp)) fault("held text \"%s\", not \"%s\"", got, exp);
+    netrace_held_text(&k->gf, mask, 0, got, sizeof got);
+    if (!strstr(got, "0:00")) fault("held text at 0 \"%s\"", got);
+    netrace_held_text(&k->gf, mask, 1, got, sizeof got);
+    if (!strstr(got, "0:01")) fault("held text at 1 ms \"%s\"", got);
+
+    exp[0] = 0;
+    for (p = 1; p < S->consoles; p++) {
+        lobby_latin1(want, sizeof want, S->names[p]);
+        fillName(line, sizeof line, text(PORTLANG_CPU_DRIVES), want);
+        if (exp[0]) strcat(exp, "@");
+        strcat(exp, line);
+    }
+    netrace_cpu_text(&k->gf, mask, got, sizeof got);
+    if (strcmp(got, exp)) fault("CPU text \"%s\", not \"%s\"", got, exp);
+}
+
 static void gGoRacing(void)
 {
     Console* k = &C[g_cur];
@@ -1028,6 +1085,7 @@ static void gGoRacing(void)
     k->goGameType  = Fred.GameType;
     k->goPlayers   = Fred.NumPlayerCars;
     k->goAborted   = Fred.bRaceWasAborted;
+    if (!OFFLINE) checkNames(k);
     bgf_change_to_screen(&k->gf, "Racing", 0);
     // 37d's first message to each console racing, and each client's to the
     // host, which netrace must leave to the race.

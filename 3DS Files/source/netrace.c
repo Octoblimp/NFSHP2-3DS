@@ -16,7 +16,7 @@
 #include "raceevent.h"
 #include "raceparams.h"
 
-#define SETUP_VERSION 1
+#define SETUP_VERSION 2
 
 // The popup's answers: BACK's, and what SELECT gives a popup with no
 // buttons, which only puts it back.
@@ -36,7 +36,15 @@ typedef struct SetupHeader {
     uint8_t         numDrivers;
     uint8_t         stateInEvent;       // the event's state its own
     cPlayerSettings settings[WIRELESS_MAX_CONSOLES];   // each place's
+    char            name[WIRELESS_MAX_CONSOLES][WIRELESS_NAME_MAX];
+                                        // each place's console, Latin-1
 } SetupHeader;
+
+// The setup's whole, the most drivers there can be.
+typedef char setup_fits[
+    sizeof(SetupHeader) + sizeof(RaceParameters)
+    + RACE_PARAMETERS_MAX_DRIVERS * sizeof(DriverInfo) + sizeof(RaceEvent)
+    <= NETRACE_SETUP_MAX ? 1 : -1];
 
 static NetRace  s_own = { .popup = -1 };
 static NetRace* R     = &s_own;
@@ -59,22 +67,29 @@ static const char* text(const BGameFlow* gf, int32_t id)
     return s ? s : "";
 }
 
-// `tmpl` with "$NAME" put in.
-static void fillName(char* out, size_t cap, const char* tmpl,
-                     const char* name)
+// `tmpl` with `value` put in for each `tok`.
+static void fillTok(char* out, size_t cap, const char* tmpl, const char* tok,
+                    const char* value)
 {
-    size_t o = 0;
+    size_t o = 0, n = strlen(tok);
 
     while (*tmpl && o + 1 < cap) {
-        if (!strncmp(tmpl, "$NAME", 5)) {
-            const char* p = name;
+        if (!strncmp(tmpl, tok, n)) {
+            const char* p = value;
             while (*p && o + 1 < cap) out[o++] = *p++;
-            tmpl += 5;
+            tmpl += n;
         } else {
             out[o++] = *tmpl++;
         }
     }
     out[o] = 0;
+}
+
+// `tmpl` with "$NAME" put in.
+static void fillName(char* out, size_t cap, const char* tmpl,
+                     const char* name)
+{
+    fillTok(out, cap, tmpl, "$NAME", name);
 }
 
 // ------------------------------------------------------------- the places
@@ -294,8 +309,11 @@ static void pack(void)
     h.eventSize     = (uint16_t)sizeof(RaceEvent);
     h.numDrivers    = (uint8_t)n;
     h.stateInEvent  = TheRaceEvent.pState == TheRaceEvent.aOldState;
-    for (p = 0; p < R->race.consoles; p++)
+    for (p = 0; p < R->race.consoles; p++) {
         if (R->driver[p] >= 0) h.settings[p] = R->cars[p].settings;
+        placeName(p, R->names[p], sizeof R->names[p]);
+    }
+    memcpy(h.name, R->names, sizeof h.name);
 
     memcpy(s, &h, sizeof h);
     s += sizeof h;
@@ -443,8 +461,11 @@ static void take(BGameFlow* gf)
     Fred.bRaceWasAborted = 0;
     bDefaultSeed         = h.seed;
     memcpy(R->driver, h.driver, sizeof R->driver);
-    for (p = 0; p < WIRELESS_MAX_CONSOLES; p++)
+    for (p = 0; p < WIRELESS_MAX_CONSOLES; p++) {
         R->cars[p].settings = h.settings[p];
+        memcpy(R->names[p], h.name[p], sizeof R->names[p]);
+        R->names[p][sizeof R->names[p] - 1] = 0;
+    }
 
     R->stage = NR_LOADING;
     say("netrace: setup taken, track %d, %d drivers, driver %d, seed %08lx",
@@ -676,6 +697,59 @@ int netrace_place(void)
 const LobbyRace* netrace_race(void)
 {
     return &R->race;
+}
+
+const char* netrace_place_name(int p)
+{
+    return p >= 0 && p < WIRELESS_MAX_CONSOLES ? R->names[p] : "";
+}
+
+// `line` on the end of `out`, after a break when `out` has one already.
+static void addLine(char* out, size_t cap, const char* line)
+{
+    size_t o = strlen(out);
+
+    if (o && o + 1 < cap) out[o++] = '@';
+    out[o] = 0;
+    strncat(out, line, cap - o - 1);
+}
+
+void netrace_held_text(const BGameFlow* gf, uint8_t places, uint32_t msLeft,
+                       char* out, size_t cap)
+{
+    char     names[WIRELESS_MAX_CONSOLES * (WIRELESS_NAME_MAX + 2)];
+    char     line[256], clock[16];
+    uint32_t s = (msLeft + 999u) / 1000u;
+    int      p;
+
+    names[0] = 0;
+    for (p = 0; p < WIRELESS_MAX_CONSOLES; p++) {
+        if (!((places >> p) & 1)) continue;
+        if (names[0]) strncat(names, ", ", sizeof names - strlen(names) - 1);
+        strncat(names, R->names[p], sizeof names - strlen(names) - 1);
+    }
+    snprintf(clock, sizeof clock, "%lu:%02lu", (unsigned long)(s / 60u),
+             (unsigned long)(s % 60u));
+    out[0] = 0;
+    fillName(line, sizeof line, text(gf, PORTLANG_LINK_LOST), names);
+    addLine(out, cap, line);
+    fillTok(line, sizeof line, text(gf, PORTLANG_RECONNECTING), "$N", clock);
+    addLine(out, cap, line);
+}
+
+void netrace_cpu_text(const BGameFlow* gf, uint8_t places, char* out,
+                      size_t cap)
+{
+    char line[256];
+    int  p;
+
+    out[0] = 0;
+    for (p = 0; p < WIRELESS_MAX_CONSOLES; p++) {
+        if (!((places >> p) & 1)) continue;
+        fillName(line, sizeof line, text(gf, PORTLANG_CPU_DRIVES),
+                 R->names[p]);
+        addLine(out, cap, line);
+    }
 }
 
 int netrace_driver(int p)

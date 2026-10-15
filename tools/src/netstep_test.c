@@ -13,9 +13,12 @@
 // once the console at its other end has not pumped it for the link's
 // timeout: the patience the race set, or its own 3 s once netstep gave it
 // back, or main.c's after the stop; or at once, both ways, where a
-// scenario has a console vanish at its stop. A console pumps every millisecond but
-// when it is gone, in its first frame's drawing, or in a stall after its
-// stop (its save, its unload).
+// scenario has a console vanish at its stop or before the start. A link
+// lost stays lost, both ways, as wireless.c's does (the host sends the
+// client off). A console pumps every millisecond but when it is gone, in
+// its first frame's drawing, in a stall after its stop (its save, its
+// unload), or while its loop is frozen (it comes back after to its link
+// lost).
 //
 // Each console does what main.c's frame does: at the frame's start it
 // puts its pad for the frame NETSTEP_DELAY ahead with the step it
@@ -45,7 +48,16 @@
 //     client's alone;
 //   - the places racing: never one that is not, one gone or stopped
 //     dropped once and never back, none dropped that is on;
-//   - every message no longer than WL_MSG_MAX, to a peer there is, a
+//   - the hold (37g): a console whose link is lost said lost, and said
+//     gone no sooner than the hold after, nor more than a few ms past it;
+//     one gone before the start said so and never held for; a client that
+//     loses its host alone no sooner than the hold after; netstep_held's
+//     places on the host those it said lost and not yet gone, on a client
+//     what the host said or its host lost, the time left never more than
+//     the hold, and every console still on held for each place lost,
+//     and alone for none;
+//   - every message no longer than WL_MSG_MAX, to a peer there is and
+//     over a link not lost, a
 //     client's PADS and the host's FRAMES only; from a client alone only
 //     its stop, and after a console's stop only its stop (a client's with
 //     no pads), and nothing once it has ended; no link with more than
@@ -79,7 +91,8 @@
 #define LINK_MS   3000u
 #define PATIENCE  30000u
 #define MAX_RATE  120     // messages a second on a link
-#define HEADER    19      // netstep.c's
+#define HEADER    21      // netstep.c's
+#define HOLD_SLACK 3u     // ms a hold may run past its end: polls a ms
 #define MSG_BACK  0x18    // lobby.h's LOBBY_MSG_BACK
 #define TAIL_MS   3000u   // run on once all is done, for what is in flight
 
@@ -116,6 +129,12 @@ typedef struct {
     int         maxWait;            // ms a frame may wait on, 0: no check
     int         maxRun;             // ms all its frames may take, 0: any
     int         junk;               // ms between junk messages, 0: none
+    int         hold;               // ms a lost console is held for, 0:
+                                    // netstep's own
+    int         vanishAtStart;      // consoles racing but gone before the
+                                    // first poll, a bit each
+    int         freezeAt[MAXC];     // ms its loop stops, 0: never
+    int         freezeFor[MAXC];    // ms it stays stopped
 } Scenario;
 
 static const Scenario kScenarios[] = {
@@ -144,13 +163,45 @@ static const Scenario kScenarios[] = {
       .latency = 3, .jitter = 15, .lossPct = 15, .dupPct = 5,
       .period = { 33, 30, 36, 33, 40, 28, 33, 35 } },
     { .name = "three, place 2 gone", .consoles = 3, .frames = 500,
-      .latency = 5, .goneAt = { 0, 0, 3000 } },
+      .latency = 5, .goneAt = { 0, 0, 3000 }, .hold = 5000 },
+    // Held for netstep's own 1:30 (37g).
     { .name = "two, the client gone", .consoles = 2, .frames = 500,
       .latency = 5, .goneAt = { 0, 4000 } },
     { .name = "two, the host gone", .consoles = 2, .frames = 500,
       .latency = 5, .goneAt = { 4000, 0 } },
     { .name = "three, the host gone", .consoles = 3, .frames = 500,
-      .latency = 5, .jitter = 10, .lossPct = 10, .goneAt = { 5000, 0, 0 } },
+      .latency = 5, .jitter = 10, .lossPct = 10, .goneAt = { 5000, 0, 0 },
+      .hold = 7000 },
+    { .name = "three, place 1 gone, a lossy link", .consoles = 3,
+      .frames = 500, .latency = 4, .jitter = 20, .lossPct = 20,
+      .dupPct = 5, .goneAt = { 0, 4000 }, .hold = 6000 },
+    // Place 2's link lost to the host at 6 s, the host gone at 7 s while
+    // it holds: place 1 holds for place 2 on the host's word, then for
+    // the host, then races alone, the host's word gone with it.
+    { .name = "three, place 2 gone, then the host while it holds",
+      .consoles = 3, .frames = 500, .latency = 5,
+      .goneAt = { 7000, 0, 3000 }, .hold = 8000 },
+    // Gone before the first poll: not held for.
+    { .name = "three, place 2 gone at the start", .consoles = 3,
+      .frames = 300, .latency = 5, .vanishAtStart = 0x04 },
+    { .name = "two, the host gone at the start", .consoles = 2,
+      .frames = 300, .latency = 5, .vanishAtStart = 0x01 },
+    // A loop stopped past the link's timeout: its link lost for good.
+    // Each side holds for the other, then goes on without it.
+    { .name = "two, the client's loop frozen 6 s", .consoles = 2,
+      .frames = 400, .latency = 5, .freezeAt = { 0, 4000 },
+      .freezeFor = { 0, 6000 }, .hold = 20000 },
+    { .name = "two, the host's loop frozen 5 s", .consoles = 2,
+      .frames = 400, .latency = 5, .freezeAt = { 3000, 0 },
+      .freezeFor = { 5000, 0 }, .hold = 6000 },
+    { .name = "three, place 2's loop frozen 5 s, a lossy link",
+      .consoles = 3, .frames = 400, .latency = 4, .jitter = 15,
+      .lossPct = 15, .freezeAt = { 0, 0, 3000 },
+      .freezeFor = { 0, 0, 5000 }, .hold = 8000 },
+    // Stopped for less than the link's timeout: nothing lost.
+    { .name = "two, the client's loop frozen 2 s", .consoles = 2,
+      .frames = 400, .latency = 5, .freezeAt = { 0, 4000 },
+      .freezeFor = { 0, 2000 }, .hold = 8000 },
     { .name = "two, a checksum differs", .consoles = 2, .frames = 400,
       .latency = 5, .divergeAt = { 0, 200 } },
     // The client runs ahead, so each checksum comes to the host before
@@ -163,7 +214,7 @@ static const Scenario kScenarios[] = {
     { .name = "three, place 1 not racing", .consoles = 3, .frames = 300,
       .latency = 5, .notRacing = 0x02 },
     { .name = "four, all gone but the host", .consoles = 4, .frames = 400,
-      .latency = 5, .goneAt = { 0, 2000, 3000, 2500 } },
+      .latency = 5, .goneAt = { 0, 2000, 3000, 2500 }, .hold = 4000 },
     { .name = "three, junk on the race's link", .consoles = 3,
       .frames = 300, .latency = 5, .jitter = 10, .junk = 7 },
 
@@ -192,7 +243,7 @@ static const Scenario kScenarios[] = {
       .stopAt = { 300, 300 }, .stallAfterStop = { 0, 5000 } },
     { .name = "three, both stop, place 2 gone", .consoles = 3,
       .frames = 300, .latency = 5, .goneAt = { 0, 0, 3000 },
-      .stopAt = { 300, 300 } },
+      .stopAt = { 300, 300 }, .hold = 5000 },
     { .name = "two, both stop, both back", .consoles = 2, .frames = 300,
       .latency = 5, .jitter = 10, .stopAt = { 300, 300 },
       .backAfter = { 1000, 1500 } },
@@ -288,6 +339,13 @@ typedef struct {
     unsigned long saidFrame;
     int          goneSaid[MAXC];
     int          stoppedSaid[MAXC], leftSaid[MAXC], goneOnSaid[MAXC];
+    // The hold: lost as said, by place (the host lost a client's place
+    // 0's), and when; held for now, and ever, as netstep_held said.
+    int          lostSaid[MAXC], startGoneSaid[MAXC];
+    uint32_t     lostAt[MAXC];
+    uint8_t      lostNow;
+    uint8_t      heldSeen;
+    int          frozen;         // its loop stopped, a scenario's freeze
     uint8_t      q[MAXFRAMES + NETSTEP_DELAY + 2];   // its steps put
 } Console;
 
@@ -298,6 +356,7 @@ typedef struct {
 
 static Console         C[MAXC];
 static Pipe            g_pipe[MAXC][MAXC];   // [from][to]
+static int             g_lost[MAXC][MAXC];   // a link lost, for good
 static Truth           g_truth[MAXFRAMES + 8];
 static const Scenario* S;
 static int             g_cur = -1;
@@ -400,10 +459,16 @@ static int target(int c, int i)
     return S->consoles - 1 - i;
 }
 
-// Its loop held, after its stop: it pumps and reads nothing.
+// Its loop held, after its stop, or frozen: it pumps and reads nothing.
 static int held(int c)
 {
+    if (C[c].frozen) return 1;
     return C[c].stopped && (int32_t)(g_now - C[c].stallTo) < 0;
+}
+
+static uint32_t holdOf(void)
+{
+    return S->hold ? (uint32_t)S->hold : NETSTEP_HOLD_MS;
 }
 
 static int fPeerAlive(int i)
@@ -413,8 +478,11 @@ static int fPeerAlive(int i)
 
     if (t < 0) return 0;
     if (C[g_cur].vanished || C[t].vanished) return 0;
+    if (g_lost[g_cur][t]) return 0;
     timeout = C[g_cur].patience ? C[g_cur].patience : LINK_MS;
-    return g_now - C[t].pumped < timeout;
+    if (g_now - C[t].pumped < timeout) return 1;
+    g_lost[g_cur][t] = g_lost[t][g_cur] = 1;
+    return 0;
 }
 
 static int used(const Pipe* p)
@@ -484,6 +552,9 @@ static int fSend(int i, uint8_t type, const void* data, size_t n)
         fault("sent to peer %d, which is not there", i);
         return 0;
     }
+    // A link lost is never asked again: the host holds for that place,
+    // and a client for its host, with nothing sent over it.
+    if (g_lost[g_cur][t]) fault("sent to console %d, its link lost", t);
     if (n > WL_MSG_MAX) {
         fault("a message of %u bytes", (unsigned)n);
         return 0;
@@ -608,7 +679,33 @@ static void fLog(const char* line)
         if (p >= 0 && p < MAXC) {
             if (k->goneSaid[p]) fault("place %d said gone twice", p);
             k->goneSaid[p] = 1;
+            if (!k->lostSaid[p]) fault("place %d gone, never lost", p);
+            else if (g_now - k->lostAt[p] < holdOf()
+                     || g_now - k->lostAt[p] > holdOf() + HOLD_SLACK)
+                fault("place %d gone %lu ms after it was lost", p,
+                      (unsigned long)(g_now - k->lostAt[p]));
+            k->lostNow &= (uint8_t)~(1u << p);
         }
+    }
+    if (sscanf(line, "netstep: place %d lost at frame %lu; held for", &p, &n)
+            == 2 && p >= 0 && p < MAXC) {
+        if (k->lostNow & (1u << p)) fault("place %d said lost twice", p);
+        k->lostSaid[p]++;
+        k->lostAt[p] = g_now;
+        k->lostNow |= (uint8_t)(1u << p);
+    }
+    if (strstr(line, " was gone at the start")
+        && sscanf(line, "netstep: place %d", &p) == 1 && p >= 0 && p < MAXC) {
+        if (k->startGoneSaid[p]) fault("place %d said gone at the start "
+                                       "twice", p);
+        k->startGoneSaid[p] = 1;
+    }
+    if (sscanf(line, "netstep: the host lost at frame %lu; held for", &n)
+        == 1) {
+        if (k->lostNow & 1u) fault("the host said lost twice");
+        k->lostSaid[0]++;
+        k->lostAt[0] = g_now;
+        k->lostNow |= 1u;
     }
     if (sscanf(line, "netstep: place %d stopped after %lu frames", &p, &n)
             == 2 && p >= 0 && p < MAXC) {
@@ -628,6 +725,15 @@ static void fLog(const char* line)
     if (sscanf(line, "netstep: the host is gone, from frame %lu", &n) == 1) {
         k->aloneLines++;
         k->aloneFrom = (int)n;
+        if (k->lostNow & 1u) {
+            if (g_now - k->lostAt[0] < holdOf()
+                || g_now - k->lostAt[0] > holdOf() + HOLD_SLACK)
+                fault("alone %lu ms after the host was lost",
+                      (unsigned long)(g_now - k->lostAt[0]));
+            k->lostNow &= (uint8_t)~1u;
+        } else if (!(S->vanishAtStart & 1)) {
+            fault("alone, the host never lost");
+        }
     }
     if (sscanf(line, "netstep: past the host's stop, from frame %lu", &n)
         == 1) {
@@ -811,7 +917,7 @@ static void checkRecord(int c, const NetStepFrame* r)
                       (unsigned long)r->n, p);
             if (k->wasLive[p] > 0) {
                 k->wasLive[p] = -1;
-                if (!C[p].gone && !C[p].stopped && !alone)
+                if (!C[p].gone && !C[p].stopped && !alone && !g_lost[0][p])
                     fault("frame %lu: place %d dropped, still on",
                           (unsigned long)r->n, p);
             }
@@ -889,11 +995,67 @@ static int drawingFirst(int c)
         && (int32_t)(g_now - k->startAt) < 0;
 }
 
+// The ms left of a hold whose places `lost` were lost at `at` (by place,
+// as the log said): the least of each one's.
+static uint32_t leftOf(uint8_t lost, const uint32_t* at)
+{
+    uint32_t left = 0, most = holdOf();
+    int      p, any = 0;
+
+    for (p = 0; p < MAXC; p++) {
+        uint32_t since, l;
+
+        if (!((lost >> p) & 1)) continue;
+        since = g_now - at[p];
+        l = since < most ? most - since : 0;
+        if (!any || l < left) left = l;
+        any = 1;
+    }
+    return left;
+}
+
+// What netstep_held says against what the log said: the host's places
+// lost and not yet gone or back, and the least time left of them, to the
+// ms; a client's host lost, and its own time left; or the places the
+// host's last message held for, its seconds rounded up, so never less
+// than the host's own time left now.
+static void checkHeld(int c)
+{
+    Console* k = &C[c];
+    uint32_t left, most = holdOf();
+    uint8_t  m = netstep_held(g_now, &left);
+
+    if (c != 0) most = (most + 999u) / 1000u * 1000u;
+    k->heldSeen |= m;
+    if (!m && left) fault("held for none, %lu ms left", (unsigned long)left);
+    if (left > most) fault("held, %lu ms left", (unsigned long)left);
+    if (m & (1u << c)) fault("held for itself");
+    // Alone, the host's last word is no more: its places are the CPU's.
+    if (k->aloneFrom >= 0 && m) fault("held for %02x, alone", m);
+    if (c == 0 && m != k->lostNow)
+        fault("held for %02x, lost %02x", m, k->lostNow);
+    if (c == 0 && m && left != leftOf(m, k->lostAt))
+        fault("held, %lu ms left, not %lu", (unsigned long)left,
+              (unsigned long)leftOf(m, k->lostAt));
+    if (c != 0 && (k->lostNow & 1u) && m != 1u)
+        fault("held for %02x, the host lost", m);
+    if (c != 0 && (k->lostNow & 1u) && left != leftOf(1u, k->lostAt))
+        fault("held for the host, %lu ms left, not %lu",
+              (unsigned long)left, (unsigned long)leftOf(1u, k->lostAt));
+    if (c != 0 && !(k->lostNow & 1u) && (m & (uint8_t)~C[0].heldSeen))
+        fault("held for %02x, which the host never held for", m);
+    if (c != 0 && !(k->lostNow & 1u) && m && C[0].lostNow
+        && left < leftOf(C[0].lostNow, C[0].lostAt))
+        fault("held, %lu ms left, the host %lu", (unsigned long)left,
+              (unsigned long)leftOf(C[0].lostNow, C[0].lostAt));
+}
+
 static void tick(int c)
 {
     Console* k = &C[c];
 
     if (k->gone || held(c)) return;
+    if (!k->stopped) checkHeld(c);
     // Drained each millisecond, ended or not: once it has, a drain does
     // nothing (main.c drains once at the stop, whatever is left to say).
     if (k->stopped) {
@@ -913,10 +1075,56 @@ static void tick(int c)
 
 // ------------------------------------------------------------ a scenario
 
+// A console lost for good: gone, or its loop stopped past the link's
+// timeout.
+static int goesAt(int p)
+{
+    return S->goneAt[p]
+        || (S->freezeAt[p] && (uint32_t)S->freezeFor[p] > LINK_MS);
+}
+
 static int expectGone(int c, int p)
 {
     // The host says each racing client gone; a client says none.
-    return c == 0 && p != 0 && S->goneAt[p] && !(S->notRacing >> p & 1);
+    return c == 0 && p != 0 && p < S->consoles && (goesAt(p) || goesAt(0))
+        && !(S->notRacing >> p & 1) && !(S->vanishAtStart >> p & 1);
+}
+
+// The host held for place p and said so: on to the end, or gone well
+// after p's link was lost to it (LINK_MS after p went).
+static int hostSaw(int p)
+{
+    if (!goesAt(0) && !(S->vanishAtStart & 1)) return 1;
+    return S->goneAt[0] && S->goneAt[p]
+        && S->goneAt[p] + (int)LINK_MS + 500 < S->goneAt[0];
+}
+
+// The lines of the hold, and each console's netstep_held.
+static void checkHold(int c, const Console* k)
+{
+    int p;
+
+    for (p = 0; p < S->consoles; p++) {
+        int racing = !((S->notRacing >> p) & 1) && p != c;
+        int start  = racing && ((S->vanishAtStart >> p) & 1);
+        // The host holds for each client lost, a client for its host:
+        // the other gone, or lost to it while its own loop stopped.
+        int lost   = racing && !start && (c == 0 || p == 0)
+                  && (goesAt(p) || goesAt(c));
+        // A client still with its host is held for each place the host
+        // holds for.
+        int seen   = lost || (c != 0 && p != 0 && racing && !start
+                              && goesAt(p) && hostSaw(p) && !goesAt(c));
+
+        if (k->lostSaid[p] != lost)
+            fault("place %d said lost %d times", p, k->lostSaid[p]);
+        if (k->startGoneSaid[p] != (start && c == 0))
+            fault("place %d said gone at the start %d times", p,
+                  k->startGoneSaid[p]);
+        if (!!(k->heldSeen & (1u << p)) != seen)
+            fault("held for place %d: %d", p, !!(k->heldSeen & (1u << p)));
+    }
+    if (k->lostNow) fault("still held for %02x", k->lostNow);
 }
 
 // The host's end: each racing client's stop heard, and its drain ended
@@ -928,7 +1136,8 @@ static void hostEnd(const Console* k)
     for (p = 1; p < S->consoles; p++) {
         int first, after;
 
-        if (((S->notRacing >> p) & 1) || S->goneAt[p]) {
+        if (((S->notRacing >> p) & 1) || goesAt(p)
+            || ((S->vanishAtStart >> p) & 1)) {
             if (k->stoppedSaid[p] || k->leftSaid[p] || k->goneOnSaid[p])
                 fault("said place %d stopped, which was not racing", p);
             continue;
@@ -963,7 +1172,7 @@ static void hostEnd(const Console* k)
 // stop said.
 static void clientEnd(int c, const Console* k)
 {
-    int hostOn = !S->goneAt[0];
+    int hostOn = !goesAt(0) && !goesAt(c) && !(S->vanishAtStart & 1);
     int past   = hostOn && S->stopAt[0]
               && (!S->stopAt[c] || S->stopAt[c] > S->stopAt[0]);
     int on     = (S->goneOn >> c) & 1;
@@ -991,7 +1200,9 @@ static void finish(void)
         if (S->divergeAt[p]) diverge = 1;
     for (c = 0; c < S->consoles; c++) {
         Console* k = &C[c];
-        int      wantAlone = c != 0 && S->goneAt[0] && !S->goneAt[c];
+        int      wantAlone = c != 0 && !S->goneAt[c]
+                          && (goesAt(0) || goesAt(c)
+                              || (S->vanishAtStart & 1));
 
         g_cur = c;
         if (k->gone) continue;
@@ -1016,6 +1227,7 @@ static void finish(void)
                 fault("place %d gone said %d", p, k->goneSaid[p]);
         if (k->aloneLines != wantAlone)
             fault("said alone %d times", k->aloneLines);
+        checkHold(c, k);
         if (c == 0) hostEnd(k);
         else clientEnd(c, k);
         if (!diverge && k->differs)
@@ -1062,6 +1274,7 @@ static void runScenario(const Scenario* s)
     S = s;
     memset(C, 0, sizeof C);
     memset(g_pipe, 0, sizeof g_pipe);
+    memset(g_lost, 0, sizeof g_lost);
     memset(g_truth, 0, sizeof g_truth);
     g_lcg       = 12345u;
     g_now       = 1000;
@@ -1070,12 +1283,17 @@ static void runScenario(const Scenario* s)
     for (c = 0; c < s->consoles; c++) {
         enter(c);
         netstep_init(&kNet, fLog);
-        // Before GO, as main.c: netstep_start keeps it.
+        // Before GO, as main.c: netstep_start keeps them.
         netstep_on_differ(fDiffer);
+        netstep_set_hold((uint32_t)s->hold);
         C[c].saidPlace = -1;
         if (s->stopAt[c]) stops = 1;
         if ((s->notRacing >> c) & 1) {
             C[c].gone = 1;
+            continue;
+        }
+        if ((s->vanishAtStart >> c) & 1) {
+            C[c].gone = C[c].vanished = 1;
             continue;
         }
         C[c].patience  = PATIENCE;   // netrace's, from the lobby's start
@@ -1097,6 +1315,10 @@ static void runScenario(const Scenario* s)
         for (c = 0; c < s->consoles; c++) {
             if (s->goneAt[c] && g_now == (uint32_t)s->goneAt[c])
                 C[c].gone = 1;
+            if (s->freezeAt[c])
+                C[c].frozen = g_now >= (uint32_t)s->freezeAt[c]
+                           && g_now < (uint32_t)(s->freezeAt[c]
+                                                 + s->freezeFor[c]);
             C[c].sent = 0;
             if (!C[c].gone && !drawingFirst(c) && !held(c))
                 C[c].pumped = g_now;

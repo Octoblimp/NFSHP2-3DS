@@ -103,8 +103,9 @@ them, as retail's split screen ignores the other pad. So one player's
 Quit Race ends the race on every console, and Restart restarts it on
 every console. Only ports 0 and 1, the two players', reach the flow
 (`JOYSTICK_PORTS`): a place past them races as the AI for now (37d-2),
-and its pad pauses nothing. A console leaving alone while the others
-race on, its car handed to the AI, is 37g's.
+and its pad pauses nothing. A console lost while the others race on
+hands the pause it held to the lowest port still racing (37g, "A
+console lost").
 
 ## The messages
 
@@ -116,7 +117,7 @@ other side still needs, sent again every 16 ms:
 | 0x16 | `NETSTEP_MSG_PADS` | a client | header, then its pads from `first` |
 | 0x17 | `NETSTEP_MSG_FRAMES` | the host | header, then the records from `first` |
 
-The header, 19 bytes, little-endian:
+The header, 21 bytes, little-endian:
 
 | Offset | Size | |
 |---|---|---|
@@ -126,6 +127,8 @@ The header, 19 bytes, little-endian:
 | 9 | 4 | the frame of the sender's last checksum (0xffffffff: none run) |
 | 13 | 2 | that checksum |
 | 15 | 4 | `stopAt`: the frames the sender ran before its stop (0xffffffff: still on; 37f) |
+| 19 | 1 | the places the host holds for, a bit each (a client's: 0; 37g) |
+| 20 | 1 | the hold's seconds left, rounded up (a client's: 0) |
 
 A pad is the 8 bytes above. A record is its step `q` (1/3600 s), the
 live places' mask, then the pad of each live place in place order. A
@@ -137,14 +140,37 @@ its own step in it, and sends each client the records from the first it
 said it lacks. A client sends its pads from the first the host said it
 lacks.
 
-## A console lost
+## A console lost (TASKS 37g)
 
 The race's link keeps netrace's patience until frames have flowed for 30
 past the delay (the first frame's long drawing), then has its own
-timeout back (`setPatience(0)`, "frames flow"). The host builds without
-a client whose link is lost, its pad at rest from then on ("place p is
-gone"). A client that loses the host goes on alone, its own pad on its
-place and the rest at rest. What more a race does then is 37g's.
+timeout back (`setPatience(0)`, "frames flow").
+
+The host holds for a client whose link is lost ("place p lost at frame
+n; held for t ms"). It builds no record without that client's pad, so
+the race stops on every console for the hold: the config's
+`WirelessHoldSeconds` (90 unless said, NETSTEP_HOLD_MS), set with
+`netstep_set_hold`. Nothing goes over the lost link. Each FRAMES message
+carries the places held for and the seconds left (header bytes 19 and
+20), and `netstep_held` gives them to the screen. main.c draws a box on
+the top screen with "The link to NAME was lost." and "Reconnecting...
+m:ss" (`netrace_held_text`, the name from the setup's), and mutes the
+race's sound while it holds.
+
+Past the hold the host builds without the place, its pad at rest ("place
+p is gone, from frame n; its car to the CPU"). On the first record
+without that bit, every console hands the car to the CPU, as retail's
+race_finish_car does after the finish (`car_set_control_mode(car,
+AI_CONTROL)`, "lockstep: frame n, place p's car (driver d) to the CPU").
+Each console then shows "The CPU drives NAME's car." for 4 s
+(`netrace_cpu_text`). If that place held the pause, the pause and its
+popups go to the lowest port still racing.
+
+A client that loses the host holds the same way and sends nothing. It
+then goes on alone ("the host is gone, from frame n; racing alone"): its
+own pad on its place, the rest at rest, every other car the CPU's. A
+console already gone at the first poll is not held for. A lost link
+never comes back yet: rejoining is 37g-2 and 37g-3.
 
 ## The end (TASKS 37f)
 
@@ -167,8 +193,7 @@ next race's LOADED and GO come after the last race's stop and last
 frames.
 
 From the stop on, every message says how many frames its sender ran
-(`stopAt`, 4 bytes after the checksum: the header is 19 bytes; none is
-0xffffffff):
+(`stopAt`, the 4 bytes after the checksum; none is 0xffffffff):
 
 - The host serves its last records on (`netstep_drain`): a client still
   behind may need them. It ends once every client has said it stopped
@@ -216,8 +241,15 @@ or all stopping on a clean, lossy or slow link, either side slow or
 held after its stop, a console gone or its link lost at the stop, the
 link out at the stop, the lobby's back message coming before the race's
 last, each side stopping alone or before the other, a client's stop
-unheard. 39 scenarios, faults 0. `--mutate`: 148 mutations, 146
-caught, 2 equivalent (named in the check).
+unheard. Since 37g, the hold: a client lost, of two and of three, on a
+lossy link, checked every ms against each line and `netstep_held`
+(the host's time left to the ms); the host lost; a place, or the host,
+gone at the start and not held for; a loop frozen past the link's
+timeout and short of it; place 2 lost and then the host while it holds.
+Nothing may go over a lost link, and a console alone holds for none. 47
+scenarios, faults 0. `--mutate`: 173 mutations, 170 caught, 3
+equivalent (named in the check). `tools/netrace_check.py` checks the
+names the setup carries and the box's texts.
 
 ## On Azahar
 
@@ -314,3 +346,19 @@ still on Resume Race (the first flow state logged after it):
 - `-Quit` (the host pauses, B presses): the host paused on frame
   1003 (seed e5574ec8), port 0. B's presses on 1089 and 1221 left the
   pause on Resume Race, and both stopped after frame 2010.
+
+Session 112 (37g-1), with `-Lose`: each card's config has
+`WirelessHoldSeconds 10`, and once the 20 s of driving are done one
+copy is closed. The other keeps the gas held for the hold and 25 s
+more, with a shot every 2 s:
+
+- `-Lose 1` (seed 9c08c5df): the host lost B at frame 718 and held. Its
+  top screen showed "The link to hp2join1 was lost." over
+  "Reconnecting... 0:07", the race standing still. After 10 s it logged
+  "place 1 is gone, from frame 718", dropped place 1 and handed B's car
+  to the CPU on frame 718, under "The CPU drives hp2join1's car." for
+  4 s. B's car then passed the host's, 0.95 s ahead 30 s on.
+- `-Lose 0` (seed fbf75d38): B lost the host at frame 773 and held under
+  "The link to hp2host was lost.", then raced alone from frame 773,
+  the host's car the CPU's and ahead of B's (copy B is Manual, and the
+  script never shifts).

@@ -7,8 +7,9 @@
 #include <string.h>
 
 #define MASK     (NETSTEP_RING - 1)
-#define HEADER   19   // need (4), first (4), count, checksum's frame (4), it
-                      // (2), the stop (4)
+#define HEADER   21   // need (4), first (4), count, checksum's frame (4), it
+                      // (2), the stop (4), the hold: its places, its
+                      // seconds left (the host's; a client's 0)
 #define PAD_WIRE 8    // the DualShock's six bytes, the presses (2)
 
 static NetStep  s_own;
@@ -178,6 +179,26 @@ static void takeHash(int p, const uint8_t* b)
 
 // ------------------------------------------------------------ the host's
 
+// The places the host holds for, and the ms left of the one lost first.
+static uint8_t hostHeld(uint32_t now, uint32_t* msLeft)
+{
+    uint8_t  mask = 0;
+    uint32_t left = 0;
+    int      p;
+
+    for (p = 0; p < NETSTEP_MAX; p++) {
+        uint32_t since;
+
+        if (!S->lost[p] || !((S->live >> p) & 1)) continue;
+        since = now - S->lostAt[p];
+        since = since < S->holdMs ? S->holdMs - since : 0;
+        if (!mask || since < left) left = since;
+        mask |= (uint8_t)(1u << p);
+    }
+    if (msLeft) *msLeft = left;
+    return mask;
+}
+
 static void takePads(int p, const WlMsg* m)
 {
     const uint8_t* d = m->data;
@@ -213,7 +234,7 @@ static void takePads(int p, const WlMsg* m)
 static void sendFrames(int p, uint32_t now)
 {
     uint8_t  b[WL_MSG_MAX];
-    uint32_t first = S->need[p], n;
+    uint32_t first = S->need[p], n, left;
     size_t   o = HEADER;
     int      count = 0;
 
@@ -237,6 +258,8 @@ static void sendFrames(int p, uint32_t now)
     b[8] = (uint8_t)count;
     putHash(b + 9);
     put32(b + 15, S->stopAt);
+    b[19] = hostHeld(now, &left);
+    b[20] = (uint8_t)((left + 999) / 1000);
     if (!S->net.send(S->peer[p], NETSTEP_MSG_FRAMES, b, o)) S->sendFails++;
     S->lastSend[p] = now;
     S->fresh[p]    = 0;
@@ -271,22 +294,37 @@ static void hostPoll(uint32_t now)
 
     hostRead();
     // A client that stopped has left the race: from the next record on it
-    // is built without, as one gone.
+    // is built without. One whose link is lost is held for (37g): no
+    // record is built without its pad until the hold is over, and then
+    // the records are built without it, as without one left. One gone
+    // already at the first poll is not held for.
     for (p = 0; p < NETSTEP_MAX; p++) {
         if (p == S->place || !((S->live >> p) & 1)) continue;
-        if (S->left[p])
+        if (S->left[p]) {
             say("netstep: place %d left, from frame %lu", p,
                 (unsigned long)S->built);
-        else if (!alive(p))
-            say("netstep: place %d is gone, from frame %lu", p,
-                (unsigned long)S->built);
-        else
+        } else if (alive(p)) {
             continue;
+        } else if (!S->polled) {
+            say("netstep: place %d was gone at the start", p);
+        } else if (!S->lost[p]) {
+            S->lost[p]   = 1;
+            S->lostAt[p] = now;
+            say("netstep: place %d lost at frame %lu; held for %lu ms", p,
+                (unsigned long)S->built, (unsigned long)S->holdMs);
+            continue;
+        } else if (now - S->lostAt[p] < S->holdMs) {
+            continue;
+        } else {
+            say("netstep: place %d is gone, from frame %lu; its car to the "
+                "CPU", p, (unsigned long)S->built);
+        }
+        S->lost[p] = 0;
         S->live &= (uint8_t)~(1u << p);
     }
     hostBuild();
     for (p = 0; p < NETSTEP_MAX; p++) {
-        if (p == S->place || !((S->live >> p) & 1)) continue;
+        if (p == S->place || !((S->live >> p) & 1) || S->lost[p]) continue;
         if (S->fresh[p] || now - S->lastSend[p] >= NETSTEP_RESEND_MS)
             sendFrames(p, now);
     }
@@ -334,6 +372,8 @@ static void takeFrames(const WlMsg* m)
     first = get32(d + 4);
     if (need > S->padNeed) S->padNeed = need;
     takeHash(0, d + 9);
+    S->held     = d[19];
+    S->heldLeft = d[20];
     if (get32(d + 15) != NETSTEP_NONE && S->hostStop == NETSTEP_NONE) {
         S->hostStop = get32(d + 15);
         say("netstep: the host stopped after %lu frames",
@@ -385,6 +425,8 @@ static void sendPads(uint32_t now)
     b[8] = (uint8_t)count;
     putHash(b + 9);
     put32(b + 15, S->stopAt);
+    b[19] = 0;
+    b[20] = 0;
     if (!S->net.send(S->peer[0], NETSTEP_MSG_PADS, b, o)) S->sendFails++;
     S->lastSend[S->place] = now;
 }
@@ -420,10 +462,21 @@ static void clientPoll(uint32_t now)
             takeFrames(&m);
         }
         if (!alive(0)) {
-            S->alone = 1;
-            S->live  = (uint8_t)(1u << S->place);
-            say("netstep: the host is gone, from frame %lu; racing alone",
-                (unsigned long)S->built);
+            // Held for (37g), as the host holds for a client, unless gone
+            // already at the first poll; then alone, the rest the CPU's.
+            if (S->polled && !S->lost[0]) {
+                S->lost[0]   = 1;
+                S->lostAt[0] = now;
+                say("netstep: the host lost at frame %lu; held for %lu ms",
+                    (unsigned long)S->built, (unsigned long)S->holdMs);
+            } else if (!S->polled || now - S->lostAt[0] >= S->holdMs) {
+                S->alone   = 1;
+                S->live    = (uint8_t)(1u << S->place);
+                S->lost[0] = 0;
+                say("netstep: the host is gone, from frame %lu; racing "
+                    "alone, the other cars the CPU's",
+                    (unsigned long)S->built);
+            }
         } else if (on || (S->hostStop != NETSTEP_NONE
                           && S->frame >= S->hostStop)) {
             // Past the host's last frame, on its own: it has left the
@@ -443,6 +496,7 @@ static void clientPoll(uint32_t now)
         aloneBuild();
         return;
     }
+    if (S->lost[0]) return;
     // A new pad goes at once with no more: it is put at the frame's
     // start, a frame past the last poll's send.
     if (now - S->lastSend[S->place] >= NETSTEP_RESEND_MS) sendPads(now);
@@ -467,12 +521,19 @@ void netstep_on_differ(NetStepDifferFn fn)
     S->differ = fn;
 }
 
+// 0 is netstep_start's NETSTEP_HOLD_MS.
+void netstep_set_hold(uint32_t ms)
+{
+    S->holdMs = ms;
+}
+
 void netstep_start(int place, int consoles, const int peer[NETSTEP_MAX],
                    uint8_t racing)
 {
     NetStepNet      net    = S->net;
     NetStepLogFn    log    = S->log;
     NetStepDifferFn differ = S->differ;
+    uint32_t        holdMs = S->holdMs ? S->holdMs : NETSTEP_HOLD_MS;
     uint32_t     n;
     int          p, i;
 
@@ -480,6 +541,7 @@ void netstep_start(int place, int consoles, const int peer[NETSTEP_MAX],
     S->net    = net;
     S->log    = log;
     S->differ = differ;
+    S->holdMs = holdMs;
     S->on     = 1;
     S->host   = place == 0;
     S->place  = place;
@@ -560,6 +622,7 @@ int netstep_poll(uint32_t now)
     if (!S->on) return 0;
     if (S->host) hostPoll(now);
     else clientPoll(now);
+    S->polled = 1;
     if (!S->settled && S->built >= NETSTEP_DELAY + NETSTEP_SETTLE) {
         S->settled = 1;
         S->net.setPatience(0);
@@ -590,4 +653,20 @@ void netstep_done(uint16_t hash)
 uint32_t netstep_frame(void)
 {
     return S->frame;
+}
+
+uint8_t netstep_held(uint32_t now, uint32_t* msLeft)
+{
+    uint32_t since;
+
+    if (msLeft) *msLeft = 0;
+    if (!S->on || S->alone) return 0;
+    if (S->host) return hostHeld(now, msLeft);
+    if (!S->lost[0]) {
+        if (msLeft) *msLeft = (uint32_t)S->heldLeft * 1000u;
+        return S->held;
+    }
+    since = now - S->lostAt[0];
+    if (msLeft) *msLeft = since < S->holdMs ? S->holdMs - since : 0;
+    return 1;
 }

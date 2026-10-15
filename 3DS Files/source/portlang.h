@@ -35,6 +35,8 @@ enum {
     PORTLANG_CPU_RACERS_N,                      // and line, $N of them
     PORTLANG_WIRELESS_DISABLED,                 // the HOME Menu's switch off
     PORTLANG_HOST_MODE,                         // Host's question, TASKS 63
+    PORTLANG_RECONNECTING,                      // a race held, $N left (37g)
+    PORTLANG_CPU_DRIVES,                        // past it, $NAME's car
     PORTLANG_END
 };
 

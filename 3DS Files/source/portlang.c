@@ -106,6 +106,14 @@ static const char* const kStrings[PORTLANG_END - PORTLANG_FIRST][6] = {
       "Quale modalit\xe0 vuoi creare?",
       "\xbf" "Qu\xe9 modo quieres crear?",
       "Vilket l\xe4ge vill du skapa?" },
+    // PORTLANG_RECONNECTING: $N is the time left, m:ss
+    { "Reconnecting... $N", "Reconnexion... $N",
+      "Verbindung wird wiederhergestellt... $N", "Riconnessione... $N",
+      "Reconectando... $N", "\xc5teransluter... $N" },
+    // PORTLANG_CPU_DRIVES
+    { "The CPU drives $NAME's car.", "L'IA conduit la voiture de $NAME.",
+      "Die KI f\xe4hrt das Auto von $NAME.", "La CPU guida l'auto di $NAME.",
+      "La CPU conduce el coche de $NAME.", "Datorn k\xf6r $NAMEs bil." },
 };
 
 const char* portlang_get(int32_t languageEnum, int32_t id, size_t* outLen)
