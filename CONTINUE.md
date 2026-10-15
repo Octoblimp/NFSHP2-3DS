@@ -110,6 +110,15 @@ on the 15.5 FPS of an earlier run: that was the fire on track 11, and
 TASKS 46 must reach a steady 30 there and in every place like it.
 Next: TASKS 37 (multi-card multiplayer).**
 
+**Now (Session 111, 2026-10-15): 37f-3 is done. Either player's pause
+in a wireless race pauses every console, and only that player's pad
+drives it, so one player's Quit Race or Restart is everyone's, as on
+retail's split screen. Nothing in the game had to change.
+`run_azahar_lobby.ps1 -PauseBy 1` has B pause, and checks that the
+host's presses do nothing to B's pause. It passed with Quit and with
+Restart, and with the host pausing. Next: 37g, TASKS 61, 46, 60 and 59.
+See HANDOFF.md's Session 111.**
+
 **Now (Session 110, 2026-10-15): the CIA's HOME Menu banner is Hot
 Pursuit 2's. The logo's letters are a 3D chrome badge that the HOME
 Menu turns, in front of an oval plate of the light bar's blue and red.

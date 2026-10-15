@@ -94,6 +94,18 @@ keeps it by the screen's hash. A menu made for the screen takes it
 (`filterPort`), and the screen's own START and BACK filter on it in
 `flowInput(kDown, port)`.
 
+So either player's pad pauses a wireless race for everyone (37f-3).
+Its START is in the record on its place's port, so every console's
+player on that port asks for the pause on the same frame. Each console
+then gives the pause's screens that port. The other console's presses
+still reach the flow on their own port, and the screens do not hear
+them, as retail's split screen ignores the other pad. So one player's
+Quit Race ends the race on every console, and Restart restarts it on
+every console. Only ports 0 and 1, the two players', reach the flow
+(`JOYSTICK_PORTS`): a place past them races as the AI for now (37d-2),
+and its pad pauses nothing. A console leaving alone while the others
+race on, its car handed to the AI, is 37g's.
+
 ## The messages
 
 Both unreliable (`wlproto.h`), after netrace's, each repeating what the
@@ -281,3 +293,24 @@ nine frames after the test's finish, in the time and racers parts (an
 AI racer's car, and with it retail's x + y), and every frame after it
 differed too. The runs before and after it had none. Finding it is
 still open (TASKS 37f-2).
+
+Session 111 (37f-3), with `-PauseBy 1`: B pauses instead of the host,
+and before B moves, the host presses Down and then START on B's pause.
+Every copy must log the pause on B's port on the same frame, the
+host's presses on the same frames, and after each press the Pause Menu
+still on Resume Race (the first flow state logged after it):
+
+- `-Quit -PauseBy 1`: B paused on frame 991 (seed dbfe8ce9), port 1 on
+  both copies. The host's Down on frame 1081 and START on 1229 reached
+  both copies on port 0, and each left the pause on Resume Race. B's
+  three Downs then went from Resume to Restart, Options and Quit Race
+  (View Replay grayed, the hidden items passed over). Both stopped
+  after frame 2160 and went back to the lobby, then on to Select Car
+  again; all 15 logged frames' parts the same.
+- `-Restart -PauseBy 1`: B paused on frame 970 (seed 3d51a052). The
+  host's presses on 1058 and 1213 left the pause on Resume Race. B's
+  Restart started the race again on both, still in lockstep, and both
+  raced on; all 19 logged frames' parts the same.
+- `-Quit` (the host pauses, B presses): the host paused on frame
+  1003 (seed e5574ec8), port 0. B's presses on 1089 and 1221 left the
+  pause on Resume Race, and both stopped after frame 2010.

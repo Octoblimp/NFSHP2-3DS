@@ -23622,3 +23622,61 @@ The user's look on their 3DS. Then 37f-3, 37g, TASKS 61, 46, 60 and 59.
 
 The user's second look, after deleting the old title in FBI: "It worked
 perfectly!" (2026-10-15). TASKS 66 is done; 37f-3 is next.
+
+## Session 111 -- 37f-3: either player's pause, on every console
+
+The user, on the banner: "It worked perfectly! Now go back to 37f-3 and
+continue work as normal. Never stop working." TASKS 66 is done
+(ed6998e).
+
+### What 37f-3 needed
+
+Nothing in the game. Lockstep sends each place's START in its frame
+record on that place's port, so every console's player on that port
+asks for the pause on the same frame. `pause_menu_enter_pause` then
+gives the pause's eight screens that port (SetScreenFilterPort, through
+`hookSetScreenFilterPort`), and `flowInput` and the menu filter every
+other port's presses. So one player's Quit Race or Restart is
+everyone's, as on retail's split screen. Places past the two players'
+have no port that reaches the flow (`JOYSTICK_PORTS` is 2; they race
+as the AI for now, 37d-2).
+
+### The test
+
+`tools/run_azahar_lobby.ps1 -PauseBy 1` (with `-Quit` or `-Restart`)
+has B pause instead of the host. Before B moves, the host presses Down,
+then START, on B's pause. Each press must reach every copy on port 0,
+and the first flow state after it must still be the Pause Menu on
+Resume Race. The verdict also wants one pause on every copy, on the
+pauser's port and on the same frame, and the other copy's presses on
+the same frames. With `-PauseBy 0`, the default, B presses on the
+host's pause.
+
+- `-Quit -PauseBy 1`: B paused on frame 991 (seed dbfe8ce9), port 1 on
+  both copies. The host's Down on frame 1081 and START on 1229 reached
+  both copies on port 0, and each left the pause on Resume Race. B's
+  three Downs then went from Resume to Restart, Options and Quit Race
+  (View Replay grayed, the hidden items passed over). Both stopped
+  after frame 2160 and went back to the lobby, then on to Select Car
+  again; all 15 logged frames' parts the same.
+- `-Restart -PauseBy 1`: B paused on frame 970 (seed 3d51a052). The
+  host's presses on 1058 and 1213 left the pause on Resume Race. B's
+  Restart started the race again on both, still in lockstep, and both
+  raced on; all 19 logged frames' parts the same.
+- `-Quit` (the host pauses, B presses): the host paused on frame
+  1003 (seed e5574ec8), port 0. B's presses on 1089 and 1221 left the
+  pause on Resume Race, and both stopped after frame 2010.
+
+One screenshot of A after its START shows Restart Race lit. The log
+shows that was B's first Down (frame 1370), which landed before the
+shot. A's shot after its own Down shows Resume Race lit.
+
+### Next
+
+37g (a console lost mid-race: the pause, the rejoin by the console's
+ID, and after 1:30 its car to the CPU), then TASKS 61, 46, 60 and 59.
+37f's last open item stays: the checksum difference at frame 1809 in
+one Next Race run of three. Still to ask the user: the road's blink on
+the device again (TASKS 64), 47's bridge, 52's popups, the next device
+log's `sends:` line for 65, and how the `-fno-strict-aliasing` build
+plays on the device.

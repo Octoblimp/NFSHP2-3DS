@@ -2717,11 +2717,23 @@ phases.
                   - Not run: Restart Event on Azahar; the harness
                   covers it. Not seen on the device: the smokeables
                   now freed, and any FPS change from the flag.
-                - 37f-3: the pause's screens are driven by the pad
-                  that paused, on every console, so one player's Quit
-                  Race ends the race for all, as retail's split screen
-                  does. Leaving alone (the others racing on, its car
-                  to the AI) is 37g's hand-over.
+                - [x] 37f-3, done (Session 111): the pause's screens
+                  are driven by the pad that paused, on every console,
+                  so one player's Quit Race ends the race for all, as
+                  retail's split screen does. Nothing in the game had
+                  to change: the START is in the record on its place's
+                  port, and SetScreenFilterPort gives the screens that
+                  port on each console (`netstep.md`, "The screens'
+                  ports"). `run_azahar_lobby.ps1 -PauseBy 1` has B
+                  pause. Before B moves, the host's Down and START
+                  must leave B's pause on Resume Race on every copy.
+                  Three runs passed: B's Quit (seed dbfe8ce9: paused on
+                  frame 991, stopped after 2160, back to the lobby and
+                  Select Car), B's Restart (seed 3d51a052: racing
+                  again in lockstep), and the host's Quit with B's
+                  presses (seed e5574ec8). Every logged frame's parts
+                  were the host's. Leaving alone (the others racing
+                  on, its car to the AI) is 37g's hand-over.
           - [ ] 37g: a console lost mid-race. The user, 2026-10-14:
                 when a console disconnects, the whole race pauses and
                 tries to reconnect it. The lost console rejoins the
