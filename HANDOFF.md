@@ -22817,3 +22817,78 @@ ask the user: TASKS 47's bridge and 52's popups.
 TASKS 63 (Local Wireless on the main menu, the settings after Host),
 then 37f and 37g, then TASKS 61, 46, 60 and 59. Still to ask the user:
 TASKS 47's bridge and 52's popups.
+
+## Session 103 -- TASKS 63, Local Wireless on the main menu (done)
+
+The user, on 37b's Players route: a top-level entry "may be better",
+and the settings chosen once Host is pressed, since setting a race up
+and then picking Local Wireless "can confuse people".
+`docs/formats/lobby.md`, "The host's setup", has the whole of it.
+
+### What changed
+
+- `debugmenu_patch.c`/`debugmenu.h`: NEW_MAIN_MENU gains six objects,
+  two rows of three. The tallest BOTTOM_MASK is cut to a separator
+  (0.625) for good and the rows fill the 113 px it covered: Local
+  Wireless (MENUITEM_4, MI_4_MASK, `PORT_WIRELESS_FILL`; shown, its
+  label's LanguageID 2000000) at y 236, then the hidden debug row at
+  y 291. `debugmenu_reveal` names the debug row MENUITEM_5 and
+  MI_5_MASK and cuts Local Wireless's filler to a separator.
+- `gameflow.c`/`.h`: MENUITEM_4 highlights MI_4_MASK with the lobby's
+  blurb and selects `BGF_LOCAL_WIRELESS_NAME` (pushed); the debug menu
+  moved to MENUITEM_5 (`BGF_ITEM_MENUITEM_5`). `main.c`'s chord too.
+- `lobby.c`/`.h`: Host (wireless on) asks the mode (LS_MODE, Hot
+  Pursuit 10023 or World Racing 10022, the last hosted highlighted);
+  a mode sets `gf->copsOn` and the police hook, tells
+  `lobby_on_setup(1)` and pushes `LOBBY_SETUP_SCREEN` ("Challenge").
+  ACTIVATE with the setup on: `lobby_on_setup(0)`, then hosting after
+  popping to under the lobby that went to the setup, or the mode
+  again if BACK popped that lobby. LOBBY_MSG_START is four bytes, the
+  host's game type and cops added; `LobbyRace.gameType`/`copsOn`.
+- `main.c`: `wirelessPlayers` only while the host sets up
+  (`lobbySetup`); the setup hook says only pad port 0 is plugged in,
+  so Players stays at 1 elsewhere; `lobbyStarted` puts a client's
+  host's mode in Fred (GameType, 2 player cars, the cops, the
+  challenge cars) before car select.
+- `bsetup.c`/`.h`: Players held at 2 while `wirelessPlayers`.
+- `portlang.c`/`.h`: `PORTLANG_HOST_MODE` (2000018) in six languages.
+- `tools/debugmenu_check.py`: both rows' geometry, the cut filler, the
+  reveal's four changes. `tools/src/lobby_test.c`: the setup screens
+  (keys S, SB, SS; H hosts through the mode and the setup), the setup
+  and police hooks, four-byte starts, the stack under car select, 8
+  scenarios. `tools/lobby_check.py`: 26 mutations.
+- `tools/run_azahar_lobby.ps1`: down to Local Wireless on the main
+  menu; the host's mode (World Racing, Hot Pursuit with `-CopsOn`)
+  and the Challenge; each joiner must log the host's mode.
+- `docs/formats/lobby.md`, `debug-menu.md`, `frontend-setup.md`.
+
+### Checks
+
+- debugmenu_check ok: Local Wireless label y 236, mask 238, filler 283
+  to 341 (3.625); debug label 291, mask 293, filler 338 to 341.
+- lobby_check: 58 scenarios, faults 0; `--mutate`: 130, 127 caught, 3
+  equivalent (the old three), 0 unexplained.
+- bootflow, bscreens, carsel, cartypeinfo, challenge, racesetup,
+  racesetups, setup, tracksel: 0 differ; netrace faults 0; langtab 0
+  differ; screen_registry: the same 7 port-only rows as before.
+- tools/build_cia.ps1: built, relocations and shaders OK.
+- Azahar, `run_azahar_lobby.ps1 -Consoles 2 -Race -Drive 20`: both
+  PASS. Both reached the lobby from the main menu's fourth row (91 s);
+  the host's mode, World Racing, the Challenge (Players "Local
+  Wireless") and its select had it hosting 16 s later; B logged "the
+  host's game type 3, cops off"; GO on seed 1d08fdbf, 2 CPU racers, B's
+  parts the same as the host's on all 7 frames logged. The shots: the
+  main menu with Local Wireless under Options and its blurb, the mode
+  popup, the Challenge.
+- The same with `-CopsOn`: both PASS, Hot Pursuit, "lobby: setup, cops
+  on", B "cops on"; race start 2 players, 2 AI, 4 cops; GO on seed
+  6ecb4d07, B's 6 logged frames the same as the host's.
+- Not run: `run_azahar_debugmenu.ps1` (its `-Cop` path now presses down
+  four to the fifth row); the chord's reveal is checked by
+  debugmenu_check only.
+
+### Next
+
+37f and 37g, then TASKS 61 (You're The Cop and cops over wireless),
+46, 60 and 59. Still to ask the user: TASKS 47's bridge and 52's
+popups.

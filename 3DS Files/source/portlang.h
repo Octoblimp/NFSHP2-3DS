@@ -34,6 +34,7 @@ enum {
     PORTLANG_CPU_RACERS,                        // the host's count: button
     PORTLANG_CPU_RACERS_N,                      // and line, $N of them
     PORTLANG_WIRELESS_DISABLED,                 // the HOME Menu's switch off
+    PORTLANG_HOST_MODE,                         // Host's question, TASKS 63
     PORTLANG_END
 };
 

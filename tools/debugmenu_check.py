@@ -5,14 +5,19 @@ Builds the patch for the host, runs it on retail's FRONTB.BUN as the
 handheld does at boot, and holds what it wrote against the bundle:
 
   - every chunk of the Flailer chunk is there, in order and byte for byte,
-    but NEW_MAIN_MENU's object count;
-  - NEW_MAIN_MENU has its 31 objects and then the three the port adds (the
-    item, its mask, the filler), all invisible, under the hidden names;
+    but NEW_MAIN_MENU's object count and its bottom filler, cut to a
+    separator;
+  - NEW_MAIN_MENU has its 31 objects and then the six the port adds: Local
+    Wireless's label, mask and filler, shown as MENUITEM_4 and MI_4_MASK
+    with the port's LanguageID, then the debug menu's, invisible under
+    the hidden names; each row and filler where the rows above put it,
+    down to where the filler ended;
   - the two debug screens are last: Be The Cop Setup's objects but the
     six left out (and the debug menu's rows past five), each the same but
     for the texts' rooms, the title's string and the help line's room;
-  - bui.c reads the result, and debugmenu_reveal shows the three once,
-    under MENUITEM_4 and MI_4_MASK, with the filler cut to a separator.
+  - bui.c reads the result, and debugmenu_reveal shows the debug menu's
+    three once, under MENUITEM_5 and MI_5_MASK, with Local Wireless's
+    filler cut to the separator above them.
 
 Usage:
     python tools/debugmenu_check.py [extracted-retail/FRONTEND/FRONTB.BUN]
@@ -43,11 +48,19 @@ DEBUG_RACE = 0xd98d6284
 ITEM_HIDDEN = 0xd988c438
 MASK_HIDDEN = 0xd98aa6b5
 FILL = 0xd986f130
+WIRELESS_FILL = 0x3e221977
+MENUITEM_2 = 0x52e039f4
 MENUITEM_3 = 0x52e039f5
 MENUITEM_4 = 0x52e039f6
+MENUITEM_5 = 0x52e039f7
+MI_2_MASK = 0x708a0bf1
 MI_3_MASK = 0x72df3492
 MI_4_MASK = 0x75345d33
+MI_5_MASK = 0x778985d4
 BOTTOM_MASK = 0xaa5d7d3f
+PORTLANG_LOCAL_WIRELESS = 2000000
+MASK_UNIT = 16.0
+SEPARATOR = 0.625
 LEFT_OUT = {0x52e039fa, 0x69a2c75e, 0x7e88ffb7, 0xab671c9a, 0x1042eac3,
             0xc67cfb4a}
 TITLE = 0x5e9f4683
@@ -161,29 +174,89 @@ def main():
             continue
         n0, n1 = struct.unpack_from("<H", d0, 28)[0], \
             struct.unpack_from("<H", d1, 28)[0]
-        want(n1 == n0 + 3, "main menu count %d against %d" % (n1, n0))
+        want(n1 == n0 + 6, "main menu count %d against %d" % (n1, n0))
         want(d0[:28] == d1[:28] and d0[30:] == d1[30:],
              "main menu's def differs beyond the count")
-        want(o1[:len(o0)] == o0, "main menu's own objects differ")
+        want(len(o1) == len(o0) + 6, "main menu's objects")
+        # Its own the same but the biggest BOTTOM_MASK, whose ScaleY alone
+        # is now the separator's.
+        fills = [c for t, c in o0 if u32(c, 8) == BOTTOM_MASK]
+        filler = max(fills, key=lambda c: f32(c, 60))
+        cut = None
+        for (t0, c0), (t1, c1) in zip(o0, o1):
+            if c0 is filler:
+                cut = c1
+                want(c1[:60] == c0[:60] and c1[64:] == c0[64:]
+                     and abs(f32(c1, 60) - SEPARATOR) < 1e-6,
+                     "the filler cut to a separator")
+            else:
+                want(c0 == c1, "main menu's object %08x differs"
+                     % u32(c0, 8))
+        want(cut is not None, "no filler")
+        bottom = f32(filler, 52) + f32(filler, 60) * MASK_UNIT
         added = o1[len(o0):]
         want([u32(c, 8) for t, c in added]
-             == [ITEM_HIDDEN, MASK_HIDDEN, FILL],
+             == [MENUITEM_4, MI_4_MASK, WIRELESS_FILL,
+                 ITEM_HIDDEN, MASK_HIDDEN, FILL],
              "added: %s" % ["%08x" % u32(c, 8) for t, c in added])
-        want(all(c[41] == 0 for t, c in added), "an added object visible")
+        want([c[41] for t, c in added] == [1, 1, 1, 0, 0, 0],
+             "added objects' visibility %s" % [c[41] for t, c in added])
+        item2 = by_hash(o0, MENUITEM_2)[0]
         item3 = by_hash(o0, MENUITEM_3)[0]
-        item = added[0][1]
-        want(added[0][0] == TEXT and u32(item, 96) == 0
-             and item[100:].split(b"\0")[0] == b"Debug Menu",
-             "the item's text")
-        want(item[16:40].split(b"\0")[0] == b"MENUITEM_4", "the item's name")
-        want(f32(item, 52) > f32(item3, 52), "the item is below Options")
+        mask2 = by_hash(o0, MI_2_MASK)[0]
         mask3 = by_hash(o0, MI_3_MASK)[0]
-        want(f32(added[1][1], 52) > f32(mask3, 52),
-             "the mask is below Options'")
-        print("main menu: %d objects, item at y %.0f, mask at y %.0f, "
-              "fill y %.0f scale %.3f"
-              % (n1, f32(item, 52), f32(added[1][1], 52),
-                 f32(added[2][1], 52), f32(added[2][1], 60)))
+        step = f32(item3, 52) - f32(item2, 52)
+        mstep = f32(mask3, 52) - f32(mask2, 52)
+        # Each row: a copy of MENUITEM_3 a row (or two) below, at
+        # MENUITEM_2's X, its room the same; MI_3_MASK as far down; the
+        # filler from under the mask to where the filler ended. Past the
+        # name (8..40), the visibility (41), X (48), Y (52) and ScaleY
+        # (60), every field is the copy's.
+        rows = [(1, added[0:3], b"Local Wireless", PORTLANG_LOCAL_WIRELESS,
+                 b"MENUITEM_4", b"MI_4_MASK", b"PORT_WIRELESS_FILL"),
+                (2, added[3:6], b"Debug Menu", 0, b"MENUITEM_5",
+                 b"MI_5_MASK", b"PORT_DEBUG_FILL")]
+
+        def same(a, b, skip):
+            # Equal but for the byte ranges in `skip`.
+            if len(a) != len(b):
+                return False
+            for i in range(len(a)):
+                if any(lo <= i < hi for lo, hi in skip):
+                    continue
+                if a[i] != b[i]:
+                    return False
+            return True
+
+        for row, objs, text, lang, iname, mname, fname in rows:
+            (ti, item), (tm, mask), (tf, fill) = objs
+            want(ti == TEXT and u32(item, 96) == lang
+                 and item[100:].split(b"\0")[0] == text,
+                 "row %d's text" % row)
+            want(same(item[:96], item3[:96], [(8, 40), (41, 42), (48, 56)])
+                 and len(item) == len(item3),
+                 "row %d's label is MENUITEM_3's" % row)
+            want(item[16:40].split(b"\0")[0] == iname, "row %d's name" % row)
+            want(mask[16:40].split(b"\0")[0] == mname,
+                 "row %d's mask's name" % row)
+            want(fill[16:40].split(b"\0")[0] == fname,
+                 "row %d's filler's name" % row)
+            want(f32(item, 48) == f32(item2, 48), "row %d's X" % row)
+            want(abs(f32(item, 52) - (f32(item3, 52) + step * row)) < 1e-3,
+                 "row %d's Y" % row)
+            want(same(mask, mask3, [(8, 40), (41, 42), (52, 56)])
+                 and abs(f32(mask, 52) - (f32(mask3, 52) + mstep * row))
+                 < 1e-3, "row %d's mask is MI_3_MASK's, a row down" % row)
+            top = f32(mask, 52) + f32(mask3, 60) * MASK_UNIT
+            want(same(fill, filler, [(8, 40), (41, 42), (52, 56), (60, 64)])
+                 and abs(f32(fill, 52) - top) < 1e-3
+                 and abs(f32(fill, 52) + f32(fill, 60) * MASK_UNIT - bottom)
+                 < 1e-3, "row %d's filler" % row)
+            print("row %d %s: label y %.0f, mask y %.0f, filler y %.0f "
+                  "scale %.4f, to %.0f"
+                  % (row, text.decode(), f32(item, 52), f32(mask, 52),
+                     f32(fill, 52), f32(fill, 60), bottom))
+        print("main menu: %d objects" % n1)
 
     # The two debug screens, last.
     want(src is not None, "no Be The Cop Setup")
@@ -226,15 +299,20 @@ def main():
         _, _, o1 = screen_of(p1)
         changed = [(a, b) for a, b in zip(o0, o1) if a != b]
         names = sorted("%08x" % u32(b[1], 8) for a, b in changed)
-        want(names == sorted(["%08x" % MENUITEM_4, "%08x" % MI_4_MASK,
-                              "%08x" % FILL, "%08x" % BOTTOM_MASK]),
+        want(names == sorted(["%08x" % MENUITEM_5, "%08x" % MI_5_MASK,
+                              "%08x" % FILL, "%08x" % WIRELESS_FILL]),
              "reveal changed %s" % names)
         for a, b in changed:
             hb = u32(b[1], 8)
-            if hb == BOTTOM_MASK:
-                want(abs(f32(b[1], 60) - 0.625) < 1e-6, "the separator")
+            if hb == WIRELESS_FILL:
+                want(abs(f32(b[1], 60) - SEPARATOR) < 1e-6
+                     and a[1][:60] == b[1][:60] and a[1][64:] == b[1][64:],
+                     "the separator")
             else:
-                want(b[1][41] == 1, "%08x shown" % hb)
+                want(b[1][41] == 1 and a[1][:8] == b[1][:8]
+                     and a[1][12:41] == b[1][12:41]
+                     and a[1][42:] == b[1][42:],
+                     "%08x shown, and nothing else" % hb)
     want("reveal 1 0" in r.stdout, "reveal answers")
 
     for b in bad:

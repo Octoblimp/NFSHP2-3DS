@@ -1,19 +1,25 @@
 // lobby -- the Local Wireless lobby, the port's (TASKS 37b).
 //
 // Retail's second player has a pad on the same PS2. The port's has a 3DS
-// of their own (TASKS 37), so where a mode screen's two players go to the
-// two-pad car select, the port's go here first. The lobby is a screen of
-// popups, tPopupMenu's (bpopup.h) on the memory card's popup screen, over
-// whatever the frontend shows behind it:
+// of their own (TASKS 37), so the port's multiplayer is a row of the main
+// menu's own, Local Wireless (TASKS 63), which comes here. The lobby is a
+// screen of popups, tPopupMenu's (bpopup.h) on the memory card's popup
+// screen, over whatever the frontend shows behind it:
 //
 //   - "Host a race, or join one?" Host or Join; BACK leaves the lobby.
-//   - The host: UDS up and a network made, then the names of the consoles
-//     on it, this one first. Start shows once one has joined, and closes
-//     the network; BACK takes it down. Where the race setup has CPU
-//     racers to choose (lobby_cpu_wish, TASKS 37c-2), a last line says how
-//     many and CPU Racers counts one more, none again past as many as fit
-//     beside the consoles on the network; the highlight stays on it as
-//     consoles come and go, so A there never starts the race.
+//   - Host: "Which mode will you host?" Hot Pursuit or World Racing, as
+//     the main menu sets them, then retail's Challenge (LOBBY_SETUP_SCREEN)
+//     for the race type, the skill and, under Setup, the track, its
+//     Players reading Local Wireless (lobby_on_setup). Its select comes
+//     back here; BACK from it, to the mode again.
+//   - The host, set up: UDS up and a network made, then the names of the
+//     consoles on it, this one first. Start shows once one has joined,
+//     and closes the network; BACK takes it down, to Host or Join. Where
+//     the race setup has CPU racers to choose (lobby_cpu_wish, TASKS
+//     37c-2), a last line says how many and CPU Racers counts one more,
+//     none again past as many as fit beside the consoles on the network;
+//     the highlight stays on it as consoles come and go, so A there never
+//     starts the race.
 //   - A joiner: a scan each LOBBY_SCAN_MS until a race is found, then
 //     that race, its host's name and how many are on it: Join, or Next
 //     for the next one found (a new scan once the list has been seen).
@@ -25,8 +31,9 @@
 //     and that it is turned on from the HOME Menu, OK, the question. UDS
 //     is never started with it off.
 //
-// Start goes to every client as LOBBY_MSG_START, and every console then
-// goes on to "Select Car", the lobby pushed under it. Coming back to the
+// Start goes to every client as LOBBY_MSG_START, with the host's game
+// type and cops, and every console then goes on to "Select Car", the
+// lobby pushed under it. Coming back to the
 // lobby takes the network down. What the race needs over the link (the
 // cars, the race's parameters, a barrier) is netrace.c's (37c), which the
 // lobby tells what Start settled.
@@ -45,9 +52,12 @@
 
 typedef struct BGameFlow BGameFlow;
 
-// The lobby's place in the screen table, and where a select of two
-// players goes on the 3DS (bsetup.c).
-#define LOBBY_SCREEN_NAME "Local Wireless"
+// The lobby's place in the screen table (gameflow.h's
+// BGF_LOCAL_WIRELESS_NAME, the main menu's way here), where a select of
+// two players goes on the 3DS (bsetup.c), and where the host sets the
+// race up.
+#define LOBBY_SCREEN_NAME  "Local Wireless"
+#define LOBBY_SETUP_SCREEN "Challenge"
 #define LOBBY_NEXT_SCREEN "Select Car"
 
 #define LOBBY_SCAN_MS 1000
@@ -102,18 +112,30 @@ void lobby_cpu_wish(LobbyCpuFn fn);
 // and the clients' 1 on in the order they came; `peer` is each place's
 // peer for the link (the host's own -1, and on a client only the host's,
 // 0, is known) and -1 past `consoles`. `cpu` is the host's CPU racers, 0
-// with no choice and on a client (the host's setup says).
+// with no choice and on a client (the host's setup says). `gameType` and
+// `copsOn` are the host's Fred.GameType (the gameflow's gameType hook)
+// and cops, on every console, for a client's car select: a client comes
+// from the main menu, not from a setup of its own. -1 and 0 from a host
+// that did not send them.
 typedef struct LobbyRace {
     int  consoles;
     int  place;
     int  peer[WIRELESS_MAX_CONSOLES];
     char hostName[WIRELESS_NAME_MAX];    // Latin-1; on the host its own
     int  cpu;
+    int  gameType;
+    int  copsOn;
 } LobbyRace;
 
 // Told on Start, on every console, before it goes on to car select.
 typedef void (*LobbyStartFn)(const LobbyRace* race);
 void lobby_on_start(LobbyStartFn fn);
+
+// Told 1 as the host goes to set the race up, after Host and the mode,
+// and 0 when the lobby is back, set up or not: while it is 1, the setup
+// screens are for Local Wireless (bsetup.h's wirelessPlayers).
+typedef void (*LobbySetupFn)(int on);
+void lobby_on_setup(LobbySetupFn fn);
 
 // When the lobby is next come back to, the line `id` with `name` for
 // $NAME (Latin-1, as lobby_latin1 makes it) and OK, before the question:

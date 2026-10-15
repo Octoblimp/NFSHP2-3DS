@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Checks the Local Wireless lobby (`3DS Files/source/lobby.c`).
 
-TASKS 37b: Players' "Local Wireless" goes to a screen of popups where a
-console hosts a race or joins one, the host starts it, and every console
-goes on to car select with the link up. Nothing of retail's is ported
+TASKS 37b: Local Wireless goes to a screen of popups where a console
+hosts a race or joins one, the host starts it, and every console goes on
+to car select with the link up. Since TASKS 63 it is the main menu's own
+row, and Host asks the mode and sets the race up first. Nothing of retail's is ported
 here (the PS2 had two pads on one console), so there is no model to diff
 against. tools/src/lobby_test.c runs the lobby with the flow and its
 popups (gameflow.c, bpopup.c) over a scripted fake of the link and checks
@@ -30,7 +31,14 @@ what it shows and does each frame (the harness's header has the list):
     searching, on a race found and joined; on the frame of a press (Join,
     Next past the last, Start, B) before the network is seen to go; and
     during the race's setup, back in the lobby, against the race's own
-    notice with it on.
+    notice with it on;
+  - Host's mode and setup (TASKS 63): Hot Pursuit, World Racing (the cops
+    told, and the highlight on it next time), B on the mode and on the
+    Challenge, the Challenge's Setup and back, the setup's screens off the
+    stack under car select, the setup told on exactly while it is up, the
+    wireless off during it, never the mode with the wireless off; the
+    start's game type and cops on every console, and a start without them
+    from a host before 63.
 
 The harness prints "faults 0" after each scenario that holds and "total
 faults 0" at the end. A mutant is caught only when the harness finds a
@@ -202,9 +210,10 @@ MUTATIONS = [
       "            if (L.state == LS_HOSTING && data)",
       "        case BMSG_POPUP_NEXT:\n        case BMSG_POPUP_PREV:\n"
       "            if (0)"),
-    M("lb-cpu-start", "race.cpu = cpu > 0 ? cpu : 0;", "race.cpu = cpu;"),
-    M("lb-cpu-start-want", "race.cpu = cpu > 0 ? cpu : 0;",
-      "race.cpu = L.cpuWant > 0 ? L.cpuWant : 0;"),
+    M("lb-cpu-start", "race.cpu      = cpu > 0 ? cpu : 0;",
+      "race.cpu      = cpu;"),
+    M("lb-cpu-start-want", "race.cpu      = cpu > 0 ? cpu : 0;",
+      "race.cpu      = L.cpuWant > 0 ? L.cpuWant : 0;"),
     M("lb-cpu-start-say", "    if (cpu >= 0)\n        say(\"lobby: start, %d consoles, %d",
       "    if (0)\n        say(\"lobby: start, %d consoles, %d"),
     M("lb-gone-state", "    L.state = LS_GONE;\n", ""),
@@ -305,6 +314,51 @@ MUTATIONS = [
     M("lb-radio-return-on", "                if (radioOff()) offNotice(gf);\n"
       "                else notice(gf, id, L.nextName, LS_ASK);\n",
       "                offNotice(gf);\n"),
+    # -- the mode and the setup (TASKS 63)
+    M("lb-mode-skip", "                if (radioOff()) offNotice(gf);\n"
+      "                else toMode(gf);\n",
+      "                if (radioOff()) offNotice(gf);\n"
+      "                else startHosting(gf);\n"),
+    M("lb-mode-radio", "                if (radioOff()) offNotice(gf);\n"
+      "                else toMode(gf);\n", "                toMode(gf);\n"),
+    M("lb-mode-back", "            else if (a == A_BACK) toAsk(gf);\n"
+      "            else toMode(gf);\n", "            else toMode(gf);\n"),
+    M("lb-mode-cops", "startSetup(gf, a == A_COPS_ON);", "startSetup(gf, 1);"),
+    M("lb-mode-highlight", "A_COPS_OFF, L.copsOff);", "A_COPS_OFF, 0);"),
+    M("lb-mode-remember", "    L.copsOff  = !copsOn;\n", ""),
+    M("lb-mode-buttons", "showPopup(gf, 2, LANG_HOT_PURSUIT, A_COPS_ON, "
+      "LANG_WORLD_RACING,", "showPopup(gf, 2, LANG_WORLD_RACING, A_COPS_ON, "
+      "LANG_HOT_PURSUIT,"),
+    M("lb-setup-copson", "    gf->copsOn = copsOn;\n", ""),
+    M("lb-setup-police", "    if (gf->hooks.setPolice) gf->hooks.setPolice("
+      "gf->hooks.user, copsOn);\n", ""),
+    M("lb-setup-flag", "    L.setup = 1;\n", ""),
+    M("lb-setup-on", "    if (L.setupFn) L.setupFn(1);\n", ""),
+    M("lb-setup-off", "    if (L.setupFn) L.setupFn(0);\n", ""),
+    M("lb-setup-clear", "    L.setup = 0;\n    if (L.setupFn)",
+      "    if (L.setupFn)"),
+    M("lb-setup-left", "        say(\"lobby: setup left\");\n        toMode(gf);",
+      "        say(\"lobby: setup left\");\n        toAsk(gf);"),
+    M("lb-setup-until", "    bgf_pop_until(gf, LOBBY_SCREEN_NAME);\n"
+      "    bgf_pop_screen(gf);\n", "    bgf_pop_screen(gf);\n"),
+    M("lb-setup-pop", "    bgf_pop_until(gf, LOBBY_SCREEN_NAME);\n"
+      "    bgf_pop_screen(gf);\n", "    bgf_pop_until(gf, LOBBY_SCREEN_NAME);\n"),
+    M("lb-setup-first", "            if (L.setup) {\n                setupOver(gf);"
+      "\n                break;\n            }\n", ""),
+    # -- the start's mode
+    M("lb-start-type", "msg[2] = (uint8_t)race.gameType;", "msg[2] = 0;"),
+    M("lb-start-cops", "msg[3] = (uint8_t)race.copsOn;", "msg[3] = 1;"),
+    M("lb-start-len", "L.net.send(i, LOBBY_MSG_START, msg, sizeof msg);",
+      "L.net.send(i, LOBBY_MSG_START, msg, 2);"),
+    M("lb-race-type", "race.gameType = gf->hooks.gameType ? "
+      "gf->hooks.gameType(gf->hooks.user)\n"
+      "                                       : 0;", "race.gameType = 0;"),
+    M("lb-race-cops", "    race.copsOn   = gf->copsOn != 0;\n", ""),
+    M("lb-joined-len", "if (m.len >= 4) {", "if (m.len >= 2) {"),
+    M("lb-joined-type", "                    race.gameType = m.data[2];\n", ""),
+    M("lb-joined-cops", "                    race.copsOn   = m.data[3] != 0;\n",
+      ""),
+    M("lb-race-init-type", "    r->gameType = -1;\n", ""),
 ]
 
 EQUIVALENT = {

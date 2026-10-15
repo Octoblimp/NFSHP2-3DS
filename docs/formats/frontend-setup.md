@@ -717,4 +717,8 @@ unchanged. The last-row case is there for them.
 ## What comes next
 
 - **The help menu** (`tHelpMenu`), for `SetHelpOverride`.
-- **Local wireless** joins the Players rows (TASKS 37b).
+- **Local wireless**: Players 2 was the way in (TASKS 37b); since TASKS
+  63 the way in is the main menu's own row, and Players stays at 1 (a
+  3DS has one pad) but while the host of a Local Wireless race sets it
+  up, when it is held at 2 and reads Local Wireless
+  (`docs/formats/lobby.md`, "The host's setup").

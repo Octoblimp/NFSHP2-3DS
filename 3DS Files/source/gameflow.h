@@ -698,11 +698,16 @@ void bgf_language_screen_callback(BGameFlow* gf, BScreenMessage msg,
 #define BGF_BLURB_MENUITEM_1 10016
 #define BGF_BLURB_MENUITEM_2 10015
 #define BGF_BLURB_MENUITEM_3 10009
-// The port's own fourth item, "Debug Menu", which retail's screen does not
-// author: debugmenu.c adds it to FRONTB at boot, hidden until revealed (the
-// L + R + D-Pad Up chord, or "DebugMenu 1"). Its mask is MI_4_MASK, the
-// fourth of the constructor's five, and it leads to the port's own screen.
+// The port's own fourth and fifth items, which retail's screen does not
+// author: debugmenu_patch.c adds both to FRONTB at boot. The fourth is
+// "Local Wireless" (TASKS 63), always shown, with MI_4_MASK; it leads to
+// the lobby, lobby.h's LOBBY_SCREEN_NAME. The fifth is "Debug Menu",
+// hidden until revealed (the L + R + D-Pad Up chord, or "DebugMenu 1"),
+// with MI_5_MASK, the last of the constructor's five; it leads to the
+// port's own screen.
 #define BGF_ITEM_MENUITEM_4  0x52e039f6u
+#define BGF_ITEM_MENUITEM_5  0x52e039f7u
+#define BGF_LOCAL_WIRELESS_NAME "Local Wireless"
 #define BGF_DEBUG_MENU_NAME  "Port Debug Menu"
 // The language screen's: MENUITEM_1..6 are the six languages in
 // e_Languages order, MENUITEM_7 is Load All Languages.

@@ -1,9 +1,11 @@
 # Runs the Local Wireless lobby (TASKS 37b, lobby.h) between 2 to 8 Azahar
-# instances in a room of their own. Each boots the game to World Racing's
-# Challenge, sets Players to Local Wireless and selects it; A hosts, the
-# rest search, find A's race and join it, and A starts once every one is on
-# its list. Every copy must then reach Select Car, each joiner told its
-# place of how many.
+# instances in a room of their own. Each boots the game to the main menu
+# and selects Local Wireless, its fourth row (TASKS 63). A hosts: World
+# Racing on the mode question (Hot Pursuit with -CopsOn), then the
+# Challenge, its Players reading Local Wireless, selected as it stands,
+# back to the lobby. The rest search, find A's race and join it, and A
+# starts once every one is on its list. Every copy must then reach Select
+# Car, each joiner told its place of how many and the host's mode.
 #
 # Where the race setup has CPU racers to choose (TASKS 37c-2, a last line
 # on the host's list), the host moves to CPU Racers and counts to -Cpu
@@ -16,11 +18,11 @@
 # retail data the user's own card has, a junction per folder of
 # sdmc:/NFSHP2, a copy of its SAVES (never a junction: a save on one copy
 # is not another's), so every copy starts from the same profile, and the
-# DSP firmware (sdmc:/3ds/dspfirm.cdc), so every copy has its sound. The
-# walk to Challenge is run_azahar_challenge.ps1's, each copy on its own
-# clock and driven by its own debug log ("DebugLog 1"), which lands up to
-# ~7 s late: a press that changes screen is repeated only after 20 s with
-# nothing, and a press on the lobby's popups never is.
+# DSP firmware (sdmc:/3ds/dspfirm.cdc), so every copy has its sound. Each
+# copy walks on its own clock, driven by its own debug log ("DebugLog
+# 1"), which lands up to ~7 s late: a press that changes screen is
+# repeated only after 20 s with nothing, and a press on the lobby's popups
+# never is.
 #
 # With -Race (TASKS 37c, netrace.h) each copy goes on: its car, which a
 # client sends to the host and waits on "Wireless Race"; the host's first
@@ -44,8 +46,8 @@
 # host's frame by frame, and fails a copy at the first that differs, naming
 # the parts and showing both copies' draws on bDefaultSeed there (map the
 # addresses with arm-none-eabi-addr2line on the .elf). With -CopsOn the
-# walk goes through Hot Pursuit (Cops On Mode Select) to Challenge, so the
-# race has cops; with -Steer each copy also steers, left and right on the
+# host hosts Hot Pursuit, so the race has cops, and every joiner must be
+# told so; with -Steer each copy also steers, left and right on the
 # D-pad by turns, its own period each (2 s for the host, 3 s for B, ...), so
 # the cars hit walls and each other.
 #
@@ -83,7 +85,7 @@ param(
     [switch]$NoDsp,               # no DSP firmware on the cards: silent
     [switch]$SilentClients,       # the host with sound, the rest silent
     [switch]$WirelessOff,         # each console's wireless taken as off (62)
-    [switch]$CopsOn,              # through Hot Pursuit: a race with cops
+    [switch]$CopsOn,              # the host hosts Hot Pursuit: a race with cops
     [switch]$Steer,               # -Race: steer by turns while driving
     [ValidateRange(-1, 7)]
     [int]$Cpu = 2,                # the host's CPU racers; -1 as shown
@@ -448,7 +450,7 @@ function Step([string]$name, [hashtable]$h) {
     return $s
 }
 
-$modeSelect = if ($CopsOn) { "Cops On Mode Select" } else { "Cops Off Mode Select" }
+$cops = if ($CopsOn) { "on" } else { "off" }
 $boot = @(
     Step "main loop" @{ Pattern = "entering main loop"; Wait = 120 }
     Step "language" @{ Pattern = "flow enter Language Options Pre FE"; Wait = 30; Optional = $true; Settle = 1500 }
@@ -462,17 +464,12 @@ $boot = @(
     Step "title" @{ Pattern = "flow vis object b5761d00 b070dbc9 1"; Wait = 15; Optional = $true; Settle = 900 }
     Step "main menu" @{ Key = $VK_START; Pattern = "flow enter New Main Menu [0-9a-f]{8}"; Tries = 2 }
     Step "main menu up" @{ Pattern = "screen New Main Menu [0-9a-f]{8} .* last HIGHLIGHT"; Optional = $true; Settle = 1000 }
-    Step "world racing" @{ Key = $VK_DOWN; Pattern = "flow bracket 708a0bf1"; Tries = 2; When = { -not $CopsOn } }
-    Step "mode select" @{ Key = $VK_A; Pattern = "flow enter $modeSelect [0-9a-f]{8}"; Tries = 2 }
-    Step "mode select up" @{ Pattern = "screen $modeSelect [0-9a-f]{8} .* last HIGHLIGHT"; Optional = $true; Settle = 1000 }
-    Step "to challenge" @{ Key = $VK_DOWN; Settle = 700 }
-    # Hot Pursuit's has You're The Cop between: one more.
-    Step "to challenge 2" @{ Key = $VK_DOWN; Settle = 700; When = { $CopsOn } }
-    Step "challenge" @{ Key = $VK_A; Pattern = "flow enter Challenge [0-9a-f]{8}"; Tries = 2 }
-    Step "challenge up" @{ Pattern = "screen Challenge [0-9a-f]{8} .* last HIGHLIGHT"; Optional = $true; Settle = 1000;
-                        Shot = "challenge" }
-    # Players, the first row: right from 1 to Local Wireless, and A.
-    Step "players" @{ Key = $VK_RIGHT; Settle = 1200; Shot = "players" }
+    # Local Wireless, the fourth row: down past World Racing and Options,
+    # each move seen in its brackets (MI_2_MASK, MI_3_MASK, MI_4_MASK).
+    Step "to world racing" @{ Key = $VK_DOWN; Pattern = "flow bracket 708a0bf1"; Tries = 2 }
+    Step "to options" @{ Key = $VK_DOWN; Pattern = "flow bracket 72df3492"; Tries = 2 }
+    Step "to wireless" @{ Key = $VK_DOWN; Pattern = "flow bracket 75345d33"; Tries = 2; Settle = 1000;
+                         Shot = "main-menu" }
     Step "lobby" @{ Key = $VK_A; Pattern = "lobby: ask"; Wait = 30; Settle = 1000; Shot = "ask" }
 )
 
@@ -507,7 +504,15 @@ function LastCpu($side) {
 $cpuToSet = { param($s) $Cpu -ge 0 -and (ListCpu $s) -ge 0 -and (ListCpu $s) -ne $Cpu }
 $cpuMoved = { param($s) $s.Seen["to cpu"] }
 $hostSteps = $boot + @(
-    Step "host" @{ Key = $VK_A; Pattern = "lobby: hosting"; Settle = 500; Shot = "hosting" }
+    # Host asks the mode, Hot Pursuit highlighted; then the Challenge, its
+    # select back to the lobby, which hosts.
+    Step "host" @{ Key = $VK_A; Pattern = "lobby: mode"; Settle = 1000; Shot = "mode" }
+    Step "world racing" @{ Key = $VK_RIGHT; Settle = 1000; When = { -not $CopsOn } }
+    Step "mode" @{ Key = $VK_A; Pattern = "lobby: setup, cops $cops" }
+    Step "challenge" @{ Pattern = "flow enter Challenge [0-9a-f]{8}"; Wait = 30 }
+    Step "challenge up" @{ Pattern = "screen Challenge [0-9a-f]{8} .* last HIGHLIGHT"; Optional = $true; Settle = 1500;
+                        Shot = "challenge" }
+    Step "set up" @{ Key = $VK_A; Pattern = "lobby: hosting"; Tries = 2; Settle = 500; Shot = "hosting" }
     Step "all in" @{ Check = { param($s) ListFull $s }; Wait = $RunSeconds; Settle = 1500; Shot = "list" }
     Step "to cpu" @{ Key = $VK_RIGHT; Settle = 1000; When = $cpuToSet }
     Step "cpu" @{ Key = $VK_A; Check = { param($s) (LastCpu $s) -eq $Cpu }; Wait = 10; Tries = 20;
@@ -522,6 +527,7 @@ $joinBase = $boot + @(
     Step "found" @{ Pattern = "lobby: found 1 of \d+, hp2host"; Wait = 90; Settle = 1000; Shot = "found" }
     Step "join" @{ Key = $VK_A; Pattern = "lobby: joined hp2host"; Settle = 500; Shot = "joined" }
     Step "started" @{ Pattern = "lobby: started by hp2host, place \d+ of $Consoles"; Wait = $RunSeconds }
+    Step "the host's mode" @{ Pattern = "lobby: the host's game type \d+, cops $cops"; Wait = 15 }
     Step "car select" @{ Pattern = "flow enter Select Car [0-9a-f]{8}"; Wait = 30; Settle = 2000; Shot = "carsel" }
 )
 
@@ -638,7 +644,7 @@ function Advance($side) {
                 $side.Seen[$step.Name] = $true
                 $side.SettleUntil = $now.AddMilliseconds($step.Settle)
                 $side.Phase = "settle"
-                if ($step.Name -match "^(lobby|host|search|found|join|started|car select|all in|start|track select|host start|built|car sent|taken|go|racing|race on|host off|join off|ok)$") {
+                if ($step.Name -match "^(lobby|host|mode|challenge|set up|the host's mode|search|found|join|started|car select|all in|start|track select|host start|built|car sent|taken|go|racing|race on|host off|join off|ok)$") {
                     Say $side $step.Name
                 }
             } elseif ($now -gt $side.Deadline) {

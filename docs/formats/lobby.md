@@ -1,17 +1,31 @@
-# The Local Wireless lobby (TASKS 37b-2)
+# The Local Wireless lobby (TASKS 37b-2, 63)
 
 The port's own. On retail, Players 2 on a mode screen means split screen
 on one PS2, and its car select is "Select Car2P". The port has no split
-screen (the user, 2026-10-13). There, Players 2 means local wireless,
-with up to eight New 3DS consoles (`docs/formats/wireless.md`). The
-lobby is where they find each other before car select.
+screen (the user, 2026-10-13). Its multiplayer is local wireless, with
+up to eight New 3DS consoles (`docs/formats/wireless.md`). The lobby is
+where they find each other before car select.
 
+Since TASKS 63 the way in is the main menu's own fourth row, Local
+Wireless, under Options, and the host sets the race up after Host, not
+before. The user, 2026-10-14: a top-level entry "may be better", and
+setting up then picking Local Wireless "can confuse people". It used to
+be Players 2 on the Challenge, which also hid that a client's mode is the
+host's.
+
+- `debugmenu_patch.c` adds the main menu's row (MENUITEM_4, MI_4_MASK,
+  a filler) to FRONTB's chunk, above the hidden debug row, which is the
+  fifth now (`docs/formats/debug-menu.md`). `gameflow.c` shows the
+  lobby's blurb on its highlight and goes to the lobby, pushed, on its
+  select.
 - `bsetup.c` shows Players 2 as "Local Wireless" with its own blurb
-  while `BSetup.wirelessPlayers` is set. `main.c` sets it, and the
-  setup hook answers that pad port 1 is plugged in, so Players can reach
-  2. Where retail goes on to "Select Car2P", the port goes on to the
-  lobby instead. That covers Challenge and the four setups behind its
-  Setup (Single Race, Knockout, Lap Knockout, Free Run).
+  while `BSetup.wirelessPlayers` is set, and holds Players there. `main.c`
+  sets it only while the host sets the race up (`lobby_on_setup`); at
+  any other time the setup hook answers that only pad port 0 is plugged
+  in, so Players stays at 1, as on a PS2 with one pad. With Players 2,
+  where retail goes on to "Select Car2P", the port goes on to the lobby
+  instead. That covers Challenge and the four setups behind its Setup
+  (Single Race, Knockout, Lap Knockout, Free Run).
 - `lobby.c` is the screen "Local Wireless". It has no `<3ds.h>`: the
   link comes in through `LobbyNet` (`lobby.h`), which `main.c` fills
   with `wireless.c`'s calls. `tools/lobby_check.py` runs it on the
@@ -29,7 +43,8 @@ The previous one is taken down with no sound and no answer.
 
 | State | The message | Buttons | What A does | BACK |
 |---|---|---|---|---|
-| Ask | "Host a race, or join one?" | Host, Join | Host: hosts. Join: searches. | Back to the mode screen |
+| Ask | "Host a race, or join one?" | Host, Join | Host: asks the mode. Join: searches. | Back to the main menu |
+| Mode | "Which mode will you host?" | Hot Pursuit, World Racing | Either: the setup | Ask |
 | Hosting | "Waiting for players:", then each name, then "CPU racers: n" where there is a choice | Start, once a client is on; CPU Racers where there is a choice | Start: starts the race. CPU Racers: one more. | Ask |
 | Searching | "Looking for races..." | none | Puts it back | Ask |
 | Found | "Race: name", "Players: n/max" | Join, Next | Join: joins. Next: the next race found. | Ask |
@@ -46,9 +61,39 @@ too, and so does coming back from car select (SCREEN_ACTIVATE starts at
 Ask). Only the host's Start and a client's start message go on to
 "Select Car" with the link up.
 
+### The host's setup (TASKS 63)
+
+Host, with the console's wireless on, asks the mode. Its buttons are the
+main menu's own two, retail's strings: Hot Pursuit (10023) with the cops
+on and World Racing (10022) with them off, as the main menu's items set
+them. The highlight starts on the one hosted last, Hot Pursuit at first.
+BACK goes to Ask.
+
+A mode sets the flow's cops (`gf->copsOn` and the police hook, as the
+main menu does), tells `main.c` the setup is on (`lobby_on_setup(1)`),
+and goes to retail's Challenge (`LOBBY_SETUP_SCREEN`), pushed over the
+lobby. The link is still down. There the host picks the race type and
+the rest as retail has them, Players reading Local Wireless, and Setup
+leads to the race type's setup as always. The setup's select with
+Players 2 goes to the lobby, pushed again.
+
+The lobby, activated with the setup on, tells `main.c` it is over
+(`lobby_on_setup(0)`) and looks down the stack for the lobby that went
+to the setup:
+
+- found: the select came back. The stack is popped to under that lobby
+  (`bgf_pop_until`, then `bgf_pop_screen`), so it reads Prev, then this
+  lobby, as if the setup had never been pushed, and hosting begins. B
+  from the list, then B again, leave to the main menu.
+- not found: BACK from the Challenge popped the old lobby, and this is
+  it. The mode is asked again.
+
+The race's mode is then whatever the Challenge left in Fred, which Start
+sends on.
+
 ### Hosting
 
-Host starts UDS and a network of up to 8 consoles. The popup's lines
+Hosting starts UDS and a network of up to 8 consoles. The popup's lines
 are "Waiting for players:", this console's name, then each client still
 on, in the order they came. It goes up again only when that changes, so
 the list stays put while nothing happens. Start shows once one client
@@ -57,8 +102,9 @@ network is cleared too (`wireless_forget_lost`), or it would keep the
 next console out.
 
 Start closes the network and sends each client, reliably, the message
-`LOBBY_MSG_START` (0x10) with two bytes: how many consoles there are,
-and the client's place (1 on; the host is 0). Then it goes on. If the
+`LOBBY_MSG_START` (0x10) with four bytes: how many consoles there are,
+the client's place (1 on; the host is 0), the host's Fred.GameType (the
+flow's gameType hook) and its cops (TASKS 63). Then it goes on. If the
 last client went as Start was pressed, the list comes back instead.
 
 If the network goes from under the host, it says local wireless could
@@ -116,6 +162,14 @@ frame, until the host's start message comes, and goes on. If the link
 goes first, it says "The link to name was lost.", and OK goes back to
 Ask. A failed join says so, and OK goes back to searching.
 
+A client comes from the main menu, through no mode screen and no setup,
+so its Fred holds nothing of the race. The start's last two bytes are
+the host's mode: `LobbyRace.gameType` and `copsOn`, which `main.c` puts
+in Fred before car select (GameType, two player cars, the cops, the
+cars that mode makes available), so a client's car select offers what
+the host's does. A start of two bytes, from a host before TASKS 63,
+leaves them -1 and 0, and nothing is put.
+
 ### Wireless communication off (TASKS 62)
 
 The 3DS can have its wireless communication turned off: from the HOME
@@ -157,7 +211,7 @@ popup's lines) becomes `?`.
 
 ## The strings
 
-`portlang.c` holds 18 strings, each in the six languages retail ships
+`portlang.c` holds 19 strings, each in the six languages retail ships
 (English, French, German, Italian, Spanish, Swedish), in retail's
 encoding, Latin-1. Their IDs start at 2000000 (`PORTLANG_FIRST`), well
 past retail's last (980002). `langtab_get` answers those IDs from
@@ -189,6 +243,10 @@ starts a new line in a popup's message, as in retail's strings.
 | 2000015 | CPU Racers |
 | 2000016 | CPU racers: $N |
 | 2000017 | Wireless communication is turned off. Turn it on from the HOME Menu to play over Local Wireless. |
+| 2000018 | Which mode will you host? |
+
+The main menu's row reads 2000000 (its text object's LanguageID) and
+highlights with 2000001 as its blurb.
 
 ### How it looks
 
@@ -212,13 +270,16 @@ port 24873.
   refuses to go on if a data folder is a real folder or SAVES is a
   junction.
 - Each copy boots the game with `DebugLog 1` and is driven by its own
-  log: language and intro if they come, the title, World Racing,
-  Challenge, right on Players to Local Wireless, and A. A step waits
-  for its line among the lines logged since the last press, since a
-  line can land up to ~7 s late.
-- Copy A hosts and waits until its list has every copy, then presses
-  Start. The rest press right to Join and A to search, wait for
-  hp2host's race, join it, and wait for the start.
+  log: language and intro if they come, the title, down past World
+  Racing and Options to Local Wireless (each move seen in its bracket's
+  line), and A. A step waits for its line among the lines logged since
+  the last press, since a line can land up to ~7 s late.
+- Copy A presses Host, right to World Racing (or, with `-CopsOn`, stays
+  on Hot Pursuit) and A, then A on the Challenge as it comes up, which
+  hosts. It waits until its list has every copy, then presses Start.
+  The rest press right to Join and A to search, wait for hp2host's race,
+  join it, and wait for the start and the host's mode, cops on or off
+  as the host chose.
 - Where the host's list has a CPU racers line, the host presses right
   to CPU Racers, A until the count is `-Cpu` (2 unless said; -1 leaves
   it), one press at a time with a wait past the log's lag, and left
@@ -253,12 +314,21 @@ title with OK below, and Host and Join again after OK. Without it, 2
 consoles still reached Select Car: Azahar's NETWORK_STATE does not read
 as off.
 
+Session 103 (TASKS 63), 2 consoles with `-Race`: both took the main
+menu's Local Wireless 91 s from launch; the host's mode question, World
+Racing, the Challenge (Players reading Local Wireless) and its select
+had it hosting 16 s later. B joined, the host counted 2 CPU racers and
+started; B logged the host's mode (cops off) and both reached Select
+Car, then GO on one seed, 4 racers, every logged frame's parts the same.
+With `-CopsOn` the host hosted Hot Pursuit, B logged cops on, and the
+race had 4 cops; both passed, every logged frame the same.
+
 ## The check
 
 `tools/lobby_check.py` builds `tools/src/lobby_test.c` with `lobby.c`,
 `portlang.c` and the real flow and popups under them (`gameflow.c`,
 `bpopup.c`, `memcard.c`, `banim.c`). A fake network stands in for
-`wireless.c`. It runs 50 scenarios, each a script of presses and of
+`wireless.c`. It runs 58 scenarios, each a script of presses and of
 what the network does: hosting alone, with one, with seven and with a
 full network; clients coming and going; the network going; joining,
 Next past every race, a failed join, a lost host, leaving; no wireless;
@@ -272,12 +342,24 @@ says so: Host and Join with it off, with UDS failing too, in French and
 with no language, turned on again; turned off while hosting, searching,
 on a race found and joined; on the frame of a press (Join, Next past
 the last, Start, BACK); and during the race's setup, back in the lobby
-with the race's notice, against the same with it on.
+with the race's notice, against the same with it on. Eight are the
+host's setup (TASKS 63): Hot Pursuit through the Challenge to hosting
+and a start; World Racing, and the highlight on it when asked again; B
+on the mode; B on the Challenge; the Challenge's Setup and back, then
+its select; the same with a client; the wireless off during the setup;
+a start of two bytes from a host before 63. The harness's Challenge and
+Single Race Setup are screens of nothing whose select and BACK are
+presses. Every host scenario's Host goes through the mode (Hot Pursuit)
+and the setup's select in one press.
 
 At every frame and after every press it checks:
 
 - one popup up on the lobby, the lobby's own, and none off it;
 - the question never up with the link up;
+- the mode never up with the link up, nor on Host with the wireless off,
+  and its two buttons Hot Pursuit and World Racing;
+- the setup told on exactly while the Challenge or its Setup is up, and
+  the link down there;
 - the host's list against the network, its CPU racers line (the wish,
   no more than fit), and its buttons: Start exactly when a client is
   on, CPU Racers where there is a choice, the highlight where it was
@@ -293,15 +375,19 @@ At every frame and after every press it checks:
   send with the wireless off);
 - the lobby's link down by the end of a frame with the wireless off;
 - on to car select only with the link up and the network closed, each
-  client told once its place and the count, and a joiner only after
-  reading its start;
+  client told once its place, the count, the game type and the cops the
+  police hook last told, and a joiner only after reading its start;
+- under car select only Prev and the lobby on the stack, whatever setup
+  screens the host went through;
+- the mode Start hands on, on the host (the flow's cops as told) and on
+  a joiner (the one it read, or none from a two-byte start);
 - back out only with the link down;
 - where each scenario ends, and the lines its log must say, in order.
 
 The last line is `total faults N`, and the check passes at 0.
 
-`--mutate` makes 104 mutations of `lobby.c` (out of tree, in parallel).
-101 are caught and 3 are equivalent, named in the script:
+`--mutate` makes 130 mutations of `lobby.c` (out of tree, in parallel).
+127 are caught and 3 are equivalent, named in the script:
 
 - `lb-latin1-two`: a two-byte lead's bit 5 is always clear, so masking
   it again changes nothing.

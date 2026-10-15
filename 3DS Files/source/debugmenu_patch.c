@@ -1,14 +1,16 @@
-// FRONTB's Flailer chunk with the port's debug menu in it (debugmenu.h).
+// FRONTB's Flailer chunk with the port's main menu rows, Local Wireless
+// and the debug menu, and the debug menu's screens in it (debugmenu.h).
 //
 // The chunk is written out again rather than patched in place, because
 // what is added has to sit between what is there: flailer_object_index
 // (flailer.c) binary-searches a project's payload addresses, so the objects
 // must rise in file order, and NEW_MAIN_MENU's new objects belong inside
 // its container, before the screens after it. Every chunk goes across in
-// order and byte for byte, but for the main menu's object count; the
-// padding between chunks (type 0, size 0) is dropped, which neither
-// reader counts (bchunk_next skips it). Every size in the chunk is a
-// multiple of 4, so a malloc'd buffer keeps every payload 4-aligned.
+// order and byte for byte, but for the main menu's object count and its
+// bottom filler's height; the padding between chunks (type 0, size 0) is
+// dropped, which neither reader counts (bchunk_next skips it). Every size
+// in the chunk is a multiple of 4, so a malloc'd buffer keeps every
+// payload 4-aligned.
 //
 // Free of <3ds.h>, like bui.c, for tools/debugmenu_check.py.
 
@@ -19,6 +21,7 @@
 
 #include "bchunk.h"
 #include "bui.h"
+#include "portlang.h"
 
 // Retail's object fields, as offsets from the payload: flailer.h's
 // FlailerObjectChunk, FlailerTextChunk and FlailerScreenChunk.
@@ -36,12 +39,13 @@
 
 #define CHUNK_TEXT      0x00010212u
 
-// NEW_MAIN_MENU's objects the new row is made from (gameflow.h).
+// NEW_MAIN_MENU's objects the new rows are made from (gameflow.h).
 #define MAIN_MENU       0xae0f8aa1u
 #define MENUITEM(n)     (0x52e039f2u + (uint32_t)(n))
 #define MI_2_MASK       0x708a0bf1u
 #define MI_3_MASK       0x72df3492u
 #define MI_4_MASK       0x75345d33u
+#define MI_5_MASK       0x778985d4u
 #define BOTTOM_MASK     0xaa5d7d3fu
 // Be The Cop Setup's, for the debug screen.
 #define LINE(n)         (0x69a2c756u + (uint32_t)(n))
@@ -51,7 +55,9 @@
 // The mask texture (e2a5c626) is 16 high at ScaleY 1: MI_n_MASK's 2.813
 // is the row's 45 pixels, and the two thin BOTTOM_MASKs' 0.625 the 10
 // between rows. The third BOTTOM_MASK, at 7.063, fills the panel below
-// Options; with the item shown it becomes the separator above it.
+// Options: 113 pixels, room for two more rows and their separators. It
+// becomes the separator above Local Wireless, and Local Wireless's own
+// filler the one above the debug menu's row once that is shown.
 #define MASK_UNIT       16.0f
 #define SEPARATOR_SCALE 0.625f
 
@@ -78,10 +84,15 @@ typedef struct {
     int      failed;
 } Out;
 
-// The four objects debugmenu_reveal changes, as offsets of their payloads
-// in the buffer the patch returned.
+// A row added under Options: its label, its mask and the filler under
+// it, as offsets of their payloads in the buffer the patch returned.
+typedef struct {
+    size_t item, mask, fill;
+} Row;
+
+// The two rows, which debugmenu_reveal changes.
 static uint8_t* sBuf;
-static size_t   sItem, sMask, sFill, sFiller;
+static Row      sWireless, sDebug;
 static int      sRevealed;
 
 static uint32_t rd32(const uint8_t* p)
@@ -227,61 +238,98 @@ static const uint8_t* find_object(const uint8_t* payload, uint32_t size,
     return best;
 }
 
-// NEW_MAIN_MENU as it is, three objects after its own, and its NumObjects
-// up by three.
+// What the new rows are copied from: the last two of retail's three, and
+// the filler under them.
+typedef struct {
+    const uint8_t *item2, *item3, *mask2, *mask3, *fill;
+    uint32_t       s3, sm3, sf;
+} MenuParts;
+
+// The row `row` below MENUITEM_3 (1 the first): MENUITEM_3 as far below
+// itself, at MENUITEM_2's X (3's is two pixels right of 1's and 2's);
+// MI_3_MASK as far below itself; and the rest of the filler under the
+// mask, down to where the filler ends. Each stays in its group, so it
+// slides in with the rest, and is named and shown as asked.
+static int put_row(Out* o, const MenuParts* m, int row, Row* r,
+                   uint32_t itemHash, const char* itemName,
+                   uint32_t maskHash, const char* maskName,
+                   uint32_t fillHash, const char* fillName, int shown)
+{
+    float rowY   = rdf(m->item3 + OBJ_Y)
+                 + (rdf(m->item3 + OBJ_Y) - rdf(m->item2 + OBJ_Y)) * row;
+    float maskY  = rdf(m->mask3 + OBJ_Y)
+                 + (rdf(m->mask3 + OBJ_Y) - rdf(m->mask2 + OBJ_Y)) * row;
+    float fillY  = maskY + rdf(m->mask3 + OBJ_SCALE_Y) * MASK_UNIT;
+    float bottom = rdf(m->fill + OBJ_Y)
+                 + rdf(m->fill + OBJ_SCALE_Y) * MASK_UNIT;
+
+    r->item = put_text(o, m->item3, m->s3, rd32(m->item3 + TEXT_MAX_CHARS));
+    set_name(o, r->item, itemHash, itemName);
+    if (o->failed) return 0;
+    wrf(o->p + r->item + OBJ_X, rdf(m->item2 + OBJ_X));
+    wrf(o->p + r->item + OBJ_Y, rowY);
+    o->p[r->item + OBJ_VISIBILITY] = (uint8_t)shown;
+
+    r->mask = put_chunk(o, BUI_CHUNK_BITMAP, m->mask3, m->sm3);
+    set_name(o, r->mask, maskHash, maskName);
+    if (o->failed) return 0;
+    wrf(o->p + r->mask + OBJ_Y, maskY);
+    o->p[r->mask + OBJ_VISIBILITY] = (uint8_t)shown;
+
+    r->fill = put_chunk(o, BUI_CHUNK_BITMAP, m->fill, m->sf);
+    set_name(o, r->fill, fillHash, fillName);
+    if (o->failed) return 0;
+    wrf(o->p + r->fill + OBJ_Y, fillY);
+    wrf(o->p + r->fill + OBJ_SCALE_Y, (bottom - fillY) / MASK_UNIT);
+    o->p[r->fill + OBJ_VISIBILITY] = (uint8_t)shown;
+    return 1;
+}
+
+// NEW_MAIN_MENU as it is, but for its bottom filler cut to a separator,
+// then six objects after its own, and its NumObjects up by six: Local
+// Wireless's row, shown, and the debug menu's under it, hidden.
 static int put_main_menu(Out* o, const uint8_t* payload, uint32_t size)
 {
-    uint32_t       s2 = 0, s3 = 0, sm2 = 0, sm3 = 0, sf = 0;
-    const uint8_t* item2 = find_object(payload, size, MENUITEM(2), 0, &s2);
-    const uint8_t* item3 = find_object(payload, size, MENUITEM(3), 0, &s3);
-    const uint8_t* mask2 = find_object(payload, size, MI_2_MASK, 0, &sm2);
-    const uint8_t* mask3 = find_object(payload, size, MI_3_MASK, 0, &sm3);
-    const uint8_t* fill  = find_object(payload, size, BOTTOM_MASK, 1, &sf);
-    size_t         hdr, def = 0;
-    float          rowY, maskY, fillY, bottom;
-    BChunkIter     it;
+    MenuParts  m;
+    uint32_t   s2 = 0, sm2 = 0;
+    size_t     hdr, def = 0, filler = 0;
+    BChunkIter it;
 
-    if (!item2 || !item3 || !mask2 || !mask3 || !fill) return 0;
+    memset(&m, 0, sizeof m);
+    m.item2 = find_object(payload, size, MENUITEM(2), 0, &s2);
+    m.item3 = find_object(payload, size, MENUITEM(3), 0, &m.s3);
+    m.mask2 = find_object(payload, size, MI_2_MASK, 0, &sm2);
+    m.mask3 = find_object(payload, size, MI_3_MASK, 0, &m.sm3);
+    m.fill  = find_object(payload, size, BOTTOM_MASK, 1, &m.sf);
+    if (!m.item2 || !m.item3 || !m.mask2 || !m.mask3 || !m.fill) return 0;
 
     hdr = open_chunk(o, BUI_CHUNK_SCREEN);
     bchunk_begin(&it, payload, 0, size);
     while (bchunk_next(&it)) {
         size_t at = put_chunk(o, it.type, it.payload, it.size);
         if (it.type == BUI_CHUNK_SCREENDEF) def = at;
-        if (it.payload == fill) sFiller = at;
+        if (it.payload == m.fill) filler = at;
     }
-    if (o->failed || !def || !sFiller) return 0;
-    o->p[def + SCREEN_NUM_OBJS] += 3;     // 31 on disc, so no carry
+    if (o->failed || !def || !filler) return 0;
+    o->p[def + SCREEN_NUM_OBJS] += 6;     // 31 on disc, so no carry
+    wrf(o->p + filler + OBJ_SCALE_Y, SEPARATOR_SCALE);
 
-    // The label: MENUITEM_3 a row below itself, at MENUITEM_2's X (3's is
-    // two pixels right of 1's and 2's), in its group so it slides in with
-    // the rest.
-    rowY  = rdf(item3 + OBJ_Y) + (rdf(item3 + OBJ_Y) - rdf(item2 + OBJ_Y));
-    sItem = put_text(o, item3, s3, rd32(item3 + TEXT_MAX_CHARS));
-    set_name(o, sItem, DEBUGMENU_ITEM_HIDDEN, "MENUITEM_4");
-    if (o->failed) return 0;
-    wrf(o->p + sItem + OBJ_X, rdf(item2 + OBJ_X));
-    wrf(o->p + sItem + OBJ_Y, rowY);
-    o->p[sItem + OBJ_VISIBILITY] = 0;
-    set_string(o, sItem, "Debug Menu");
+    // Local Wireless (TASKS 63): its LanguageID the port's (portlang.h),
+    // the inline string the same in English.
+    if (!put_row(o, &m, 1, &sWireless, BGF_ITEM_MENUITEM_4, "MENUITEM_4",
+                 MI_4_MASK, "MI_4_MASK", DEBUGMENU_WIRELESS_FILL,
+                 "PORT_WIRELESS_FILL", 1))
+        return 0;
+    set_string(o, sWireless.item, "Local Wireless");
+    wr32(o->p + sWireless.item + TEXT_LANGUAGE, PORTLANG_LOCAL_WIRELESS);
 
-    // Its mask, MI_3_MASK a row down.
-    maskY = rdf(mask3 + OBJ_Y) + (rdf(mask3 + OBJ_Y) - rdf(mask2 + OBJ_Y));
-    sMask = put_chunk(o, BUI_CHUNK_BITMAP, mask3, sm3);
-    set_name(o, sMask, DEBUGMENU_MASK_HIDDEN, "MI_4_MASK");
-    if (o->failed) return 0;
-    wrf(o->p + sMask + OBJ_Y, maskY);
-    o->p[sMask + OBJ_VISIBILITY] = 0;
-
-    // And the rest of the filler under it, down to where the filler ends.
-    fillY  = maskY + rdf(mask3 + OBJ_SCALE_Y) * MASK_UNIT;
-    bottom = rdf(fill + OBJ_Y) + rdf(fill + OBJ_SCALE_Y) * MASK_UNIT;
-    sFill  = put_chunk(o, BUI_CHUNK_BITMAP, fill, sf);
-    set_name(o, sFill, DEBUGMENU_FILL, "PORT_DEBUG_FILL");
-    if (o->failed) return 0;
-    wrf(o->p + sFill + OBJ_Y, fillY);
-    wrf(o->p + sFill + OBJ_SCALE_Y, (bottom - fillY) / MASK_UNIT);
-    o->p[sFill + OBJ_VISIBILITY] = 0;
+    // The debug menu, under names the menu does not look for until it is
+    // shown.
+    if (!put_row(o, &m, 2, &sDebug, DEBUGMENU_ITEM_HIDDEN, "MENUITEM_5",
+                 DEBUGMENU_MASK_HIDDEN, "MI_5_MASK", DEBUGMENU_FILL,
+                 "PORT_DEBUG_FILL", 0))
+        return 0;
+    set_string(o, sDebug.item, "Debug Menu");
 
     close_chunk(o, hdr);
     return !o->failed;
@@ -353,7 +401,8 @@ uint8_t* debugmenu_patch_frontend(const uint8_t* data, size_t len,
     BChunkIter     it;
 
     memset(&o, 0, sizeof o);
-    sItem = sMask = sFill = sFiller = 0;
+    memset(&sWireless, 0, sizeof sWireless);
+    memset(&sDebug, 0, sizeof sDebug);
     sRevealed = 0;
     flailer = bchunk_find(data, 0, len, BUI_CHUNK_FLAILER, &size);
     if (!flailer) return NULL;
@@ -387,9 +436,10 @@ uint8_t* debugmenu_patch_frontend(const uint8_t* data, size_t len,
     }
     close_chunk(&o, hdr);
 
-    if (o.failed || !mainMenu || !source || !sItem) {
+    if (o.failed || !mainMenu || !source || !sDebug.item) {
         free(o.p);
-        sItem = sMask = sFill = sFiller = 0;
+        memset(&sWireless, 0, sizeof sWireless);
+        memset(&sDebug, 0, sizeof sDebug);
         return NULL;
     }
     sBuf = o.p;
@@ -399,13 +449,13 @@ uint8_t* debugmenu_patch_frontend(const uint8_t* data, size_t len,
 
 int debugmenu_reveal(void)
 {
-    if (!sBuf || !sItem || sRevealed) return 0;
-    wr32(sBuf + sItem + OBJ_NAME_HASH, BGF_ITEM_MENUITEM_4);
-    wr32(sBuf + sMask + OBJ_NAME_HASH, MI_4_MASK);
-    sBuf[sItem + OBJ_VISIBILITY] = 1;
-    sBuf[sMask + OBJ_VISIBILITY] = 1;
-    sBuf[sFill + OBJ_VISIBILITY] = 1;
-    wrf(sBuf + sFiller + OBJ_SCALE_Y, SEPARATOR_SCALE);
+    if (!sBuf || !sDebug.item || sRevealed) return 0;
+    wr32(sBuf + sDebug.item + OBJ_NAME_HASH, BGF_ITEM_MENUITEM_5);
+    wr32(sBuf + sDebug.mask + OBJ_NAME_HASH, MI_5_MASK);
+    sBuf[sDebug.item + OBJ_VISIBILITY] = 1;
+    sBuf[sDebug.mask + OBJ_VISIBILITY] = 1;
+    sBuf[sDebug.fill + OBJ_VISIBILITY] = 1;
+    wrf(sBuf + sWireless.fill + OBJ_SCALE_Y, SEPARATOR_SCALE);
     sRevealed = 1;
     return 1;
 }

@@ -270,14 +270,16 @@ static int32_t valueChanger(int32_t cur, int32_t d, int32_t lo, int32_t hi)
 }
 
 // MaybeChangeNumPlayers (0x001b5c90): 1 or 2, wrapping, and 1 whenever the
-// second pad is not plugged in. A 3DS has no second pad: the port's hook
-// answers for a second console instead (main.c), so two can be picked.
-// Answers whether it changed.
+// second pad is not plugged in. A 3DS has no second pad (main.c's hook
+// says so), so it is 1, as on a PS2 with one pad, but for the host's setup
+// for Local Wireless (TASKS 63), when it is always 2, which reads Local
+// Wireless. Answers whether it changed.
 static int maybeChangeNumPlayers(BSetup* s, BChallengeData* d, int32_t n)
 {
     int32_t v = n > 0 ? n : 2;
     if (v >= 3) v = 1;
     if (!joystickPluggedIn(s, 1)) v = 1;
+    if (s->wirelessPlayers) v = 2;
     if (d->numPlayers == v) return 0;
     d->numPlayers = v;
     return 1;

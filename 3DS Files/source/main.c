@@ -442,9 +442,10 @@ static const BScreenConfig kScreens[] = {
       debugmenu_callback },
     { DEBUGMENU_RACE_NAME,       DEBUGMENU_RACE_SCREEN,
       debugmenu_race_callback },
-    // The port's too: where two players go on the 3DS (bsetup.c's
-    // twoPlayersCarSelect), the Local Wireless lobby. It has no Flailer
-    // screen of its own, so its popups sit on black, as BootAutoload's do.
+    // The port's too: the Local Wireless lobby, the main menu's fourth row
+    // (TASKS 63), where the host's setup comes back to (bsetup.c's
+    // twoPlayersCarSelect). It has no Flailer screen of its own, so its
+    // popups sit on black, as BootAutoload's do.
     { LOBBY_SCREEN_NAME,         0,
       lobby_callback },
     // And the wait for the other consoles' cars or the host's race
@@ -2785,14 +2786,15 @@ static void hookSetupGrayNamed(void* user, const char* name, uint32_t screen,
     hookGrayMenuItem(user, screen, item, (BScrGrayMode)mode);
 }
 
-// IsJoystickPluggedIn (0x001542f0). Port 0 is the console's own buttons.
-// There is no second pad to plug in, but port 1 stands for the second
-// console, over local wireless (TASKS 37b): the mode screens' Players can
-// be two, which g_setup.wirelessPlayers shows as Local Wireless.
+// IsJoystickPluggedIn (0x001542f0). Port 0 is the console's own buttons,
+// and there is no second pad to plug in: the mode screens' Players is 1,
+// as on a PS2 with one pad. Local Wireless is the main menu's own row
+// (TASKS 63), and only the host's setup from there has two players
+// (g_setup.wirelessPlayers, lobbySetup).
 static int hookSetupJoystickPluggedIn(void* user, int port)
 {
     (void)user;
-    return port == 0 || port == 1;
+    return port == 0;
 }
 
 // The Local Wireless lobby's link (lobby.h): wireless.h's, with the time
@@ -2880,6 +2882,31 @@ static const LobbyNet kLobbyNet = {
 // Full Grid for two players; none with the cops, as retail's two race
 // alone) and a knockout's two, retail's for two players. Free Run has no
 // AI racers, and Be A Cop's are TASKS 61's.
+// The lobby's host setting the race up (lobby_on_setup): the setup
+// screens' Players is Local Wireless until the lobby is back.
+static void lobbySetup(int on)
+{
+    g_setup.wirelessPlayers = on;
+}
+
+// Start (lobby_on_start). A client comes from the main menu, so before
+// its car select it takes the host's mode, as the host's Challenge set
+// it: the game type, two players, the cops, and the cars the mode makes
+// available. Then the race's setup over the link (netrace.h).
+static void lobbyStarted(const LobbyRace* race)
+{
+    if (race->place != 0 && race->gameType >= 0) {
+        Fred.GameType        = race->gameType;
+        Fred.NumPlayerCars   = 2;
+        g_flow.copsOn        = race->copsOn;
+        Fred.MainMenuOpts[1] = race->copsOn;   // hookSetPolice's
+        fred_make_challenge_cars_available(&Fred);
+        logLine("lobby: the host's mode, game type %d, cops %d",
+                race->gameType, race->copsOn);
+    }
+    netrace_begin(race);
+}
+
 static int lobbyCpuWish(void)
 {
     switch (Fred.GameType) {
@@ -5849,7 +5876,7 @@ static int flowInput(u32 kDown, int port)
                 fesound_play(30, NULL);   // an Easter egg's
                 bgf_change_to_screen(&g_flow, "New Main Menu", 0);
                 if (g_boot.hasMenu)
-                    bmenu_set_active_item(&g_boot.menu, BGF_ITEM_MENUITEM_4);
+                    bmenu_set_active_item(&g_boot.menu, BGF_ITEM_MENUITEM_5);
             }
             redraw = 1;
         }
@@ -7116,12 +7143,12 @@ int main(int argc, char** argv)
     setupHooks.setRaceParameters   = hookSetupRaceParameters;
     setupHooks.trace               = hookTrace;
     bsetup_init(&g_setup, &g_flow, &setupHooks);
-    g_setup.wirelessPlayers = 1;
     lobby_init(&kLobbyNet, lobbyLog);
     netrace_init(&kNetRaceNet, &kNetRaceGame, lobbyLog);
     netstep_init(&kNetStepNet, lobbyLog);
     netstep_on_differ(lockDiffers);
-    lobby_on_start(netrace_begin);
+    lobby_on_start(lobbyStarted);
+    lobby_on_setup(lobbySetup);
     lobby_cpu_wish(lobbyCpuWish);
     gTrackFlowHoldRaceFn = netrace_hold;
 

@@ -3242,7 +3242,7 @@ phases.
           `run_azahar_lobby.ps1 -Consoles 2 -WirelessOff` passed (host
           and joiner each showed the line, no "wireless: up", OK back
           to Host or Join). Without it, `run_azahar_lobby.ps1 -Consoles 2` still passed: Azahar's state does not read as off.
-63. [ ] **Local Wireless on the main menu, the settings after Host.**
+63. [x] **Local Wireless on the main menu, the settings after Host.**
         Asked for on 2026-10-14: a top-level "Local Wireless" entry, and
         the race's settings chosen once Host is pressed, not before.
         Setting a race up and then picking Players, Local Wireless and
@@ -3261,6 +3261,33 @@ phases.
           style, as bsetup.c's "Local Wireless" label was.
         - Comes right after 37e and before 37f, 37g and 61, which build
           on where the lobby and the setup are: one task at a time.
+        - Done in Session 103 (`docs/formats/lobby.md`, "The host's
+          setup"; `docs/formats/debug-menu.md`, "The chunk"). The main
+          menu's fourth row is Local Wireless, under Options, the debug
+          menu's hidden row the fifth: `debugmenu_patch.c` cuts the
+          panel's bottom filler to a separator and puts both rows in
+          the 113 px it covered, each a copy of Options' row a row
+          down. Its highlight shows the lobby's blurb; its select goes
+          to the lobby. Host asks "Which mode will you host?", Hot
+          Pursuit or World Racing (retail's 10023 and 10022, the last
+          one hosted highlighted), sets the cops as the main menu does,
+          and goes to retail's Challenge, Players held at Local
+          Wireless (`lobby_on_setup`, `wirelessPlayers` only then). Its
+          select comes back to the lobby, which pops the setup's screens
+          and hosts; BACK from the Challenge asks the mode again.
+          LOBBY_MSG_START carries the host's game type and cops, which
+          a client puts in Fred before its car select. Players
+          elsewhere stays at 1 (the setup hook: pad port 0 only).
+          You're The Cop over wireless is TASKS 61's.
+        - debugmenu_check ok; lobby_check: 58 scenarios (8 new), faults
+          0; 130 mutations, 127 caught, 3 equivalent (26 new, all
+          caught). bootflow, bscreens, carsel, challenge, setup,
+          racesetup(s), tracksel, netrace: 0 differ / faults 0.
+          `run_azahar_lobby.ps1 -Consoles 2 -Race`: both PASS, the
+          main menu's Local Wireless, World Racing and the Challenge to
+          hosting, B told cops off, GO on one seed, every logged
+          frame's parts the same; with `-CopsOn` the same through Hot
+          Pursuit, B told cops on, 4 cops in the race.
 
 ### The retail frontend
 

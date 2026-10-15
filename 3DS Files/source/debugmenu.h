@@ -8,7 +8,7 @@
 // The port's own debug menu (TASKS 53, 2026-10-13). Retail has none in the
 // frontend: its "Debug Menu" (INGAMEB d4742cd7, PauseDebugMenu) is a pause
 // screen of in-race toggles that the disc never reaches. This one is a
-// fourth item on the main menu, "Debug Menu", hidden until the player
+// fifth item on the main menu, "Debug Menu", hidden until the player
 // presses L + R + D-Pad Up together there, or "DebugMenu 1" is in the
 // config file (configitems.h). It leads to two lists in Be The Cop Setup's
 // look. Debug Menu: the NFS points, the save set to 100%, everything
@@ -16,9 +16,12 @@
 // race on any track with any car. Leaving with the save changed asks
 // whether to save it. docs/formats/debug-menu.md.
 //
+// The fourth, since TASKS 63, is Local Wireless, always shown (gameflow.c
+// sends it to the lobby, lobby.h).
+//
 // Two halves. debugmenu_patch.c rebuilds FRONTB's Flailer chunk at boot,
-// with the item and the two screens added, and is free of <3ds.h> so the
-// host can check it. debugmenu.c is the screens' callbacks.
+// with the two rows and the two screens added, and is free of <3ds.h> so
+// the host can check it. debugmenu.c is the screens' callbacks.
 
 // bStringHash of the names the port gives what it adds.
 #define DEBUGMENU_SCREEN      0xd98ab71eu   // "PORT_DEBUG_MENU"
@@ -26,6 +29,7 @@
 #define DEBUGMENU_ITEM_HIDDEN 0xd988c438u   // "PORT_DEBUG_ITEM"
 #define DEBUGMENU_MASK_HIDDEN 0xd98aa6b5u   // "PORT_DEBUG_MASK"
 #define DEBUGMENU_FILL        0xd986f130u   // "PORT_DEBUG_FILL"
+#define DEBUGMENU_WIRELESS_FILL 0x3e221977u // "PORT_WIRELESS_FILL"
 // The screen both are copied from: Be The Cop Setup.
 #define DEBUGMENU_SOURCE      0xd1eadbcau
 // Debug Menu's rows; Debug Race has all seven and scrolls.
@@ -34,19 +38,21 @@
 // BGF_DEBUG_MENU_NAME).
 #define DEBUGMENU_RACE_NAME   "Port Debug Race"
 
-// FRONTB's Flailer chunk rebuilt: every chunk of it in order, with three
-// objects added to NEW_MAIN_MENU (the item, its mask and a filler, all
-// invisible) and the two debug screens after the last screen. `data` is the
-// whole bundle; the answer is a malloc'd chunk stream holding the one
-// Flailer container, for bui_open, or NULL if the bundle is not retail's
-// FRONTB. Its objects stay in file order, which flailer_object_index
-// needs, and 4-aligned, which flailer_add_project does.
+// FRONTB's Flailer chunk rebuilt: every chunk of it in order, with
+// NEW_MAIN_MENU's bottom filler cut to a separator and six objects added
+// to it (Local Wireless's label, mask and filler, shown, then the debug
+// menu's, hidden) and the two debug screens after the last screen. `data`
+// is the whole bundle; the answer is a malloc'd chunk stream holding the
+// one Flailer container, for bui_open, or NULL if the bundle is not
+// retail's FRONTB. Its objects stay in file order, which
+// flailer_object_index needs, and 4-aligned, which flailer_add_project
+// does.
 uint8_t* debugmenu_patch_frontend(const uint8_t* data, size_t len,
                                   size_t* outLen);
 
-// The item shown: MENUITEM_4 and MI_4_MASK written over the two hidden
-// names, the three objects made visible and the main menu's bottom filler
-// cut to a separator above them. 1 the first time, 0 after, or with no
+// The item shown: MENUITEM_5 and MI_5_MASK written over the two hidden
+// names, the three objects made visible and Local Wireless's filler cut
+// to a separator above them. 1 the first time, 0 after, or with no
 // patched chunk. The main menu must be entered again for its menu and its
 // SelectionSet to find the item.
 int debugmenu_reveal(void);

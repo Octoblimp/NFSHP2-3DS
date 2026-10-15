@@ -2,6 +2,7 @@
 // decompilation this is a port of -- every rule below names an address.
 
 #include "gameflow.h"
+#include "portlang.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -1598,7 +1599,12 @@ static void mainMenuTick(BGameFlow* gf)
 //   MENUITEM_2 "World Racing" -> CopsOn = 0, "Cops Off Mode Select"
 //   MENUITEM_3 "Options"      ->             "Options"
 //
-// All three push New Main Menu, so BACK from there returns here. Every
+// and the port's (gameflow.h):
+//
+//   MENUITEM_4 "Local Wireless" ->           "Local Wireless", the lobby
+//   MENUITEM_5 "Debug Menu"     ->           "Port Debug Menu"
+//
+// All push New Main Menu, so BACK from there returns here. Every
 // screen name the port's own code can reach is registered (kScreens[] in
 // main.c, bscreens.c for the classes). The ten with no class yet are
 // registered to bgf_plain_screen_callback so they draw. An unregistered
@@ -1663,19 +1669,25 @@ static void mainMenuHighlight(BGameFlow* gf, uint32_t itemHash)
         case BGF_ITEM_MENUITEM_3:
             mainMenuHighlightItem(gf, BGF_MI_3_MASK, BGF_BLURB_MENUITEM_3);
             break;
-        case BGF_ITEM_MENUITEM_4: {
-            // The port's own (gameflow.h): HighlightMenuItem's three steps,
-            // with a sentence of its own, as no language row has one.
+        case BGF_ITEM_MENUITEM_4:
+            // The port's own two (gameflow.h). Local Wireless's line is
+            // the one Challenge's Players had for it (portlang.h).
+            mainMenuHighlightItem(gf, BGF_MI_4_MASK,
+                                  PORTLANG_LOCAL_WIRELESS_BLURB);
+            break;
+        case BGF_ITEM_MENUITEM_5: {
+            // HighlightMenuItem's three steps, with a sentence of its own,
+            // as no language row has one.
             static const char kText[] =
                 "Jump into any race, unlock everything, set your NFS points.";
             BNewMainMenu* m = &gf->mainMenu;
             BAnim*        a = flowAnim(gf);
             HOOK_VOID(gf, moveBrackets, BGF_SCREEN_NEW_MAIN_MENU,
-                      BGF_MI_4_MASK, -3.0f, -6.0f);
+                      BGF_MI_5_MASK, -3.0f, -6.0f);
             if (a) banim_blurb_new_text(a, &m->blurb, kText);
             HOOK_VOID(gf, setBlurbText, BGF_SCREEN_NEW_MAIN_MENU, kText);
-            if (a) bsel_set_current(a, &m->sel, BGF_MI_4_MASK);
-            trace(gf, "bracket %08x", (unsigned)BGF_MI_4_MASK);
+            if (a) bsel_set_current(a, &m->sel, BGF_MI_5_MASK);
+            trace(gf, "bracket %08x", (unsigned)BGF_MI_5_MASK);
             break;
         }
         default:
@@ -1705,8 +1717,12 @@ static void mainMenuEvent(BGameFlow* gf, BScreenMessage msg,
                 case BGF_ITEM_MENUITEM_3:
                     bgf_change_to_screen(gf, "Options", 1);
                     break;
+                // The port's own two, pushing the menu as the others do.
+                // The lobby asks the mode itself, once Host is chosen.
                 case BGF_ITEM_MENUITEM_4:
-                    // The port's own, pushing the menu as the others do.
+                    bgf_change_to_screen(gf, BGF_LOCAL_WIRELESS_NAME, 1);
+                    break;
+                case BGF_ITEM_MENUITEM_5:
                     bgf_change_to_screen(gf, BGF_DEBUG_MENU_NAME, 1);
                     break;
                 default:

@@ -12,12 +12,16 @@
 
 // "OK", the language table's (END_GAME_LANG_OK, endgame.h).
 #define LANG_OK 0x38277
+// The main menu's two modes, its MENUITEM_1 and MENUITEM_2.
+#define LANG_HOT_PURSUIT  10023
+#define LANG_WORLD_RACING 10022
 
 #define MESSAGE_MAX 512
 
 typedef enum {
     LS_OFF,         // not the current screen
     LS_ASK,         // Host or Join, with the link down
+    LS_MODE,        // the host's: Hot Pursuit or World Racing
     LS_NOTICE,      // a line and OK
     LS_HOSTING,     // the names on this console's network
     LS_SEARCHING,   // scanning, with nothing found yet
@@ -28,7 +32,10 @@ typedef enum {
 
 // The popups' answers: each button's Param, BACK's, and the Param a popup
 // with no buttons gives SELECT, which only puts it back.
-enum { A_HOST = 1, A_JOIN, A_BACK, A_STAY, A_START, A_NEXT, A_OK, A_CPU };
+enum {
+    A_HOST = 1, A_JOIN, A_BACK, A_STAY, A_START, A_NEXT, A_OK, A_CPU,
+    A_COPS_ON, A_COPS_OFF
+};
 
 static struct {
     LobbyNet     net;
@@ -49,6 +56,9 @@ static struct {
     LobbyCpuFn   cpuFn;
     int          cpuWant;        // the host's CPU racers, or LOBBY_CPU_NONE
     int          onCpu;          // the host's highlight on CPU Racers
+    LobbySetupFn setupFn;
+    int          setup;          // the host's setup screens up, over this
+    int          copsOff;        // the mode last hosted: the highlight
 } L = { .popup = -1 };
 
 static void say(const char* fmt, ...)
@@ -335,6 +345,59 @@ static void startHosting(BGameFlow* gf)
     showList(gf);
 }
 
+// Host's question (TASKS 63): the main menu's two modes, the one hosted
+// last highlighted.
+static void toMode(BGameFlow* gf)
+{
+    hidePopup(gf);
+    L.state = LS_MODE;
+    snprintf(L.message, sizeof L.message, "%s",
+             text(gf, PORTLANG_HOST_MODE));
+    say("lobby: mode");
+    showPopup(gf, 2, LANG_HOT_PURSUIT, A_COPS_ON, LANG_WORLD_RACING,
+              A_COPS_OFF, L.copsOff);
+}
+
+// A mode chosen: the cops on or off, as the main menu's two items set
+// them, then retail's Challenge for the rest, the lobby pushed under it.
+// Players there reads Local Wireless until the lobby is back (the setup
+// function, bsetup.c's wirelessPlayers).
+static void startSetup(BGameFlow* gf, int copsOn)
+{
+    hidePopup(gf);
+    L.copsOff  = !copsOn;
+    gf->copsOn = copsOn;
+    if (gf->hooks.setPolice) gf->hooks.setPolice(gf->hooks.user, copsOn);
+    L.setup = 1;
+    if (L.setupFn) L.setupFn(1);
+    say("lobby: setup, cops %s", copsOn ? "on" : "off");
+    bgf_change_to_screen(gf, LOBBY_SETUP_SCREEN, 1);
+}
+
+// Back from the setup. A select there pushed the lobby again, over the
+// setup's screens and the lobby that went to them: the stack goes back to
+// under that lobby, as if this one had been it all along, and hosting
+// begins. BACK from the Challenge popped that lobby instead: the question
+// of the mode again.
+static void setupOver(BGameFlow* gf)
+{
+    int k;
+
+    L.setup = 0;
+    if (L.setupFn) L.setupFn(0);
+    for (k = gf->stack.index - 1; k >= 0; k--)
+        if (!strcmp(gf->stack.names[k], LOBBY_SCREEN_NAME)) break;
+    if (k < 0) {
+        say("lobby: setup left");
+        toMode(gf);
+        return;
+    }
+    bgf_pop_until(gf, LOBBY_SCREEN_NAME);
+    bgf_pop_screen(gf);
+    say("lobby: setup done");
+    startHosting(gf);
+}
+
 static void goOn(BGameFlow* gf)
 {
     hidePopup(gf);
@@ -342,8 +405,8 @@ static void goOn(BGameFlow* gf)
     bgf_change_to_screen(gf, LOBBY_NEXT_SCREEN, 1);
 }
 
-// Start: no more in, and each client told how many there are and which
-// place is its, the host's being 0.
+// Start: no more in, and each client told how many there are, which
+// place is its, the host's being 0, and the host's mode.
 static void raceInit(LobbyRace* r, int consoles, int place)
 {
     int i;
@@ -351,13 +414,14 @@ static void raceInit(LobbyRace* r, int consoles, int place)
     memset(r, 0, sizeof *r);
     r->consoles = consoles;
     r->place    = place;
+    r->gameType = -1;
     for (i = 0; i < WIRELESS_MAX_CONSOLES; i++) r->peer[i] = -1;
 }
 
 static void startRace(BGameFlow* gf)
 {
     int       i, place = 0, consoles = clientsAlive() + 1, cpu = cpuShown();
-    uint8_t   msg[2];
+    uint8_t   msg[4];
     LobbyRace race;
 
     if (consoles < 2) {
@@ -366,12 +430,17 @@ static void startRace(BGameFlow* gf)
     }
     L.net.setOpen(0);
     raceInit(&race, consoles, 0);
-    race.cpu = cpu > 0 ? cpu : 0;
+    race.cpu      = cpu > 0 ? cpu : 0;
+    race.gameType = gf->hooks.gameType ? gf->hooks.gameType(gf->hooks.user)
+                                       : 0;
+    race.copsOn   = gf->copsOn != 0;
     lobby_latin1(race.hostName, sizeof race.hostName, L.net.selfName());
     for (i = 0; i < L.net.peerCount(); i++) {
         if (!L.net.peerAlive(i)) continue;
         msg[0] = (uint8_t)consoles;
         msg[1] = (uint8_t)++place;
+        msg[2] = (uint8_t)race.gameType;
+        msg[3] = (uint8_t)race.copsOn;
         race.peer[place] = i;
         L.net.send(i, LOBBY_MSG_START, msg, sizeof msg);
     }
@@ -473,6 +542,12 @@ static void tick(BGameFlow* gf)
                 say("lobby: started by %s, place %d of %d", L.hostName,
                     m.data[1], m.data[0]);
                 raceInit(&race, m.data[0], m.data[1]);
+                if (m.len >= 4) {
+                    race.gameType = m.data[2];
+                    race.copsOn   = m.data[3] != 0;
+                    say("lobby: the host's game type %d, cops %s",
+                        race.gameType, race.copsOn ? "on" : "off");
+                }
                 race.peer[0] = 0;
                 memcpy(race.hostName, L.hostName, sizeof race.hostName);
                 if (L.onStart) L.onStart(&race);
@@ -500,9 +575,13 @@ static void answer(BGameFlow* gf, int a)
         return;
     }
     switch (L.state) {
+        // Host asks the mode, then sets the race up, before the network
+        // is made; with the console's wireless off it says so first.
         case LS_ASK:
-            if (a == A_HOST) startHosting(gf);
-            else if (a == A_JOIN) {
+            if (a == A_HOST) {
+                if (radioOff()) offNotice(gf);
+                else toMode(gf);
+            } else if (a == A_JOIN) {
                 if (!radioOff() && L.net.start()) startSearching(gf, 0);
                 else offNotice(gf);
             } else if (a == A_BACK) {
@@ -512,6 +591,13 @@ static void answer(BGameFlow* gf, int a)
             } else {
                 toAsk(gf);
             }
+            break;
+
+        case LS_MODE:
+            if (a == A_COPS_ON || a == A_COPS_OFF)
+                startSetup(gf, a == A_COPS_ON);
+            else if (a == A_BACK) toAsk(gf);
+            else toMode(gf);
             break;
 
         case LS_NOTICE:
@@ -586,16 +672,26 @@ void lobby_notice_next(int32_t id, const char* name)
     snprintf(L.nextName, sizeof L.nextName, "%s", name ? name : "");
 }
 
+void lobby_on_setup(LobbySetupFn fn)
+{
+    L.setupFn = fn;
+}
+
 void lobby_callback(BGameFlow* gf, BScreenMessage msg,
                     BScreenCallbackData* data)
 {
     switch (msg) {
-        // Coming back from car select takes the link down: the question
-        // again, as at the start, after the race's notice if it left one.
-        // A console lost with this one's wireless off was this one: that
-        // is the notice.
+        // Back from the host's setup: hosting, or the mode again. Coming
+        // back from car select takes the link down: the question again,
+        // as at the start, after the race's notice if it left one. A
+        // console lost with this one's wireless off was this one: that is
+        // the notice.
         case BMSG_SCREEN_ACTIVATE:
             L.popup = -1;
+            if (L.setup) {
+                setupOver(gf);
+                break;
+            }
             if (L.nextNotice) {
                 int32_t id = L.nextNotice;
 

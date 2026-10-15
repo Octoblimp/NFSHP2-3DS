@@ -401,9 +401,10 @@ typedef struct BRaceSetup {
 struct BSetup {
     BGameFlow*       gf;
     BSetupHooks      hooks;
-    // The port's: 1 when the second player is another console's, over
-    // local wireless (TASKS 37b). Players' "2" then reads Local Wireless,
-    // its line says up to eight consoles, and a select goes to the lobby
+    // The port's: 1 while the host of a Local Wireless race sets it up
+    // (TASKS 63, lobby_on_setup), the other players on consoles of their
+    // own. Players is then always "2", which reads Local Wireless, its
+    // line says up to eight consoles, and a select goes back to the lobby
     // (lobby.h) where retail's goes to the two-pad car select. bsetup_init
     // leaves it 0, retail's, which is what the checks run.
     int              wirelessPlayers;

@@ -98,6 +98,14 @@ static const char* const kStrings[PORTLANG_END - PORTLANG_FIRST][6] = {
       "desde el men\xfa HOME para jugar en modo inal\xe1mbrico local.",
       "Tr\xe5" "dl\xf6s kommunikation \xe4r avst\xe4ngd. Sl\xe5 p\xe5 den "
       "fr\xe5n HOME-menyn f\xf6r att spela lokalt tr\xe5" "dl\xf6st." },
+    // PORTLANG_HOST_MODE: its buttons are the main menu's two modes,
+    // retail's 10023 and 10022
+    { "Which mode will you host?",
+      "Quel mode voulez-vous cr\xe9" "er ?",
+      "Welchen Modus willst du erstellen?",
+      "Quale modalit\xe0 vuoi creare?",
+      "\xbf" "Qu\xe9 modo quieres crear?",
+      "Vilket l\xe4ge vill du skapa?" },
 };
 
 const char* portlang_get(int32_t languageEnum, int32_t id, size_t* outLen)

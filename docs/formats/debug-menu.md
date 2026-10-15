@@ -2,8 +2,9 @@
 
 The port's own debug menu. Retail's frontend has none. Its "Debug Menu"
 (INGAMEB d4742cd7, PauseDebugMenu) is a pause screen of in-race toggles,
-and the disc never reaches it. This one is a fourth item on the main
-menu, "Debug Menu". It stays hidden until one of two things shows it:
+and the disc never reaches it. This one is the main menu's fifth item,
+"Debug Menu", under Local Wireless (TASKS 63, `docs/formats/lobby.md`).
+It stays hidden until one of two things shows it:
 
 - L, R and D-Pad Up pressed together on the main menu (an Easter egg's
   sound plays);
@@ -22,17 +23,27 @@ The code has two halves:
 `debugmenu_patch_frontend` copies FRONTB's Flailer chunk with two
 changes, and bui reads the copy in its place.
 
-**The main menu.** NEW_MAIN_MENU gains three objects, all invisible:
+**The main menu.** NEW_MAIN_MENU gains six objects, two rows of three.
+Its bottom filler (the tallest BOTTOM_MASK, from y 228 at ScaleY 7.063,
+down to 341) is cut to a separator (ScaleY 0.625, 10 px) for good, and
+the two rows take the 113 px it covered. Each row is a row's step (55
+px) below the one above, as MENUITEM_2 to MENUITEM_3 and MI_2_MASK to
+MI_3_MASK are; each label a copy of MENUITEM_3 (Options) at
+MENUITEM_2's X, each mask a copy of MI_3_MASK, each filler a copy of the
+cut filler from under its mask down to where that filler ended:
 
-| Object | Hidden name | What it is |
-|---|---|---|
-| The item | `PORT_DEBUG_ITEM` | A copy of MENUITEM_3 (Options), "Debug Menu" |
-| Its mask | `PORT_DEBUG_MASK` | A copy of MI_3_MASK |
-| A filler | `PORT_DEBUG_FILL` | Covers the panel down to its bottom |
+| Object | Name | Shown | What it is |
+|---|---|---|---|
+| Local Wireless | MENUITEM_4 | yes | y 236, LanguageID 2000000 |
+| Its mask | MI_4_MASK | yes | y 238 |
+| Its filler | `PORT_WIRELESS_FILL` | yes | y 283 to 341, ScaleY 3.625 |
+| The debug item | `PORT_DEBUG_ITEM` | no | y 291, "Debug Menu" |
+| Its mask | `PORT_DEBUG_MASK` | no | y 293 |
+| Its filler | `PORT_DEBUG_FILL` | no | y 338 to 341, ScaleY 0.1875 |
 
-`debugmenu_reveal` makes the three visible. It also writes MENUITEM_4
-and MI_4_MASK over the two hidden names, and cuts the panel's bottom
-filler (BOTTOM_MASK) to a separator above the item. The main menu is
+`debugmenu_reveal` makes the last three visible. It also writes
+MENUITEM_5 and MI_5_MASK over the two hidden names, and cuts Local
+Wireless's filler to a separator above the item. The main menu is
 entered again afterwards, so its menu and SelectionSet find the item.
 
 **The two screens.** Both come after the last screen and are copies of
@@ -123,7 +134,10 @@ car 4`.
 ## Checks
 
 - `tools/debugmenu_check.py`: the patch against retail's FRONTB, byte
-  for byte but what it changes, and the reveal.
+  for byte but what it changes (the six objects, each row and filler
+  where the rows above put it, and the cut filler), and the reveal,
+  which changes the debug row's three and Local Wireless's filler and
+  nothing else.
 - `tools/run_azahar_debugmenu.ps1`:
   - By default: the chord, the points, Set Save to 100%, B and B on
     the prompt, Debug Race's rows scrolled and wrapped, then Start

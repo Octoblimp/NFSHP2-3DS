@@ -254,10 +254,11 @@ if ($booted) {
         Start-Sleep -Milliseconds 2000
         Shot "mainmenu"
         if ($Cop) {
-            # The config showed the item at boot: down three to it.
-            for ($i = 0; $i -lt 3; $i++) { Press $VK_G }
+            # The config showed the item at boot: down four to it, the
+            # fifth, under Local Wireless (TASKS 63).
+            for ($i = 0; $i -lt 4; $i++) { Press $VK_G }
             $shown = $true
-            Shot "fourth-item"
+            Shot "fifth-item"
         } else {
             # L and R held, then Up.
             [Hp2Dbg]::KeyDown($hwnd, $VK_Q)
