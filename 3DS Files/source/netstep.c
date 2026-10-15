@@ -7,7 +7,8 @@
 #include <string.h>
 
 #define MASK     (NETSTEP_RING - 1)
-#define HEADER   15   // need (4), first (4), count, checksum's frame (4), it
+#define HEADER   19   // need (4), first (4), count, checksum's frame (4), it
+                      // (2), the stop (4)
 #define PAD_WIRE 8    // the DualShock's six bytes, the presses (2)
 
 static NetStep  s_own;
@@ -72,6 +73,13 @@ static int recIn(uint32_t n)
 static int alive(int p)
 {
     return S->net.peerAlive(S->peer[p]);
+}
+
+// The host's: a client still racing with it, which has not said it
+// stopped.
+static int serving(int p)
+{
+    return p != S->place && ((S->live >> p) & 1) && !S->left[p] && alive(p);
 }
 
 static void encodePad(uint8_t* b, const NetStepPad* pad)
@@ -173,7 +181,7 @@ static void takeHash(int p, const uint8_t* b)
 static void takePads(int p, const WlMsg* m)
 {
     const uint8_t* d = m->data;
-    uint32_t       need, first;
+    uint32_t       need, first, stop;
     int            count, i;
 
     // One its pads do not fill is dropped.
@@ -181,8 +189,14 @@ static void takePads(int p, const WlMsg* m)
     if (m->len != HEADER + (size_t)count * PAD_WIRE) return;
     need  = get32(d);
     first = get32(d + 4);
+    stop  = get32(d + 15);
     if (need > S->need[p]) S->need[p] = need;
     takeHash(p, d + 9);
+    if (stop != NETSTEP_NONE && !S->left[p]) {
+        S->left[p] = 1;
+        say("netstep: place %d stopped after %lu frames", p,
+            (unsigned long)stop);
+    }
     for (i = 0; i < count; i++) {
         uint32_t n = first + (uint32_t)i;
 
@@ -222,32 +236,83 @@ static void sendFrames(int p, uint32_t now)
     }
     b[8] = (uint8_t)count;
     putHash(b + 9);
+    put32(b + 15, S->stopAt);
     if (!S->net.send(S->peer[p], NETSTEP_MSG_FRAMES, b, o)) S->sendFails++;
     S->lastSend[p] = now;
     S->fresh[p]    = 0;
 }
 
-static void hostPoll(uint32_t now)
+// Each racing client's pads. Not those of one gone or stopped, nor any
+// past a message not the race's: what it sends from its stop on is the
+// lobby's, left on the link for it. One that came before its stop was
+// heard says the client has gone on all the same.
+static void hostRead(void)
 {
     WlMsg m;
     int   p;
 
     for (p = 0; p < NETSTEP_MAX; p++) {
-        if (p == S->place || S->peer[p] < 0) continue;
-        while (S->net.recv(S->peer[p], &m))
-            if (m.type == NETSTEP_MSG_PADS) takePads(p, &m);
+        if (!serving(p)) continue;
+        while (!S->left[p] && S->net.peek(S->peer[p], &m)) {
+            if (m.type != NETSTEP_MSG_PADS) {
+                S->left[p] = 1;
+                say("netstep: place %d has gone on, its stop unheard", p);
+                break;
+            }
+            S->net.recv(S->peer[p], &m);
+            takePads(p, &m);
+        }
     }
+}
+
+static void hostPoll(uint32_t now)
+{
+    int p;
+
+    hostRead();
+    // A client that stopped has left the race: from the next record on it
+    // is built without, as one gone.
     for (p = 0; p < NETSTEP_MAX; p++) {
-        if (p == S->place || !((S->live >> p) & 1) || alive(p)) continue;
+        if (p == S->place || !((S->live >> p) & 1)) continue;
+        if (S->left[p])
+            say("netstep: place %d left, from frame %lu", p,
+                (unsigned long)S->built);
+        else if (!alive(p))
+            say("netstep: place %d is gone, from frame %lu", p,
+                (unsigned long)S->built);
+        else
+            continue;
         S->live &= (uint8_t)~(1u << p);
-        say("netstep: place %d is gone, from frame %lu", p,
-            (unsigned long)S->built);
     }
     hostBuild();
     for (p = 0; p < NETSTEP_MAX; p++) {
         if (p == S->place || !((S->live >> p) & 1)) continue;
         if (S->fresh[p] || now - S->lastSend[p] >= NETSTEP_RESEND_MS)
             sendFrames(p, now);
+    }
+}
+
+// Stopped: each client still racing has the records it needs to reach
+// the host's stop, as the race did, until it says it stopped too.
+static void hostDrain(uint32_t now)
+{
+    int p, waiting = -1;
+
+    hostRead();
+    for (p = 0; p < NETSTEP_MAX; p++) {
+        if (!serving(p)) continue;
+        waiting = p;
+        if (S->fresh[p] || now - S->lastSend[p] >= NETSTEP_RESEND_MS)
+            sendFrames(p, now);
+    }
+    if (waiting < 0) {
+        S->ending = 0;
+        say("netstep: every client stopped, %lu ms after the host",
+            (unsigned long)(now - S->endFrom));
+    } else if (now - S->endFrom >= NETSTEP_DRAIN_MS) {
+        S->ending = 0;
+        say("netstep: place %d never said it stopped; given up after %lu ms",
+            waiting, (unsigned long)(now - S->endFrom));
     }
 }
 
@@ -269,6 +334,11 @@ static void takeFrames(const WlMsg* m)
     first = get32(d + 4);
     if (need > S->padNeed) S->padNeed = need;
     takeHash(0, d + 9);
+    if (get32(d + 15) != NETSTEP_NONE && S->hostStop == NETSTEP_NONE) {
+        S->hostStop = get32(d + 15);
+        say("netstep: the host stopped after %lu frames",
+            (unsigned long)S->hostStop);
+    }
     for (i = 0, o = HEADER; i < count; i++) {
         uint32_t     n = first + (uint32_t)i;
         NetStepFrame r;
@@ -296,24 +366,42 @@ static void takeFrames(const WlMsg* m)
 // To the host: the records still wanted, and this console's pads from the
 // first it still needs, as many as fit. The host built no further than
 // them, and they run no further than NETSTEP_DELAY past its records.
+// Stopped, none: the host builds no more with them.
 static void sendPads(uint32_t now)
 {
     uint8_t  b[WL_MSG_MAX];
     uint32_t first = S->padNeed, n;
+    uint32_t end = S->stopAt == NETSTEP_NONE ? S->put : first;
     size_t   o = HEADER;
     int      count = 0;
 
     put32(b, S->built);
     put32(b + 4, first);
-    for (n = first; n < S->put && o + PAD_WIRE <= WL_MSG_MAX; n++) {
+    for (n = first; n < end && o + PAD_WIRE <= WL_MSG_MAX; n++) {
         encodePad(b + o, &S->pads[S->place][n & MASK]);
         o += PAD_WIRE;
         count++;
     }
     b[8] = (uint8_t)count;
     putHash(b + 9);
+    put32(b + 15, S->stopAt);
     if (!S->net.send(S->peer[0], NETSTEP_MSG_PADS, b, o)) S->sendFails++;
     S->lastSend[S->place] = now;
+}
+
+// A client's stop said, each NETSTEP_RESEND_MS, until it has been said
+// NETSTEP_TELLS times or the host is gone. Nothing is read: the host
+// sends nothing more after it reads one.
+static void tell(uint32_t now)
+{
+    if (S->tells <= 0) return;
+    if (!alive(0)) {
+        S->tells = 0;
+        return;
+    }
+    if (now - S->lastSend[S->place] < NETSTEP_RESEND_MS) return;
+    sendPads(now);
+    if (--S->tells == 0) say("netstep: the stop said");
 }
 
 static void clientPoll(uint32_t now)
@@ -321,16 +409,37 @@ static void clientPoll(uint32_t now)
     WlMsg m;
 
     if (!S->alone) {
-        while (S->net.recv(S->peer[0], &m))
-            if (m.type == NETSTEP_MSG_FRAMES) takeFrames(&m);
+        int on = 0;   // the host's lobby, left for it: the host went on
+
+        while (S->net.peek(S->peer[0], &m)) {
+            if (m.type != NETSTEP_MSG_FRAMES) {
+                on = 1;
+                break;
+            }
+            S->net.recv(S->peer[0], &m);
+            takeFrames(&m);
+        }
         if (!alive(0)) {
             S->alone = 1;
             S->live  = (uint8_t)(1u << S->place);
             say("netstep: the host is gone, from frame %lu; racing alone",
                 (unsigned long)S->built);
+        } else if (on || (S->hostStop != NETSTEP_NONE
+                          && S->frame >= S->hostStop)) {
+            // Past the host's last frame, on its own: it has left the
+            // host's race, which it says as a stop.
+            S->alone  = 1;
+            S->live   = (uint8_t)(1u << S->place);
+            S->stopAt = S->frame;
+            S->tells  = NETSTEP_TELLS;
+            say(on ? "netstep: the host has gone on, from frame %lu; racing "
+                     "alone"
+                   : "netstep: past the host's stop, from frame %lu; racing "
+                     "alone", (unsigned long)S->built);
         }
     }
     if (S->alone) {
+        tell(now);
         aloneBuild();
         return;
     }
@@ -391,21 +500,48 @@ void netstep_start(int place, int consoles, const int peer[NETSTEP_MAX],
         buildRecord(n, S->live, NETSTEP_Q_FIRST);
     S->built = NETSTEP_DELAY;
     S->put   = NETSTEP_DELAY;
+    S->stopAt   = NETSTEP_NONE;
+    S->hostStop = NETSTEP_NONE;
     say("netstep: start, place %d, racing %02x, delay %d", place,
         (unsigned)S->live, NETSTEP_DELAY);
-}
-
-void netstep_stop(void)
-{
-    if (!S->on) return;
-    say("netstep: stop at frame %lu, %lu sends refused",
-        (unsigned long)S->frame, (unsigned long)S->sendFails);
-    S->on = 0;
 }
 
 int netstep_on(void)
 {
     return S->on;
+}
+
+void netstep_stop(uint32_t now)
+{
+    if (!S->on) return;
+    say("netstep: stop at frame %lu, %lu sends refused",
+        (unsigned long)S->frame, (unsigned long)S->sendFails);
+    S->on = 0;
+    // A client alone past the host's stop said its own then.
+    if (S->stopAt == NETSTEP_NONE) S->stopAt = S->frame;
+    S->endFrom = now;
+    if (S->host) {
+        S->ending = 1;
+    } else {
+        if (!S->alone) S->tells = NETSTEP_TELLS;
+        S->ending = S->tells > 0;
+    }
+}
+
+void netstep_drain(uint32_t now)
+{
+    if (!S->ending) return;
+    if (S->host) {
+        hostDrain(now);
+        return;
+    }
+    tell(now);
+    if (S->tells <= 0) S->ending = 0;
+}
+
+int netstep_ending(void)
+{
+    return S->ending;
 }
 
 void netstep_put(const NetStepPad* pad, uint8_t q)

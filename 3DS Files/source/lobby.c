@@ -59,6 +59,14 @@ static struct {
     LobbySetupFn setupFn;
     int          setup;          // the host's setup screens up, over this
     int          copsOff;        // the mode last hosted: the highlight
+    int          listKey;        // the host's list's buttons, as shown
+    // Back from the race (37f): next time the lobby comes up; which this
+    // console was; the link's timeout still the race's; and by peer
+    // whether it has yet to say it is back (a client's: the host).
+    int          backNext;
+    int          wasHost;
+    int          waiting;
+    int          awaited[WIRELESS_MAX_CONSOLES];
 } L = { .popup = -1 };
 
 static void say(const char* fmt, ...)
@@ -190,6 +198,8 @@ static void hidePopup(BGameFlow* gf)
 
 static void linkDown(void)
 {
+    L.waiting = 0;
+    memset(L.awaited, 0, sizeof L.awaited);
     if (L.net.state() == WIRELESS_OFF) return;
     L.net.leave();
     L.net.stop();
@@ -208,6 +218,56 @@ static int clientsAlive(void)
     int i, n = 0;
     for (i = 0; i < L.net.peerCount(); i++) n += L.net.peerAlive(i) != 0;
     return n;
+}
+
+// The consoles still on that have yet to say they are back from the race
+// (a client's: the host).
+static int awaiting(void)
+{
+    int i, n = 0;
+
+    for (i = 0; i < L.net.peerCount() && i < WIRELESS_MAX_CONSOLES; i++)
+        n += L.awaited[i] && L.net.peerAlive(i);
+    return n;
+}
+
+// Each one back, or gone: the link's own timeout again.
+static void backDone(void)
+{
+    if (!L.waiting || awaiting()) return;
+    L.waiting = 0;
+    if (L.net.setPatience) L.net.setPatience(0);
+    say("lobby: every console back");
+}
+
+// What came from client `i`: whether it says it is back. Nothing else is
+// the lobby's (the race's last, its stop said again), and none of it may
+// reach the next race.
+static void readBack(int i)
+{
+    WlMsg m;
+    char  name[WIRELESS_NAME_MAX];
+
+    while (L.net.recv(i, &m)) {
+        if (m.type != LOBBY_MSG_BACK || i >= WIRELESS_MAX_CONSOLES
+            || !L.awaited[i])
+            continue;
+        L.awaited[i] = 0;
+        lobby_latin1(name, sizeof name, L.net.peerName(i));
+        say("lobby: %s is back", name);
+    }
+}
+
+// The places of those gone go, and the next in line take theirs, as
+// wireless_forget_lost does the peers.
+static void forgetLost(void)
+{
+    int i, n = 0;
+
+    for (i = 0; i < L.net.peerCount() && i < WIRELESS_MAX_CONSOLES; i++)
+        if (L.net.peerAlive(i)) L.awaited[n++] = L.awaited[i];
+    for (; n < WIRELESS_MAX_CONSOLES; n++) L.awaited[n] = 0;
+    L.net.forgetLost();
 }
 
 // ------------------------------------------------------------ the states
@@ -273,21 +333,24 @@ static int cpuShown(void)
 // The host's list: the line, then this console, then each client still
 // on, in the order they came, then the CPU racers if there is a choice.
 // Start once there is a client, then CPU Racers, the highlight where the
-// host left it. Put up again only when it changed, or when there is none
-// up (a press took it down); the lines say which buttons there are, so
-// they alone say what changed.
+// host left it. Put up again only when it or its buttons changed, or
+// when there is none up (a press took it down). Back from a race, a
+// client is listed once it says it is back, and Start waits for every
+// client still on.
 static void showList(BGameFlow* gf)
 {
     char msg[MESSAGE_MAX];
     char name[WIRELESS_NAME_MAX];
-    int  i, clients = clientsAlive(), cpu = cpuShown();
+    int  i, clients = clientsAlive(), cpu = cpuShown(), key;
 
     snprintf(msg, sizeof msg, "%s", text(gf, PORTLANG_WAITING_FOR_PLAYERS));
     lobby_latin1(name, sizeof name, L.net.selfName());
     strncat(msg, "@", sizeof msg - strlen(msg) - 1);
     strncat(msg, name, sizeof msg - strlen(msg) - 1);
     for (i = 0; i < L.net.peerCount(); i++) {
-        if (!L.net.peerAlive(i)) continue;
+        if (!L.net.peerAlive(i)
+            || (i < WIRELESS_MAX_CONSOLES && L.awaited[i]))
+            continue;
         lobby_latin1(name, sizeof name, L.net.peerName(i));
         strncat(msg, "@", sizeof msg - strlen(msg) - 1);
         strncat(msg, name, sizeof msg - strlen(msg) - 1);
@@ -299,10 +362,13 @@ static void showList(BGameFlow* gf)
         strncat(msg, "@", sizeof msg - strlen(msg) - 1);
         strncat(msg, line, sizeof msg - strlen(msg) - 1);
     }
-    if (L.popup >= 0 && !strcmp(msg, L.message)) return;
+    if (awaiting()) clients = 0;
+    key = (cpu >= 0) * 2 + (clients > 0);
+    if (L.popup >= 0 && !strcmp(msg, L.message) && key == L.listKey) return;
     hidePopup(gf);
     if (strcmp(msg, L.message)) say("lobby: list %s", msg);
     memcpy(L.message, msg, sizeof msg);
+    L.listKey = key;
     if (cpu < 0)
         showPopup(gf, clients > 0, PORTLANG_START, A_START, 0, 0, 0);
     else if (clients == 0)
@@ -401,7 +467,8 @@ static void setupOver(BGameFlow* gf)
 static void goOn(BGameFlow* gf)
 {
     hidePopup(gf);
-    L.state = LS_GONE;
+    L.wasHost = L.state == LS_HOSTING;
+    L.state   = LS_GONE;
     bgf_change_to_screen(gf, LOBBY_NEXT_SCREEN, 1);
 }
 
@@ -424,7 +491,7 @@ static void startRace(BGameFlow* gf)
     uint8_t   msg[4];
     LobbyRace race;
 
-    if (consoles < 2) {
+    if (consoles < 2 || awaiting()) {
         showList(gf);   // the last one went as Start was pressed
         return;
     }
@@ -489,6 +556,16 @@ static void showFound(BGameFlow* gf, int onNext)
               onNext);
 }
 
+// A client's wait for the host's Start.
+static void showJoined(BGameFlow* gf)
+{
+    hidePopup(gf);
+    L.state = LS_JOINED;
+    fill(L.message, sizeof L.message, text(gf, PORTLANG_WAITING_FOR_HOST),
+         L.hostName, 0, 0);
+    showPopup(gf, 0, 0, 0, 0, 0, 0);
+}
+
 static void joinFound(BGameFlow* gf)
 {
     const WirelessHost* h = &L.hosts[L.hostIndex];
@@ -498,12 +575,59 @@ static void joinFound(BGameFlow* gf)
         notice(gf, PORTLANG_JOIN_FAILED, L.hostName, LS_SEARCHING);
         return;
     }
-    hidePopup(gf);
-    L.state = LS_JOINED;
-    fill(L.message, sizeof L.message, text(gf, PORTLANG_WAITING_FOR_HOST),
-         L.hostName, 0, 0);
     say("lobby: joined %s", L.hostName);
-    showPopup(gf, 0, 0, 0, 0, 0, 0);
+    showJoined(gf);
+}
+
+// Back from the race (lobby_back_next), the link as the race left it:
+// the host's list, open to joiners again, each client still on awaited;
+// a client's wait for the next Start. Each console says it is back. The
+// link gone on the way, or the console's wireless off: the line, as on
+// any other screen of the lobby.
+static void backFromRace(BGameFlow* gf)
+{
+    uint8_t none = 0;
+    int     i;
+
+    if (radioOff()) {
+        say("lobby: back from the race, wireless communication off");
+        linkDown();
+        offNotice(gf);
+        return;
+    }
+    if (L.wasHost && L.net.state() == WIRELESS_HOSTING) {
+        L.state = LS_HOSTING;
+        L.onCpu = 0;
+        L.net.setOpen(1);
+        for (i = 0; i < L.net.peerCount() && i < WIRELESS_MAX_CONSOLES;
+             i++) {
+            L.awaited[i] = L.net.peerAlive(i) != 0;
+            if (L.awaited[i]) L.net.send(i, LOBBY_MSG_BACK, &none, 1);
+        }
+        L.waiting = 1;
+        say("lobby: back from the race, hosting, %d to come", awaiting());
+        backDone();
+        showList(gf);
+        return;
+    }
+    if (!L.wasHost && L.net.state() == WIRELESS_CONNECTED
+        && L.net.peerAlive(0)) {
+        L.awaited[0] = 1;
+        L.waiting    = 1;
+        L.net.send(0, LOBBY_MSG_BACK, &none, 1);
+        say("lobby: back from the race, waiting for %s", L.hostName);
+        showJoined(gf);
+        return;
+    }
+    if (L.wasHost) {
+        say("lobby: back from the race, the network went");
+        linkDown();
+        offNotice(gf);
+    } else {
+        say("lobby: back from the race, %s lost", L.hostName);
+        linkDown();
+        notice(gf, PORTLANG_LINK_LOST, L.hostName, LS_ASK);
+    }
 }
 
 static void tick(BGameFlow* gf)
@@ -520,8 +644,10 @@ static void tick(BGameFlow* gf)
                 offNotice(gf);
                 break;
             }
+            for (int i = 0; i < L.net.peerCount(); i++) readBack(i);
             // A place kept for one that went would keep the next out.
-            if (clientsAlive() != L.net.peerCount()) L.net.forgetLost();
+            if (clientsAlive() != L.net.peerCount()) forgetLost();
+            backDone();
             showList(gf);
             break;
 
@@ -538,6 +664,11 @@ static void tick(BGameFlow* gf)
             while (L.net.recv(0, &m)) {
                 LobbyRace race;
 
+                if (m.type == LOBBY_MSG_BACK && L.awaited[0]) {
+                    L.awaited[0] = 0;
+                    say("lobby: %s is back", L.hostName);
+                    backDone();
+                }
                 if (m.type != LOBBY_MSG_START || m.len < 2) continue;
                 say("lobby: started by %s, place %d of %d", L.hostName,
                     m.data[1], m.data[0]);
@@ -666,6 +797,11 @@ void lobby_cpu_wish(LobbyCpuFn fn)
     L.cpuFn = fn;
 }
 
+void lobby_back_next(void)
+{
+    L.backNext = 1;
+}
+
 void lobby_notice_next(int32_t id, const char* name)
 {
     L.nextNotice = id;
@@ -681,17 +817,24 @@ void lobby_callback(BGameFlow* gf, BScreenMessage msg,
                     BScreenCallbackData* data)
 {
     switch (msg) {
-        // Back from the host's setup: hosting, or the mode again. Coming
-        // back from car select takes the link down: the question again,
-        // as at the start, after the race's notice if it left one. A
-        // console lost with this one's wireless off was this one: that is
-        // the notice.
+        // Back from the host's setup: hosting, or the mode again. Back from
+        // the race: hosting, or the wait for the host, the link kept.
+        // Coming back from car select takes the link down: the question
+        // again, as at the start, after the race's notice if it left one.
+        // A console lost with this one's wireless off was this one: that
+        // is the notice.
         case BMSG_SCREEN_ACTIVATE:
             L.popup = -1;
             if (L.setup) {
                 setupOver(gf);
                 break;
             }
+            if (L.backNext && !L.nextNotice) {
+                L.backNext = 0;
+                backFromRace(gf);
+                break;
+            }
+            L.backNext = 0;
             if (L.nextNotice) {
                 int32_t id = L.nextNotice;
 

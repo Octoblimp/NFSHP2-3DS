@@ -20,6 +20,8 @@
 //     message came;
 //   - a send is refused exactly when the window or the unreliable queue
 //     is full, or the message is too long;
+//   - a peek (wl_link_peek, TASKS 37f) is the message the next read
+//     takes, and leaves it there;
 //   - a damaged packet changes nothing but the malformed count: one made
 //     from a real packet with each framing rule broken in turn and its
 //     CRC made right again, one with a bit flipped, and noise.
@@ -425,6 +427,12 @@ static void side_send(Side *s, int sc, int traffic)
     }
 }
 
+static int same_msg(const WlMsg *a, const WlMsg *b)
+{
+    return a->type == b->type && a->seq == b->seq && a->len == b->len
+        && memcmp(a->data, b->data, a->len) == 0;
+}
+
 // What `s` reads, from the other side `o`.
 static void side_read(Side *s, Side *o, int sc)
 {
@@ -434,7 +442,19 @@ static void side_read(Side *s, Side *o, int sc)
 
     if (s->id == 1 && g_now >= g_sc->stallFrom && g_now < g_sc->stallTo)
         return;
-    while (wl_link_recv(&s->link, &m)) {
+    for (;;) {
+        WlMsg p, p2;
+        int   peeked = wl_link_peek(&s->link, &p), got;
+
+        // A peek is the next read, and leaves it to be read.
+        if (wl_link_peek(&s->link, &p2) != peeked
+            || (peeked && !same_msg(&p, &p2)))
+            fault("a second peek saw another", sc, g_now, peeked, 0);
+        got = wl_link_recv(&s->link, &m);
+        if (got != peeked || (got && !same_msg(&p, &m)))
+            fault("a peek was not the next read", sc, g_now, peeked, got);
+        if (!got)
+            break;
         if (m.type == 1) {
             uint32_t i = s->relGot, wait;
             int      len;

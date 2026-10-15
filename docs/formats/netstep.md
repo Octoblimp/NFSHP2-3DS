@@ -46,9 +46,10 @@ at rest: the first frame's edges are then the same on every console.
 Port 1 has read nothing on any console before GO. The clocks at GO are
 logged; they may differ between consoles (37e's).
 
-Lockstep stops (`netstep_stop`) once the race coordinator is gone, after
-a lockstep frame ran with it up (`g_lockRaced`): the coordinator is made
-in the GO loop's own flow pass.
+Lockstep stops (`netstep_stop`, "The end" below) after the frame that
+asks for the end's save (`g_lockEnd`), or once the race coordinator is
+gone (the pause's Quit), after a lockstep frame ran with it up
+(`g_lockRaced`): the coordinator is made in the GO loop's own flow pass.
 
 ### The pad
 
@@ -103,7 +104,7 @@ other side still needs, sent again every 16 ms:
 | 0x16 | `NETSTEP_MSG_PADS` | a client | header, then its pads from `first` |
 | 0x17 | `NETSTEP_MSG_FRAMES` | the host | header, then the records from `first` |
 
-The header, 15 bytes, little-endian:
+The header, 19 bytes, little-endian:
 
 | Offset | Size | |
 |---|---|---|
@@ -112,6 +113,7 @@ The header, 15 bytes, little-endian:
 | 8 | 1 | `count` |
 | 9 | 4 | the frame of the sender's last checksum (0xffffffff: none run) |
 | 13 | 2 | that checksum |
+| 15 | 4 | `stopAt`: the frames the sender ran before its stop (0xffffffff: still on; 37f) |
 
 A pad is the 8 bytes above. A record is its step `q` (1/3600 s), the
 live places' mask, then the pad of each live place in place order. A
@@ -130,8 +132,51 @@ past the delay (the first frame's long drawing), then has its own
 timeout back (`setPatience(0)`, "frames flow"). The host builds without
 a client whose link is lost, its pad at rest from then on ("place p is
 gone"). A client that loses the host goes on alone, its own pad on its
-place and the rest at rest. What more a race does then is 37f's and
-37g's.
+place and the rest at rest. What more a race does then is 37g's.
+
+## The end (TASKS 37f)
+
+Each console leaves lockstep after the same frame, as each runs the same
+flow on the same pads (`main.c`, after the frame's checksum):
+
+- the frame that asks for the end's save (`endGameAutosaveNow`, the
+  autosave completion's seam, sets `g_lockEnd`): each console then saves
+  its own player's progress on its own card, its own pad answering;
+- or the frame the coordinator went in (the pause's Quit Race, whose
+  screens the pausing pad drives on every console).
+
+There `netstep_stop(now)`, `lockhash_stop`, `netrace_end` (the link
+NETRACE_PATIENCE_MS again, through each console's save, unload and
+frontend load, and the lobby next: `lobby.md`) and a first
+`netstep_drain(now)`. The loop drains on each pass while
+`netstep_ending` says so.
+
+From the stop on, every message says how many frames its sender ran
+(`stopAt`, 4 bytes after the checksum: the header is 19 bytes; none is
+0xffffffff):
+
+- The host serves its last records on (`netstep_drain`): a client still
+  behind may need them. It ends once every client has said it stopped
+  ("every client stopped, n ms after the host"), is gone, or
+  `NETSTEP_DRAIN_MS` (10 s) have passed ("place p never said it
+  stopped; given up").
+- A client says its stop `NETSTEP_TELLS` (30) times, `NETSTEP_RESEND_MS`
+  apart, a PADS message with no pads, and reads nothing more ("the stop
+  said"): what comes next on the link is the lobby's.
+- A client logs the host's stop as it hears it ("the host stopped after
+  n frames"), the host each client's ("place p stopped after n frames").
+- Should the consoles ever part, a client that stops first has left (the
+  host goes on without it, "place p left, from frame n"), and a client
+  still on past the host's last frame goes on alone ("past the host's
+  stop, from frame n; racing alone") and says that as its stop.
+- Neither reads past a message that is not the race's
+  (`NetStepNet.peek`, `wl_link_peek`): it is the lobby's
+  (`LOBBY_MSG_BACK`), left for it, and says its sender has gone on, as a
+  stop would ("place p has gone on, its stop unheard"; a client's "the
+  host has gone on, from frame n; racing alone").
+
+The lobby gives the link its own timeout back once every other console
+still on is back (`lobby.md`, "After the race").
 
 ## The checksums
 
@@ -151,9 +196,13 @@ repeats and reorders, and checks each record each console runs: a clean
 link, a lossy one, a slow one and one slower than the delay; either side
 slow, the client's GO late, the first frame stalling for seconds; eight
 on a lossy link; clients and the host gone; a checksum differing; a
-place not racing; the host stopping; netrace's messages on the same
-link. 20 scenarios, faults 0. `--mutate`: 107 mutations, 104 caught, 3
-equivalent (named in the check).
+place not racing; junk on the race's link. Since 37f, the end: both
+or all stopping on a clean, lossy or slow link, either side slow or
+held after its stop, a console gone or its link lost at the stop, the
+link out at the stop, the lobby's back message coming before the race's
+last, each side stopping alone or before the other, a client's stop
+unheard. 39 scenarios, faults 0. `--mutate`: 148 mutations, 146
+caught, 2 equivalent (named in the check).
 
 ## On Azahar
 
@@ -170,5 +219,21 @@ matched, frame 0 (bae8) to frame 1200 (323a), and neither copy said one
 differed. Frames flowed from frame 32. Each copy showed its own car,
 mirror and HUD: the host its Opel Speedster in 4th, the client its
 Vauxhall VX220 in 3rd, with the same places and the same minimap on
-both, at 28 FPS each. Not tried yet: the pause menu from either console
-and the race's end (37f).
+both, at 28 FPS each.
+
+Session 106 (37f-1), with `-Quit`: after the drive the host pauses,
+moves to Quit Race and says OK. In two runs (seeds 441703d1 and
+7c0a9c9c) both copies logged the pause on port 0 on the same frame and
+the same item moves, stopped on the host's frame (2327, then 1924), and
+the host logged every client stopped 1067 and 1050 ms after it. Both
+logged the race over and came back to the lobby, and the host's next
+Start took both to Select Car again, every logged frame's parts the
+same. In the first run the host's pause was resumed at once and paused
+again 13 s later by presses the script never made, on the host's port
+alone; in the second, the host's log has D-pad left and right and A
+presses through the drive that the script did not send, so someone was
+most likely at the host's window. The pause took that A as Resume, as
+retail does. Since then each frame's presses are logged ("lockstep:
+frame N, port P's presses ..., screen ...") and so is each pause's
+port and frame ("pause: port P, frame F"). Not tried yet: the end after
+the results (Quit or Next Race once the race is over).

@@ -22,7 +22,11 @@ shows, sends and ends with (the harness's header has the list):
     names past ASCII; a console with no wireless race, which netrace
     leaves alone;
   - the host's CPU racers (TASKS 37c-2): in front of two and three
-    consoles, one console gone before its car, and a Lap Knockout's laps.
+    consoles, one console gone before its car, and a Lap Knockout's laps;
+  - the race's end (TASKS 37f): a racing console out of the race, the
+    link's patience the race's again for the way back and the lobby told;
+    a client racing alone after the host went the same; while loading,
+    with no wireless race, or a second time, nothing.
 
 The harness prints "faults 0" after each scenario that holds and "total
 faults 0" at the end. A mutant is caught only when the harness finds a
@@ -330,7 +334,8 @@ MUTATIONS = [
       "R->driver[p] = -1;\n    if (R->net.setPatience)",
       "    if (R->net.setPatience)"),
     M("nr-begin-patience", "if (R->net.setPatience) "
-      "R->net.setPatience(NETRACE_PATIENCE_MS);", "(void)0;"),
+      "R->net.setPatience(NETRACE_PATIENCE_MS);\n    say(\"netrace: begin",
+      "(void)0;\n    say(\"netrace: begin"),
     M("nr-begin-ai", "    if (R->host) {\n        TheRaceParameters.NumAICars",
       "    if (0) {\n        TheRaceParameters.NumAICars"),
     M("nr-begin-ai-count", "TheRaceParameters.NumAICars = race->cpu + "
@@ -402,6 +407,19 @@ MUTATIONS = [
       "                showWait(gf);", "                showWait(gf);"),
     M("nr-cb-stay", "                showWait(gf);\n            }\n",
       "            }\n"),
+    # -- the race's end (37f)
+    M("nr-end-racing", "    if (R->stage != NR_RACING) return;\n"
+      "    R->stage = NR_OFF;\n", "    R->stage = NR_OFF;\n"),
+    M("nr-end-off", "    R->stage = NR_OFF;\n    if (R->net.setPatience) "
+      "R->net.setPatience(NETRACE_PATIENCE_MS);\n    say(",
+      "    if (R->net.setPatience) R->net.setPatience(NETRACE_PATIENCE_MS);\n"
+      "    say("),
+    M("nr-end-patience", "R->net.setPatience(NETRACE_PATIENCE_MS);\n"
+      "    say(\"netrace: the race is over", "(void)0;\n"
+      "    say(\"netrace: the race is over"),
+    M("nr-end-say", "    say(\"netrace: the race is over; the lobby next\");\n",
+      ""),
+    M("nr-end-back", "    lobby_back_next();\n", ""),
 ]
 
 EQUIVALENT = {

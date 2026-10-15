@@ -547,17 +547,28 @@ void bgf_launch_frontend_menus(BGameFlow* gf)
     bgf_change_to_screen(gf, name, 0);
 }
 
+static int onStack(const BGameFlow* gf, const char* name)
+{
+    for (int k = 0; k < gf->stack.index; k++)
+        if (!strcmp(gf->stack.names[k], name)) return 1;
+    return 0;
+}
+
 // ScreenStack::Print, before and after the pops, is a debug dump.
 void bgf_unlaunch_frontend_menus(BGameFlow* gf)
 {
     int gameType = gf->hooks.gameType ? gf->hooks.gameType(gf->hooks.user)
                                       : 0;
     int demo = gf->hooks.raceDemo ? gf->hooks.raceDemo(gf->hooks.user) : 0;
+    const char* back = gf->hooks.raceReturn
+                     ? gf->hooks.raceReturn(gf->hooks.user) : NULL;
 
     // Back to where the game type began: the event tree for 8 and 9
     // (signed, as `slti` compares), the main menu for 2 to 7, and nowhere
-    // for the rest.
-    if (gameType == 8 || gameType == 9)
+    // for the rest. The port's own first: the screen raceReturn names.
+    if (back && onStack(gf, back))
+        bgf_pop_until(gf, back);
+    else if (gameType == 8 || gameType == 9)
         bgf_pop_until(gf, "View Event Tree");
     else if (gameType >= 2 && gameType < 8)
         bgf_pop_until(gf, "New Main Menu");

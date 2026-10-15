@@ -31,7 +31,7 @@ together, frame by frame, is 37d's (`docs/formats/netstep.md`).
 | `NR_WAIT` | "Wireless Race" | The host: every car in, the build. A client: the whole setup in. BACK: `NR_CARS`. |
 | `NR_LOADING` | The load, retail's own | Its end: `NR_HOLD` (`netrace_hold`). |
 | `NR_HOLD` | The loading screen, held | The host: every console racing has loaded. A client: GO. |
-| `NR_RACING` | The race, in lockstep (`netstep.c`) | 37f's. |
+| `NR_RACING` | The race, in lockstep (`netstep.c`) | Lockstep's stop: `NR_OFF` (`netrace_end`, 37f). |
 | `NR_OFF` | No wireless race | `netrace_begin`. |
 
 ### The cars
@@ -171,7 +171,24 @@ GO is read: what comes next is the race's.
 - Only the lobby takes the link down, with its screen up. If the link is
   down anyway, netrace stops (`NR_OFF`).
 
-What a race does with a console gone is 37f's.
+What a race does with a console gone is 37g's.
+
+## The race's end (TASKS 37f)
+
+Where the race leaves lockstep (`netstep.md`, "The end": after the end's
+save is asked for, or with the race gone by the pause's Quit), `main.c`
+calls `netrace_end`. From `NR_RACING` only, it:
+
+- goes to `NR_OFF`: no wireless race from here, so `netrace_active`
+  answers 0 and car select's and track select's hooks are retail's;
+- gives the link `NETRACE_PATIENCE_MS` again: from here each console
+  saves on its own card, unloads and loads the frontend, in its own
+  time, before its lobby can say it is back;
+- says "netrace: the race is over; the lobby next";
+- and calls `lobby_back_next`, so the frontend comes back to the lobby
+  with the link up (`lobby.md`, "After the race").
+
+Anywhere else it does nothing.
 
 ## The check
 
@@ -188,7 +205,7 @@ drawing a ride from `bDefaultSeed`), and a load of the scenario's
 frames, the loop stalled for most of them, that draws a different count
 of randoms on each console.
 
-25 scenarios: two consoles; the host waiting on two cars; a client's and
+28 scenarios: two consoles; the host waiting on two cars; a client's and
 the host's BACK; eight consoles; a client gone before its car, with its
 car in, of two waited for, while waiting, at car select, during the
 load; every client gone at the start, at car select, while the host
@@ -196,7 +213,13 @@ waits; the host gone while a client waits, at car select, during the
 load; a knockout (the event's state in the event); a setup from another
 build; a client leaving; French; the host's CPU racers with two and
 three consoles, with one gone before its car, and in a Lap Knockout;
-and no wireless race at all.
+and no wireless race at all. Three are the race's end (37f,
+`netrace_end` at the scenario's event "end"): two consoles' race over,
+the end asked of the client while it still loads and of the host a
+second time changing nothing; a client that lost the host and raced
+alone; and the end of a race with no wireless race on. Each
+ended console must be `NR_OFF`, the lobby told once, and the link's
+patience NETRACE_PATIENCE_MS; anywhere else the end changes nothing.
 
 Every frame it checks the popup (one at most, only on "Wireless Race",
 the lobby's look), each console's line, the sounds, the link's patience,
@@ -214,7 +237,7 @@ any other race's as track select left them).
 
 The last line is `total faults N`, and the check passes at 0.
 
-`--mutate` makes 172 mutations of `netrace.c`. 161 are caught and 11 are
+`--mutate` makes 177 mutations of `netrace.c`. 166 are caught and 11 are
 equivalent, each named in the script with its reason.
 
 ## On Azahar

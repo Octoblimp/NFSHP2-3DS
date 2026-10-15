@@ -2816,6 +2816,12 @@ static int lobbyNetRecv(int i, WlMsg* out)
     return l ? wl_link_recv(l, out) : 0;
 }
 
+static int lobbyNetPeek(int i, WlMsg* out)
+{
+    WlLink* l = wireless_peer_link(i);
+    return l ? wl_link_peek(l, out) : 0;
+}
+
 static void lobbyLog(const char* line)
 {
     logLine("%s", line);
@@ -2848,6 +2854,7 @@ static const NetStepNet kNetStepNet = {
     .peerAlive   = wireless_peer_alive,
     .send        = netStepSend,
     .recv        = lobbyNetRecv,
+    .peek        = lobbyNetPeek,
     .setPatience = wireless_set_patience,
 };
 
@@ -2856,6 +2863,7 @@ static const NetStepNet kNetStepNet = {
 static bool g_lockWaiting;
 static bool g_lockRan;
 static bool g_lockRaced;    // a lockstep frame ran with the coordinator up
+static bool g_lockEnd;      // the frame asked for the end's save (37f)
 static u32  g_lockMenu;     // the flow's presses since the last begin
 
 static const LobbyNet kLobbyNet = {
@@ -2875,6 +2883,7 @@ static const LobbyNet kLobbyNet = {
     .send       = lobbyNetSend,
     .recv       = lobbyNetRecv,
     .radioOff   = lobbyNetRadioOff,
+    .setPatience = wireless_set_patience,
 };
 
 // The host's first count of CPU racers (lobby.h, TASKS 37c-2), from the
@@ -2975,6 +2984,7 @@ static void netRaceGoRacing(void)
     g_lockWaiting = false;
     g_lockRan = false;
     g_lockRaced = false;
+    g_lockEnd = false;
     g_lockMenu = 0;
     logLine("netstep: clocks at GO: real %ld frames %ld, world %ld frames "
             "%ld", (long)RealTimer, (long)RealTimeFrames, (long)WorldTimer,
@@ -3071,6 +3081,13 @@ static int hookRaceDemo(void* user)
 {
     (void)user;
     return RaceParametersAIDemoMode != 0 || RaceParametersReplayDemoMode != 0;
+}
+
+// A wireless race comes back to the lobby, the link up (TASKS 37f).
+static const char* hookRaceReturn(void* user)
+{
+    (void)user;
+    return netrace_active() ? LOBBY_SCREEN_NAME : NULL;
 }
 
 // The race's music. RaceCoordinator's cleanup stops it (sound::jukebox::Stop,
@@ -5243,15 +5260,22 @@ static bool lockFrame(uint32_t* ticker)
 }
 
 // The record's presses for the flow, each place's on its port: the two
-// players' (a third place's on, 37d-2).
+// players' (a third place's on, 37d-2). Each frame's presses are logged
+// with the screen they reach, as every console hears them.
 static int lockFlowInput(void)
 {
     const NetStepFrame* r = netstep_current();
     int                 redraw = 0;
 
-    for (int p = 0; r != NULL && p < JOYSTICK_PORTS; p++)
-        if ((r->live >> p) & 1)
-            redraw |= flowInput(r->pad[p].menu, p);
+    for (int p = 0; r != NULL && p < JOYSTICK_PORTS; p++) {
+        if (!((r->live >> p) & 1)) continue;
+        if (r->pad[p].menu != 0)
+            logLine("lockstep: frame %lu, port %d's presses %04x, screen %08lx",
+                    (unsigned long)netstep_frame(), p,
+                    (unsigned)r->pad[p].menu,
+                    (unsigned long)(g_flow.screen ? g_flow.screen->hash : 0));
+        redraw |= flowInput(r->pad[p].menu, p);
+    }
     return redraw;
 }
 
@@ -5515,6 +5539,18 @@ static struct PauseMenu* pauseMenuNew(void* mem)
     return pause_menu_construct((PauseMenu*)mem);
 }
 
+// RCSTATE_PAUSE's way in: the port that asked, and in a wireless race the
+// lockstep frame, so the log says whose pause it is.
+static void pauseEnter(struct PauseMenu* m, JoystickPort port)
+{
+    if (netstep_on())
+        logLine("pause: port %d, frame %lu", (int)port,
+                (unsigned long)netstep_frame());
+    else
+        logLine("pause: port %d", (int)port);
+    pause_menu_enter_pause((PauseMenu*)m, port);
+}
+
 // GrayMenuItem (0x0016d198), in retail's argument order.
 static void pauseGrayMenuItem(uint32_t item, int32_t mode, uint32_t screen)
 {
@@ -5547,9 +5583,13 @@ static BAnim* pauseMenuAnim(void)
 // endgame.c's seams, and the FED's two that TheRaceHasFinished asks.
 
 // SetAutosaveCompletionCallback (0x00247d98): what comes after the save,
-// once the Autosave screen is done -- or now, with none up.
+// once the Autosave screen is done -- or now, with none up. A wireless
+// race leaves lockstep after this frame, the same one on every console:
+// each saves its own player's progress on its own card, its own pad
+// answering (TASKS 37f).
 static void endGameAutosaveNow(void (*cb)(void))
 {
+    if (netstep_on()) g_lockEnd = true;
     bgf_set_autosave_completion_callback(&g_flow, cb);
 }
 
@@ -6145,7 +6185,7 @@ int main(int argc, char** argv)
     // RCSTATE_NONE, QUIT_RACE on to the unloading.
     gPauseMenuCtorFn = pauseMenuNew;
     gPauseMenuDestroyFn = pause_menu_destroy;
-    gPauseMenuEnterPauseFn = pause_menu_enter_pause;
+    gPauseMenuEnterPauseFn = pauseEnter;
     gSetScreenFilterPortFn = hookSetScreenFilterPort;
     gPauseMenuExitPauseFn = pause_menu_exit_pause;
     gGrayMenuItemFn = pauseGrayMenuItem;
@@ -6704,6 +6744,7 @@ int main(int argc, char** argv)
     hooks.songMonitorReset = hookSongMonitorReset;
     hooks.gameType         = hookGameType;
     hooks.raceDemo         = hookRaceDemo;
+    hooks.raceReturn       = hookRaceReturn;
     hooks.easterEggs       = hookEasterEggs;
     hooks.initSelectCar    = hookCarSelInit;
     hooks.closeSelectCar   = hookCarSelClose;
@@ -7455,6 +7496,9 @@ int main(int argc, char** argv)
             // read it (TASKS 37). A lockstep race's was pumped in its wait.
             if (wireless_state() != WIRELESS_OFF && !lockOn)
                 wireless_pump((uint32_t)osGetTime());
+            // A wireless race's end: the host's last frames served, a
+            // client's stop said (netstep.h).
+            if (netstep_ending()) netstep_drain((uint32_t)osGetTime());
             // And a wireless race's setup, through the loads too.
             if (netrace_active()) netrace_frame(&g_flow);
             // A wireless race shows this console's player alone (player.h)
@@ -7504,17 +7548,26 @@ int main(int argc, char** argv)
                 update_camera_movers();
             }
             // The lockstep frame ran: the world's checksum after it, in
-            // parts (lockhash.h), and on to the next. The race gone,
-            // lockstep ends (37f's end); not before its coordinator was
-            // ever up (the GO loop's flow makes it).
+            // parts (lockhash.h), and on to the next. Lockstep ends after
+            // the frame that asked for the end's save, or with the race
+            // gone (the pause's Quit), not before its coordinator was
+            // ever up (the GO loop's flow makes it): the race's end, and
+            // the lobby next (37f).
             if (lockOn && raceStep) {
                 netstep_done(lockhash_ran(netstep_frame(), pCurrentWorld));
                 g_lockRan = true;
                 if (pRaceCoordinator != NULL) g_lockRaced = true;
             }
-            if (netstep_on() && g_lockRaced && pRaceCoordinator == NULL) {
-                netstep_stop();
+            if (netstep_on()
+                && (g_lockEnd
+                    || (g_lockRaced && pRaceCoordinator == NULL))) {
+                uint32_t now = (uint32_t)osGetTime();
+
+                netstep_stop(now);
                 lockhash_stop();
+                netrace_end();
+                netstep_drain(now);
+                g_lockEnd = false;
             }
 
             // The Begin of unloading deleted the coordinator and is

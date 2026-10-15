@@ -2605,7 +2605,58 @@ phases.
                   the harnesses, not on Azahar.
           - [ ] 37f: the end. Results and points on each console, back
                 to the lobby or a rematch, and a player leaving
-                mid-race.
+                mid-race. Three slices: 37f-1 the end of lockstep and
+                the way back to the lobby, 37f-2 a rematch (Restart
+                Race, Next Race), 37f-3 one player leaving mid-race.
+                - [x] 37f-1, done in Session 106 (`netstep.md`, "The
+                  end"; `lobby.md`, "After the race"; `netrace.md`,
+                  "The race's end"). Every console leaves lockstep
+                  after the same frame: the one that asks for the
+                  end's save (Quit or Next Race after the results), or
+                  the one the pause's Quit Race unloads the race in.
+                  The host serves its last records until each client
+                  has said it stopped, is gone, or 10 s have passed; a
+                  client says its stop 30 times and reads nothing
+                  more; neither reads past a message of the lobby's
+                  (`wl_link_peek`). `netrace_end` gives the link
+                  netrace's long patience for each console's save,
+                  unload and frontend load, and the frontend comes
+                  back to the lobby with the link up (gameflow's
+                  `raceReturn` hook): the host's list, open to
+                  joiners, each client listed once it says it is
+                  back (`LOBBY_MSG_BACK`), Start once all are; a
+                  client's wait for the next Start. Once every
+                  console is back the link has its own timeout again.
+                  netstep_check: 39 scenarios, faults 0, 146 of 148
+                  mutations caught (2 equivalent); lobby_check: 71
+                  scenarios, 165 of 171 (6 equivalent); netrace_check:
+                  28 scenarios, 166 of 177 (11 equivalent);
+                  wlproto_check: 51 of 53 (2 equivalent).
+                - On Azahar (`run_azahar_lobby.ps1 -Consoles 2 -Race
+                  -Quit`): both passed, twice (seeds 441703d1 and
+                  7c0a9c9c): the host's pause and Quit Race OK, both
+                  stopped on the host's frame (2327, 1924), every
+                  client stopped about 1.05 s after the host, both back
+                  in the lobby and every console back, the host's
+                  Start again, both at Select Car again, every logged
+                  frame's parts the same. Presses from someone at the
+                  host's window once resumed the pause (A on Resume, as
+                  retail); the log now has each lockstep frame's
+                  presses and each pause's port and frame.
+                - Not tried on Azahar: the end through the results
+                  (the race has to finish, and the gas alone does not
+                  finish it). The pause's Quit and the results' Quit
+                  share everything past the stop.
+                - 37f-2: after the end's save each console races on
+                  alone: Next Race (and Restart Race from the pause or
+                  the results) must go back into lockstep, on a new
+                  seed from the host, or go back to the lobby until it
+                  does.
+                - 37f-3: the pause's screens are driven by the pad
+                  that paused, on every console, so one player's Quit
+                  Race ends the race for all, as retail's split screen
+                  does. Leaving alone (the others racing on, its car
+                  to the AI) is 37g's hand-over.
           - [ ] 37g: a console lost mid-race. The user, 2026-10-14:
                 when a console disconnects, the whole race pauses and
                 tries to reconnect it. The lost console rejoins the

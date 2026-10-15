@@ -23012,3 +23012,102 @@ second is world 186 s on lap 1 (`3DS Files/nfshp2_debug.txt` lines
 37f, 37g, TASKS 61, 46, 60 and 59. Still to ask: the road's blink on
 the device again (TASKS 64), 47's bridge, 52's popups, and the next
 device log's `sends:` line for 65.
+
+## Session 106 -- 37f-1, the end of lockstep and back to the lobby (done)
+
+The user's standing word: continue from the last session and never
+stop until the port is at 100%, one task at a time. 37f is in three
+slices now: 37f-1 the end of lockstep and the way back to the lobby
+(this), 37f-2 a rematch (Restart Race, Next Race), 37f-3 one player
+leaving mid-race.
+
+### The design
+
+- Every console runs the same flow on the same pads, so all of them
+  leave lockstep after the same frame: the one that asks for the end's
+  save (Quit or Next Race after the results; `endGameAutosaveNow` sets
+  `g_lockEnd`), or the one the pause's Quit Race unloads the race in
+  (the coordinator gone after it was up). From the next frame each
+  console's save is its own, on its own card, with its own pad.
+- The end on the link: every message carries `stopAt`, the frames its
+  sender ran before its stop (the header is 19 bytes now). The host
+  serves its last records until each client has said it stopped, is
+  gone, or 10 s have passed (`NETSTEP_DRAIN_MS`). A client says its
+  stop 30 times, 16 ms apart, and reads nothing more. Neither reads past
+  a message that is not the race's (`wl_link_peek`): it is the lobby's.
+  Should two consoles ever part, a client stopping first has left the
+  host's race, and a client still on past the host's last frame goes
+  on alone and says that as its stop.
+- `netrace_end`: `NR_RACING` to `NR_OFF`, netrace's long patience on
+  the link again (each console saves, unloads and loads the frontend in
+  its own time), and the lobby next (`lobby_back_next`).
+- The frontend's relaunch pops to the lobby, not the main menu:
+  `gameflow.c`'s new `raceReturn` hook names it while netrace is on.
+- The lobby, back from the race with the link up: the host's list open
+  again, each client awaited and sent `LOBBY_MSG_BACK` (0x18), listed
+  once its own comes, Start once none is awaited; a client sends its
+  own and waits for the next Start. Once every other console still on
+  is back, each gives the link its own timeout again ("every console
+  back"). A client gone while awaited loses its place to the next, as
+  the peers do.
+
+### What changed
+
+- `netstep.c/h`: `netstep_stop(now)`, `netstep_drain`,
+  `netstep_ending`; `stopAt`, `left`, `hostStop`, `tells`; the peek in
+  both reads; `NETSTEP_TELLS`, `NETSTEP_DRAIN_MS`.
+- `wlproto.c/h`: `wl_link_peek`.
+- `netrace.c/h`: `netrace_end`.
+- `lobby.c/h`: `LOBBY_MSG_BACK`, `lobby_back_next`, `backFromRace`,
+  `readBack`, `backDone`, `forgetLost`, `LobbyNet.setPatience`.
+- `gameflow.c/h`: `raceReturn` in `bgf_unlaunch_frontend_menus`.
+- `main.c`: the peek for netstep, `g_lockEnd`, the stop after the
+  frame's checksum (`netstep_stop`, `lockhash_stop`, `netrace_end`, a
+  first drain), the drain each loop while `netstep_ending`,
+  `hookRaceReturn`; the log's lines for each lockstep frame's presses
+  and each pause's port (`pauseEnter`).
+- `tools/run_azahar_lobby.ps1 -Quit`: after the drive the host pauses,
+  moves to Quit Race (the log's highlighted item), OK; every copy must
+  stop on the host's frame and come back to the lobby; the host starts
+  again once all are back, and every copy must reach Select Car again.
+- Docs: `netstep.md` ("The end"), `lobby.md` ("After the race"),
+  `netrace.md` ("The race's end"), `end-game.md`, `wireless.md`.
+
+### Checks
+
+- netstep_check: 39 scenarios (19 of the end), faults 0; `--mutate`
+  148, 146 caught, 2 equivalent.
+- lobby_check: 71 scenarios (13 back from the race), faults 0; a new
+  check that no popup is put up again just as it was on a frame with no
+  press; `--mutate` 171 (one of gameflow's return), 165 caught, 6
+  equivalent.
+- netrace_check: 28 scenarios (3 of the end), faults 0; `--mutate` 177,
+  166 caught, 11 equivalent.
+- wlproto_check: a peek before each read in every scenario, faults 0;
+  `--mutate` 53, 51 caught, 2 equivalent.
+- tools/build_cia.ps1: built, relocations OK, shaders OK.
+- `run_azahar_lobby.ps1 -Consoles 2 -Race -Quit -Drive 30`: both
+  passed, twice. Seed 441703d1: the stop on frame 2327 on both, every
+  client stopped 1067 ms after the host; seed 7c0a9c9c: frame 1924,
+  1050 ms. Both logged the race over and back in the lobby, every
+  console back, the host's Start again, Select Car again on both, every
+  logged frame's parts the same. The first run's failure was the
+  script's (the popup's dismiss line names no button; "to ok" now waits
+  for the bloom on BUTTON1, e0105663).
+- In one run the host's first pause was resumed at once, and the race
+  paused again 13 s later with no START from the script. The new log
+  lines (`main.c`: "lockstep: frame N, port P's presses", and "pause:
+  port P, frame F" by `pauseEnter`) showed the next run's pause on port
+  0 the frame after its START, as it should be, and D-pad left, right and
+  A presses on the host's port through the drive that the script never
+  sent: someone at the host's window. A on the pause is Resume, as in
+  retail. Not the port's.
+
+### Next
+
+37f-2: Restart Race resets the race in place (the coordinator kept),
+so it should stay in lockstep; Next Race goes through the save, where
+lockstep stops, and would race on alone: it must load and GO again in
+step. Then 37f-3, 37g, TASKS 61, 46, 60 and 59. Still to ask: the
+road's blink on the device again (TASKS 64), 47's bridge, 52's popups,
+and the next device log's `sends:` line for 65.

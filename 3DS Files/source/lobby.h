@@ -34,9 +34,18 @@
 // Start goes to every client as LOBBY_MSG_START, with the host's game
 // type and cops, and every console then goes on to "Select Car", the
 // lobby pushed under it. Coming back to the
-// lobby takes the network down. What the race needs over the link (the
+// lobby before the race takes the network down. What the race needs over the link (the
 // cars, the race's parameters, a barrier) is netrace.c's (37c), which the
 // lobby tells what Start settled.
+//
+// After the race (TASKS 37f, lobby_back_next) the frontend comes back to
+// the lobby with the link up: the host's list again, open to joiners, and
+// a client's wait for the host's next Start. Each says it is back
+// (LOBBY_MSG_BACK). The host lists a client once it is, and has Start
+// again once every client still on is; each console, once every other
+// still on is back, gives the link its own timeout again (the race's end
+// left it long for the loads). With the link gone on the way, the line
+// that says so, as before.
 //
 // Host-buildable: the link is the LobbyNet's, wireless.h's on the 3DS and
 // a script in tools/src/lobby_test.c.
@@ -65,6 +74,7 @@ typedef struct BGameFlow BGameFlow;
 // The lobby's reliable messages. 37c's come after.
 enum {
     LOBBY_MSG_START = 0x10,     // the host's: the race is on
+    LOBBY_MSG_BACK  = 0x18,     // either's: back from the race (37f)
 };
 
 // The link, as wireless.h has it. The lobby calls nothing else.
@@ -90,6 +100,9 @@ typedef struct LobbyNet {
     // 62, wireless_radio_off): asked before start, and each frame with
     // the link up. NULL: never.
     int           (*radioOff)(void);
+    // The silence that loses a console from now on, 0 for the link's own
+    // (wireless_set_patience). NULL: never set.
+    void          (*setPatience)(uint32_t ms);
 } LobbyNet;
 
 // What the lobby says it did, for the log and the check.
@@ -141,6 +154,10 @@ void lobby_on_setup(LobbySetupFn fn);
 // $NAME (Latin-1, as lobby_latin1 makes it) and OK, before the question:
 // the race lost a console on the way to it.
 void lobby_notice_next(int32_t id, const char* name);
+
+// When the lobby is next come back to, it is from the race with the link
+// up (netrace_end): the host's list or a client's wait, as before Start.
+void lobby_back_next(void);
 
 // The ScreenCallback, for kScreens[]: LOBBY_SCREEN_NAME's.
 void lobby_callback(BGameFlow* gf, BScreenMessage msg,

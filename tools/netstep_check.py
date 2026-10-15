@@ -18,8 +18,17 @@ each record each console runs (the harness's header has the list):
     three; every client gone; a second with nothing through;
   - a checksum that differs, the host as fast and slower, and the
     NetStepDifferFn told of each, as the line says (37e); a place not
-    racing; the host stopping; netrace's messages on the same link,
-    half of them shaped as netstep's.
+    racing; junk of netstep's own types on the race's link, its lengths
+    off;
+  - the end (37f): every console stopping on the same frame, on a clean
+    link, a lossy one, the host or the client slow, eight at once; a
+    loop held seconds after its stop (the save); a client gone, the link
+    out at the stop, a console's link lost at its stop; the lobby's
+    message after the stop, at once or seconds on, never read by
+    netstep; the parted ends (the host's stop alone, the client's
+    alone, the client's first, the host's lobby before the client's
+    stop); the client's stop unheard, given up on or heard by its
+    lobby's message.
 
 The harness prints "faults 0" after each scenario that holds and "total
 faults 0" at the end. A mutant is caught only when the harness finds a
@@ -140,8 +149,8 @@ MUTATIONS = [
     M("ns-takepads-len",
       "if (m->len != HEADER + (size_t)count * PAD_WIRE) return;",
       "if (m->len < HEADER) return;"),
-    M("ns-takepads-first", "    first = get32(d + 4);\n    if (need > S->need[p])",
-      "    first = get32(d + 4) + 1;\n    if (need > S->need[p])"),
+    M("ns-takepads-first", "    first = get32(d + 4);\n    stop  = get32(d + 15);",
+      "    first = get32(d + 4) + 1;\n    stop  = get32(d + 15);"),
     M("ns-takepads-need", "    if (need > S->need[p]) S->need[p] = need;\n",
       ""),
     M("ns-takepads-hash", "    takeHash(p, d + 9);\n", ""),
@@ -166,24 +175,36 @@ MUTATIONS = [
       "            if (!((r->live >> q) & 1)) continue;\n", ""),
     M("ns-sendframes-count",
       "    b[8] = (uint8_t)count;\n    putHash(b + 9);\n"
-      "    if (!S->net.send(S->peer[p]",
+      "    put32(b + 15, S->stopAt);\n    if (!S->net.send(S->peer[p]",
       "    b[8] = (uint8_t)(count ? count - 1 : 0);\n    putHash(b + 9);\n"
-      "    if (!S->net.send(S->peer[p]"),
+      "    put32(b + 15, S->stopAt);\n    if (!S->net.send(S->peer[p]"),
     M("ns-sendframes-hash",
-      "    putHash(b + 9);\n    if (!S->net.send(S->peer[p]",
-      "    memset(b + 9, 0xff, 6);\n    if (!S->net.send(S->peer[p]"),
+      "    putHash(b + 9);\n    put32(b + 15, S->stopAt);\n"
+      "    if (!S->net.send(S->peer[p]",
+      "    memset(b + 9, 0xff, 6);\n    put32(b + 15, S->stopAt);\n"
+      "    if (!S->net.send(S->peer[p]"),
+    M("ns-sendframes-stop",
+      "    put32(b + 15, S->stopAt);\n    if (!S->net.send(S->peer[p]",
+      "    put32(b + 15, NETSTEP_NONE);\n    if (!S->net.send(S->peer[p]"),
     M("ns-sendframes-type",
       "S->net.send(S->peer[p], NETSTEP_MSG_FRAMES, b, o)",
       "S->net.send(S->peer[p], NETSTEP_MSG_PADS, b, o)"),
     M("ns-sendframes-last", "    S->lastSend[p] = now;\n", ""),
     M("ns-sendframes-fresh", "    S->fresh[p]    = 0;\n", ""),
-    M("ns-hostpoll-peer", "if (p == S->place || S->peer[p] < 0) continue;",
-      "if (p == S->place) continue;"),
-    M("ns-hostpoll-type", "if (m.type == NETSTEP_MSG_PADS) takePads(p, &m);",
-      "takePads(p, &m);"),
-    M("ns-hostpoll-alive",
-      "if (p == S->place || !((S->live >> p) & 1) || alive(p)) continue;",
-      "if (p == S->place || !((S->live >> p) & 1)) continue;"),
+    M("ns-serving-live", "return p != S->place && ((S->live >> p) & 1) && ",
+      "return p != S->place && "),
+    M("ns-serving-left", " && !S->left[p] && alive(p);", " && alive(p);"),
+    M("ns-serving-alive", " && !S->left[p] && alive(p);", " && !S->left[p];"),
+    M("ns-hostread-type",
+      "            if (m.type != NETSTEP_MSG_PADS) {\n                S->left[p] = 1;",
+      "            if (0) {\n                S->left[p] = 1;"),
+    M("ns-hostread-goneon",
+      "                S->left[p] = 1;\n                say(\"netstep: place %d has gone on",
+      "                say(\"netstep: place %d has gone on"),
+    M("ns-hostpoll-left", "        if (S->left[p])\n            say(\"netstep: place %d left",
+      "        if (0)\n            say(\"netstep: place %d left"),
+    M("ns-hostpoll-alive", "        else if (!alive(p))\n            say(",
+      "        else if (0)\n            say("),
     M("ns-hostpoll-drop", "        S->live &= (uint8_t)~(1u << p);\n", ""),
     M("ns-hostpoll-build", "    hostBuild();\n    for", "    for"),
     M("ns-hostpoll-sendlive",
@@ -191,10 +212,41 @@ MUTATIONS = [
       "        if (S->fresh[p]",
       "if (p == S->place) continue;\n        if (S->fresh[p]"),
     M("ns-hostpoll-resend",
-      "if (S->fresh[p] || now - S->lastSend[p] >= NETSTEP_RESEND_MS)",
-      "if (S->fresh[p])"),
-    M("ns-hostpoll-fresh", "if (S->fresh[p] || now - S->lastSend[p]",
-      "if (now - S->lastSend[p]"),
+      "if (S->fresh[p] || now - S->lastSend[p] >= NETSTEP_RESEND_MS)\n"
+      "            sendFrames(p, now);\n    }\n}",
+      "if (S->fresh[p])\n            sendFrames(p, now);\n    }\n}"),
+    M("ns-hostpoll-fresh",
+      "if (S->fresh[p] || now - S->lastSend[p] >= NETSTEP_RESEND_MS)\n"
+      "            sendFrames(p, now);\n    }\n}",
+      "if (now - S->lastSend[p] >= NETSTEP_RESEND_MS)\n"
+      "            sendFrames(p, now);\n    }\n}"),
+    # -- the host's end
+    M("ns-hostdrain-read",
+      "    hostRead();\n    for (p = 0; p < NETSTEP_MAX; p++) {\n"
+      "        if (!serving(p)) continue;\n        waiting = p;",
+      "    for (p = 0; p < NETSTEP_MAX; p++) {\n"
+      "        if (!serving(p)) continue;\n        waiting = p;"),
+    M("ns-hostdrain-send",
+      "        waiting = p;\n        if (S->fresh[p] || now - S->lastSend[p]"
+      " >= NETSTEP_RESEND_MS)\n            sendFrames(p, now);\n",
+      "        waiting = p;\n"),
+    M("ns-hostdrain-resend",
+      "        waiting = p;\n        if (S->fresh[p] || now - S->lastSend[p]"
+      " >= NETSTEP_RESEND_MS)",
+      "        waiting = p;\n        if (S->fresh[p])"),
+    M("ns-hostdrain-done",
+      "        S->ending = 0;\n        say(\"netstep: every client stopped",
+      "        say(\"netstep: every client stopped"),
+    M("ns-hostdrain-limit", "now - S->endFrom >= NETSTEP_DRAIN_MS",
+      "now - S->endFrom >= 1000"),
+    M("ns-hostdrain-giveup",
+      "        S->ending = 0;\n        say(\"netstep: place %d never said",
+      "        say(\"netstep: place %d never said"),
+    M("ns-takepads-stop", "    if (stop != NETSTEP_NONE && !S->left[p]) {",
+      "    if (0) {"),
+    M("ns-takepads-left",
+      "        S->left[p] = 1;\n        say(\"netstep: place %d stopped after",
+      "        say(\"netstep: place %d stopped after"),
     # -- a client's
     M("ns-takeframes-walk",
       "        o += 2 + (size_t)bits(d[o + 1]) * PAD_WIRE;\n",
@@ -220,24 +272,53 @@ MUTATIONS = [
       "    if (recIn(S->built)) S->built++;"),
     M("ns-sendpads-need",
       "    put32(b, S->built);\n    put32(b + 4, first);\n"
-      "    for (n = first; n < S->put",
+      "    for (n = first; n < end",
       "    put32(b, S->built + 1);\n    put32(b + 4, first);\n"
-      "    for (n = first; n < S->put"),
+      "    for (n = first; n < end"),
     M("ns-sendpads-first",
-      "    put32(b + 4, first);\n    for (n = first; n < S->put",
-      "    put32(b + 4, first + 1);\n    for (n = first; n < S->put"),
+      "    put32(b + 4, first);\n    for (n = first; n < end",
+      "    put32(b + 4, first + 1);\n    for (n = first; n < end"),
+    M("ns-sendpads-end",
+      "uint32_t end = S->stopAt == NETSTEP_NONE ? S->put : first;",
+      "uint32_t end = S->put;"),
     M("ns-sendpads-count",
       "    b[8] = (uint8_t)count;\n    putHash(b + 9);\n"
-      "    if (!S->net.send(S->peer[0]",
+      "    put32(b + 15, S->stopAt);\n    if (!S->net.send(S->peer[0]",
       "    b[8] = (uint8_t)(count ? count - 1 : 0);\n    putHash(b + 9);\n"
-      "    if (!S->net.send(S->peer[0]"),
+      "    put32(b + 15, S->stopAt);\n    if (!S->net.send(S->peer[0]"),
+    M("ns-sendpads-stop",
+      "    put32(b + 15, S->stopAt);\n    if (!S->net.send(S->peer[0]",
+      "    put32(b + 15, NETSTEP_NONE);\n    if (!S->net.send(S->peer[0]"),
     M("ns-sendpads-own", "encodePad(b + o, &S->pads[S->place][n & MASK]);",
       "encodePad(b + o, &S->pads[0][n & MASK]);"),
     M("ns-sendpads-type", "S->net.send(S->peer[0], NETSTEP_MSG_PADS, b, o)",
       "S->net.send(S->peer[0], NETSTEP_MSG_FRAMES, b, o)"),
     M("ns-sendpads-last", "    S->lastSend[S->place] = now;\n", ""),
     M("ns-clientpoll-type",
-      "if (m.type == NETSTEP_MSG_FRAMES) takeFrames(&m);", "takeFrames(&m);"),
+      "            if (m.type != NETSTEP_MSG_FRAMES) {\n                on = 1;",
+      "            if (0) {\n                on = 1;"),
+    M("ns-clientpoll-on", "                on = 1;\n                break;",
+      "                break;"),
+    M("ns-clientpoll-past", "&& S->frame >= S->hostStop)) {",
+      "&& S->frame > S->hostStop)) {"),
+    M("ns-clientpoll-stopat", "            S->stopAt = S->frame;\n", ""),
+    M("ns-clientpoll-tells", "            S->tells  = NETSTEP_TELLS;\n", ""),
+    M("ns-takeframes-hoststop",
+      "    if (get32(d + 15) != NETSTEP_NONE && S->hostStop == NETSTEP_NONE) {",
+      "    if (0) {"),
+    M("ns-takeframes-hoststop-once",
+      "    if (get32(d + 15) != NETSTEP_NONE && S->hostStop == NETSTEP_NONE) {",
+      "    if (get32(d + 15) != NETSTEP_NONE) {"),
+    # -- a client's end
+    M("ns-tell-none", "    if (S->tells <= 0) return;\n    if (!alive(0))",
+      "    if (!alive(0))"),
+    M("ns-tell-alive", "    if (!alive(0)) {\n        S->tells = 0;",
+      "    if (0) {\n        S->tells = 0;"),
+    M("ns-tell-resend",
+      "    if (now - S->lastSend[S->place] < NETSTEP_RESEND_MS) return;\n"
+      "    sendPads(now);\n    if (--S->tells",
+      "    sendPads(now);\n    if (--S->tells"),
+    M("ns-tell-count", "    if (--S->tells == 0) say(", "    if (S->tells == 0) say("),
     M("ns-clientpoll-alive", "        if (!alive(0)) {\n", "        if (0) {\n"),
     M("ns-clientpoll-alone", "            S->alone = 1;\n", ""),
     M("ns-clientpoll-alone-live",
@@ -269,7 +350,23 @@ MUTATIONS = [
       "    for (n = 0; n < NETSTEP_DELAY - 1; n++)\n"),
     M("ns-start-built", "    S->built = NETSTEP_DELAY;\n", "    S->built = 0;\n"),
     M("ns-start-put", "    S->put   = NETSTEP_DELAY;\n", "    S->put   = 0;\n"),
+    M("ns-start-stopat", "    S->stopAt   = NETSTEP_NONE;\n", ""),
+    M("ns-start-hoststop", "    S->hostStop = NETSTEP_NONE;\n", ""),
     M("ns-stop-off", "    S->on = 0;\n", ""),
+    M("ns-stop-at", "    if (S->stopAt == NETSTEP_NONE) S->stopAt = S->frame;",
+      "    S->stopAt = S->frame;"),
+    M("ns-stop-from", "    S->endFrom = now;\n", ""),
+    M("ns-stop-host", "        S->ending = 1;\n    } else {",
+      "        S->ending = 0;\n    } else {"),
+    M("ns-stop-tells", "        if (!S->alone) S->tells = NETSTEP_TELLS;\n", ""),
+    M("ns-stop-tells-alone", "        if (!S->alone) S->tells = NETSTEP_TELLS;",
+      "        S->tells = NETSTEP_TELLS;"),
+    M("ns-stop-client", "        S->ending = S->tells > 0;", "        S->ending = 0;"),
+    M("ns-drain-off", "    if (!S->ending) return;\n    if (S->host) {",
+      "    if (S->host) {"),
+    M("ns-drain-tell", "    tell(now);\n    if (S->tells <= 0) S->ending = 0;",
+      "    if (S->tells <= 0) S->ending = 0;"),
+    M("ns-drain-end", "    if (S->tells <= 0) S->ending = 0;\n}", "}"),
     M("ns-put-pad", "    S->pads[S->place][i]   = *pad;\n", ""),
     M("ns-put-mark", "    S->padFor[S->place][i] = S->put;\n", ""),
     M("ns-put-q", "    S->q[i]                = q;\n", ""),
@@ -296,10 +393,9 @@ EQUIVALENT = {
     # lands in slot 63 with both checksums still 0 there; once frame 63
     # has run, the slot is not that frame's.
     "ns-takehash-none",
-    # Every message netstep sends is as long as what it holds; the checks
-    # are for one that is not.
-    "ns-takepads-len",
-    "ns-takeframes-len",
+    # The peers past the consoles are never read: every loop over the
+    # places goes by the places racing, which netrace gives inside them.
+    "ns-start-peer",
 }
 
 

@@ -170,6 +170,43 @@ cars that mode makes available), so a client's car select offers what
 the host's does. A start of two bytes, from a host before TASKS 63,
 leaves them -1 and 0, and nothing is put.
 
+### After the race (TASKS 37f)
+
+A wireless race comes back to the lobby with the link up, not to the
+main menu. Once the race leaves lockstep (`netstep.md`, "The end"),
+`netrace_end` calls `lobby_back_next`, and the frontend's relaunch pops
+to the lobby: `gameflow.c`'s `bgf_unlaunch_frontend_menus` asks the
+`raceReturn` hook first, which names `LOBBY_SCREEN_NAME` while netrace
+is on (`main.c`'s `hookRaceReturn`), and pops to it when it is on the
+stack, as it is under car select. Retail's return by game type is
+unchanged for every other race.
+
+On ACTIVATE with that set (`backFromRace`):
+
+- The host, still hosting: its network open again, "Waiting for
+  players:" again, and each client still on awaited: sent
+  `LOBBY_MSG_BACK` (0x18, one byte), a reliable message. A client is
+  listed once its own `LOBBY_MSG_BACK` is read ("name is back"); Start
+  shows only once no client still on is awaited. A console that joins
+  the open network after the race was never in it, so it is listed at
+  once. One gone while awaited goes, and the next in line takes its
+  place, its flag with it (`forgetLost`), as the peers' do.
+- A client, still on its host's network: sends its `LOBBY_MSG_BACK`,
+  waits for the host's next Start ("Waiting for $NAME to start the
+  race.", the host's own back read on the way), and goes on with it as
+  before.
+- Each, once every other console still on is back, or gone, gives the
+  link its own timeout again (`LobbyNet.setPatience(0)`, "every
+  console back"): the race's end gave it netrace's long one, for each
+  console's save, unload and frontend load.
+- Everything else read on the way is the race's last (its records, a
+  stop said again) and is dropped: none of it reaches the next race.
+- With the network gone on the way, or the host lost, the line that
+  says so, as before; with the console's wireless off, that line. The
+  race's own notice (`lobby_notice_next`) wins over the return: the
+  link goes down. The return is never left over for the next time the
+  lobby comes up, nor are the awaited flags once the link goes down.
+
 ### Wireless communication off (TASKS 62)
 
 The 3DS can have its wireless communication turned off: from the HOME
@@ -323,6 +360,12 @@ Car, then GO on one seed, 4 racers, every logged frame's parts the same.
 With `-CopsOn` the host hosted Hot Pursuit, B logged cops on, and the
 race had 4 cops; both passed, every logged frame the same.
 
+Session 106 (TASKS 37f-1), 2 consoles with `-Race -Quit`: the host's
+Quit Race from the pause ended the race on both. The host was back
+hosting with "1 to come" and B came back a second later; both logged
+"every console back", and the host's Start took both to Select Car
+again. Two runs, both passed.
+
 ## The check
 
 `tools/lobby_check.py` builds `tools/src/lobby_test.c` with `lobby.c`,
@@ -347,7 +390,14 @@ host's setup (TASKS 63): Hot Pursuit through the Challenge to hosting
 and a start; World Racing, and the highlight on it when asked again; B
 on the mode; B on the Challenge; the Challenge's Setup and back, then
 its select; the same with a client; the wireless off during the setup;
-a start of two bytes from a host before 63. The harness's Challenge and
+a start of two bytes from a host before 63. Thirteen are back from the
+race (TASKS 37f, the key "RB"): the host's list with one client, two
+and a third that joins after the race, the next race started; one never
+back; one gone while awaited and its place taken; the network gone or
+the wireless off on the way; a joiner's wait and its next race, the
+host lost on the way or while awaited; the race's notice winning, and
+a race joined again after it with no return left over; the host's B
+with a client awaited, then Host again. The harness's Challenge and
 Single Race Setup are screens of nothing whose select and BACK are
 presses. Every host scenario's Host goes through the mode (Hot Pursuit)
 and the setup's select in one press.
@@ -382,12 +432,22 @@ At every frame and after every press it checks:
 - the mode Start hands on, on the host (the flow's cops as told) and on
   a joiner (the one it read, or none from a two-byte start);
 - back out only with the link down;
+- back from the race (37f): the frontend on the lobby by `raceReturn`;
+  the host's network open again and each client still on sent one
+  `LOBBY_MSG_BACK`, a joiner's one sent to the host; a client listed
+  once its own is read, and Start only once every client still on is;
+  the race's timeout kept until every other console still on is back,
+  then the link's own, given back once; a client gone while awaited,
+  its place taken by the next, and one who comes after listed at once;
+  no return and no awaited flag left over once the link goes down;
+- no popup put up again just as it was on a frame with no press;
 - where each scenario ends, and the lines its log must say, in order.
 
 The last line is `total faults N`, and the check passes at 0.
 
-`--mutate` makes 130 mutations of `lobby.c` (out of tree, in parallel).
-127 are caught and 3 are equivalent, named in the script:
+`--mutate` makes 170 mutations of `lobby.c` and one of `gameflow.c`'s
+return (out of tree, in parallel). Of the 171, 165 are caught and 6
+are equivalent, named in the script:
 
 - `lb-latin1-two`: a two-byte lead's bit 5 is always clear, so masking
   it again changes nothing.
@@ -395,3 +455,11 @@ The last line is `total faults N`, and the check passes at 0.
   leaving the screen, so the index it leaves is never read.
 - `lb-ask-hide`: Ask is only reached after a popup was dismissed or the
   screen came up, so there is no popup left for it to hide.
+- `lb-awaiting-alive`: a console is awaited only while it is on (the
+  return sets the flag from `peerAlive`), and the tick forgets one gone,
+  its flag with it, before anything asks.
+- `lb-start-awaiting`: Start is not on the list while one is awaited,
+  and only the race's return makes one awaited.
+- `lb-back-join-alive`: the host's peer goes down only with the link
+  LOST (`wireless.c`'s `peer_lost` sets both), so CONNECTED alone says
+  the host is on.

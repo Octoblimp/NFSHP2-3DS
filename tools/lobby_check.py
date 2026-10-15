@@ -38,7 +38,16 @@ what it shows and does each frame (the harness's header has the list):
     stack under car select, the setup told on exactly while it is up, the
     wireless off during it, never the mode with the wireless off; the
     start's game type and cops on every console, and a start without them
-    from a host before 63.
+    from a host before 63;
+  - back from the race (TASKS 37f): the race's end leaves the lobby on
+    the stack's top; the host's network open again, each client still on
+    told and awaited, listed once it says it is back and Start once every
+    one is, the race's last passed over; one never back, one gone and its
+    place taken by the next, one that comes after; the network gone or the
+    wireless off on the way; a joiner waiting for the host, the host lost
+    on the way or while awaited, the race's own notice first; the link's
+    timeout the race's until every console is back, then given back once;
+    the link down and up again with no return left over.
 
 The harness prints "faults 0" after each scenario that holds and "total
 faults 0" at the end. A mutant is caught only when the harness finds a
@@ -101,6 +110,11 @@ def M(name, before, after):
     return (name, LOBBY, before, after)
 
 
+def G(name, before, after):
+    """gameflow.c's, for the frontend's way back to the lobby."""
+    return (name, "3DS Files/source/gameflow.c", before, after)
+
+
 MUTATIONS = [
     # -- text
     M("lb-clock", "return gf->realTimer / 4;", "return gf->realTimer;"),
@@ -147,14 +161,16 @@ MUTATIONS = [
     M("lb-list-self", "    strncat(msg, \"@\", sizeof msg - strlen(msg) - 1);\n"
       "    strncat(msg, name, sizeof msg - strlen(msg) - 1);\n    for (i = 0;",
       "    for (i = 0;"),
-    M("lb-list-alive", "        if (!L.net.peerAlive(i)) continue;\n"
-      "        lobby_latin1(name", "        lobby_latin1(name"),
-    M("lb-list-latin1", "lobby_latin1(name, sizeof name, L.net.peerName(i));",
-      "snprintf(name, sizeof name, \"%s\", L.net.peerName(i));"),
-    M("lb-list-same", "if (L.popup >= 0 && !strcmp(msg, L.message)) return;",
-      "if (L.popup >= 0) return;"),
-    M("lb-list-shown", "if (L.popup >= 0 && !strcmp(msg, L.message)) return;",
-      "if (!strcmp(msg, L.message)) return;"),
+    M("lb-list-alive", "        if (!L.net.peerAlive(i)\n"
+      "            || (i < WIRELESS_MAX_CONSOLES && L.awaited[i]))\n",
+      "        if (i < WIRELESS_MAX_CONSOLES && L.awaited[i])\n"),
+    M("lb-list-latin1", "lobby_latin1(name, sizeof name, L.net.peerName(i));"
+      "\n        strncat(", "snprintf(name, sizeof name, \"%s\", "
+      "L.net.peerName(i));\n        strncat("),
+    M("lb-list-same", "if (L.popup >= 0 && !strcmp(msg, L.message) && key",
+      "if (L.popup >= 0 && key"),
+    M("lb-list-shown", "if (L.popup >= 0 && !strcmp(msg, L.message) && key",
+      "if (!strcmp(msg, L.message) && key"),
     M("lb-list-say", "if (strcmp(msg, L.message)) say(\"lobby: list", "say(\"lobby: list"),
     M("lb-list-buttons", "showPopup(gf, clients > 0, PORTLANG_START",
       "showPopup(gf, 1, PORTLANG_START"),
@@ -166,9 +182,10 @@ MUTATIONS = [
       "L.net.host(2, NULL, 0)"),
     M("lb-host-gone", "            if (L.net.state() != WIRELESS_HOSTING) {",
       "            if (0) {"),
-    M("lb-forget", "if (clientsAlive() != L.net.peerCount()) L.net.forgetLost();",
+    M("lb-forget", "if (clientsAlive() != L.net.peerCount()) forgetLost();",
       "(void)0;"),
-    M("lb-start-alone", "    if (consoles < 2) {", "    if (consoles < 1) {"),
+    M("lb-start-alone", "    if (consoles < 2 || awaiting()) {",
+      "    if (consoles < 1 || awaiting()) {"),
     M("lb-start-close", "    L.net.setOpen(0);\n", ""),
     M("lb-start-alive", "        if (!L.net.peerAlive(i)) continue;\n"
       "        msg[0]", "        msg[0]"),
@@ -216,7 +233,7 @@ MUTATIONS = [
       "race.cpu      = L.cpuWant > 0 ? L.cpuWant : 0;"),
     M("lb-cpu-start-say", "    if (cpu >= 0)\n        say(\"lobby: start, %d consoles, %d",
       "    if (0)\n        say(\"lobby: start, %d consoles, %d"),
-    M("lb-gone-state", "    L.state = LS_GONE;\n", ""),
+    M("lb-gone-state", "    L.state   = LS_GONE;\n", ""),
     M("lb-gone-push", "bgf_change_to_screen(gf, LOBBY_NEXT_SCREEN, 1);",
       "bgf_change_to_screen(gf, LOBBY_NEXT_SCREEN, 0);"),
     # -- searching
@@ -288,7 +305,8 @@ MUTATIONS = [
       "if (!L.net.start()) {"),
     M("lb-radio-join", "if (!radioOff() && L.net.start())",
       "if (L.net.start())"),
-    M("lb-radio-line", "    if (radioOff()) {\n        say(", "    if (0) {\n        say("),
+    M("lb-radio-line", "    if (radioOff()) {\n        say(\"lobby: wireless",
+      "    if (0) {\n        say(\"lobby: wireless"),
     M("lb-radio-say", "        say(\"lobby: wireless communication off\");\n", ""),
     M("lb-radio-id", "notice(gf, PORTLANG_WIRELESS_DISABLED, \"\", LS_ASK);",
       "notice(gf, PORTLANG_WIRELESS_OFF, \"\", LS_ASK);"),
@@ -359,6 +377,94 @@ MUTATIONS = [
     M("lb-joined-cops", "                    race.copsOn   = m.data[3] != 0;\n",
       ""),
     M("lb-race-init-type", "    r->gameType = -1;\n", ""),
+    # -- back from the race (37f)
+    M("lb-down-waiting", "    L.waiting = 0;\n    memset(L.awaited, 0, "
+      "sizeof L.awaited);\n", "    memset(L.awaited, 0, sizeof L.awaited);\n"),
+    M("lb-down-awaited", "    memset(L.awaited, 0, sizeof L.awaited);\n", ""),
+    M("lb-awaiting-alive", "n += L.awaited[i] && L.net.peerAlive(i);",
+      "n += L.awaited[i];"),
+    M("lb-backdone-waiting", "if (!L.waiting || awaiting()) return;",
+      "if (awaiting()) return;"),
+    M("lb-backdone-awaiting", "if (!L.waiting || awaiting()) return;",
+      "if (!L.waiting) return;"),
+    M("lb-backdone-clear", "    L.waiting = 0;\n    if (L.net.setPatience) "
+      "L.net.setPatience(0);\n",
+      "    if (L.net.setPatience) L.net.setPatience(0);\n"),
+    M("lb-backdone-patience",
+      "    if (L.net.setPatience) L.net.setPatience(0);\n", ""),
+    M("lb-readback-type",
+      "if (m.type != LOBBY_MSG_BACK || i >= WIRELESS_MAX_CONSOLES",
+      "if (i >= WIRELESS_MAX_CONSOLES"),
+    M("lb-readback-clear", "        L.awaited[i] = 0;\n        lobby_latin1",
+      "        lobby_latin1"),
+    M("lb-forget-keep",
+      "        if (L.net.peerAlive(i)) L.awaited[n++] = L.awaited[i];\n", ""),
+    M("lb-forget-clear",
+      "    for (; n < WIRELESS_MAX_CONSOLES; n++) L.awaited[n] = 0;\n", ""),
+    M("lb-forget-call",
+      "if (clientsAlive() != L.net.peerCount()) forgetLost();",
+      "if (clientsAlive() != L.net.peerCount()) L.net.forgetLost();"),
+    M("lb-tick-readback", "            for (int i = 0; i < L.net.peerCount(); "
+      "i++) readBack(i);\n", ""),
+    M("lb-tick-backdone", "forgetLost();\n            backDone();\n",
+      "forgetLost();\n"),
+    M("lb-list-awaited", "        if (!L.net.peerAlive(i)\n"
+      "            || (i < WIRELESS_MAX_CONSOLES && L.awaited[i]))\n",
+      "        if (!L.net.peerAlive(i))\n"),
+    M("lb-list-start", "    if (awaiting()) clients = 0;\n", ""),
+    M("lb-list-key", "&& key == L.listKey) return;", ") return;"),
+    M("lb-list-key-set", "    L.listKey = key;\n", ""),
+    M("lb-start-awaiting", "if (consoles < 2 || awaiting()) {",
+      "if (consoles < 2) {"),
+    M("lb-goon-host", "    L.wasHost = L.state == LS_HOSTING;\n",
+      "    L.wasHost = 1;\n"),
+    M("lb-goon-join", "    L.wasHost = L.state == LS_HOSTING;\n",
+      "    L.wasHost = 0;\n"),
+    M("lb-back-radio", "    if (radioOff()) {\n        say(\"lobby: back from "
+      "the race, wireless", "    if (0) {\n        say(\"lobby: back from "
+      "the race, wireless"),
+    M("lb-back-host-state",
+      "if (L.wasHost && L.net.state() == WIRELESS_HOSTING) {",
+      "if (L.wasHost) {"),
+    M("lb-back-open", "        L.net.setOpen(1);\n        for (i = 0;",
+      "        for (i = 0;"),
+    M("lb-back-awaited", "            L.awaited[i] = L.net.peerAlive(i) != 0;\n",
+      "            L.awaited[i] = 0;\n"),
+    M("lb-back-send", "            if (L.awaited[i]) L.net.send(i, "
+      "LOBBY_MSG_BACK, &none, 1);\n", ""),
+    M("lb-back-waiting", "        L.waiting = 1;\n        say(\"lobby: back "
+      "from the race, hosting", "        say(\"lobby: back from the race, "
+      "hosting"),
+    M("lb-back-join-awaited", "        L.awaited[0] = 1;\n        L.waiting"
+      "    = 1;\n", "        L.waiting    = 1;\n"),
+    M("lb-back-join-waiting", "        L.awaited[0] = 1;\n        L.waiting"
+      "    = 1;\n", "        L.awaited[0] = 1;\n"),
+    M("lb-back-join-send", "        L.net.send(0, LOBBY_MSG_BACK, &none, 1);\n",
+      ""),
+    M("lb-back-join-alive", "        && L.net.peerAlive(0)) {", ") {"),
+    M("lb-back-lost", "        say(\"lobby: back from the race, %s lost\", "
+      "L.hostName);\n        linkDown();\n", "        say(\"lobby: back from "
+      "the race, %s lost\", L.hostName);\n"),
+    M("lb-back-went", "        say(\"lobby: back from the race, the network "
+      "went\");\n        linkDown();\n", "        say(\"lobby: back from the "
+      "race, the network went\");\n"),
+    M("lb-joined-back", "                    L.awaited[0] = 0;\n"
+      "                    say(\"lobby: %s is back\", L.hostName);\n",
+      "                    say(\"lobby: %s is back\", L.hostName);\n"),
+    M("lb-joined-backdone", "                    backDone();\n", ""),
+    M("lb-act-back", "            if (L.backNext && !L.nextNotice) {\n"
+      "                L.backNext = 0;\n                backFromRace(gf);\n"
+      "                break;\n            }\n", ""),
+    M("lb-act-notice", "if (L.backNext && !L.nextNotice) {",
+      "if (L.backNext) {"),
+    M("lb-act-clear", "            L.backNext = 0;\n            if "
+      "(L.nextNotice) {", "            if (L.nextNotice) {"),
+    M("lb-act-clear-back", "                L.backNext = 0;\n"
+      "                backFromRace(gf);", "                backFromRace(gf);"),
+    M("lb-back-next", "    L.backNext = 1;\n", ""),
+    G("lb-gf-return", "    if (back && onStack(gf, back))\n"
+      "        bgf_pop_until(gf, back);\n    else if (gameType == 8",
+      "    if (gameType == 8"),
 ]
 
 EQUIVALENT = {
@@ -371,6 +477,16 @@ EQUIVALENT = {
     # toAsk is entered only from a dismiss (the popup already down and its
     # index -1) or from ACTIVATE (which sets -1 first): nothing to hide.
     "lb-ask-hide",
+    # A console is awaited only while it is on (backFromRace sets the flag
+    # from peerAlive), and the tick forgets one gone, its flag with it,
+    # before backDone or showList asks.
+    "lb-awaiting-alive",
+    # Start is not on the list while one is awaited, and only the race's
+    # return makes one awaited: Start is never pressed with one awaited.
+    "lb-start-awaiting",
+    # The host's peer goes down only with the link LOST (wireless.c's
+    # peer_lost sets both): CONNECTED alone says the host is on.
+    "lb-back-join-alive",
 }
 
 

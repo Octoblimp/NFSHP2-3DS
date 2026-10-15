@@ -51,6 +51,15 @@
 # D-pad by turns, its own period each (2 s for the host, 3 s for B, ...), so
 # the cars hit walls and each other.
 #
+# With -Quit (TASKS 37f; -Race), once the driving is done the host pauses,
+# moves down to Quit Race (the item the log says is highlighted) and says
+# OK. The pause runs in lockstep, its screens on the host's pad, so every
+# copy quits on the same frame: each must log the lockstep's stop on the
+# host's frame, the race over and its way back to the lobby, and the host
+# every client's stop. The host then waits for every console's word that
+# it is back and starts again, and every copy must reach Select Car a
+# second time.
+#
 # With -NoDsp the copies' cards have no DSP firmware, so ndsp fails and the
 # game must run silent: each copy has to log "Sound: ndsp unavailable", and
 # still pass with no unmapped read (a driver call through NULL). With
@@ -73,10 +82,12 @@
 #   powershell -File tools/run_azahar_lobby.ps1 -Consoles 2 -WirelessOff
 #   powershell -File tools/run_azahar_lobby.ps1 -Consoles 2 -Race -CopsOn -Steer -Drive 120
 #   powershell -File tools/run_azahar_lobby.ps1 -Consoles 2 -Race -CopsOn -Steer -SilentClients
+#   powershell -File tools/run_azahar_lobby.ps1 -Consoles 2 -Race -Quit
 #
 # Screenshots of each copy go to %TEMP%\nfshp2_lobby. Exit code 0 when
 # every copy reached Select Car from the lobby (with -Race: racing, every
-# copy's GO on the host's seed).
+# copy's GO on the host's seed; with -Quit: back in the lobby from the
+# race and on to Select Car again).
 
 param(
     [ValidateRange(2, 8)]
@@ -87,10 +98,11 @@ param(
     [switch]$WirelessOff,         # each console's wireless taken as off (62)
     [switch]$CopsOn,              # the host hosts Hot Pursuit: a race with cops
     [switch]$Steer,               # -Race: steer by turns while driving
+    [switch]$Quit,                # -Race: the host's pause and Quit, all back to the lobby (37f)
     [ValidateRange(-1, 7)]
     [int]$Cpu = 2,                # the host's CPU racers; -1 as shown
     [int]$Drive = 30,             # -Race: seconds of gas once all race
-    [int]$RunSeconds = 0,         # hard ceiling; 0 is 240 + 30 a console, + 300 with -Race
+    [int]$RunSeconds = 0,         # the walk's ceiling; 0 is 240 + 30 a console, + 300 with -Race
     [string]$AzaharDir = "C:\Program Files\Azahar",
     [string]$Target3dsx = "",
     [string]$WorkDir = "",
@@ -100,6 +112,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 if ($WirelessOff -and $Race) { throw "-WirelessOff stops in the lobby: no -Race with it" }
+if ($Quit -and -not $Race) { throw "-Quit quits a race: it needs -Race" }
 
 $root = Split-Path -Parent $PSScriptRoot
 if ($Target3dsx -eq "") { $Target3dsx = Join-Path $root "3DS Files\NFSHP2-3DS.3dsx" }
@@ -609,6 +622,41 @@ function JoinSteps([int]$i) {
     return $steps + $joinRace
 }
 
+# -Quit (37f): the host's pause, Quit Race and OK, which every copy takes
+# on the same lockstep frame; then each back in the lobby, the host's
+# Start once every console is back, and Select Car again. Quit Race is
+# the pause menu's MENUITEM_7 (PAUSE_MENU_ITEM_QUIT); the menu loops, so
+# down reaches it past whatever is grayed or hidden. The Quit popup opens
+# on Cancel, OK to its left: its bloom on BUTTON1 (e0105663) is OK.
+function PauseOn($side, [int]$item) {
+    $l = @(LogLines $side "flow state .* screen Pause Menu [0-9a-f]{8} .* item -?\d+ ")
+    if ($l.Count -eq 0) { return $false }
+    return [int]([regex]::Match($l[-1], " item (-?\d+) ")).Groups[1].Value -eq $item
+}
+$againEnd = @(
+    Step "car select again" @{ Pattern = "flow enter Select Car [0-9a-f]{8}"; Wait = 30; Settle = 2000;
+                              Shot = "carsel-again" }
+)
+$quitHost = @(
+    Step "pause" @{ Key = $VK_START; Pattern = "flow enter Pause Menu"; Wait = 12; Settle = 1500; Shot = "pause" }
+    Step "to quit" @{ Key = $VK_DOWN; Check = { param($s) PauseOn $s 7 }; Wait = 9; Tries = 8; Settle = 1000;
+                     Shot = "pause-quit" }
+    Step "quit" @{ Key = $VK_A; Pattern = "flow popup \d+ summon"; Wait = 12; Settle = 1500; Shot = "quit-popup" }
+    Step "to ok" @{ Key = $VK_LEFT; Pattern = "flow popup \d+ bloom [0-9a-f]{8} e0105663"; Wait = 12;
+                   Settle = 1000; Shot = "quit-ok" }
+    Step "quit ok" @{ Key = $VK_A; Pattern = "flow popup \d+ dismiss"; Wait = 12 }
+    Step "race over" @{ Pattern = "netrace: the race is over"; Wait = 60 }
+    Step "back" @{ Pattern = "lobby: back from the race, hosting"; Wait = 120; Settle = 1000; Shot = "back-host" }
+    Step "every back" @{ Pattern = "lobby: every console back"; Wait = 120; Settle = 2000; Shot = "back-list" }
+    Step "start again" @{ Key = $VK_A; Pattern = "lobby: start, $Consoles consoles"; Tries = 2 }
+) + $againEnd
+$quitJoin = @(
+    Step "race over" @{ Pattern = "netrace: the race is over"; Wait = 120 }
+    Step "back" @{ Pattern = "lobby: back from the race, waiting for hp2host"; Wait = 120; Settle = 1000;
+                  Shot = "back-join" }
+    Step "started again" @{ Pattern = "lobby: started by hp2host, place \d+ of $Consoles"; Wait = 240 }
+) + $againEnd
+
 $start = Get-Date
 function Elapsed { ((Get-Date) - $start).TotalSeconds }
 function Say($side, [string]$what) {
@@ -644,7 +692,7 @@ function Advance($side) {
                 $side.Seen[$step.Name] = $true
                 $side.SettleUntil = $now.AddMilliseconds($step.Settle)
                 $side.Phase = "settle"
-                if ($step.Name -match "^(lobby|host|mode|challenge|set up|the host's mode|search|found|join|started|car select|all in|start|track select|host start|built|car sent|taken|go|racing|race on|host off|join off|ok)$") {
+                if ($step.Name -match "^(lobby|host|mode|challenge|set up|the host's mode|search|found|join|started|car select|all in|start|track select|host start|built|car sent|taken|go|racing|race on|host off|join off|ok|pause|to quit|quit|to ok|quit ok|race over|back|every back|start again|started again|car select again)$") {
                     Say $side $step.Name
                 }
             } elseif ($now -gt $side.Deadline) {
@@ -755,6 +803,29 @@ try {
             }
         }
         foreach ($s in $sides) { if (-not (Alive $s) -and -not $s.Failed) { $s.Failed = "Azahar exited while driving" } }
+    }
+    # -Quit: the host's pause and Quit, every copy back to the lobby and
+    # on to Select Car again, each on its own clock as before.
+    if ($Quit -and @($sides | Where-Object { $_.Failed }).Count -eq 0) {
+        Write-Host ("  [{0,5:N0}s] quitting: the host's pause, Quit Race, OK" -f (Elapsed))
+        for ($i = 0; $i -lt $sides.Count; $i++) {
+            $s = $sides[$i]
+            $s.Steps = if ($i -eq 0) { $quitHost } else { $quitJoin }
+            $s.Step = 0; $s.Phase = "start"; $s.Done = $false
+            $s.Mark = LogLength $s
+        }
+        $quitEnd = (Get-Date).AddSeconds(360)
+        while ((Get-Date) -lt $quitEnd) {
+            foreach ($s in $sides) { Advance $s }
+            if (@($sides | Where-Object { -not $_.Done -and -not $_.Failed }).Count -eq 0) { break }
+            Start-Sleep -Milliseconds 250
+        }
+        foreach ($s in $sides) {
+            if (-not $s.Done -and -not $s.Failed) {
+                $s.Failed = "out of time on '$($s.Steps[$s.Step].Name)'"
+                Shot $s "timeout-quit"
+            }
+        }
     }
     # The log's last lines land up to ~7 s late.
     Start-Sleep -Seconds 8
@@ -911,10 +982,36 @@ if ($Race) {
         if ($got.Count -eq 0 -and -not $h.Failed) { $h.Failed = "$($s.Name)'s car not as sent" }
         if ($type -eq $hostType) { Write-Host "  (the same car as the host's)" }
     }
+
+    # -Quit (37f): every copy's lockstep stopped once, on the host's frame,
+    # and the host heard every client's stop.
+    if ($Quit) {
+        $hostStop = $null
+        foreach ($s in $sides) {
+            Write-Host "--- $($s.Name) the race's end ---"
+            LogLines $s "netstep: (stop at|every client|place \d+ (stopped|never|left|is gone|has gone)|the host (stopped|is gone))|netrace: the race is over|lobby: (back|every console|started by|start, |\S+ is back)|flow enter (Pause Menu|Select Car)" |
+                ForEach-Object { Write-Host "  $_" }
+            $stops = @(LogLines $s "netstep: stop at frame \d+")
+            if ($stops.Count -ne 1) {
+                if (-not $s.Failed) { $s.Failed = "$($stops.Count) lockstep stops" }
+                continue
+            }
+            $f = [int]([regex]::Match($stops[0], "frame (\d+)")).Groups[1].Value
+            if ($null -eq $hostStop) { $hostStop = $f }
+            elseif ($f -ne $hostStop -and -not $s.Failed) {
+                $s.Failed = "lockstep stopped at frame $f, the host at $hostStop"
+            }
+        }
+        if (@(LogLines $h "netstep: every client stopped").Count -eq 0 -and -not $h.Failed) {
+            $h.Failed = "no word of every client's stop"
+        }
+    }
 }
 Write-Host ""
 $failed = @($sides | Where-Object { -not $_.Done -or $_.Failed })
-$goal = if ($WirelessOff) { "the wireless-off line, then the question" } elseif ($Race) { "racing" } else { "Select Car" }
+$goal = if ($WirelessOff) { "the wireless-off line, then the question" }
+        elseif ($Quit) { "racing, quit, back in the lobby, Select Car again" }
+        elseif ($Race) { "racing" } else { "Select Car" }
 foreach ($s in $sides) {
     $v = if ($s.Done -and -not $s.Failed) { "PASS ($goal)" } else { "FAIL ($($s.Failed))" }
     Write-Host ("{0} {1,-9} {2}" -f $s.Name, $s.Nick, $v)
@@ -922,6 +1019,7 @@ foreach ($s in $sides) {
 Write-Host "Screenshots in $OutDir"
 if ($failed.Count -eq 0) {
     if ($WirelessOff) { Write-Host "All $Consoles said the wireless is off, and asked again." }
+    elseif ($Quit) { Write-Host "All $Consoles raced on seed $hostSeed, quit on frame $hostStop, back in the lobby and on to Select Car again." }
     elseif ($Race) { Write-Host "All $Consoles racing from the lobby, GO on seed $hostSeed." }
     else { Write-Host "All $Consoles reached Select Car from the lobby." }
 } else {

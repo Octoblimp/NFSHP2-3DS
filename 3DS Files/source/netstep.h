@@ -29,9 +29,23 @@
 // the first frame's long drawing, and then has its own timeout back.
 //
 // A console gone: the host builds without a client whose link is lost,
-// its pad at rest from then on (what more a race does is 37f's). A client
+// its pad at rest from then on (what more a race does is 37g's). A client
 // that loses the host goes on alone, its own pad on its place and the
 // rest at rest.
+//
+// The end (37f). Each console stops where its race leaves lockstep
+// (netstep_stop: the race gone, or the end's save, main.c), all of them
+// on the same frame, as they run the same flow; every message then says
+// how many frames its sender ran. A client still behind may need records
+// the host ran, so the host serves them on (netstep_drain) until each
+// client has said it stopped, is gone, or NETSTEP_DRAIN_MS have passed. A
+// stopped client says so NETSTEP_TELLS times, NETSTEP_RESEND_MS apart,
+// and reads nothing more: what comes next on the link is the lobby's.
+// Should the two ever part, a client that stops first has left (the host
+// goes on without it, as without one gone), and a client still on past
+// the host's last frame goes on alone, and says it stopped. Neither reads
+// past a message not the race's (NetStepNet's peek): it is the lobby's,
+// left for it, and says its sender has gone on, as a stop would.
 //
 // Each console also says, in every message, its checksum of the world
 // after the last frame it ran. A console that has run that frame itself
@@ -58,6 +72,8 @@
 #define NETSTEP_RESEND_MS  16     // what is still wanted goes again
 #define NETSTEP_SETTLE     30     // frames before the link's own timeout
 #define NETSTEP_LOG_EVERY  150    // frames between the log's checksums
+#define NETSTEP_TELLS      30     // a client's stop said this many times
+#define NETSTEP_DRAIN_MS   10000  // the host's last frames served at most
 #define NETSTEP_NONE       0xffffffffu
 
 // The race's unreliable messages, after netrace's.
@@ -82,6 +98,7 @@ typedef struct NetStepNet {
     int  (*peerAlive)(int i);
     int  (*send)(int i, uint8_t type, const void* data, size_t n);
     int  (*recv)(int i, WlMsg* out);
+    int  (*peek)(int i, WlMsg* out);      // recv's next, left to be read
     void (*setPatience)(uint32_t ms);
 } NetStepNet;
 
@@ -127,6 +144,17 @@ typedef struct NetStep {
     uint32_t     theirFor[NETSTEP_MAX][NETSTEP_RING];
     int          differs[NETSTEP_MAX];       // said once
     uint32_t     sendFails;
+    // The end. stopAt: the frames run when this console left lockstep,
+    // by its stop or a client's going alone past the host's, which every
+    // message says; NETSTEP_NONE before. The host's, by place: each that
+    // said it stopped. A client's: the host's stopAt as it said it, and
+    // its own stop still to say (tells, the sends left).
+    uint32_t     stopAt;
+    int          ending;                     // stopped, and not done
+    uint32_t     endFrom;                    // ms, the stop
+    int          left[NETSTEP_MAX];
+    uint32_t     hostStop;
+    int          tells;
 } NetStep;
 
 // The one running: netstep's own unless bound to another (NULL: its own).
@@ -142,8 +170,15 @@ void netstep_on_differ(NetStepDifferFn fn);
 // past `consoles` not read), and the places racing, this one among them.
 void netstep_start(int place, int consoles, const int peer[NETSTEP_MAX],
                    uint8_t racing);
-void netstep_stop(void);
 int  netstep_on(void);
+
+// After the last frame this console runs in lockstep, at `now` in ms:
+// no frame is current from then on. netstep_drain, once a loop from then
+// until netstep_ending says 0, serves the host's last frames, or says a
+// client's stop.
+void netstep_stop(uint32_t now);
+void netstep_drain(uint32_t now);
+int  netstep_ending(void);
 
 // This console's pad for the frame NETSTEP_DELAY past the one to run,
 // and the step it measured (the host's goes into that frame's record).

@@ -21,8 +21,9 @@
 // Each scenario starts every console on "Select Car" with "Local
 // Wireless" under it, as the lobby leaves them, calls netrace_begin, and
 // then plays its events: a car chosen, the host's start on Select Track,
-// A or B, a console gone (powered off), a link taken down. Checked each
-// frame, with a FAULT for each found:
+// A or B, a console gone (powered off), a link taken down, the race's end
+// (netrace_end, TASKS 37f; racing, netstep has given the link its own
+// timeout back by then). Checked each frame, with a FAULT for each found:
 //
 //   - one popup at most, and only on "Wireless Race", its parent that
 //     screen, the memory card's look, the lobby's title, every port's, no
@@ -37,6 +38,9 @@
 //   - no message past WL_MSG_MAX, none to a peer that is not there;
 //   - GO only once every console racing and still on has loaded and held,
 //     once to each, and a console racing only after its load;
+//   - at the race's end, a racing console's stage off, the link's patience
+//     NETRACE_PATIENCE_MS again for the way back, and the lobby told once
+//     (lobby_back_next); at any other stage, or a second time, nothing;
 //
 // and at the end:
 //
@@ -107,7 +111,7 @@ static RideInfo g_rides[2];   // Fred's players' selected rides
 typedef struct {
     int         frame;
     int         console;
-    const char* what;   // "car", "start", "A", "B", "gone", "off"
+    const char* what;   // "car", "start", "A", "B", "gone", "off", "end"
 } Event;
 
 typedef struct {
@@ -392,6 +396,29 @@ static const Scenario kScenarios[] = {
     { "offline", 300, 1, LANG_EN, 1, 3, 0, 3, {80}, {"hp2host"},
       {{20, 0, "car"}, {40, 0, "start"}}, 0,
       {"Racing"}, {1}, NULL, {NULL} },
+    // ... its end too.
+    { "offline_end", 300, 1, LANG_EN, 1, 3, 0, 3, {80}, {"hp2host"},
+      {{20, 0, "car"}, {40, 0, "start"}, {250, 0, "end"}}, 0,
+      {"Racing"}, {1}, NULL, {NULL} },
+
+    // The race's end (TASKS 37f): each console out of the race and the
+    // lobby next; the host's again, and the client's while it loads,
+    // nothing.
+    { "two_end", 800, 2, LANG_EN, 1, 3, 0, 3, {120, 260}, TWO,
+      {{30, 1, "car"}, {40, 0, "car"}, {80, 0, "start"}, {200, 1, "end"},
+       {600, 0, "end"}, {620, 1, "end"}, {640, 0, "end"}}, 0,
+      {"Racing", "Racing"}, {1, 1}, "0 1",
+      {"0|netrace: go, seed", "1|netrace: go, seed",
+       "0|netrace: the race is over; the lobby next",
+       "1|netrace: the race is over; the lobby next"} },
+    // A client that lost the host and raced alone: its end the same.
+    { "host_gone_end", 900, 2, LANG_EN, 1, 3, 0, 3, {100, 300}, TWO,
+      {{30, 1, "car"}, {40, 0, "car"}, {80, 0, "start"}, {250, 0, "gone"},
+       {800, 1, "end"}},
+      0, {NULL, "Racing"}, {0, 1}, NULL,
+      {"1|netrace: the host is gone; racing alone",
+       "1|netrace: go, seed",
+       "1|netrace: the race is over; the lobby next"} },
 };
 #define NUM_SCENARIOS ((int)(sizeof kScenarios / sizeof kScenarios[0]))
 
@@ -423,6 +450,8 @@ typedef struct {
     int              gone, off;
     uint32_t         patience;
     int              loadingAt, loadedAt, heldAt, racingAt;   // -1 not yet
+    int              endedAt;          // the race's end, -1 not yet
+    int              backNexts;        // lobby_back_next's
     int32_t          notice;
     char             noticeName[WIRELESS_NAME_MAX];
     int              carIn[MAXC];      // the host's: the CARs read
@@ -545,7 +574,7 @@ static const char* text(int32_t id)
     return s ? s : "";
 }
 
-// --------------------------------------------------------- lobby.c's two
+// ------------------------------------------------------- lobby.c's three
 
 void lobby_latin1(char* out, size_t cap, const char* utf8)
 {
@@ -562,6 +591,12 @@ void lobby_latin1(char* out, size_t cap, const char* utf8)
         out[o++] = (char)c;
     }
     out[o] = 0;
+}
+
+void lobby_back_next(void)
+{
+    printf("[%d] lobby back next\n", g_cur);
+    C[g_cur].backNexts++;
 }
 
 void lobby_notice_next(int32_t id, const char* name)
@@ -1109,6 +1144,7 @@ static void initConsole(int c)
         k->race.peer[0] = 0;
     }
     lobby_latin1(k->race.hostName, sizeof k->race.hostName, S->names[0]);
+    k->endedAt = -1;
 }
 
 static void startConsole(int c)
@@ -1133,6 +1169,43 @@ static void startConsole(int c)
     leave();
 }
 
+// The race over (netrace_end). Racing, netstep has given the link its own
+// timeout back once every console's frames came in; netrace_end puts the
+// race's on again for the way back and tells the lobby. At any other
+// stage, or a second time, it does nothing.
+static void endRace(void)
+{
+    Console*     k     = &C[g_cur];
+    NetRaceStage was   = netrace_stage();
+    int          backs = k->backNexts, lines = k->numLog;
+    uint32_t     patience;
+
+    if (was == NR_RACING) {
+        printf("[%d] netstep: the link's own patience\n", g_cur);
+        k->patience = 0;
+    }
+    patience = k->patience;
+    netrace_end();
+    if (was != NR_RACING) {
+        if (netrace_stage() != was)
+            fault("the end at stage %d left stage %d", (int)was,
+                  (int)netrace_stage());
+        if (k->backNexts != backs) fault("the lobby told at stage %d", (int)was);
+        if (k->patience != patience)
+            fault("the patience set at stage %d", (int)was);
+        if (k->numLog != lines)
+            fault("said \"%s\" at stage %d", k->log[lines], (int)was);
+        return;
+    }
+    k->endedAt = g_frame;
+    if (netrace_stage() != NR_OFF || netrace_active())
+        fault("stage %d after the end", (int)netrace_stage());
+    if (k->backNexts != backs + 1)
+        fault("the lobby told %d times", k->backNexts - backs);
+    if (k->patience != NETRACE_PATIENCE_MS)
+        fault("the end with patience %lu", (unsigned long)k->patience);
+}
+
 static void consoleFrame(int c)
 {
     Console* k = &C[c];
@@ -1151,6 +1224,8 @@ static void consoleFrame(int c)
             press(v->what);
         else if (!strcmp(v->what, "ai0"))
             TheRaceParameters.NumAICars = 0;   // track select's options
+        else if (!strcmp(v->what, "end"))
+            endRace();
     }
 
     // A loading console's loop stalls but for a frame in STALL.
@@ -1406,11 +1481,15 @@ static void runScenario(const Scenario* sc)
         if (!k->gone && (k->racingAt >= 0) != sc->racing[c])
             fault("%s racing", k->racingAt >= 0 ? "ends" : "never");
         if (k->notice) fault("a notice left for the lobby");
+        if (k->backNexts != (k->endedAt >= 0))
+            fault("the lobby told %d times", k->backNexts);
+        if (k->endedAt >= 0 && k->patience != NETRACE_PATIENCE_MS)
+            fault("ended with patience %lu", (unsigned long)k->patience);
         if (OFFLINE && k->numLog)
             fault("said \"%s\" with no wireless race", k->log[0]);
         if (!k->gone) {
-            NetRaceStage want = k->racingAt >= 0 && !OFFLINE ? NR_RACING
-                                                                 : NR_OFF;
+            NetRaceStage want = k->racingAt >= 0 && k->endedAt < 0
+                                && !OFFLINE ? NR_RACING : NR_OFF;
             int          p;
 
             enter(c);

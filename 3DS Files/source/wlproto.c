@@ -283,6 +283,14 @@ int wl_link_recv(WlLink *l, WlMsg *out)
     return 1;
 }
 
+int wl_link_peek(const WlLink *l, WlMsg *out)
+{
+    if (l->inCount == 0)
+        return 0;
+    *out = l->inbox[l->inHead];
+    return 1;
+}
+
 int wl_link_alive(const WlLink *l)
 {
     return l->heard && (int32_t)(l->now - l->lastHeard) < (int32_t)l->timeout;

@@ -17,7 +17,9 @@ header has the list), scenario by scenario:
   - cuts short of the timeout and past it, and the receiver not reading
     for up to ten seconds, so its inbox fills;
   - sequence numbers that wrap (over 32,768 messages a side);
-  - traffic one way only, and none.
+  - traffic one way only, and none;
+  - and with each, a peek before each read (TASKS 37f), which must be the
+    message the read then takes.
 
 The harness prints "faults 0" when every property holds. A mutant is
 caught only when the harness finds a fault: the transcript's counts move
@@ -222,9 +224,17 @@ MUTATIONS = [
     M("wl-in-ack-skip", "        l->base = ack;\n", ""),
     M("wl-recv-drain", "    // Room again: the next message held for it.\n"
       "    drain_held(l);\n", ""),
+    M("wl-peek-none", "    if (l->inCount == 0)\n        return 0;\n"
+      "    *out = l->inbox[l->inHead];\n    return 1;\n",
+      "    *out = l->inbox[l->inHead];\n    return 1;\n"),
+    M("wl-peek-head", "    *out = l->inbox[l->inHead];\n    return 1;\n",
+      "    *out = l->inbox[0];\n    return 1;\n"),
     # -- the link's state
     M("wl-alive-heard", "return l->heard && (int32_t)", "return (int32_t)"),
-    M("wl-alive-timeout", "< WL_TIMEOUT_MS;", "< 10 * WL_TIMEOUT_MS;"),
+    M("wl-alive-timeout", "< (int32_t)l->timeout;",
+      "< 10 * (int32_t)l->timeout;"),
+    M("wl-init-timeout", "    l->timeout   = WL_TIMEOUT_MS;\n",
+      "    l->timeout   = 10 * WL_TIMEOUT_MS;\n"),
 ]
 
 EQUIVALENT = {

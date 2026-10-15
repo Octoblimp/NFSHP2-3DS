@@ -111,6 +111,10 @@ void wl_link_tick(WlLink *l, uint32_t now);
 // The next message to read into *out: 1, or 0 for none.
 int wl_link_recv(WlLink *l, WlMsg *out);
 
+// The same, left to be read: a reader that takes only its own messages
+// leaves another's for its reader (netstep.c, the lobby's after a race).
+int wl_link_peek(const WlLink *l, WlMsg *out);
+
 // Heard from within the link's timeout, WL_TIMEOUT_MS until set.
 int wl_link_alive(const WlLink *l);
 

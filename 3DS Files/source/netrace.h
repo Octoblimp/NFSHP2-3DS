@@ -179,6 +179,13 @@ int netrace_host_start(BGameFlow* gf);
 // gTrackFlowHoldRaceFn.
 int netrace_hold(void);
 
+// The race has left lockstep (netstep_stop, 37f): no wireless race from
+// here, and the frontend comes back to the lobby with the link up
+// (lobby_back_next; gameflow's raceReturn names it). The link waits
+// NETRACE_PATIENCE_MS for a silent console again, through each one's save,
+// unload and frontend load, until the lobby has them all back.
+void netrace_end(void);
+
 // The ScreenCallback, for kScreens[]: NETRACE_SCREEN_NAME's.
 void netrace_callback(BGameFlow* gf, BScreenMessage msg,
                       BScreenCallbackData* data);

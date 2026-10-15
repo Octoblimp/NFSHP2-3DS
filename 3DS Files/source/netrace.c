@@ -724,6 +724,15 @@ int netrace_hold(void)
     return 1;
 }
 
+void netrace_end(void)
+{
+    if (R->stage != NR_RACING) return;
+    R->stage = NR_OFF;
+    if (R->net.setPatience) R->net.setPatience(NETRACE_PATIENCE_MS);
+    say("netrace: the race is over; the lobby next");
+    lobby_back_next();
+}
+
 // BACK on "Wireless Race": a client's car taken back and on to car
 // select again; the host back to track select.
 static void back(BGameFlow* gf)

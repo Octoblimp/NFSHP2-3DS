@@ -272,6 +272,14 @@ with autosave on, it then asks whether to go on without saving, as retail
 does. `endgame_should_auto_save` is retail's, and the checker runs with the
 flag at 0.
 
+A local wireless race (TASKS 37f) runs these screens in lockstep, every
+console on the same pads, up to the frame whose Quit or Next Race asks
+for the save (`endGameAutosaveNow`). That frame is the race's last in
+lockstep (`netstep.md`, "The end"): from the next, each console answers
+its own save on its own card with its own pad, and its Quit comes back
+to the lobby (`lobby.md`, "After the race"). A Next Race after the stop
+would race on with no lockstep: 37f-2's.
+
 Three of retail's reads are tested first in the port:
 
 - `pEndGameScreens` in the base's SELECT, BACK and the bridge.

@@ -249,13 +249,16 @@ It checks:
 - latency and resends on a clean channel;
 - the mean wait on a lossy one;
 - when the link is lost and back around a cut;
-- keepalives on a quiet link.
+- keepalives on a quiet link;
+- a peek (`wl_link_peek`, TASKS 37f: the race's end leaves the lobby's
+  messages on the link for it) is the message the next read takes, and
+  leaves it there.
 
 Each scenario prints its counts. The last line is `faults N`, and the
 check passes at 0.
 
-`--mutate` makes 50 mutations of `wlproto.c` (out of tree, in parallel).
-48 are caught and 2 are equivalent, named in the script:
+`--mutate` makes 53 mutations of `wlproto.c` (out of tree, in parallel).
+51 are caught and 2 are equivalent, named in the script:
 
 - `wl-drain-seq`: the held slot of `expect` only ever holds `expect`'s
   message.

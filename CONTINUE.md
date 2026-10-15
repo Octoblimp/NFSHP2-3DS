@@ -110,6 +110,15 @@ on the 15.5 FPS of an earlier run: that was the fire on track 11, and
 TASKS 46 must reach a steady 30 there and in every place like it.
 Next: TASKS 37 (multi-card multiplayer).**
 
+**Now (Session 106, 2026-10-15): TASKS 37f-1 is done. A wireless
+race's lockstep ends after the frame that asks for the end's save,
+or with the pause's Quit Race, on every console on the same frame;
+the host serves its last frames until each client has said it
+stopped, and every console goes back to the lobby, where the host
+can start again. Two Azahars passed it twice. Next: 37f-2 (Restart
+Race and Next Race back in lockstep), 37f-3, 37g, TASKS 61, 46, 60
+and 59.**
+
 **Now (Session 105, later): TASKS 65's slow second (world 186 s) was
 every stage with a mid-frame GPU send about 10 ms longer. The sends now
 flush the linear heap by the kernel's own call, not a request to GSP

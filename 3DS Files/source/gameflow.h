@@ -249,6 +249,10 @@ typedef struct {
     // is set. Not traced; no hook answers 0 for both.
     int (*gameType)(void* user);
     int (*raceDemo)(void* user);
+    // The port's own: the screen the frontend comes back to after the race
+    // instead of the game type's, when it is on the stack (a wireless
+    // race's lobby, TASKS 37f), or NULL for retail's.
+    const char* (*raceReturn)(void* user);
     // TheEasterEggs (0x0031d7e8), the port's name: retail's ELF has no
     // symbols, and the class is not on the demo disc. Start (0x0024f488)
     // gives it the pad's sixteen button events, 133..148, and Stop
