@@ -36,7 +36,16 @@ each record each console runs (the harness's header has the list):
     for; a client's loop frozen 6 s and 2 s, the host's 5 s, place 2's
     5 s on a lossy link; place 2 lost to the host and then the host
     lost while it holds, the client held on its word, then for it, then
-    alone; nothing sent over a lost link.
+    alone; nothing sent over a lost link;
+  - back (37g-2): a client's link cut, each end on, re-peered in the hold
+    and the race on from the frame it held on; re-peered as the client's
+    hold ends, the host's word waited for past it; the rejoin half up
+    (the client sees the host, the host never sees it), the client alone
+    once it has waited; the rejoin up at the host's end alone, no pad
+    ever from it (a console restarted), gone once the host has waited
+    past the hold; the link cut twice, back each time; the rejoin too
+    late; two links cut at once, back one after the other; place 2's on
+    a lossy link.
 
 The harness prints "faults 0" after each scenario that holds and "total
 faults 0" at the end. A mutant is caught only when the harness finds a
@@ -155,7 +164,7 @@ MUTATIONS = [
     M("ns-takehash-check", "    checkHash(p, n);\n}", "}"),
     # -- the host's
     M("ns-takepads-len",
-      "if (m->len != HEADER + (size_t)count * PAD_WIRE) return;",
+      "if (m->len != HEADER + (size_t)count * PAD_WIRE) return 0;",
       "if (m->len < HEADER) return;"),
     M("ns-takepads-first", "    first = get32(d + 4);\n    stop  = get32(d + 15);",
       "    first = get32(d + 4) + 1;\n    stop  = get32(d + 15);"),
@@ -216,30 +225,30 @@ MUTATIONS = [
     M("ns-hostpoll-left",
       "        if (S->left[p]) {\n            say(\"netstep: place %d left",
       "        if (0) {\n            say(\"netstep: place %d left"),
-    M("ns-hostpoll-alive", "        } else if (alive(p)) {\n            continue;",
-      "        } else if (1) {\n            continue;"),
+    M("ns-hostpoll-alive", "        } else if (alive(p) && !S->lost[p]) {",
+      "        } else if (!S->lost[p]) {"),
     M("ns-hostpoll-drop", "        S->live &= (uint8_t)~(1u << p);\n", ""),
     M("ns-hostpoll-build", "    hostBuild();\n    for", "    for"),
     M("ns-hostpoll-sendlive",
-      "if (p == S->place || !((S->live >> p) & 1) || S->lost[p]) continue;\n"
-      "        if (S->fresh[p]",
-      "if (p == S->place || S->lost[p]) continue;\n        if (S->fresh[p]"),
+      "if (p == S->place || !((S->live >> p) & 1)\n"
+      "            || (S->lost[p] && !alive(p)))",
+      "if (p == S->place\n            || (S->lost[p] && !alive(p)))"),
     # -- the hold (37g)
     M("ns-start-hold", "    S->holdMs = holdMs;\n", ""),
     M("ns-poll-polled", "    S->polled = 1;\n", ""),
     M("ns-hostpoll-polled", "        } else if (!S->polled) {",
       "        } else if (0) {"),
     M("ns-hostpoll-lostmark",
-      "            S->lost[p]   = 1;\n            S->lostAt[p] = now;\n",
-      "            S->lostAt[p] = now;\n"),
+      "            S->lost[p]   = 1;\n            S->back[p]   = 0;\n",
+      "            S->back[p]   = 0;\n"),
     M("ns-hostpoll-lostat",
       "            S->lostAt[p] = now;\n            say(\"netstep: place %d lost",
       "            say(\"netstep: place %d lost"),
-    M("ns-hostpoll-hold", "        } else if (now - S->lostAt[p] < S->holdMs) {",
-      "        } else if (now - S->lostAt[p] < S->holdMs / 2) {"),
-    M("ns-hostpoll-sendlost",
-      " || S->lost[p]) continue;\n        if (S->fresh[p]",
-      ") continue;\n        if (S->fresh[p]"),
+    M("ns-hostpoll-hold",
+      "                   < S->holdMs + (alive(p) ? NETSTEP_BACK_MS : 0)) {",
+      "                   < S->holdMs / 2 + (alive(p) ? NETSTEP_BACK_MS : 0)) {"),
+    M("ns-hostpoll-sendlost", "            || (S->lost[p] && !alive(p)))\n",
+      "            || 0)\n"),
     M("ns-hostheld-left",
       "        since = since < S->holdMs ? S->holdMs - since : 0;\n",
       "        since = S->holdMs;\n"),
@@ -286,7 +295,7 @@ MUTATIONS = [
     M("ns-takeframes-walk",
       "        o += 2 + (size_t)bits(d[o + 1]) * PAD_WIRE;\n",
       "        o += 2;\n"),
-    M("ns-takeframes-len", "    if (i < count || o != m->len) return;\n", ""),
+    M("ns-takeframes-len", "    if (i < count || o != m->len) return 0;\n", ""),
     M("ns-takeframes-first",
       "    first = get32(d + 4);\n    if (need > S->padNeed)",
       "    first = get32(d + 4) + 1;\n    if (need > S->padNeed)"),
@@ -354,7 +363,8 @@ MUTATIONS = [
       "    sendPads(now);\n    if (--S->tells",
       "    sendPads(now);\n    if (--S->tells"),
     M("ns-tell-count", "    if (--S->tells == 0) say(", "    if (S->tells == 0) say("),
-    M("ns-clientpoll-alive", "        if (!alive(0)) {\n", "        if (0) {\n"),
+    M("ns-clientpoll-alive", "        if (!alive(0) || S->lost[0]) {\n",
+      "        if (S->lost[0]) {\n"),
     M("ns-clientpoll-alone", "                S->alone   = 1;\n", ""),
     M("ns-clientpoll-alone-live",
       "                S->live    = (uint8_t)(1u << S->place);\n", ""),
@@ -367,8 +377,9 @@ MUTATIONS = [
       "                S->lostAt[0] = now;\n"
       "                say(\"netstep: the host lost",
       "                say(\"netstep: the host lost"),
-    M("ns-clientpoll-hold", "now - S->lostAt[0] >= S->holdMs) {",
-      "now - S->lostAt[0] >= S->holdMs / 2) {"),
+    M("ns-clientpoll-hold",
+      "uint32_t hold = S->holdMs + (alive(0) ? NETSTEP_BACK_MS : 0);",
+      "uint32_t hold = S->holdMs / 2 + (alive(0) ? NETSTEP_BACK_MS : 0);"),
     M("ns-clientpoll-nopads", "    if (S->lost[0]) return;\n", ""),
     M("ns-takeframes-held", "    S->held     = d[19];\n", ""),
     M("ns-takeframes-heldleft", "    S->heldLeft = d[20];\n", ""),
@@ -376,15 +387,54 @@ MUTATIONS = [
       "    if (!S->on) return 0;\n"),
     M("ns-held-host", "    if (S->host) return hostHeld(now, msLeft);\n", ""),
     M("ns-held-client-left",
-      "        if (msLeft) *msLeft = (uint32_t)S->heldLeft * 1000u;\n", ""),
-    M("ns-held-client", "        return S->held;\n", "        return 0;\n"),
+      "        if (msLeft && held) *msLeft = (uint32_t)S->heldLeft * 1000u;\n",
+      ""),
+    M("ns-held-client", "        return held;\n", "        return 0;\n"),
+    M("ns-held-client-self", "S->held & (uint8_t)~(1u << S->place);",
+      "S->held;"),
+    M("ns-held-client-none", "if (msLeft && held) *msLeft", "if (msLeft) *msLeft"),
     M("ns-held-lost-left",
       "    if (msLeft) *msLeft = since < S->holdMs ? S->holdMs - since : 0;\n"
       "    return 1;",
       "    if (msLeft) *msLeft = S->holdMs;\n    return 1;"),
-    M("ns-held-lost", "    return 1;\n}", "    return S->held;\n}"),
+    M("ns-held-lost", "S->holdMs - since : 0;\n    return 1;\n}",
+      "S->holdMs - since : 0;\n    return S->held;\n}"),
     M("ns-clientpoll-alone-return", "        aloneBuild();\n        return;\n",
       "        aloneBuild();\n"),
+    # -- back (37g-2)
+    M("ns-back-host-clear",
+      "            S->lost[p] = 0;\n            say(\"netstep: place %d back",
+      "            say(\"netstep: place %d back"),
+    M("ns-back-host-pads", "        } else if (S->lost[p] && S->back[p]) {",
+      "        } else if (S->lost[p] && alive(p)) {"),
+    M("ns-back-host-heard", "if (takePads(p, &m) && S->lost[p]) S->back[p] = 1;",
+      "takePads(p, &m);"),
+    M("ns-back-host-reset", "            S->back[p]   = 0;\n", ""),
+    M("ns-back-host-grace", "S->holdMs + (alive(p) ? NETSTEP_BACK_MS : 0)",
+      "S->holdMs"),
+    M("ns-back-host-grace-alive", "(alive(p) ? NETSTEP_BACK_MS : 0)",
+      "NETSTEP_BACK_MS"),
+    M("ns-back-host-send", "            || (S->lost[p] && !alive(p)))\n",
+      "            || S->lost[p])\n"),
+    M("ns-takepads-taken",
+      "        S->padFor[p][n & MASK] = n;\n    }\n    return 1;\n}",
+      "        S->padFor[p][n & MASK] = n;\n    }\n    return 0;\n}"),
+    M("ns-back-host-after", "(unsigned long)(now - S->lostAt[p]));",
+      "(unsigned long)S->holdMs);"),
+    M("ns-back-client-clear",
+      "            S->lost[0] = 0;\n            say(\"netstep: the host back",
+      "            say(\"netstep: the host back"),
+    M("ns-back-client-got", "if (S->lost[0] && got) {",
+      "if (S->lost[0] && alive(0)) {"),
+    M("ns-back-client-lost", "if (!alive(0) || S->lost[0]) {",
+      "if (!alive(0)) {"),
+    M("ns-back-grace", "S->holdMs + (alive(0) ? NETSTEP_BACK_MS : 0)",
+      "S->holdMs"),
+    M("ns-back-grace-alive", "(alive(0) ? NETSTEP_BACK_MS : 0)",
+      "NETSTEP_BACK_MS"),
+    M("ns-takeframes-taken",
+      "    while (recIn(S->built)) S->built++;\n    return 1;\n}",
+      "    while (recIn(S->built)) S->built++;\n    return 0;\n}"),
     # -- the race's
     M("ns-clientpoll-resend",
       "now - S->lastSend[S->place] >= NETSTEP_RESEND_MS) sendPads",
@@ -457,9 +507,10 @@ EQUIVALENT = {
     # places goes by the places racing, which netrace gives inside them.
     "ns-start-peer",
     # A place out of the live bits is one that left (the next test), one
-    # whose link was lost for good, held for and dropped, or one never
-    # racing, its link never up: alive() is 0 for the last two, as a link
-    # lost never comes back (wireless.c; until 37g-2's re-peering).
+    # whose link was lost, held for and dropped, or one never racing, its
+    # link never up: alive() is 0 for the last two, as a link lost comes
+    # back only by a rejoin the host takes while it holds for that place
+    # (37g-2, main.c's lockRejoinOk), never once it has dropped it.
     "ns-serving-live",
 }
 

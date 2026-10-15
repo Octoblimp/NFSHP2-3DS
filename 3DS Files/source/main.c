@@ -2946,12 +2946,17 @@ static bool g_lockFinished; // WirelessTestFinish's finish made (37f-2)
 // A console lost (37g): the places racing at GO, those dropped since
 // (their cars the CPU's), the CPU's notice (its places, when it went up,
 // in ms) and the hold's mute.
-#define LOCK_NOTE_MS 4000
+#define LOCK_NOTE_MS   4000
+#define LOCK_REJOIN_MS 2000
 static uint8_t  g_lockLive;
 static uint8_t  g_lockCpu;
 static uint8_t  g_lockNote;
 static uint32_t g_lockNoteAt;
 static bool     g_lockMuted;
+// A console back (37g-2): a client's last try at finding its host, and
+// whether WirelessTestDropFrame's deafness was made.
+static uint32_t g_lockRejoinAt;
+static bool     g_lockDropped;
 
 static const LobbyNet kLobbyNet = {
     .start      = lobbyNetStart,
@@ -3078,6 +3083,8 @@ static void netRaceGoRacing(void)
     g_lockLive = racing;
     g_lockCpu = 0;
     g_lockNote = 0;
+    g_lockRejoinAt = (uint32_t)osGetTime() - LOCK_REJOIN_MS;
+    g_lockDropped = false;
     logLine("netstep: clocks at GO: real %ld frames %ld, world %ld frames "
             "%ld", (long)RealTimer, (long)RealTimeFrames, (long)WorldTimer,
             (long)WorldTimeFrames);
@@ -5449,6 +5456,49 @@ static void lockHandOver(void)
     }
 }
 
+// A console lost (37g-2). The host lets it back into its place while the
+// race holds for it: the place whose peer it is, among those held for
+// now. A client that lost its host looks for it again each
+// LOCK_REJOIN_MS while it holds for it (the scan blocks the loop, the race
+// held already).
+static int lockRejoinOk(int peer)
+{
+    const LobbyRace* r = netrace_race();
+    uint8_t          held = netstep_held((uint32_t)osGetTime(), NULL);
+
+    for (int p = 1; p < r->consoles && p < NETSTEP_MAX; p++)
+        if (r->peer[p] == peer) return (held >> p) & 1;
+    return 0;
+}
+
+static void lockRejoin(uint32_t now)
+{
+    uint8_t held = netstep_held(now, NULL);
+
+    if (wireless_is_host()) {
+        wireless_set_rejoin(held != 0, lockRejoinOk);
+        return;
+    }
+    if (!(held & 1) || wireless_state() != WIRELESS_LOST) return;
+    if (now - g_lockRejoinAt < LOCK_REJOIN_MS) return;
+    g_lockRejoinAt = now;
+    (void)wireless_rejoin();
+}
+
+// WirelessTestDropFrame (configitems.h): this console deaf from that
+// lockstep frame for WirelessTestDropMs, its links lost at both ends.
+static void lockTestDrop(void)
+{
+    if (ConfigWirelessTestDropFrame <= 0 || g_lockDropped
+        || netstep_frame() < (uint32_t)ConfigWirelessTestDropFrame)
+        return;
+    g_lockDropped = true;
+    logLine("lockstep: frame %lu, deaf for the test",
+            (unsigned long)netstep_frame());
+    wireless_test_deaf(ConfigWirelessTestDropMs > 0
+                       ? (uint32_t)ConfigWirelessTestDropMs : 5000u);
+}
+
 // The race held for a lost console (37g) is muted, as the pause mutes it,
 // unless it was muted already; the hold's end, or lockstep's, unmutes it.
 // No lockstep frame runs in a hold, so the pause cannot change it under.
@@ -7760,6 +7810,7 @@ int main(int argc, char** argv)
         if (lockOn) {
             raceStep = lockFrame(&frameTicker);
             lockHoldMute(netstep_held((uint32_t)osGetTime(), NULL) != 0);
+            lockRejoin((uint32_t)osGetTime());
         } else {
             prepare_real_timestep_from_ticker(&frameTicker);
         }
@@ -7895,6 +7946,7 @@ int main(int argc, char** argv)
             // the lobby next (37f).
             if (lockOn && raceStep) {
                 lockTestFinish();
+                lockTestDrop();
                 netstep_done(lockhash_ran(netstep_frame(), pCurrentWorld));
                 g_lockRan = true;
                 if (pRaceCoordinator != NULL) g_lockRaced = true;
@@ -7910,6 +7962,7 @@ int main(int argc, char** argv)
                 netstep_drain(now);
                 g_lockEnd = false;
                 lockHoldMute(false);
+                wireless_set_rejoin(0, NULL);
             }
 
             // The view let go in the Begin of unloading

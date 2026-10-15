@@ -15,6 +15,9 @@
 // (the lobby's start), or until it is full. A client that leaves, or
 // goes quiet, keeps its place in the host's list with `alive` 0, so the
 // race can tell who went; wireless_forget_lost clears those places.
+// While a race holds for one (37g-2, wireless_set_rejoin), it may come
+// back into its place: a client that lost its host finds it again by its
+// address (wireless_rejoin) and joins it anew.
 //
 // The host's beacon carries a few bytes of its own (WIRELESS_APPDATA_MAX)
 // after the port's tag and wlproto's version, so a scan lists only hosts
@@ -80,6 +83,24 @@ int  wireless_host(int consoles, const void *appdata, size_t n);
 
 // The host lets more clients in (1) or no more (0).
 void wireless_set_open(int open);
+
+// The host's, in a race (37g-2): while on, a console whose link was lost
+// may come back into its old place, its user name the same (and its
+// friend code seed, when both have one), with a new link, if `ok` says
+// the race still holds for that peer; any other that comes is sent away,
+// as once closed. Off, no one comes in.
+typedef int (*WirelessRejoinFn)(int peer);
+void wireless_set_rejoin(int on, WirelessRejoinFn ok);
+
+// A client's whose host was lost (WIRELESS_LOST), in a race (37g-2): off
+// the old network, the host found again by its address and joined anew,
+// the one peer as before: 1 when joined. Blocks while it scans.
+int  wireless_rejoin(void);
+
+// For the Azahar runs (WirelessTestDropFrame, 37g-2): from now for `ms`,
+// this console hears nothing and sends nothing, as one out of range,
+// so each end of each link finds it lost; and no rejoin until then.
+void wireless_test_deaf(uint32_t ms);
 
 // The hosts in range, up to `max`: how many, or -1 when the scan failed.
 // Full ones are left out. The list stays good until the next scan.

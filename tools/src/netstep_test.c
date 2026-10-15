@@ -15,10 +15,15 @@
 // back, or main.c's after the stop; or at once, both ways, where a
 // scenario has a console vanish at its stop or before the start. A link
 // lost stays lost, both ways, as wireless.c's does (the host sends the
-// client off). A console pumps every millisecond but when it is gone, in
-// its first frame's drawing, in a stall after its stop (its save, its
-// unload), or while its loop is frozen (it comes back after to its link
-// lost).
+// client off), and has no inbox, until a scenario re-peers it (37g-2):
+// main.c's rejoin, tried each second while the client holds for its host
+// and the host for that place, the link new with nothing of the old on
+// it. A scenario can cut a client's link to the host: nothing goes over
+// it from then, so each end finds it lost by its timeout, as a console
+// out of range does. A console pumps every millisecond but when it is
+// gone, in its first frame's drawing, in a stall after its stop (its
+// save, its unload), or while its loop is frozen (it comes back after to
+// its link lost).
 //
 // Each console does what main.c's frame does: at the frame's start it
 // puts its pad for the frame NETSTEP_DELAY ahead with the step it
@@ -56,6 +61,10 @@
 //     what the host said or its host lost, the time left never more than
 //     the hold, and every console still on held for each place lost,
 //     and alone for none;
+//   - a link re-peered while both ends held (37g-2): back said once on
+//     each end, by the host no later than the hold, by the client no
+//     later than NETSTEP_BACK_MS past it; neither end gone nor alone, and
+//     no record without the place; one re-peered too late never back;
 //   - every message no longer than WL_MSG_MAX, to a peer there is and
 //     over a link not lost, a
 //     client's PADS and the host's FRAMES only; from a client alone only
@@ -135,6 +144,22 @@ typedef struct {
                                     // first poll, a bit each
     int         freezeAt[MAXC];     // ms its loop stops, 0: never
     int         freezeFor[MAXC];    // ms it stays stopped
+    int         dropAt[MAXC];       // ms a client's link to the host is
+                                    // cut, 0: never (37g-2)
+    int         repeerAt[MAXC];     // ms from which its rejoin is tried,
+                                    // each second, 0: never
+    int         dropAgain[MAXC];    // ms its link is cut again, once
+                                    // back, 0: never
+    int         repeerLate;         // clients whose rejoin is tried each
+                                    // ms, taken only 2 ms or less before
+                                    // its hold ends, a bit each
+    int         repeerHalf;         // clients whose rejoin brings up its
+                                    // own end alone: it sees the host,
+                                    // which never sees it, a bit each
+    int         repeerMute;         // clients whose rejoin brings up the
+                                    // host's end alone: the host sees it,
+                                    // and it hears nothing and sends no
+                                    // pads (one restarted), a bit each
 } Scenario;
 
 static const Scenario kScenarios[] = {
@@ -202,6 +227,42 @@ static const Scenario kScenarios[] = {
     { .name = "two, the client's loop frozen 2 s", .consoles = 2,
       .frames = 400, .latency = 5, .freezeAt = { 0, 4000 },
       .freezeFor = { 0, 2000 }, .hold = 8000 },
+    // A link cut, each end on (37g-2): lost to both at 7 s, re-peered at
+    // 9 s, and on from the frame it held on.
+    { .name = "two, the client's link cut, back in the hold", .consoles = 2,
+      .frames = 500, .latency = 5, .dropAt = { 0, 4000 },
+      .repeerAt = { 0, 9000 }, .hold = 20000 },
+    // Back on the host's word as the client's hold ends: it waits on.
+    { .name = "two, the client's link cut, back as its hold ends",
+      .consoles = 2, .frames = 400, .latency = 5, .dropAt = { 0, 4000 },
+      .repeerAt = { 0, 5000 }, .repeerLate = 0x02, .hold = 6000 },
+    // The client on the link again, the host never: no word comes, and
+    // it goes on alone once it has waited for it.
+    { .name = "two, the client's link cut, its rejoin half up",
+      .consoles = 2, .frames = 400, .latency = 5, .dropAt = { 0, 4000 },
+      .repeerAt = { 0, 9000 }, .repeerHalf = 0x02, .hold = 8000 },
+    // Lost, back, lost again and back again: nothing of the first time
+    // left over.
+    { .name = "two, the client's link cut twice, back each time",
+      .consoles = 2, .frames = 700, .latency = 5, .dropAt = { 0, 4000 },
+      .repeerAt = { 0, 9000 }, .dropAgain = { 0, 14000 }, .hold = 20000 },
+    // The host's end on the link again, no pad ever from it (as a
+    // console restarted and joined, 37g-3's): the host waits past the
+    // hold for its pads, then it is gone.
+    { .name = "two, the client's link cut, back with no pads",
+      .consoles = 2, .frames = 400, .latency = 5, .dropAt = { 0, 4000 },
+      .repeerAt = { 0, 9000 }, .repeerMute = 0x02, .hold = 8000 },
+    { .name = "two, the client's link cut, its rejoin too late",
+      .consoles = 2, .frames = 400, .latency = 5, .dropAt = { 0, 4000 },
+      .repeerAt = { 0, 14000 }, .hold = 5000 },
+    // Place 1 held for place 2, back first, then on the host's word.
+    { .name = "three, both links cut, back one after the other",
+      .consoles = 3, .frames = 500, .latency = 5, .dropAt = { 0, 4000, 4000 },
+      .repeerAt = { 0, 8000, 10000 }, .hold = 15000 },
+    { .name = "three, place 2's link cut, back, a lossy link",
+      .consoles = 3, .frames = 500, .latency = 4, .jitter = 15,
+      .lossPct = 15, .dupPct = 5, .dropAt = { 0, 0, 3000 },
+      .repeerAt = { 0, 0, 7000 }, .hold = 10000 },
     { .name = "two, a checksum differs", .consoles = 2, .frames = 400,
       .latency = 5, .divergeAt = { 0, 200 } },
     // The client runs ahead, so each checksum comes to the host before
@@ -345,6 +406,10 @@ typedef struct {
     uint32_t     lostAt[MAXC];
     uint8_t      lostNow;
     uint8_t      heldSeen;
+    int          backSaid[MAXC]; // back as said, by place (37g-2)
+    int          repeered;       // its link to the host, a client's
+    int          halfUp;         // and that only at its own end
+    int          hostUp;         // or only at the host's
     int          frozen;         // its loop stopped, a scenario's freeze
     uint8_t      q[MAXFRAMES + NETSTEP_DELAY + 2];   // its steps put
 } Console;
@@ -356,7 +421,8 @@ typedef struct {
 
 static Console         C[MAXC];
 static Pipe            g_pipe[MAXC][MAXC];   // [from][to]
-static int             g_lost[MAXC][MAXC];   // a link lost, for good
+static int             g_lost[MAXC][MAXC];   // a link lost, until re-peered
+static uint32_t        g_cutAt[MAXC];        // ms a client's link was cut
 static Truth           g_truth[MAXFRAMES + 8];
 static const Scenario* S;
 static int             g_cur = -1;
@@ -471,16 +537,26 @@ static uint32_t holdOf(void)
     return S->hold ? (uint32_t)S->hold : NETSTEP_HOLD_MS;
 }
 
+// The cut of the link between a and b, one of them the host; 0: none.
+static uint32_t cutOf(int a, int b)
+{
+    return g_cutAt[a != 0 ? a : b];
+}
+
 static int fPeerAlive(int i)
 {
     int      t = target(g_cur, i);
-    uint32_t timeout;
+    uint32_t timeout, last;
 
     if (t < 0) return 0;
     if (C[g_cur].vanished || C[t].vanished) return 0;
     if (g_lost[g_cur][t]) return 0;
     timeout = C[g_cur].patience ? C[g_cur].patience : LINK_MS;
-    if (g_now - C[t].pumped < timeout) return 1;
+    // Cut, nothing of its heard since.
+    last = C[t].pumped;
+    if (cutOf(g_cur, t) && (int32_t)(last - cutOf(g_cur, t)) > 0)
+        last = cutOf(g_cur, t);
+    if (g_now - last < timeout) return 1;
     g_lost[g_cur][t] = g_lost[t][g_cur] = 1;
     return 0;
 }
@@ -564,6 +640,7 @@ static int fSend(int i, uint8_t type, const void* data, size_t n)
     C[g_cur].sent++;
     C[g_cur].sends++;
     if (C[t].gone) return 1;
+    if (cutOf(g_cur, t)) return 1;
     if (((S->deafAfterStop >> t) & 1) && C[t].stopped) return 1;
     if (S->outageFrom && g_now >= (uint32_t)S->outageFrom
         && g_now < (uint32_t)S->outageTo)
@@ -593,6 +670,8 @@ static int next(int i, int* from)
         fault("read from peer %d, which is not there", i);
         return -1;
     }
+    // A link lost has no inbox (wireless_peer_link).
+    if (g_lost[g_cur][t]) return -1;
     p = &g_pipe[t][g_cur];
     for (k = 0; k < PIPE; k++) {
         if (!p->q[k].used || (int32_t)(g_now - p->q[k].due) < 0) continue;
@@ -655,11 +734,29 @@ static void fSetPatience(uint32_t ms)
     C[g_cur].patienceSets++;
 }
 
+// A place back, as the log said (37g-2): one lost, after as long as it
+// was, within NETSTEP_BACK_MS past the hold.
+static void backOf(Console* k, int p, unsigned long ms)
+{
+    uint32_t most = holdOf() + HOLD_SLACK + NETSTEP_BACK_MS;
+
+    k->backSaid[p]++;
+    if (!(k->lostNow & (1u << p))) {
+        fault("place %d back, not lost", p);
+        return;
+    }
+    if (ms != g_now - k->lostAt[p])
+        fault("place %d back after %lu ms, lost %lu ms ago", p, ms,
+              (unsigned long)(g_now - k->lostAt[p]));
+    if (ms > most) fault("place %d back %lu ms after it was lost", p, ms);
+    k->lostNow &= (uint8_t)~(1u << p);
+}
+
 static void fLog(const char* line)
 {
     Console*      k = &C[g_cur];
     int           p;
-    unsigned long n;
+    unsigned long n, ms;
     unsigned      h;
 
     if (k->numLines < LINES)
@@ -679,9 +776,12 @@ static void fLog(const char* line)
         if (p >= 0 && p < MAXC) {
             if (k->goneSaid[p]) fault("place %d said gone twice", p);
             k->goneSaid[p] = 1;
+            // On the link again, its pads waited for.
+            uint32_t from = holdOf() + (C[p].hostUp ? NETSTEP_BACK_MS : 0);
+
             if (!k->lostSaid[p]) fault("place %d gone, never lost", p);
-            else if (g_now - k->lostAt[p] < holdOf()
-                     || g_now - k->lostAt[p] > holdOf() + HOLD_SLACK)
+            else if (g_now - k->lostAt[p] < from
+                     || g_now - k->lostAt[p] > from + HOLD_SLACK)
                 fault("place %d gone %lu ms after it was lost", p,
                       (unsigned long)(g_now - k->lostAt[p]));
             k->lostNow &= (uint8_t)~(1u << p);
@@ -700,6 +800,12 @@ static void fLog(const char* line)
                                        "twice", p);
         k->startGoneSaid[p] = 1;
     }
+    if (sscanf(line, "netstep: place %d back at frame %lu, after %lu ms", &p,
+               &n, &ms) == 3 && p > 0 && p < MAXC)
+        backOf(k, p, ms);
+    if (sscanf(line, "netstep: the host back at frame %lu, after %lu ms", &n,
+               &ms) == 2)
+        backOf(k, 0, ms);
     if (sscanf(line, "netstep: the host lost at frame %lu; held for", &n)
         == 1) {
         if (k->lostNow & 1u) fault("the host said lost twice");
@@ -723,11 +829,14 @@ static void fLog(const char* line)
         k->goneOnSaid[p] = 1;
     }
     if (sscanf(line, "netstep: the host is gone, from frame %lu", &n) == 1) {
+        // On the link again, the host's word waited for.
+        uint32_t from = holdOf() + (k->halfUp ? NETSTEP_BACK_MS : 0);
+
         k->aloneLines++;
         k->aloneFrom = (int)n;
         if (k->lostNow & 1u) {
-            if (g_now - k->lostAt[0] < holdOf()
-                || g_now - k->lostAt[0] > holdOf() + HOLD_SLACK)
+            if (g_now - k->lostAt[0] < from
+                || g_now - k->lostAt[0] > from + HOLD_SLACK)
                 fault("alone %lu ms after the host was lost",
                       (unsigned long)(g_now - k->lostAt[0]));
             k->lostNow &= (uint8_t)~1u;
@@ -807,7 +916,8 @@ static void sayBack(int c)
 
     C[c].backSent = 1;
     for (t = 0; t < S->consoles; t++) {
-        if (t == c || (c != 0 && t != 0) || C[t].gone) continue;
+        if (t == c || (c != 0 && t != 0) || C[t].gone || g_lost[c][t])
+            continue;
         if ((S->notRacing >> t) & 1) continue;
         put(c, t, MSG_BACK, &none, 1);
         C[t].backTo++;
@@ -917,7 +1027,8 @@ static void checkRecord(int c, const NetStepFrame* r)
                       (unsigned long)r->n, p);
             if (k->wasLive[p] > 0) {
                 k->wasLive[p] = -1;
-                if (!C[p].gone && !C[p].stopped && !alone && !g_lost[0][p])
+                if (!C[p].gone && !C[p].stopped && !alone && !g_lost[0][p]
+                    && !g_lost[p][0])
                     fault("frame %lu: place %d dropped, still on",
                           (unsigned long)r->n, p);
             }
@@ -1075,12 +1186,22 @@ static void tick(int c)
 
 // ------------------------------------------------------------ a scenario
 
-// A console lost for good: gone, or its loop stopped past the link's
-// timeout.
+// A client's cut link re-peered while both ends hold for it: its rejoin
+// tried from well within the hold (37g-2).
+static int repeers(int p)
+{
+    return S->dropAt[p] && S->repeerAt[p]
+        && !(((S->repeerHalf | S->repeerMute) >> p) & 1)
+        && S->repeerAt[p] < S->dropAt[p] + (int)holdOf();
+}
+
+// A console lost for good: gone, its loop stopped past the link's
+// timeout, or its link cut and never re-peered.
 static int goesAt(int p)
 {
     return S->goneAt[p]
-        || (S->freezeAt[p] && (uint32_t)S->freezeFor[p] > LINK_MS);
+        || (S->freezeAt[p] && (uint32_t)S->freezeFor[p] > LINK_MS)
+        || (S->dropAt[p] && !repeers(p));
 }
 
 static int expectGone(int c, int p)
@@ -1099,6 +1220,14 @@ static int hostSaw(int p)
         && S->goneAt[p] + (int)LINK_MS + 500 < S->goneAt[0];
 }
 
+// Client c with its host at some time while the host holds for place p:
+// not when both links were cut and p was back first, c's still lost.
+static int heardHold(int c, int p)
+{
+    if (!S->dropAt[c] || !S->dropAt[p]) return 1;
+    return !repeers(p) || S->repeerAt[c] < S->repeerAt[p];
+}
+
 // The lines of the hold, and each console's netstep_held.
 static void checkHold(int c, const Console* k)
 {
@@ -1108,16 +1237,27 @@ static void checkHold(int c, const Console* k)
         int racing = !((S->notRacing >> p) & 1) && p != c;
         int start  = racing && ((S->vanishAtStart >> p) & 1);
         // The host holds for each client lost, a client for its host:
-        // the other gone, or lost to it while its own loop stopped.
+        // the other gone, or lost to it while its own loop stopped, or
+        // the link between them cut.
         int lost   = racing && !start && (c == 0 || p == 0)
-                  && (goesAt(p) || goesAt(c));
+                  && (goesAt(p) || goesAt(c) || (c == 0 && S->dropAt[p])
+                      || (p == 0 && S->dropAt[c]));
+        // Back, the link re-peered in the hold.
+        int back   = lost && ((c == 0 && repeers(p))
+                              || (p == 0 && repeers(c)));
+        // As often as the link was cut.
+        int cuts   = 1 + !!((c == 0 && S->dropAgain[p])
+                            || (p == 0 && S->dropAgain[c]));
         // A client still with its host is held for each place the host
         // holds for.
         int seen   = lost || (c != 0 && p != 0 && racing && !start
-                              && goesAt(p) && hostSaw(p) && !goesAt(c));
+                              && (goesAt(p) || S->dropAt[p]) && hostSaw(p)
+                              && !goesAt(c) && heardHold(c, p));
 
-        if (k->lostSaid[p] != lost)
+        if (k->lostSaid[p] != lost * cuts)
             fault("place %d said lost %d times", p, k->lostSaid[p]);
+        if (k->backSaid[p] != back * cuts)
+            fault("place %d said back %d times", p, k->backSaid[p]);
         if (k->startGoneSaid[p] != (start && c == 0))
             fault("place %d said gone at the start %d times", p,
                   k->startGoneSaid[p]);
@@ -1255,6 +1395,39 @@ static void finish(void)
     }
 }
 
+// main.c's rejoin (37g-2): a client holding for its host finds it again,
+// and the host lets it back into its place while it holds for it; late,
+// only in the hold's last 2 ms. The link is new: nothing of the old one's
+// is on it. Half up, only the client's end comes up; mute, only the
+// host's.
+static void repeer(int c)
+{
+    uint32_t left;
+    uint8_t  host, client;
+
+    if (!g_lost[0][c] || C[0].gone || C[c].gone || held(0) || held(c)
+        || C[0].stopped || C[c].stopped)
+        return;
+    enter(0);
+    host = netstep_held(g_now, NULL);
+    enter(c);
+    client = netstep_held(g_now, &left);
+    if (!((host >> c) & 1) || !(client & 1)) return;
+    if (((S->repeerLate >> c) & 1) && left > 2) return;
+    if ((S->repeerMute >> c) & 1) {
+        g_lost[0][c] = 0;
+        C[c].hostUp  = 1;
+    } else {
+        g_lost[c][0] = 0;
+        if (!((S->repeerHalf >> c) & 1)) g_lost[0][c] = 0;
+        else C[c].halfUp = 1;
+    }
+    g_cutAt[c] = 0;
+    memset(&g_pipe[0][c], 0, sizeof g_pipe[0][c]);
+    memset(&g_pipe[c][0], 0, sizeof g_pipe[c][0]);
+    C[c].repeered = 1;
+}
+
 // Still to come: a frame to run, a drain, a lobby to come back.
 static int busy(int c)
 {
@@ -1275,6 +1448,7 @@ static void runScenario(const Scenario* s)
     memset(C, 0, sizeof C);
     memset(g_pipe, 0, sizeof g_pipe);
     memset(g_lost, 0, sizeof g_lost);
+    memset(g_cutAt, 0, sizeof g_cutAt);
     memset(g_truth, 0, sizeof g_truth);
     g_lcg       = 12345u;
     g_now       = 1000;
@@ -1315,6 +1489,14 @@ static void runScenario(const Scenario* s)
         for (c = 0; c < s->consoles; c++) {
             if (s->goneAt[c] && g_now == (uint32_t)s->goneAt[c])
                 C[c].gone = 1;
+            if (c > 0 && s->dropAt[c] && g_now == (uint32_t)s->dropAt[c])
+                g_cutAt[c] = g_now;
+            if (c > 0 && s->dropAgain[c]
+                && g_now == (uint32_t)s->dropAgain[c]) {
+                if (!C[c].repeered) fault("cut again, never back");
+                g_cutAt[c]    = g_now;
+                C[c].repeered = 0;
+            }
             if (s->freezeAt[c])
                 C[c].frozen = g_now >= (uint32_t)s->freezeAt[c]
                            && g_now < (uint32_t)(s->freezeAt[c]
@@ -1326,6 +1508,13 @@ static void runScenario(const Scenario* s)
                 junk(0, c);
                 junk(c, 0);
             }
+        }
+        for (c = 1; c < s->consoles; c++) {
+            uint32_t from = (uint32_t)s->repeerAt[c];
+
+            if (!from || C[c].repeered || g_now < from) continue;
+            if (((s->repeerLate >> c) & 1) || (g_now - from) % 1000u == 0)
+                repeer(c);
         }
         for (c = 0; c < s->consoles; c++) {
             enter(c);

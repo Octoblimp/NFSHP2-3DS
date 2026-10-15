@@ -129,6 +129,15 @@ extern int32_t ConfigWirelessTestFinish;    // 0
 // TASKS 37g). 0 is netstep's own, 90 s. Azahar runs set it short.
 extern int32_t ConfigWirelessHoldSeconds;   // 90
 
+// The port's own: "WirelessTestDropFrame n" has this console's wireless
+// hear and send nothing for WirelessTestDropMs from its lockstep frame n
+// (wireless_test_deaf), as one out of range: each end loses the link, the
+// race holds, and the console finds the host again and is taken back
+// (TASKS 37g-2). The Azahar runs' way to a dropped link. Off by default
+// (2026-10-15).
+extern int32_t ConfigWirelessTestDropFrame; // 0
+extern int32_t ConfigWirelessTestDropMs;    // 5000
+
 // SkipFE as the image reads it, `lw -23220(gp)`: gameflow's skipFE
 // through gPlayerCamSkipFE, 0 while that is unset.
 int32_t config_skip_fe(void);

@@ -169,8 +169,50 @@ popups go to the lowest port still racing.
 A client that loses the host holds the same way and sends nothing. It
 then goes on alone ("the host is gone, from frame n; racing alone"): its
 own pad on its place, the rest at rest, every other car the CPU's. A
-console already gone at the first poll is not held for. A lost link
-never comes back yet: rejoining is 37g-2 and 37g-3.
+console already gone at the first poll is not held for.
+
+### Back in the hold (TASKS 37g-2)
+
+A link lost to a console that is still on can come back during the hold,
+for example when a console goes out of range and back:
+
+- **The host.** While the race holds for any place, main.c's
+  `lockRejoin` turns on `wireless_set_rejoin`, which unblocks new
+  connections. A node that comes to the closed network is taken back only
+  into the place of a lost peer with the same user name. The friend code
+  seeds must match too, when both consoles have one. The race must still
+  hold for that place: `lockRejoinOk` asks `netstep_held`. The node gets a
+  new link ("wireless: node n (NAME) back in place i"). Any other node is
+  sent away, as before. Once that peer is alive again, netstep sends the
+  place the records it still needs, still holding for it. Only when the
+  place's pads come again does it say "place p back at frame n, after t
+  ms" and build with it again, from the record it held on. When nothing
+  is held, or the race stops, the network closes again.
+- **The client.** While it holds for its host and wireless is
+  WIRELESS_LOST, main.c calls `wireless_rejoin` every 2 s. That leaves
+  the old network, scans for the host by the MAC address saved at the
+  join, and connects again, the host its one peer as before ("wireless:
+  back on "NAME"'s network, try k"). The scan blocks the loop, but the
+  race is already held. netstep says "the host back at frame n, after t
+  ms" only once the host's records come again: that proves the host took
+  it back. It then sends its pads again and goes on from the frame it
+  held on.
+- **At the hold's end.** Either end back on the link but without the
+  other's word yet waits up to NETSTEP_BACK_MS (3 s) past its hold. This
+  covers a rejoin that blocks across the hold's end. With no word by
+  then, a client goes on alone, and the host builds without the place,
+  its car the CPU's. A host that refused a client never sends it a
+  record, so a refused client cannot be taken for back. A console that
+  comes back on the link but sends no pads cannot be either. One that
+  restarted and joined from the lobby is such a console, until 37g-3.
+  Without this rule the host would wait for its pads for good, the link
+  kept up by its keepalives.
+
+For the Azahar runs, `WirelessTestDropFrame n` (and `WirelessTestDropMs`,
+5000) makes a console's wireless deaf from lockstep frame n
+(`wireless_test_deaf`). It hears nothing and sends nothing, so each end
+of its links times out. It tries no rejoin until the deafness ends.
+37g-3 (a console restarted and joining again) is still to come.
 
 ## The end (TASKS 37f)
 
@@ -246,10 +288,31 @@ lossy link, checked every ms against each line and `netstep_held`
 (the host's time left to the ms); the host lost; a place, or the host,
 gone at the start and not held for; a loop frozen past the link's
 timeout and short of it; place 2 lost and then the host while it holds.
-Nothing may go over a lost link, and a console alone holds for none. 47
-scenarios, faults 0. `--mutate`: 173 mutations, 170 caught, 3
-equivalent (named in the check). `tools/netrace_check.py` checks the
-names the setup carries and the box's texts.
+Nothing may go over a lost link, and a console alone holds for none.
+
+Since 37g-2, back in the hold, through a client's link cut with both
+ends still on. Each end finds a cut link lost by its own timeout. A lost
+link has no inbox, and a rejoin is tried each second while both ends
+hold. The scenarios:
+
+- re-peered in the hold;
+- re-peered 2 ms before the client's hold ends, the host's word waited
+  for past it;
+- re-peered only at the client's end (the host never sees it), the
+  client alone once it has waited;
+- re-peered only at the host's end, no pad ever coming (as from a
+  console restarted): the host waits past the hold, then hands the car
+  to the CPU;
+- the link cut twice, back each time;
+- the rejoin too late;
+- two links cut at once, back one after the other;
+- place 2's link cut on a lossy link.
+
+"Back" must be said once on each end for each cut, and no record may
+drop the place. In all: 55 scenarios, faults 0. `--mutate`: 190
+mutations, 187 caught, 3 equivalent (named in the check).
+`tools/netrace_check.py` checks the names the setup carries and the
+box's texts.
 
 ## On Azahar
 
@@ -362,3 +425,35 @@ more, with a shot every 2 s:
   "The link to hp2host was lost.", then raced alone from frame 773,
   the host's car the CPU's and ahead of B's (copy B is Manual, and the
   script never shifts).
+
+Session 112, continued (37g-2), with `-Drop N`: each card's config has
+`WirelessHoldSeconds 30`, and copy N's also has `WirelessTestDropFrame
+300` and `WirelessTestDropMs 5000`. From lockstep frame 300 its wireless
+hears and sends nothing for 5 s, like a console out of range. Every copy
+drives on through the hold and 30 s more:
+
+- `-Drop 1` (seed dab01660): B went deaf on frame 300. The host lost it
+  at frame 303, held, and opened its network to a lost console. B lost
+  the host at frame 301. Once it heard again it looked for hp2host by
+  its MAC and was back on its network on the first try. The host took
+  node 2 back as its first client. The host said place 1 back after
+  2373 ms, and B said the host back after 2357 ms, both at frame 303.
+  The host closed its network again. Both raced on in lockstep, all 18
+  logged frames' parts the same.
+- `-Drop 0` (seed d0cf097b): the host went deaf on frame 300, and both
+  lost the link at frame 301. B found the host on its first try, and the
+  host took it back 401 ms after the loss, still deaf: UDS's node events
+  still came. B said the host back after 2056 ms, once the host could
+  hear and its records came. All 17 logged frames' parts the same.
+
+In those two runs the host said a place back as soon as it took its
+console back. It now waits for the place's pads, since a restarted
+console is taken back the same way and sends none. Both were run again:
+
+- `-Drop 1` (seed 01389e7e): B said the host back after 4363 ms, and
+  the host said place 1 back 16 ms later, after 4379 ms, once B's pads
+  came. All 18 logged frames' parts the same.
+- `-Drop 0` (seed 9d768a12): the host took B back while still deaf, and
+  said place 1 back only once it heard again and B's pads came, after
+  2139 ms; B said the host back after 2056 ms, both at frame 301. All 17
+  logged frames' parts the same.

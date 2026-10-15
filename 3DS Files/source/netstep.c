@@ -199,7 +199,8 @@ static uint8_t hostHeld(uint32_t now, uint32_t* msLeft)
     return mask;
 }
 
-static void takePads(int p, const WlMsg* m)
+// 1 for a message taken, 0 for one dropped.
+static int takePads(int p, const WlMsg* m)
 {
     const uint8_t* d = m->data;
     uint32_t       need, first, stop;
@@ -207,7 +208,7 @@ static void takePads(int p, const WlMsg* m)
 
     // One its pads do not fill is dropped.
     count = d[8];
-    if (m->len != HEADER + (size_t)count * PAD_WIRE) return;
+    if (m->len != HEADER + (size_t)count * PAD_WIRE) return 0;
     need  = get32(d);
     first = get32(d + 4);
     stop  = get32(d + 15);
@@ -226,6 +227,7 @@ static void takePads(int p, const WlMsg* m)
         decodePad(&S->pads[p][n & MASK], d + HEADER + (size_t)i * PAD_WIRE);
         S->padFor[p][n & MASK] = n;
     }
+    return 1;
 }
 
 // To client `p`: its pads from the next record on, and the records from
@@ -268,7 +270,8 @@ static void sendFrames(int p, uint32_t now)
 // Each racing client's pads. Not those of one gone or stopped, nor any
 // past a message not the race's: what it sends from its stop on is the
 // lobby's, left on the link for it. One that came before its stop was
-// heard says the client has gone on all the same.
+// heard says the client has gone on all the same. Pads from a place held
+// for, its link re-peered, say it is back in the race (37g-2).
 static void hostRead(void)
 {
     WlMsg m;
@@ -283,7 +286,7 @@ static void hostRead(void)
                 break;
             }
             S->net.recv(S->peer[p], &m);
-            takePads(p, &m);
+            if (takePads(p, &m) && S->lost[p]) S->back[p] = 1;
         }
     }
 }
@@ -297,23 +300,34 @@ static void hostPoll(uint32_t now)
     // is built without. One whose link is lost is held for (37g): no
     // record is built without its pad until the hold is over, and then
     // the records are built without it, as without one left. One gone
-    // already at the first poll is not held for.
+    // already at the first poll is not held for. One on the link again
+    // (37g-2) is sent the records, and is back once its pads come; it is
+    // waited for a little past the hold, as a client waits for its host.
     for (p = 0; p < NETSTEP_MAX; p++) {
         if (p == S->place || !((S->live >> p) & 1)) continue;
         if (S->left[p]) {
             say("netstep: place %d left, from frame %lu", p,
                 (unsigned long)S->built);
-        } else if (alive(p)) {
+        } else if (S->lost[p] && S->back[p]) {
+            // Back: the records built with it again, from the one it
+            // held on.
+            S->lost[p] = 0;
+            say("netstep: place %d back at frame %lu, after %lu ms", p,
+                (unsigned long)S->built, (unsigned long)(now - S->lostAt[p]));
+            continue;
+        } else if (alive(p) && !S->lost[p]) {
             continue;
         } else if (!S->polled) {
             say("netstep: place %d was gone at the start", p);
         } else if (!S->lost[p]) {
             S->lost[p]   = 1;
+            S->back[p]   = 0;
             S->lostAt[p] = now;
             say("netstep: place %d lost at frame %lu; held for %lu ms", p,
                 (unsigned long)S->built, (unsigned long)S->holdMs);
             continue;
-        } else if (now - S->lostAt[p] < S->holdMs) {
+        } else if (now - S->lostAt[p]
+                   < S->holdMs + (alive(p) ? NETSTEP_BACK_MS : 0)) {
             continue;
         } else {
             say("netstep: place %d is gone, from frame %lu; its car to the "
@@ -324,7 +338,9 @@ static void hostPoll(uint32_t now)
     }
     hostBuild();
     for (p = 0; p < NETSTEP_MAX; p++) {
-        if (p == S->place || !((S->live >> p) & 1) || S->lost[p]) continue;
+        if (p == S->place || !((S->live >> p) & 1)
+            || (S->lost[p] && !alive(p)))
+            continue;
         if (S->fresh[p] || now - S->lastSend[p] >= NETSTEP_RESEND_MS)
             sendFrames(p, now);
     }
@@ -356,7 +372,8 @@ static void hostDrain(uint32_t now)
 
 // ------------------------------------------------------------ a client's
 
-static void takeFrames(const WlMsg* m)
+// 1 for a message taken, 0 for one dropped.
+static int takeFrames(const WlMsg* m)
 {
     const uint8_t* d = m->data;
     uint32_t       need, first;
@@ -367,7 +384,7 @@ static void takeFrames(const WlMsg* m)
     count = d[8];
     for (i = 0, o = HEADER; i < count && o + 2 <= m->len; i++)
         o += 2 + (size_t)bits(d[o + 1]) * PAD_WIRE;
-    if (i < count || o != m->len) return;
+    if (i < count || o != m->len) return 0;
     need  = get32(d);
     first = get32(d + 4);
     if (need > S->padNeed) S->padNeed = need;
@@ -401,6 +418,7 @@ static void takeFrames(const WlMsg* m)
         S->recs[n & MASK] = r;
     }
     while (recIn(S->built)) S->built++;
+    return 1;
 }
 
 // To the host: the records still wanted, and this console's pads from the
@@ -451,7 +469,8 @@ static void clientPoll(uint32_t now)
     WlMsg m;
 
     if (!S->alone) {
-        int on = 0;   // the host's lobby, left for it: the host went on
+        int on  = 0;   // the host's lobby, left for it: the host went on
+        int got = 0;   // the host's records
 
         while (S->net.peek(S->peer[0], &m)) {
             if (m.type != NETSTEP_MSG_FRAMES) {
@@ -459,17 +478,27 @@ static void clientPoll(uint32_t now)
                 break;
             }
             S->net.recv(S->peer[0], &m);
-            takeFrames(&m);
+            got |= takeFrames(&m);
         }
-        if (!alive(0)) {
+        // The host's records again, its link re-peered (37g-2): it has
+        // this place back, and the race goes on.
+        if (S->lost[0] && got) {
+            S->lost[0] = 0;
+            say("netstep: the host back at frame %lu, after %lu ms",
+                (unsigned long)S->built, (unsigned long)(now - S->lostAt[0]));
+        }
+        if (!alive(0) || S->lost[0]) {
             // Held for (37g), as the host holds for a client, unless gone
             // already at the first poll; then alone, the rest the CPU's.
+            // Back on the link, it waits on a little for the host's word.
+            uint32_t hold = S->holdMs + (alive(0) ? NETSTEP_BACK_MS : 0);
+
             if (S->polled && !S->lost[0]) {
                 S->lost[0]   = 1;
                 S->lostAt[0] = now;
                 say("netstep: the host lost at frame %lu; held for %lu ms",
                     (unsigned long)S->built, (unsigned long)S->holdMs);
-            } else if (!S->polled || now - S->lostAt[0] >= S->holdMs) {
+            } else if (!S->polled || now - S->lostAt[0] >= hold) {
                 S->alone   = 1;
                 S->live    = (uint8_t)(1u << S->place);
                 S->lost[0] = 0;
@@ -662,9 +691,12 @@ uint8_t netstep_held(uint32_t now, uint32_t* msLeft)
     if (msLeft) *msLeft = 0;
     if (!S->on || S->alone) return 0;
     if (S->host) return hostHeld(now, msLeft);
+    // Not its own place: the host holds for it until its pads come again.
     if (!S->lost[0]) {
-        if (msLeft) *msLeft = (uint32_t)S->heldLeft * 1000u;
-        return S->held;
+        uint8_t held = S->held & (uint8_t)~(1u << S->place);
+
+        if (msLeft && held) *msLeft = (uint32_t)S->heldLeft * 1000u;
+        return held;
     }
     since = now - S->lostAt[0];
     if (msLeft) *msLeft = since < S->holdMs ? S->holdMs - since : 0;

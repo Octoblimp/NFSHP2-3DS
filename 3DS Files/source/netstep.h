@@ -37,7 +37,15 @@
 // without its bit. A client that loses the host holds the same way, then
 // goes on alone: its own pad on its place, the rest at rest, every other
 // car the CPU's. A console already gone at the first poll is not waited
-// for.
+// for. A link that comes back in the hold (37g-2: main.c re-peers it, the
+// host letting the console back only while it holds for its place) is
+// taken back. The host sends the place its records again, and the client,
+// once they come, goes on from the frame it held on and sends its pads;
+// once those come, the host says the place is back and builds with it
+// again from the record it held on. Either end back on the link as its
+// hold ends waits up to NETSTEP_BACK_MS more for the other's word, and a
+// console on the link that sends no pads (one restarted, not in the race)
+// is gone once that is over.
 //
 // The end (37f). Each console stops where its race leaves lockstep
 // (netstep_stop: the race gone, or the end's save, main.c), all of them
@@ -81,6 +89,8 @@
 #define NETSTEP_TELLS      30     // a client's stop said this many times
 #define NETSTEP_DRAIN_MS   10000  // the host's last frames served at most
 #define NETSTEP_HOLD_MS    90000  // a lost console waited for (37g)
+#define NETSTEP_BACK_MS    3000   // a console back, its word waited for past
+                                  // the hold (37g-2)
 #define NETSTEP_NONE       0xffffffffu
 
 // The race's unreliable messages, after netrace's.
@@ -152,12 +162,14 @@ typedef struct NetStep {
     int          differs[NETSTEP_MAX];       // said once
     uint32_t     sendFails;
     // The hold (37g). By place, a link lost and when (ms): the host's of
-    // each client, a client's of the host (place 0). A client's: what the
-    // host's last message said it holds for, and the seconds left.
+    // each client, a client's of the host (place 0). The host's, by place:
+    // pads come from one lost, its link re-peered (37g-2). A client's: what
+    // the host's last message said it holds for, and the seconds left.
     uint32_t     holdMs;
     int          polled;                     // the first poll made
     int          lost[NETSTEP_MAX];
     uint32_t     lostAt[NETSTEP_MAX];
+    int          back[NETSTEP_MAX];
     uint8_t      held;
     uint8_t      heldLeft;
     // The end. stopAt: the frames run when this console left lockstep,

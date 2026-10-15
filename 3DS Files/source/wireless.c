@@ -25,6 +25,7 @@ typedef struct Peer {
     uint16_t node;
     int      alive;
     char     name[WIRELESS_NAME_MAX];
+    uint64_t seed;                    // its friend code seed, 0 unknown
     uint32_t joinedAt;
     WlLink   link;
 } Peer;
@@ -35,11 +36,19 @@ static struct {
     int                 network;      // made or joined
     int                 host;
     int                 open;         // the host's: lets clients in
+    int                 rejoin;       // and those lost back (37g-2)
+    WirelessRejoinFn    rejoinOk;
     udsBindContext      bind;
     WirelessState       state;
     uint16_t            self;
     char                selfName[WIRELESS_NAME_MAX];   // read once per network
     uint16_t            goneMask;     // the host's: nodes let go, still on
+    uint8_t             hostMac[6];   // a client's host, from its join
+    int                 hostKnown;
+    char                hostName[WIRELESS_NAME_MAX];
+    int                 rejoins;      // tries since the host was lost
+    int                 deaf;         // the test's: hears and sends nothing
+    uint32_t            deafUntil;
     Peer                peers[WIRELESS_MAX_PEERS];
     int                 numPeers;     // places taken, in the order they came
     uint32_t            now;
@@ -51,8 +60,19 @@ static struct {
 } W;
 
 static uint8_t s_in[UDS_DATAFRAME_MAXSIZE];
+static uint8_t s_scanBuf[SCAN_BUF];
 
 #define LOG(...) do { if (W.log) W.log(__VA_ARGS__); } while (0)
+
+// The test's deafness (wireless_test_deaf), over once its time is.
+static int deaf(void)
+{
+    if (W.deaf && (int32_t)(W.now - W.deafUntil) >= 0) {
+        W.deaf = 0;
+        LOG("wireless: hears again");
+    }
+    return W.deaf;
+}
 
 // Each link's ctx is its console's node.
 static void send_packet(void *ctx, const uint8_t *buf, size_t n)
@@ -60,6 +80,8 @@ static void send_packet(void *ctx, const uint8_t *buf, size_t n)
     uint16_t node = (uint16_t)(uintptr_t)ctx;
     Result   r;
 
+    if (deaf())
+        return;
     r = udsSendTo(node, WIRELESS_CHANNEL, UDS_SENDFLAG_Default, buf, n);
     if (UDS_CHECK_SENDTO_FATALERROR(r)) {
         W.stats.sendErrors++;
@@ -220,13 +242,25 @@ void wireless_set_open(int open)
     if (!W.host || W.open == !!open)
         return;
     W.open = !!open;
-    r = udsSetNewConnectionsBlocked(!W.open, true, false);
+    r = udsSetNewConnectionsBlocked(!(W.open || W.rejoin), true, false);
     LOG("wireless: %s (%08lx)", W.open ? "open" : "closed", (unsigned long)r);
+}
+
+void wireless_set_rejoin(int on, WirelessRejoinFn ok)
+{
+    Result r;
+
+    W.rejoinOk = ok;
+    if (!W.host || W.rejoin == !!on)
+        return;
+    W.rejoin = !!on;
+    r = udsSetNewConnectionsBlocked(!(W.open || W.rejoin), true, false);
+    LOG("wireless: %s to a console lost (%08lx)",
+        W.rejoin ? "open" : "closed", (unsigned long)r);
 }
 
 int wireless_scan(WirelessHost *out, int max)
 {
-    static uint8_t buf[SCAN_BUF];
     static int     lastSeen = -1, lastCount, lastForeign, lastFull;
     size_t         i;
     int            count = 0, foreign = 0, full = 0;
@@ -235,7 +269,7 @@ int wireless_scan(WirelessHost *out, int max)
     if (!W.up)
         return -1;
     free_scan();
-    r = udsScanBeacons(buf, sizeof buf, &W.scan, &W.numScan,
+    r = udsScanBeacons(s_scanBuf, sizeof s_scanBuf, &W.scan, &W.numScan,
                        WIRELESS_COMM_ID, WIRELESS_ID8, NULL,
                        W.network ? true : false);
     if (R_FAILED(r)) {
@@ -311,9 +345,77 @@ int wireless_join(int scanIndex)
     W.statusAt = W.now - STATUS_POLL_MS;
     clear_peers();
     add_peer(UDS_HOST_NETWORKNODEID, name);
+    // Its host, to find again should it be lost (37g-2).
+    memcpy(W.hostMac, W.scan[scanIndex].network.host_macaddress,
+           sizeof W.hostMac);
+    memcpy(W.hostName, name, sizeof W.hostName);
+    W.hostKnown = 1;
+    W.rejoins   = 0;
     free_scan();
     LOG("wireless: joined \"%s\"", name);
     return 1;
+}
+
+int wireless_rejoin(void)
+{
+    udsNetworkScanInfo *scan = NULL;
+    size_t              n = 0, i;
+    Result              r;
+
+    if (!W.up || W.host || W.state != WIRELESS_LOST || !W.hostKnown
+        || deaf())
+        return 0;
+    if (W.rejoins++ == 0)
+        LOG("wireless: looking for \"%s\" again", W.hostName);
+    // Off the network the host sent it from, with nothing of it kept.
+    if (W.network) {
+        udsDisconnectNetwork();
+        udsUnbind(&W.bind);
+        W.network = 0;
+        clear_peers();
+    }
+    free_scan();
+    r = udsScanBeacons(s_scanBuf, sizeof s_scanBuf, &scan, &n,
+                       WIRELESS_COMM_ID, WIRELESS_ID8, W.hostMac, false);
+    if (R_FAILED(r)) {
+        if (W.rejoins == 1)
+            LOG("wireless: udsScanBeacons %08lx", (unsigned long)r);
+        free(scan);
+        return 0;
+    }
+    for (i = 0; i < n; i++)
+        if (!memcmp(scan[i].network.host_macaddress, W.hostMac,
+                    sizeof W.hostMac))
+            break;
+    if (i == n) {
+        free(scan);
+        return 0;
+    }
+    r = udsConnectNetwork(&scan[i].network, kPassphrase, sizeof kPassphrase,
+                          &W.bind, UDS_BROADCAST_NETWORKNODEID,
+                          UDSCONTYPE_Client, WIRELESS_CHANNEL,
+                          UDS_DEFAULT_RECVBUFSIZE);
+    free(scan);
+    if (R_FAILED(r)) {
+        LOG("wireless: udsConnectNetwork %08lx, try %d", (unsigned long)r,
+            W.rejoins);
+        return 0;
+    }
+    W.network  = 1;
+    W.state    = WIRELESS_CONNECTED;
+    W.statusAt = W.now - STATUS_POLL_MS;
+    add_peer(UDS_HOST_NETWORKNODEID, W.hostName);
+    LOG("wireless: back on \"%s\"'s network, try %d", W.hostName,
+        W.rejoins);
+    W.rejoins = 0;
+    return 1;
+}
+
+void wireless_test_deaf(uint32_t ms)
+{
+    W.deaf      = 1;
+    W.deafUntil = W.now + ms;
+    LOG("wireless: deaf for %lu ms (the test's)", (unsigned long)ms);
 }
 
 void wireless_leave(void)
@@ -328,6 +430,7 @@ void wireless_leave(void)
     W.network = 0;
     W.host    = 0;
     W.open    = 0;
+    W.rejoin  = 0;
     W.self    = 0;
     W.selfName[0] = 0;
     W.goneMask = 0;
@@ -336,28 +439,66 @@ void wireless_leave(void)
     LOG("wireless: left");
 }
 
+// A console back in a race (37g-2): the place of one lost with its name
+// (and seed, when both have one), which the race still holds for, with a
+// new link.
+static Peer *take_back(uint16_t node, const char *name, uint64_t seed)
+{
+    int i;
+
+    if (!name[0] || W.rejoinOk == NULL)
+        return NULL;
+    for (i = 0; i < W.numPeers; i++) {
+        Peer *p = &W.peers[i];
+
+        if (p->alive || strcmp(p->name, name) != 0)
+            continue;
+        if (p->seed && seed && p->seed != seed)
+            continue;
+        if (!W.rejoinOk(i))
+            continue;
+        p->node     = node;
+        p->alive    = 1;
+        p->joinedAt = W.now;
+        wl_link_init(&p->link, send_packet, (void *)(uintptr_t)node, W.now);
+        wl_link_set_timeout(&p->link, W.patience);
+        LOG("wireless: node %u (%s) back in place %d", node, name, i);
+        return p;
+    }
+    return NULL;
+}
+
 // A client new to the host's network: a place with a link, while it is
-// open; once it is closed, out again.
+// open; once it is closed, out again, unless the race takes it back.
 static void client_came(uint16_t node)
 {
     udsNodeInfo info;
     char        name[WIRELESS_NAME_MAX];
+    uint64_t    seed = 0;
+    Peer       *p;
 
+    memset(name, 0, sizeof name);
+    if (R_SUCCEEDED(udsGetNodeInformation(node, &info))) {
+        (void)udsGetNodeInfoUsername(&info, name);
+        seed = info.uds_friendcodeseed;
+    }
     if (!W.open) {
+        if (W.rejoin && take_back(node, name, seed) != NULL)
+            return;
         W.goneMask |= (uint16_t)(1u << (node - 1));
         udsEjectClient(node);
-        LOG("wireless: node %u came after closing, sent away", node);
+        LOG("wireless: node %u (%s) came after closing, sent away", node,
+            name);
         return;
     }
-    memset(name, 0, sizeof name);
-    if (R_SUCCEEDED(udsGetNodeInformation(node, &info)))
-        (void)udsGetNodeInfoUsername(&info, name);
-    if (add_peer(node, name) == NULL) {
+    p = add_peer(node, name);
+    if (p == NULL) {
         W.goneMask |= (uint16_t)(1u << (node - 1));
         udsEjectClient(node);
         LOG("wireless: node %u came with no place for it", node);
         return;
     }
+    p->seed = seed;
     LOG("wireless: node %u (%s) joined", node, name);
 }
 
@@ -430,6 +571,8 @@ void wireless_pump(uint32_t nowMs)
         }
         if (got == 0)
             break;
+        if (deaf())
+            continue;
         p = alive_peer(src);
         if (p == NULL) {
             W.stats.strays++;

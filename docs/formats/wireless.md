@@ -71,6 +71,24 @@ peer keeps its place with `alive` 0, so the race can tell who went;
 `wireless_forget_lost` clears those places, for the lobby. A client
 whose host is lost is in the state LOST.
 
+A lost console can come back mid-race (TASKS 37g-2, `netstep.md`).
+
+- **The host.** While a race holds for a place,
+  `wireless_set_rejoin(1, ok)` unblocks new connections, even on a
+  closed network. A node that comes then takes the place of a lost peer
+  with the same user name. The friend code seeds (`uds_friendcodeseed`)
+  must match too, when both are known. `ok` must also say the race still
+  holds for that peer. The node gets a new link, and the log says "node n
+  (NAME) back in place i", i being its place among the host's peers (0
+  the first client). Any other node is ejected.
+- **The client.** `wireless_rejoin` leaves the old network and scans by
+  the host's MAC address, saved at the join (`udsScanBeacons`'s filter).
+  It then joins again, the host its one peer.
+
+`wireless_test_deaf(ms)` makes the console drop every packet it pulls
+and every packet it sends for that long. It is the Azahar runs' out of
+range.
+
 ## The packet
 
 Each UDS frame is one packet of at most 1024 bytes. UDS itself carries

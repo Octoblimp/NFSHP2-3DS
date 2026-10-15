@@ -115,6 +115,19 @@
 # same lockstep frame. The host lost: each client must log it lost, then
 # gone, and race alone, its car the CPU's.
 #
+# With -Drop N (TASKS 37g-2; -Race) each card's config has the hold (30 s
+# unless -HoldSeconds says), and copy N's "WirelessTestDropFrame
+# -DropFrame" and "WirelessTestDropMs -DropMs": from that lockstep frame
+# its wireless hears and sends nothing for that long, as a console out of
+# range. Every copy drives on for the hold and 30 s more, a shot of each
+# every 3 s. The links lost at both ends, the race holds; then the
+# dropped copy finds its host again and is taken back. A dropped client:
+# it must log the host lost, back on the host's network and the host
+# back; the host the place lost, the node back in its place and the place
+# back. The host dropped: each client and the host, so, for each link.
+# None says a place gone, no car goes to the CPU, and every copy's parts
+# stay the host's to the end.
+#
 # Usage:
 #   powershell -File tools/run_azahar_lobby.ps1
 #   powershell -File tools/run_azahar_lobby.ps1 -Consoles 4
@@ -130,13 +143,15 @@
 #   powershell -File tools/run_azahar_lobby.ps1 -Consoles 2 -Race -NextRace
 #   powershell -File tools/run_azahar_lobby.ps1 -Consoles 2 -Race -Lose 1
 #   powershell -File tools/run_azahar_lobby.ps1 -Consoles 2 -Race -Lose 0
+#   powershell -File tools/run_azahar_lobby.ps1 -Consoles 2 -Race -Drop 1
 #
 # Screenshots of each copy go to %TEMP%\nfshp2_lobby. Exit code 0 when
 # every copy reached Select Car from the lobby (with -Race: racing, every
 # copy's GO on the host's seed; with -Quit: back in the lobby from the
 # race and on to Select Car again; with -Restart: racing again after the
 # restart; with -NextRace: racing in the event's next race; with -Lose:
-# the lost copy's car the CPU's on every other).
+# the lost copy's car the CPU's on every other; with -Drop: the dropped
+# copy back in the race on every copy).
 
 param(
     [ValidateRange(2, 8)]
@@ -155,7 +170,11 @@ param(
     [ValidateRange(-1, 7)]
     [int]$Lose = -1,              # -Race: the copy closed once the driving is done, 0 the host (37g-1)
     [ValidateRange(1, 255)]
-    [int]$HoldSeconds = 10,       # -Lose: the hold, the cards' WirelessHoldSeconds
+    [int]$HoldSeconds = 10,       # -Lose, -Drop: the hold, the cards' WirelessHoldSeconds (-Drop's 30)
+    [ValidateRange(-1, 7)]
+    [int]$Drop = -1,              # -Race: the copy whose wireless goes deaf mid-race, 0 the host (37g-2)
+    [int]$DropFrame = 300,        # -Drop: the lockstep frame it goes deaf on
+    [int]$DropMs = 5000,          # -Drop: for how long
     [ValidateRange(-1, 7)]
     [int]$Cpu = 2,                # the host's CPU racers; -1 as shown
     [int]$Drive = 30,             # -Race: seconds of gas once all race
@@ -180,6 +199,12 @@ if ($PauseBy -gt 0 -and -not ($Quit -or $Restart)) { throw "-PauseBy says who pa
 if ($Lose -ge 0 -and -not $Race) { throw "-Lose closes a copy mid-race: it needs -Race" }
 if ($Lose -ge 0 -and ($Quit -or $Restart -or $NextRace)) { throw "-Lose ends the run: no -Quit, -Restart or -NextRace with it" }
 if ($Lose -ge $Consoles) { throw "-Lose ${Lose}: there are only $Consoles copies" }
+if ($Drop -ge 0 -and -not $Race) { throw "-Drop deafens a copy mid-race: it needs -Race" }
+if ($Drop -ge 0 -and ($Quit -or $Restart -or $NextRace -or $Lose -ge 0)) {
+    throw "-Drop ends the run: no -Quit, -Restart, -NextRace or -Lose with it"
+}
+if ($Drop -ge $Consoles) { throw "-Drop ${Drop}: there are only $Consoles copies" }
+if ($Drop -ge 0 -and -not $PSBoundParameters.ContainsKey("HoldSeconds")) { $HoldSeconds = 30 }
 
 $root = Split-Path -Parent $PSScriptRoot
 if ($Target3dsx -eq "") { $Target3dsx = Join-Path $root "3DS Files\NFSHP2-3DS.3dsx" }
@@ -387,7 +412,11 @@ function Prepare([string]$name, [string]$nick, [bool]$isHost) {
     $lines = @("DebugLog 1")
     if ($WirelessOff) { $lines += "WirelessOff 1" }
     if ($NextRace) { $lines += "WirelessTestFinish $Finish" }
-    if ($Lose -ge 0) { $lines += "WirelessHoldSeconds $HoldSeconds" }
+    if ($Lose -ge 0 -or $Drop -ge 0) { $lines += "WirelessHoldSeconds $HoldSeconds" }
+    if ($Drop -ge 0 -and $name -eq $letters[$Drop]) {
+        $lines += "WirelessTestDropFrame $DropFrame"
+        $lines += "WirelessTestDropMs $DropMs"
+    }
     Set-Content -Path (Join-Path $user "sdmc\nfshp2_config.txt") -Encoding ASCII -Value $lines
     LinkData $user ($NoDsp -or ($SilentClients -and -not $isHost))
     $log = Join-Path $user "sdmc\nfshp2_debug.txt"
@@ -1037,6 +1066,12 @@ try {
         $lostSide.Proc | Stop-Process -Force
         DriveAll "held" ($HoldSeconds + 25) 2
     }
+    # -Drop (37g-2): a copy deaf mid-race, every copy driving on through
+    # the hold, the rejoin and past it.
+    if ($Drop -ge 0 -and (NoneFailed)) {
+        Write-Host ("  [{0,5:N0}s] driving on: {1} deaf from frame {2} for {3} ms, the hold {4} s" -f (Elapsed), $sides[$Drop].Name, $DropFrame, $DropMs, $HoldSeconds)
+        DriveAll "dropped" ($HoldSeconds + 30) 3
+    }
     # -Quit: the pauser's pause and Quit, every copy back to the lobby and
     # on to Select Car again, each on its own clock as before.
     $pauser = $sides[$PauseBy].Name
@@ -1317,6 +1352,46 @@ if ($Race) {
         }
     }
 
+    # -Drop (37g-2): the dropped copy's links lost at both ends, then
+    # re-peered and back, on each; no place gone, no car the CPU's.
+    if ($Drop -ge 0) {
+        $dropSide = $sides[$Drop]
+        $hold = $HoldSeconds * 1000
+        foreach ($s in $sides) {
+            Write-Host "--- $($s.Name) the drop ---"
+            LogLines $s "netstep: (place \d+ (lost|back|is gone)|the host (lost|back|is gone))|wireless: (deaf|hears again|looking for|back on|node \d+ .*(back in place|sent away|timed out|left|never heard)|the host|open to|closed to|udsConnectNetwork|udsScanBeacons)|lockstep: frame \d+, (places|place \d+'s car|deaf)" |
+                ForEach-Object { Write-Host "  $_" }
+            $says = @()
+            if ($s -eq $dropSide) { $says += "wireless: deaf for $DropMs ms" }
+            if ($Drop -eq 0 -and -not $s.IsHost) {
+                $says += "netstep: the host lost at frame \d+; held for $hold ms"
+                $says += "wireless: back on "".*""'s network"
+                $says += "netstep: the host back at frame \d+, after \d+ ms"
+            } elseif ($Drop -gt 0 -and $s -eq $dropSide) {
+                $says += "netstep: the host lost at frame \d+; held for $hold ms"
+                $says += "wireless: back on "".*""'s network"
+                $says += "netstep: the host back at frame \d+, after \d+ ms"
+            }
+            if ($s.IsHost) {
+                $places = if ($Drop -eq 0) { 1..($Consoles - 1) } else { @($Drop) }
+                foreach ($pl in $places) {
+                    $says += "netstep: place $pl lost at frame \d+; held for $hold ms"
+                    $says += "netstep: place $pl back at frame \d+, after \d+ ms"
+                }
+                $n = @(LogLines $s "wireless: node \d+ \(.*\) back in place \d+").Count
+                if ($n -ne $places.Count -and -not $s.Failed) { $s.Failed = "$n nodes back in place, not $($places.Count)" }
+            }
+            foreach ($say in $says) {
+                $n = @(LogLines $s $say).Count
+                if ($n -ne 1 -and -not $s.Failed) { $s.Failed = "'$say' $n times" }
+            }
+            foreach ($bad in @("netstep: place \d+ is gone", "netstep: the host is gone", "lockstep: frame \d+, place \d+'s car")) {
+                $n = @(LogLines $s $bad).Count
+                if ($n -ne 0 -and -not $s.Failed) { $s.Failed = "'$bad' $n times" }
+            }
+        }
+    }
+
     # -Quit (37f) and -NextRace (37f-2): every copy's lockstep stopped once,
     # on the host's frame, and the host heard every client's stop.
     if ($Quit -or $NextRace) {
@@ -1409,6 +1484,7 @@ $goal = if ($WirelessOff) { "the wireless-off line, then the question" }
         elseif ($Restart) { "racing, restarted in lockstep, racing again" }
         elseif ($NextRace) { "racing, the results, Next Race, racing again in lockstep" }
         elseif ($Lose -ge 0) { "racing, a copy closed, held for, its car the CPU's" }
+        elseif ($Drop -ge 0) { "racing, a copy deaf, held for, back in lockstep" }
         elseif ($Race) { "racing" } else { "Select Car" }
 foreach ($s in $sides) {
     $g = if ($s.Lost) { "racing, then closed" } else { $goal }
@@ -1423,6 +1499,7 @@ if ($failed.Count -eq 0) {
     elseif ($NextRace) { Write-Host "All $Consoles finished on frame $hostFinish, stopped on $hostStop, and raced the next on seeds $hostSeed." }
     elseif ($Lose -gt 0) { Write-Host "All $Consoles raced on seed $hostSeed; $($sides[$Lose].Name) closed, held for $HoldSeconds s, its car the CPU's on frame $handFrame on every copy left." }
     elseif ($Lose -ge 0) { Write-Host "All $Consoles raced on seed $hostSeed; the host closed, held for $HoldSeconds s, then every client raced alone, its car the CPU's." }
+    elseif ($Drop -ge 0) { Write-Host "All $Consoles raced on seed $hostSeed; $($sides[$Drop].Name) deaf from frame $DropFrame for $DropMs ms, held for, found its host again and raced on in lockstep." }
     elseif ($Race) { Write-Host "All $Consoles racing from the lobby, GO on seed $hostSeed." }
     else { Write-Host "All $Consoles reached Select Car from the lobby." }
 } else {
