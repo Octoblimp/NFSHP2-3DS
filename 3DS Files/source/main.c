@@ -2865,6 +2865,7 @@ static bool g_lockRan;
 static bool g_lockRaced;    // a lockstep frame ran with the coordinator up
 static bool g_lockEnd;      // the frame asked for the end's save (37f)
 static u32  g_lockMenu;     // the flow's presses since the last begin
+static bool g_lockFinished; // WirelessTestFinish's finish made (37f-2)
 
 static const LobbyNet kLobbyNet = {
     .start      = lobbyNetStart,
@@ -2940,6 +2941,7 @@ static const NetRaceNet kNetRaceNet = {
     .send        = lobbyNetSend,
     .recv        = lobbyNetRecv,
     .setPatience = wireless_set_patience,
+    .busy        = netstep_ending,
 };
 
 static void netRaceStartRace(void)
@@ -2986,10 +2988,40 @@ static void netRaceGoRacing(void)
     g_lockRaced = false;
     g_lockEnd = false;
     g_lockMenu = 0;
+    g_lockFinished = false;
     logLine("netstep: clocks at GO: real %ld frames %ld, world %ld frames "
             "%ld", (long)RealTimer, (long)RealTimeFrames, (long)WorldTimer,
             (long)WorldTimeFrames);
     trackflow_go_racing();
+}
+
+// The player a wireless race shows on this console (PlayerNetLocal): its
+// own, place 1's player 1 and every other place's player 0, or the other
+// once a knockout has put its own out of the event, which racecoord then
+// never makes (37f-2): this console watches the other's race.
+static int netShownPlayer(void)
+{
+    int               own = netrace_place() == 1 ? 1 : 0;
+    const DriverInfo* d = race_parameters_get_driver_info_by_driver_number(own);
+
+    return d != NULL && d->EliminatedRank > 0 ? 1 - own : own;
+}
+
+// WirelessTestFinish (configitems.h): the race finished on that lockstep
+// frame, or the first after it that is racing, before its checksum. Every
+// console runs the same frames, so each finishes it on the same one.
+static void lockTestFinish(void)
+{
+    if (ConfigWirelessTestFinish <= 0 || g_lockFinished
+        || pRaceCoordinator == NULL || pCurrentRace == NULL
+        || netstep_frame() < (uint32_t)ConfigWirelessTestFinish
+        || pRaceCoordinator->CurrentRCState != RCSTATE_RACE_IN_PROGRESS
+        || race_get_race_stage(pCurrentRace) != RACE_STAGE_RACING)
+        return;
+    g_lockFinished = true;
+    logLine("lockstep: frame %lu, the test's finish",
+            (unsigned long)netstep_frame());
+    racecoordinator_the_race_has_finished(pRaceCoordinator);
 }
 
 static const NetRaceGame kNetRaceGame = {
@@ -5727,9 +5759,42 @@ static int32_t raceEventNumOpened(void)
     return events_opened_num_passed(&TheEventsOpened, &TheRaceEvent);
 }
 
+// Restart Event's grid in a wireless race: netrace's build's again (the
+// CPU racers in front by performance, then the two players, then the
+// rest of the consoles in the order of their places) where retail's reset
+// would sort the consoles in AI racers' places in among the CPU racers.
+// The same on every console: each runs it on the same driver table.
+static void netRaceGrid(void)
+{
+    RaceParameters* rp = &TheRaceParameters;
+    int             humans = 0, cpu, i;
+
+    for (int p = 0; p < WIRELESS_MAX_CONSOLES; p++)
+        if (netrace_driver(p) >= 100) humans++;
+    cpu = rp->NumAICars - humans;
+    if (cpu < 0) cpu = 0;
+    rp->PlayerStartPosition[0] = (int8_t)(cpu + 1);
+    rp->PlayerStartPosition[1] = (int8_t)(cpu + 2);
+    for (i = 0; i < rp->NumDriverInfo; i++) {
+        DriverInfo* d = &rp->pDriverInfoTable[i];
+        int         n = d->UniqueDriverNumber;
+
+        if (n >= 0 && n < 2)
+            d->StartingPosition = rp->PlayerStartPosition[n];
+        else if (n >= 100 && n < 100 + humans)
+            d->StartingPosition = (int8_t)(cpu + 3 + (n - 100));
+        else
+            d->StartingPosition = 0;
+    }
+    fred_calculate_starting_positions(&Fred);
+    logLine("netrace: the event's grid again, %d CPU racers, %d players in "
+            "AI places", cpu, humans);
+}
+
 static void raceEventRestart(void)
 {
     raceevent_restart(&TheRaceEvent);
+    if (netrace_active()) netRaceGrid();
 }
 
 // StartRace's EventTrack::SetRace (fredrace.c): the track of the event's
@@ -5769,11 +5834,16 @@ static const uint8_t* raceEventGetTournamentState(void)
 }
 
 // FrontendDatabase::SetupNextRace (0x00184270): RaceEvent::SetupNextRace
-// when the game uses the race event.
+// when the game uses the race event. That puts the frontend's first
+// player's settings in the race's; a wireless race's are the host's on
+// every console (netrace.c's take), and stay as raced (37f-2).
 static void fedSetupNextRace(void)
 {
-    if (fred_use_the_race_event(&Fred))
-        raceevent_setup_next_race(&TheRaceEvent);
+    cPlayerSettings keep = TheRaceParameters.PlayerSettings[0];
+
+    if (!fred_use_the_race_event(&Fred)) return;
+    raceevent_setup_next_race(&TheRaceEvent);
+    if (netrace_active()) TheRaceParameters.PlayerSettings[0] = keep;
 }
 
 // RenderTextIntoGroup on the flow's screens: the reward screens' blurbs
@@ -7505,8 +7575,7 @@ int main(int argc, char** argv)
             // from its load on, until the race is gone. A place past the
             // two players' is player 0's view for now (37d-2).
             if (netrace_active() && netrace_stage() >= NR_LOADING) {
-                int place = netrace_place();
-                PlayerNetLocal = place == 1 ? 1 : 0;
+                PlayerNetLocal = netShownPlayer();
             } else if (pRaceCoordinator == NULL) {
                 PlayerNetLocal = -1;
             }
@@ -7554,6 +7623,7 @@ int main(int argc, char** argv)
             // ever up (the GO loop's flow makes it): the race's end, and
             // the lobby next (37f).
             if (lockOn && raceStep) {
+                lockTestFinish();
                 netstep_done(lockhash_ran(netstep_frame(), pCurrentWorld));
                 g_lockRan = true;
                 if (pRaceCoordinator != NULL) g_lockRaced = true;

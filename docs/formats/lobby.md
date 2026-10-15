@@ -174,12 +174,16 @@ leaves them -1 and 0, and nothing is put.
 
 A wireless race comes back to the lobby with the link up, not to the
 main menu. Once the race leaves lockstep (`netstep.md`, "The end"),
-`netrace_end` calls `lobby_back_next`, and the frontend's relaunch pops
-to the lobby: `gameflow.c`'s `bgf_unlaunch_frontend_menus` asks the
+`netrace_end` calls `lobby_back_next`, and the frontend comes back on
+the lobby. Where it comes back is set at the frontend's unload before
+the race: `gameflow.c`'s `bgf_unlaunch_frontend_menus` asks the
 `raceReturn` hook first, which names `LOBBY_SCREEN_NAME` while netrace
-is on (`main.c`'s `hookRaceReturn`), and pops to it when it is on the
-stack, as it is under car select. Retail's return by game type is
-unchanged for every other race.
+is on (`main.c`'s `hookRaceReturn`), and pops the stack to it when it is
+there, as it is under car select; the relaunch after the race opens the
+stack's top. Retail's return by game type is unchanged for every other
+race. An event's next race (Next Race, Restart Event: `netrace.md`,
+"The next race") loads with no frontend between, and the lobby is next
+once the last race's Quit loads the frontend.
 
 On ACTIVATE with that set (`backFromRace`):
 
@@ -365,6 +369,12 @@ Quit Race from the pause ended the race on both. The host was back
 hosting with "1 to come" and B came back a second later; both logged
 "every console back", and the host's Start took both to Select Car
 again. Two runs, both passed.
+
+`-Restart` and `-NextRace` (37f-2) go on from `-Race`: the host's
+pause and Restart, or a Knockout finished on `-Finish`'s lockstep frame
+(`WirelessTestFinish` on every card) and the results' Next Race. One at
+a time with `-Quit`. Their results are in `netstep.md`, "On Azahar":
+Restart passed in Session 107; Next Race was never run through.
 
 ## The check
 

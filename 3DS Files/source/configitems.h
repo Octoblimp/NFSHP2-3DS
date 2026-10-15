@@ -117,6 +117,13 @@ extern int32_t ConfigWirelessTestConsoles;  // 2
 // (2026-10-14).
 extern int32_t ConfigWirelessOff;           // 0
 
+// The port's own: "WirelessTestFinish n" finishes a wireless race on its
+// lockstep frame n, or the first one after it that is racing, on every
+// console, as if each car had crossed the line where it was
+// (racecoordinator_the_race_has_finished): the Azahar runs' way to the
+// results and Next Race (TASKS 37f-2). Off by default (2026-10-15).
+extern int32_t ConfigWirelessTestFinish;    // 0
+
 // SkipFE as the image reads it, `lw -23220(gp)`: gameflow's skipFE
 // through gPlayerCamSkipFE, 0 while that is unset.
 int32_t config_skip_fe(void);

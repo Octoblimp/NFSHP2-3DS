@@ -23,7 +23,16 @@
 // then plays its events: a car chosen, the host's start on Select Track,
 // A or B, a console gone (powered off), a link taken down, the race's end
 // (netrace_end, TASKS 37f; racing, netstep has given the link its own
-// timeout back by then). Checked each frame, with a FAULT for each found:
+// timeout back by then), the frontend's load after it, or the event's
+// next race's (37f-2: the same next race on every console, which loads
+// and holds again).
+//
+// After its end a console's fake netstep is busy for the scenario's
+// frames (NetRaceNet.busy, netstep_ending): the host sends each client
+// its last frames (0x17) and reads the clients' messages of the race; a
+// client sends its stop (0x16) and reads nothing. The race's own first
+// messages (0x20, 0x21) are read by then. Checked each frame, with a
+// FAULT for each found:
 //
 //   - one popup at most, and only on "Wireless Race", its parent that
 //     screen, the memory card's look, the lobby's title, every port's, no
@@ -38,19 +47,29 @@
 //   - no message past WL_MSG_MAX, none to a peer that is not there;
 //   - GO only once every console racing and still on has loaded and held,
 //     once to each, and a console racing only after its load;
-//   - at the race's end, a racing console's stage off, the link's patience
-//     NETRACE_PATIENCE_MS again for the way back, and the lobby told once
-//     (lobby_back_next); at any other stage, or a second time, nothing;
+//   - at the race's end, a racing console's stage NR_ENDED, the link's
+//     patience NETRACE_PATIENCE_MS again for the way back, and the lobby
+//     told once (lobby_back_next); at any other stage, or a second time,
+//     nothing; off once the frontend loads;
+//   - nothing of netrace's read or sent while its console is busy, so a
+//     client's LOADED comes after its stop and the host's GO after its
+//     last frames; one LOADED a race;
+//   - nothing of the lobby's read after the end: the host's BACK (0x18),
+//     sent each client when it is at the frontend, still there at the
+//     end;
 //
 // and at the end:
 //
 //   - each console's screen, racing or not, its stage, and its log lines
 //     in order; no place driving where nothing was built or taken; a
-//     load after (a restart) not held; nothing said with no wireless race;
+//     load while racing (a restart) not held; nothing said with no
+//     wireless race;
 //   - the race's first messages, the host's and each client's, left
-//     unread for the race (37d's);
+//     unread for the race (37d's), and none of the last race's left
+//     before them;
 //   - a client that lost the host racing on its own seed as it held;
-//   - each racing client's race as the host's at GO: the parameters (but
+//   - each racing client's race as the host's at the last GO: the
+//     parameters (but
 //     for its own display settings, with the host's two cameras), the
 //     driver table (each character its own console's), the event (its own
 //     tree, and its own state unless the event's is in it), Fred's game
@@ -111,7 +130,8 @@ static RideInfo g_rides[2];   // Fred's players' selected rides
 typedef struct {
     int         frame;
     int         console;
-    const char* what;   // "car", "start", "A", "B", "gone", "off", "end"
+    const char* what;   // "car", "start", "A", "B", "gone", "off", "end",
+                        // "front" (loading it), "infront" (in it), "next"
 } Event;
 
 typedef struct {
@@ -131,6 +151,7 @@ typedef struct {
     int         racing[MAXC];
     const char* drivers;           // each place's, "0 1 100"; NULL none
     const char* expect[MAX_EXPECT];   // "<console>|<line's start>"
+    int         busy[MAXC];        // frames netstep_ending after an end
 } Scenario;
 
 // One console: no lobby's Start, a race of its own.
@@ -157,7 +178,7 @@ static const Scenario kScenarios[] = {
        "0|netrace: loaded, holding for the rest",
        "1|netrace: loaded, holding for the host",
        "0|netrace: place 1 loaded", "0|netrace: go, seed",
-       "1|netrace: go, seed"} },
+       "1|netrace: go, seed"}, {0} },
 
     // The host's start first: it waits for both, the line shrinking as
     // the cars come; A on it only puts it back.
@@ -171,7 +192,7 @@ static const Scenario kScenarios[] = {
        "0|netrace: place 2's car",
        "0|netrace: built, track 7, 3 drivers, 1 players in AI places",
        "2|netrace: setup taken, track 7, 3 drivers, driver 100",
-       "0|netrace: go, seed"} },
+       "0|netrace: go, seed"}, {0} },
 
     // A client's car taken back with B, and sent again after the host's
     // start.
@@ -184,7 +205,7 @@ static const Scenario kScenarios[] = {
        "0|netrace: place 1 took its car back",
        "0|netrace: wait Waiting for a car from:@hp2join1",
        "1|netrace: car sent", "1|netrace: wait Waiting for hp2host to "
-       "start the race.", "0|netrace: built", "1|netrace: go, seed"} },
+       "start the race.", "0|netrace: built", "1|netrace: go, seed"}, {0} },
 
     // The host's B on its wait: back to Select Track, where a car coming
     // in builds nothing until the next start.
@@ -194,7 +215,7 @@ static const Scenario kScenarios[] = {
       {"Racing", "Racing"}, {1, 1}, "0 1",
       {"0|netrace: wait Waiting for a car from:@hp2join1",
        "0|netrace: back to track select", "0|netrace: place 1's car",
-       "0|netrace: the host's start", "0|netrace: built"} },
+       "0|netrace: the host's start", "0|netrace: built"}, {0} },
 
     // Eight: six clients in AI racers' places, the AI count set at the
     // start to the six (track select's options had none); cars and
@@ -213,7 +234,7 @@ static const Scenario kScenarios[] = {
        "@hp2join5@hp2join7",
        "0|netrace: built, track 7, 8 drivers, 6 players in AI places",
        "5|netrace: setup taken, track 7, 8 drivers, driver 103",
-       "0|netrace: go, seed", "4|netrace: go, seed"} },
+       "0|netrace: go, seed", "4|netrace: go, seed"}, {0} },
 
     // A client gone before its car: the race goes on without it, the next
     // the second player.
@@ -222,7 +243,7 @@ static const Scenario kScenarios[] = {
       0, {"Racing", NULL, "Racing"}, {1, 0, 1}, "0 -1 1",
       {"0|netrace: place 1 (hp2join1) is gone",
        "0|netrace: built, track 7, 2 drivers, 0 players in AI places",
-       "2|netrace: setup taken, track 7, 2 drivers, driver 1"} },
+       "2|netrace: setup taken, track 7, 2 drivers, driver 1"}, {0} },
 
     // One gone after its car, before the start: not in the race.
     { "gone_with_car", 800, 3, LANG_EN, 1, 3, 0, 3, {80, 80, 80}, THREE,
@@ -231,7 +252,7 @@ static const Scenario kScenarios[] = {
       {"Racing", NULL, "Racing"}, {1, 0, 1}, "0 -1 1",
       {"0|netrace: place 1's car", "0|netrace: place 2's car",
        "0|netrace: place 1 (hp2join1) is gone",
-       "0|netrace: built, track 7, 2 drivers, 0 players in AI places"} },
+       "0|netrace: built, track 7, 2 drivers, 0 players in AI places"}, {0} },
 
     // One of two the host waits for gone: the line loses it, and the
     // other's car builds the race.
@@ -243,7 +264,7 @@ static const Scenario kScenarios[] = {
       {"0|netrace: wait Waiting for a car from:@hp2join2@hp2join3",
        "0|netrace: place 2 (hp2join2) is gone",
        "0|netrace: wait Waiting for a car from:@hp2join3",
-       "0|netrace: built, track 7, 3 drivers, 1 players in AI places"} },
+       "0|netrace: built, track 7, 3 drivers, 1 players in AI places"}, {0} },
 
     // The last client gone on the frame of the host's start.
     { "all_gone_at_start", 300, 2, LANG_EN, 1, 3, 0, 3, {80, 80}, TWO,
@@ -252,7 +273,7 @@ static const Scenario kScenarios[] = {
       {"0|netrace: the host's start",
        "0|netrace: place 1 (hp2join1) is gone",
        "0|netrace: every other console is gone",
-       "0|lobby: notice The link to hp2join1 was lost."} },
+       "0|lobby: notice The link to hp2join1 was lost."}, {0} },
 
     // One gone while the host waits for its car: built with the rest.
     { "client_gone_waiting", 800, 3, LANG_EN, 1, 1, 0, 3, {80, 80, 80}, THREE,
@@ -260,7 +281,7 @@ static const Scenario kScenarios[] = {
       0, {"Racing", "Racing", NULL}, {1, 1, 0}, "0 1 -1",
       {"0|netrace: wait Waiting for a car from:@hp2join2",
        "0|netrace: place 2 (hp2join2) is gone",
-       "0|netrace: built, track 7, 2 drivers, 0 players"} },
+       "0|netrace: built, track 7, 2 drivers, 0 players"}, {0} },
 
     // The only client gone while the host waits: back to the lobby, which
     // says so.
@@ -270,7 +291,7 @@ static const Scenario kScenarios[] = {
       {"0|netrace: place 1 (hp2join1) is gone",
        "0|netrace: every other console is gone",
        "0|netrace: back to the lobby",
-       "0|lobby: notice The link to hp2join1 was lost."} },
+       "0|lobby: notice The link to hp2join1 was lost."}, {0} },
 
     // And gone while the host is still on car select.
     { "all_gone_car_select", 300, 2, LANG_EN, 1, 3, 0, 3, {80, 80}, TWO,
@@ -278,7 +299,7 @@ static const Scenario kScenarios[] = {
       {"Local Wireless", NULL}, {0, 0}, NULL,
       {"0|netrace: every other console is gone",
        "0|netrace: back to the lobby",
-       "0|lobby: notice The link to hp2join1 was lost."} },
+       "0|lobby: notice The link to hp2join1 was lost."}, {0} },
 
     // The host gone while a client waits on "Wireless Race", or picks its
     // car: back to the lobby.
@@ -288,14 +309,14 @@ static const Scenario kScenarios[] = {
       {"1|netrace: wait Waiting for hp2host to start the race.",
        "1|netrace: place 0 (hp2host) is gone",
        "1|netrace: back to the lobby",
-       "1|lobby: notice The link to hp2host was lost."} },
+       "1|lobby: notice The link to hp2host was lost."}, {0} },
     { "host_gone_car_select", 400, 3, LANG_EN, 1, 3, 0, 3, {80, 80, 80}, THREE,
       {{50, 0, "gone"}}, 0,
       {NULL, "Local Wireless", "Local Wireless"}, {0, 0, 0}, NULL,
       {"1|netrace: back to the lobby",
        "1|lobby: notice The link to hp2host was lost.",
        "2|netrace: back to the lobby",
-       "2|lobby: notice The link to hp2host was lost."} },
+       "2|lobby: notice The link to hp2host was lost."}, {0} },
 
     // The host gone while a client loads: it races alone at its hold.
     { "host_gone_loading", 900, 2, LANG_EN, 1, 3, 0, 3, {100, 300}, TWO,
@@ -303,7 +324,7 @@ static const Scenario kScenarios[] = {
       0, {NULL, "Racing"}, {0, 1}, NULL,
       {"1|netrace: setup taken", "1|netrace: loaded, holding for the host",
        "1|netrace: the host is gone; racing alone",
-       "1|netrace: go, seed"} },
+       "1|netrace: go, seed"}, {0} },
 
     // A client gone while it loads: GO when the other has loaded.
     { "client_gone_loading", 900, 3, LANG_EN, 1, 0, 0, 3, {100, 200, 400},
@@ -313,7 +334,7 @@ static const Scenario kScenarios[] = {
       {"Racing", "Racing", NULL}, {1, 1, 0}, "0 1 100",
       {"0|netrace: built, track 7, 3 drivers, 1 players in AI places",
        "0|netrace: place 2 (hp2join2) is gone", "0|netrace: place 1 loaded",
-       "0|netrace: go, seed", "1|netrace: go, seed"} },
+       "0|netrace: go, seed", "1|netrace: go, seed"}, {0} },
 
     // Lap Knockout: the fake event's state is its own aOldState.
     { "knockout", 700, 3, LANG_EN, 4, 0, 0, 3, {120, 260, 200}, THREE,
@@ -322,7 +343,7 @@ static const Scenario kScenarios[] = {
       {"0|netrace: 1 AI racers",
        "0|netrace: built, track 7, 3 drivers, 1 players in AI places",
        "1|netrace: setup taken, track 7, 3 drivers, driver 1",
-       "2|netrace: setup taken, track 7, 3 drivers, driver 100"} },
+       "2|netrace: setup taken, track 7, 3 drivers, driver 100"}, {0} },
 
     // A setup that is not this build's: the client back to the lobby; the
     // host, its client gone, races alone.
@@ -332,7 +353,7 @@ static const Scenario kScenarios[] = {
       {"1|netrace: the setup is not this build's",
        "1|netrace: back to the lobby",
        "1|lobby: notice The link to hp2host was lost.",
-       "0|netrace: place 1 (hp2join1) is gone", "0|netrace: go, seed"} },
+       "0|netrace: place 1 (hp2join1) is gone", "0|netrace: go, seed"}, {0} },
 
     // B on a client's car select: the lobby takes the link down, and the
     // host, alone, goes back to the lobby too.
@@ -342,7 +363,7 @@ static const Scenario kScenarios[] = {
       {"1|lobby: link down", "1|netrace: the link is down",
        "0|netrace: place 1 (hp2join1) is gone",
        "0|netrace: every other console is gone",
-       "0|lobby: notice The link to hp2join1 was lost."} },
+       "0|lobby: notice The link to hp2join1 was lost."}, {0} },
 
     // French, and names past ASCII.
     { "french", 800, 2, LANG_FR, 1, 3, 0, 3, {80, 120},
@@ -351,7 +372,7 @@ static const Scenario kScenarios[] = {
       {"Racing", "Racing"}, {1, 1}, "0 1",
       {"0|netrace: wait En attente de la voiture de :@Zo\xeb",
        "1|netrace: wait En attente du lancement de la course par H\xf4te.",
-       "1|netrace: setup taken", "1|netrace: go, seed"} },
+       "1|netrace: setup taken", "1|netrace: go, seed"}, {0} },
 
     // The host's CPU racers (TASKS 37c-2): drawn by StartRace, in front
     // of the two players, and the third console behind them.
@@ -361,14 +382,14 @@ static const Scenario kScenarios[] = {
       {"0|netrace: 3 AI racers, 3 CPU",
        "0|netrace: built, track 7, 5 drivers, 0 players in AI places",
        "1|netrace: setup taken, track 7, 5 drivers, driver 1",
-       "0|netrace: go, seed", "1|netrace: go, seed"} },
+       "0|netrace: go, seed", "1|netrace: go, seed"}, {0} },
     { "cpu_three", 800, 3, LANG_EN, 3, 0, 2, 3, {120, 200, 160}, THREE,
       {{30, 1, "car"}, {32, 2, "car"}, {40, 0, "car"}, {80, 0, "start"}},
       0, {"Racing", "Racing", "Racing"}, {1, 1, 1}, "0 1 100",
       {"0|netrace: 3 AI racers, 2 CPU",
        "0|netrace: built, track 7, 5 drivers, 1 players in AI places",
        "2|netrace: setup taken, track 7, 5 drivers, driver 100",
-       "0|netrace: go, seed", "2|netrace: go, seed"} },
+       "0|netrace: go, seed", "2|netrace: go, seed"}, {0} },
 
     // A console gone before its car: the CPU racers stay, the grid one
     // car shorter.
@@ -380,7 +401,7 @@ static const Scenario kScenarios[] = {
       {"0|netrace: 6 AI racers, 4 CPU",
        "0|netrace: place 1 (hp2join1) is gone",
        "0|netrace: built, track 7, 7 drivers, 1 players in AI places",
-       "3|netrace: setup taken, track 7, 7 drivers, driver 100"} },
+       "3|netrace: setup taken, track 7, 7 drivers, driver 100"}, {0} },
 
     // Lap Knockout: a lap fewer than the cars, the CPU racers counted.
     { "cpu_lap_knockout", 800, 3, LANG_EN, 5, 0, 2, 3, {120, 200, 160},
@@ -389,17 +410,17 @@ static const Scenario kScenarios[] = {
       0, {"Racing", "Racing", "Racing"}, {1, 1, 1}, "0 1 100",
       {"0|netrace: 3 AI racers, 2 CPU",
        "0|netrace: built, track 7, 5 drivers, 1 players in AI places",
-       "1|netrace: setup taken, track 7, 5 drivers, driver 1"} },
+       "1|netrace: setup taken, track 7, 5 drivers, driver 1"}, {0} },
 
     // No wireless race: car select and track select as ever, the load not
     // held, and netrace silent.
     { "offline", 300, 1, LANG_EN, 1, 3, 0, 3, {80}, {"hp2host"},
       {{20, 0, "car"}, {40, 0, "start"}}, 0,
-      {"Racing"}, {1}, NULL, {NULL} },
+      {"Racing"}, {1}, NULL, {NULL}, {0} },
     // ... its end too.
     { "offline_end", 300, 1, LANG_EN, 1, 3, 0, 3, {80}, {"hp2host"},
       {{20, 0, "car"}, {40, 0, "start"}, {250, 0, "end"}}, 0,
-      {"Racing"}, {1}, NULL, {NULL} },
+      {"Racing"}, {1}, NULL, {NULL}, {0} },
 
     // The race's end (TASKS 37f): each console out of the race and the
     // lobby next; the host's again, and the client's while it loads,
@@ -409,8 +430,7 @@ static const Scenario kScenarios[] = {
        {600, 0, "end"}, {620, 1, "end"}, {640, 0, "end"}}, 0,
       {"Racing", "Racing"}, {1, 1}, "0 1",
       {"0|netrace: go, seed", "1|netrace: go, seed",
-       "0|netrace: the race is over; the lobby next",
-       "1|netrace: the race is over; the lobby next"} },
+       "0|netrace: the race is over", "1|netrace: the race is over"}, {0} },
     // A client that lost the host and raced alone: its end the same.
     { "host_gone_end", 900, 2, LANG_EN, 1, 3, 0, 3, {100, 300}, TWO,
       {{30, 1, "car"}, {40, 0, "car"}, {80, 0, "start"}, {250, 0, "gone"},
@@ -418,7 +438,103 @@ static const Scenario kScenarios[] = {
       0, {NULL, "Racing"}, {0, 1}, NULL,
       {"1|netrace: the host is gone; racing alone",
        "1|netrace: go, seed",
-       "1|netrace: the race is over; the lobby next"} },
+       "1|netrace: the race is over"}, {0} },
+
+    // The end, and the frontend after it on each (37f-2): netrace off
+    // once it loads, the client's a while after the host's.
+    { "end_front", 900, 2, LANG_EN, 1, 3, 0, 3, {120, 260}, TWO,
+      {{30, 1, "car"}, {40, 0, "car"}, {80, 0, "start"}, {500, 0, "end"},
+       {500, 1, "end"}, {560, 0, "front"}, {640, 1, "infront"}}, 0,
+      {"Racing", "Racing"}, {1, 1}, "0 1",
+      {"0|netrace: the race is over", "0|netrace: off, the frontend next",
+       "1|netrace: the race is over", "1|netrace: off, the frontend next"},
+      {40, 40} },
+
+    // The event's next race (37f-2): both end on the race's frame, each
+    // loads the next in its own time and holds; GO again, on the host's
+    // seed as it is then.
+    { "next_race", 1400, 2, LANG_EN, 4, 3, 0, 3, {120, 260}, TWO,
+      {{30, 1, "car"}, {40, 0, "car"}, {80, 0, "start"}, {500, 0, "end"},
+       {502, 1, "end"}, {560, 0, "next"}, {600, 1, "next"}}, 0,
+      {"Racing", "Racing"}, {1, 1}, "0 1",
+      {"0|netrace: go, seed", "1|netrace: go, seed",
+       "0|netrace: the race is over", "1|netrace: the race is over",
+       "0|netrace: race 2 loaded", "0|netrace: loaded, holding for the rest",
+       "1|netrace: race 2 loaded", "1|netrace: loaded, holding for the host",
+       "0|netrace: place 1 loaded", "0|netrace: go, seed",
+       "1|netrace: go, seed"},
+      {40, 40} },
+
+    // The host's last frames served long (a client's stop unheard, 10 s):
+    // the client loads and holds, and GO waits for the host's end.
+    { "next_host_busy", 1600, 2, LANG_EN, 4, 3, 0, 3, {120, 100}, TWO,
+      {{30, 1, "car"}, {40, 0, "car"}, {80, 0, "start"}, {500, 0, "end"},
+       {500, 1, "end"}, {520, 0, "next"}, {520, 1, "next"}}, 0,
+      {"Racing", "Racing"}, {1, 1}, "0 1",
+      {"1|netrace: loaded, holding for the host",
+       "0|netrace: loaded, holding for the rest",
+       "0|netrace: place 1 loaded", "0|netrace: go, seed",
+       "1|netrace: go, seed"},
+      {600, 10} },
+
+    // A client still saying its stop when its next race has loaded: its
+    // LOADED waits for the stop said, and GO for it.
+    { "next_client_busy", 1600, 2, LANG_EN, 4, 3, 0, 3, {80, 60}, TWO,
+      {{30, 1, "car"}, {40, 0, "car"}, {80, 0, "start"}, {500, 0, "end"},
+       {500, 1, "end"}, {505, 0, "next"}, {505, 1, "next"}}, 0,
+      {"Racing", "Racing"}, {1, 1}, "0 1",
+      {"1|netrace: loaded, holding for the host",
+       "0|netrace: place 1 loaded", "0|netrace: go, seed",
+       "1|netrace: go, seed"},
+      {10, 400} },
+
+    // Three: the console in an AI racer's place loads last.
+    { "next_three", 1600, 3, LANG_EN, 4, 0, 0, 3, {120, 260, 200}, THREE,
+      {{30, 1, "car"}, {32, 2, "car"}, {40, 0, "car"}, {80, 0, "start"},
+       {600, 0, "end"}, {600, 1, "end"}, {601, 2, "end"},
+       {650, 0, "next"}, {660, 1, "next"}, {760, 2, "next"}}, 0,
+      {"Racing", "Racing", "Racing"}, {1, 1, 1}, "0 1 100",
+      {"0|netrace: race 2 loaded", "0|netrace: place 1 loaded",
+       "0|netrace: place 2 loaded", "0|netrace: go, seed",
+       "2|netrace: go, seed"},
+      {30, 30, 30} },
+
+    // A client gone while the next race loads: GO when the rest have.
+    { "next_client_gone", 1600, 3, LANG_EN, 4, 0, 0, 3, {120, 260, 200},
+      THREE,
+      {{30, 1, "car"}, {32, 2, "car"}, {40, 0, "car"}, {80, 0, "start"},
+       {600, 0, "end"}, {600, 1, "end"}, {600, 2, "end"},
+       {650, 0, "next"}, {650, 1, "next"}, {650, 2, "next"},
+       {700, 2, "gone"}}, 0,
+      {"Racing", "Racing", NULL}, {1, 1, 0}, "0 1 100",
+      {"0|netrace: race 2 loaded", "0|netrace: place 2 (hp2join2) is gone",
+       "0|netrace: place 1 loaded", "0|netrace: go, seed",
+       "1|netrace: go, seed"},
+      {30, 30, 30} },
+
+    // The host gone while the next race loads: the client races alone at
+    // its hold.
+    { "next_host_gone", 1400, 2, LANG_EN, 4, 3, 0, 3, {120, 260}, TWO,
+      {{30, 1, "car"}, {40, 0, "car"}, {80, 0, "start"}, {500, 0, "end"},
+       {500, 1, "end"}, {540, 0, "next"}, {540, 1, "next"},
+       {600, 0, "gone"}}, 0,
+      {NULL, "Racing"}, {0, 1}, NULL,
+      {"1|netrace: race 2 loaded", "1|netrace: loaded, holding for the host",
+       "1|netrace: the host is gone; racing alone", "1|netrace: go, seed"},
+      {30, 30} },
+
+    // A next race, then its end, and the frontend: the lobby told twice.
+    { "next_then_front", 2000, 2, LANG_EN, 4, 3, 0, 3, {120, 260}, TWO,
+      {{30, 1, "car"}, {40, 0, "car"}, {80, 0, "start"}, {500, 0, "end"},
+       {500, 1, "end"}, {540, 0, "next"}, {540, 1, "next"},
+       {1400, 0, "end"}, {1400, 1, "end"}, {1500, 0, "front"},
+       {1550, 1, "front"}}, 0,
+      {"Racing", "Racing"}, {1, 1}, "0 1",
+      {"0|netrace: race 2 loaded", "0|netrace: go, seed",
+       "0|netrace: the race is over", "0|netrace: off, the frontend next",
+       "1|netrace: race 2 loaded", "1|netrace: go, seed",
+       "1|netrace: the race is over", "1|netrace: off, the frontend next"},
+      {30, 30} },
 };
 #define NUM_SCENARIOS ((int)(sizeof kScenarios / sizeof kScenarios[0]))
 
@@ -450,13 +566,19 @@ typedef struct {
     int              gone, off;
     uint32_t         patience;
     int              loadingAt, loadedAt, heldAt, racingAt;   // -1 not yet
-    int              endedAt;          // the race's end, -1 not yet
+    int              endedAt;          // the race's last end, -1 not yet
+    int              ends;             // the race's ends
+    int              frontAt;          // the frontend after it, -1 not yet
+    int              busyUntil;        // netstep_ending until this frame
+    int              round;            // races loaded, from 0
     int              backNexts;        // lobby_back_next's
     int32_t          notice;
     char             noticeName[WIRELESS_NAME_MAX];
     int              carIn[MAXC];      // the host's: the CARs read
     int              gos;              // GOs sent it
     int              goRecv;           // GOs it read
+    int              loadeds;          // LOADEDs it sent
+    int              lobbySent;        // the host's BACK sent it
     int              starts;           // StartRaces
     int              sounds, sound0;
     int              pressed;          // this frame
@@ -669,6 +791,12 @@ static void sentGo(int t)
     if (++C[t].gos > 1) fault("GO %d to %d", C[t].gos, t);
 }
 
+// netstep_ending's: the last race's end still on the link.
+static int fBusy(void)
+{
+    return g_frame < C[g_cur].busyUntil;
+}
+
 static int fSend(int i, uint8_t type, const void* data, size_t n)
 {
     int    t = target(i);
@@ -676,6 +804,9 @@ static int fSend(int i, uint8_t type, const void* data, size_t n)
     Packet* k;
 
     printf("[%d] send %d %02x %u\n", g_cur, i, (unsigned)type, (unsigned)n);
+    if (type >= NETRACE_MSG_CAR && type <= NETRACE_MSG_GO && fBusy())
+        fault("message %02x with the last race's end on the link",
+              (unsigned)type);
     if (n > WL_MSG_MAX) {
         fault("a message of %u bytes", (unsigned)n);
         return 0;
@@ -686,12 +817,22 @@ static int fSend(int i, uint8_t type, const void* data, size_t n)
     }
     if (C[g_cur].off) fault("send with the link down");
     if (type == NETRACE_MSG_GO) sentGo(t);
+    if (type == NETRACE_MSG_LOADED
+        && ++C[g_cur].loadeds > C[g_cur].round + 1)
+        fault("LOADED %d times in %d races", C[g_cur].loadeds,
+              C[g_cur].round + 1);
     if (type == NETRACE_MSG_SETUP && g_cur != 0) fault("a SETUP from a client");
     if ((type == NETRACE_MSG_CAR || type == NETRACE_MSG_UNCAR
          || type == NETRACE_MSG_LOADED) && g_cur == 0)
         fault("a client's message from the host");
     if (!alive(t)) return 1;   // lost on the way
     p = &g_pipe[g_cur][t];
+    if (p->tail >= PIPE_MAX && p->head > 0) {   // the read ones let go
+        memmove(p->q, p->q + p->head,
+                (size_t)(p->tail - p->head) * sizeof p->q[0]);
+        p->tail -= p->head;
+        p->head = 0;
+    }
     if (p->tail >= PIPE_MAX) {
         fault("pipe %d to %d full", g_cur, t);
         return 0;
@@ -720,6 +861,7 @@ static int fRecv(int i, WlMsg* out)
         return 0;
     }
     if (C[g_cur].off) return 0;
+    if (fBusy()) fault("read with the last race's end on the link");
     p = &g_pipe[t][g_cur];
     if (p->head == p->tail || p->q[p->head].at > g_frame) return 0;
     *out = p->q[p->head++].m;
@@ -738,8 +880,40 @@ static void fSetPatience(uint32_t ms)
 }
 
 static const NetRaceNet kNet = {
-    fState, fPeerAlive, fPeerName, fSend, fRecv, fSetPatience,
+    fState, fPeerAlive, fPeerName, fSend, fRecv, fSetPatience, fBusy,
 };
+
+// The race's own messages: 37d's first (0x20, 0x21) and the end's (the
+// host's last frames 0x17, a client's stop 0x16).
+static int raceMsg(uint8_t type)
+{
+    return type == 0x16 || type == 0x17 || type == 0x20 || type == 0x21;
+}
+
+// netstep's end, every fourth frame while busy: the host's last frames to
+// each client racing, and the clients' messages of the race read as they
+// come (up to the first that is not, the lobby's or netrace's); a
+// client's stop to the host, and nothing read.
+static void fakeDrain(void)
+{
+    Console* k = &C[g_cur];
+    int      p;
+
+    if (!fBusy() || g_frame % 4 != 0) return;
+    if (g_cur == 0) {
+        for (p = 1; p < S->consoles; p++) {
+            Pipe* q = &g_pipe[p][0];
+
+            if (k->nr.driver[p] < 0 || !alive(p)) continue;
+            fSend(peerOf(p), 0x17, "f", 1);
+            while (q->head != q->tail && q->q[q->head].at <= g_frame
+                   && raceMsg(q->q[q->head].m.type))
+                q->head++;
+        }
+    } else if (alive(0)) {
+        fSend(0, 0x16, "s", 1);
+    }
+}
 
 // ---------------------------------------------------------------- the game
 
@@ -756,7 +930,7 @@ static void gStartLoading(void)
     printf("[%d] start loading\n", g_cur);
     if (k->loadingAt >= 0) fault("a second load");
     k->loadingAt = g_frame;
-    k->seedTaken = bDefaultSeed;
+    if (!k->round) k->seedTaken = bDefaultSeed;
     bgf_change_to_screen(&k->gf, "Loading", 0);
 }
 
@@ -1145,6 +1319,7 @@ static void initConsole(int c)
     }
     lobby_latin1(k->race.hostName, sizeof k->race.hostName, S->names[0]);
     k->endedAt = -1;
+    k->frontAt = -1;
 }
 
 static void startConsole(int c)
@@ -1172,7 +1347,8 @@ static void startConsole(int c)
 // The race over (netrace_end). Racing, netstep has given the link its own
 // timeout back once every console's frames came in; netrace_end puts the
 // race's on again for the way back and tells the lobby. At any other
-// stage, or a second time, it does nothing.
+// stage, or a second time, it does nothing. Racing, netstep's end is
+// busy on the link from here, the race's first messages read by now.
 static void endRace(void)
 {
     Console*     k     = &C[g_cur];
@@ -1181,8 +1357,18 @@ static void endRace(void)
     uint32_t     patience;
 
     if (was == NR_RACING) {
+        int t;
+
         printf("[%d] netstep: the link's own patience\n", g_cur);
-        k->patience = 0;
+        k->patience  = 0;
+        k->busyUntil = g_frame + S->busy[g_cur];
+        for (t = 0; t < MAXC; t++) {
+            Pipe* q = &g_pipe[t][g_cur];
+            while (q->head != q->tail
+                   && (q->q[q->head].m.type == 0x20
+                       || q->q[q->head].m.type == 0x21))
+                q->head++;
+        }
     }
     patience = k->patience;
     netrace_end();
@@ -1198,12 +1384,48 @@ static void endRace(void)
         return;
     }
     k->endedAt = g_frame;
-    if (netrace_stage() != NR_OFF || netrace_active())
+    k->ends++;
+    if (netrace_stage() != NR_ENDED || !netrace_active())
         fault("stage %d after the end", (int)netrace_stage());
     if (k->backNexts != backs + 1)
         fault("the lobby told %d times", k->backNexts - backs);
     if (k->patience != NETRACE_PATIENCE_MS)
         fault("the end with patience %lu", (unsigned long)k->patience);
+}
+
+// The frontend after the race (the flow's state, which netrace reads):
+// loading it, or in it already (the load done between two of netrace's
+// frames). The host's lobby tells each client it is back (0x18), which
+// is the lobby's to read.
+static void frontend(BGameFlowState state)
+{
+    Console* k = &C[g_cur];
+    int      p;
+
+    if (netrace_stage() != NR_ENDED)
+        fault("the frontend at stage %d", (int)netrace_stage());
+    k->frontAt = g_frame;
+    k->gf.current = state;
+    if (g_cur != 0) return;
+    for (p = 1; p < S->consoles; p++)
+        if (alive(p) && fSend(peerOf(p), LOBBY_MSG_BACK, "b", 1))
+            C[p].lobbySent = 1;
+}
+
+// The event's next race, after the end's save: the same next race on
+// every console (main.c's fedSetupNextRace; the track the event's next),
+// loading, its hold to come.
+static void nextRace(void)
+{
+    Console* k = &C[g_cur];
+
+    if (netrace_stage() != NR_ENDED)
+        fault("the next race at stage %d", (int)netrace_stage());
+    TheRaceParameters.TrackNumber++;
+    k->round++;
+    k->loadingAt = k->loadedAt = k->heldAt = k->racingAt = -1;
+    k->gos = k->goRecv = 0;
+    gStartLoading();
 }
 
 static void consoleFrame(int c)
@@ -1226,7 +1448,14 @@ static void consoleFrame(int c)
             TheRaceParameters.NumAICars = 0;   // track select's options
         else if (!strcmp(v->what, "end"))
             endRace();
+        else if (!strcmp(v->what, "front"))
+            frontend(BGF_LOADING_FRONTEND);
+        else if (!strcmp(v->what, "infront"))
+            frontend(BGF_IN_FRONTEND);
+        else if (!strcmp(v->what, "next"))
+            nextRace();
     }
+    fakeDrain();
 
     // A loading console's loop stalls but for a frame in STALL.
     stalled = k->loadingAt >= 0 && k->loadedAt < 0 && g_frame % STALL != 0;
@@ -1383,7 +1612,8 @@ static void checkClient(int c)
         fault("loaded on seed %08lx, the race built on %08lx",
               (unsigned long)k->seedTaken, (unsigned long)h->seedBuilt);
     if (k->racingAt < 0) return;
-    {
+    // Racing still (the last race's end before its GO, if any).
+    if (k->endedAt < k->racingAt) {
         const Pipe* p = &g_pipe[0][c];
         if (alive(0) && (p->head == p->tail || p->q[p->head].m.type != 0x20))
             fault("the race's message not left to the race");
@@ -1481,16 +1711,34 @@ static void runScenario(const Scenario* sc)
         if (!k->gone && (k->racingAt >= 0) != sc->racing[c])
             fault("%s racing", k->racingAt >= 0 ? "ends" : "never");
         if (k->notice) fault("a notice left for the lobby");
-        if (k->backNexts != (k->endedAt >= 0))
-            fault("the lobby told %d times", k->backNexts);
+        if (k->backNexts != k->ends)
+            fault("the lobby told %d times for %d ends", k->backNexts,
+                  k->ends);
         if (k->endedAt >= 0 && k->patience != NETRACE_PATIENCE_MS)
             fault("ended with patience %lu", (unsigned long)k->patience);
         if (OFFLINE && k->numLog)
             fault("said \"%s\" with no wireless race", k->log[0]);
+        if (k->lobbySent && !k->gone) {
+            const Pipe* q = &g_pipe[0][c];
+            int         i;
+
+            for (i = q->head; i < q->tail; i++)
+                if (q->q[i].m.type == LOBBY_MSG_BACK) break;
+            if (i == q->tail) fault("the lobby's BACK read after the end");
+        }
         if (!k->gone) {
-            NetRaceStage want = k->racingAt >= 0 && k->endedAt < 0
-                                && !OFFLINE ? NR_RACING : NR_OFF;
+            NetRaceStage want = k->racingAt >= 0 && !OFFLINE ? NR_RACING
+                                                             : NR_OFF;
             int          p;
+
+            // After the last end: the frontend's, the next race's GO, its
+            // hold, or still ended.
+            if (k->endedAt >= 0 && !OFFLINE) {
+                if (k->frontAt > k->endedAt) want = NR_OFF;
+                else if (k->racingAt > k->endedAt) want = NR_RACING;
+                else if (k->heldAt > k->endedAt) want = NR_HOLD;
+                else want = NR_ENDED;
+            }
 
             enter(c);
             if (netrace_stage() != want)
@@ -1501,8 +1749,10 @@ static void runScenario(const Scenario* sc)
                 if (netrace_driver(p) != -1)
                     fault("place %d drives %d with no race", p,
                           netrace_driver(p));
-            // A load after (a restart) is not held.
-            if (netrace_hold()) fault("a second load held");
+            // A load while racing (a restart) is not held, nor one with no
+            // wireless race.
+            if (want != NR_ENDED && netrace_hold())
+                fault("a second load held");
             leave();
         }
     }

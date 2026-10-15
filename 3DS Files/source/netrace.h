@@ -40,6 +40,16 @@
 // have loaded, and a client that loses the host at the hold starts alone.
 // What a race does with a console gone is 37f's.
 //
+// The race's end (37f): lockstep stops on every console after the same
+// frame (netstep.h) and netrace_end leaves the race NR_ENDED. From there
+// the frontend (each console back to the lobby, and netrace off once it
+// loads), or the event's next race or its restart: every console loads
+// the next race on what lockstep left it, the same on each, and holds
+// again; the host sends GO with a new seed once the rest have loaded. A
+// client says it loaded only once its stop has been said, and the host
+// sends GO only once its last frames have been served (NetRaceNet.busy),
+// so the last race's messages are read and dropped before the next GO.
+//
 // Host-buildable: the link is the NetRaceNet's, and what of the game it
 // does not reach through globals the NetRaceGame's, which main.c fills
 // and tools/src/netrace_test.c fakes. The state is a NetRace, so that the
@@ -82,6 +92,9 @@ typedef struct NetRaceNet {
     int           (*send)(int i, uint8_t type, const void* data, size_t n);
     int           (*recv)(int i, WlMsg* out);
     void          (*setPatience)(uint32_t ms);
+    // The last race's end still on the link (netstep_ending): nothing of
+    // netrace's read or sent until it is through. NULL: never.
+    int           (*busy)(void);
 } NetRaceNet;
 
 // The game's, where a global will not do.
@@ -107,7 +120,9 @@ typedef enum {
                   // the setup
     NR_LOADING,   // built, or taken, and loading
     NR_HOLD,      // loaded, and held for the rest (host) or GO (client)
-    NR_RACING     // GO: the race is on
+    NR_RACING,    // GO: the race is on
+    NR_ENDED      // lockstep stopped (37f): the frontend next, or the
+                  // event's next race, which holds again
 } NetRaceStage;
 
 typedef struct NetRaceCar {
@@ -128,6 +143,8 @@ typedef struct NetRace {
     // built, on every console, the settings of each place racing.
     NetRaceCar   cars[WIRELESS_MAX_CONSOLES];
     int          loaded[WIRELESS_MAX_CONSOLES];    // the host's, by place
+    int          saidLoaded;                       // a client's LOADED sent
+    int          round;                            // races run, from 0
     int8_t       driver[WIRELESS_MAX_CONSOLES];    // by place, or -1
     int          humanAI;                          // the host's build
     int          aiPlace[NETRACE_MAX_HUMAN_AI];    // AI racer k's place
@@ -176,14 +193,16 @@ int netrace_car_chosen(BGameFlow* gf);
 // "Wireless Race". 1 when it took over from StartRace.
 int netrace_host_start(BGameFlow* gf);
 
-// gTrackFlowHoldRaceFn.
+// gTrackFlowHoldRaceFn: the race built or taken, or the event's next one
+// after the last race's end, loaded. A client says so on its next frame.
 int netrace_hold(void);
 
-// The race has left lockstep (netstep_stop, 37f): no wireless race from
-// here, and the frontend comes back to the lobby with the link up
-// (lobby_back_next; gameflow's raceReturn names it). The link waits
-// NETRACE_PATIENCE_MS for a silent console again, through each one's save,
-// unload and frontend load, until the lobby has them all back.
+// The race has left lockstep (netstep_stop, 37f): NR_ENDED. The link waits
+// NETRACE_PATIENCE_MS for a silent console again, through each one's save
+// and load. Should the frontend come next, it comes back to the lobby with
+// the link up (lobby_back_next; gameflow's raceReturn named it at the
+// race's start), and netrace is off once it loads; the event's next race
+// holds and starts again in step (netrace_hold).
 void netrace_end(void);
 
 // The ScreenCallback, for kScreens[]: NETRACE_SCREEN_NAME's.

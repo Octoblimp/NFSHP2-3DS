@@ -2647,11 +2647,34 @@ phases.
                   (the race has to finish, and the gas alone does not
                   finish it). The pause's Quit and the results' Quit
                   share everything past the stop.
-                - 37f-2: after the end's save each console races on
-                  alone: Next Race (and Restart Race from the pause or
-                  the results) must go back into lockstep, on a new
-                  seed from the host, or go back to the lobby until it
-                  does.
+                - [x] 37f-2, done (Session 107): after the end netrace
+                  waits at `NR_ENDED`, goes off once the frontend
+                  loads, or holds again for the event's next race (Next
+                  Race, Restart Event) and GOes on the host's seed;
+                  nothing of netrace's is read or sent while the last
+                  race's end is on the link. The event's grid and the
+                  raced player's settings the same on every console; a
+                  knocked-out player's console shows the other player;
+                  `WirelessTestFinish n` finishes a race for Azahar
+                  runs. netrace_check: 36 scenarios, faults 0;
+                  `--mutate` 194, 182 caught, 12 equivalent.
+                  - Restart Race hung on a NULL WorldObject: GCC's
+                  strict aliasing at -O3 had dropped the loop that
+                  destroys the race's smokeables, so they leaked at
+                  every race end and far-away delete. The deletes'
+                  list head is a whole CollisionBody and the Makefile
+                  has `-fno-strict-aliasing` (a push onto
+                  CollisionBodyList kept a stale head too).
+                  smokeable_check: 0 differ, the list's mutations
+                  caught.
+                  - Two Azahars, `-Restart`: both passed on seed
+                  0ecec47b, restarted in lockstep and raced again, no
+                  unmapped reads; the CPU stages a little faster.
+                  - Not run: Next Race and Restart Event on Azahar
+                  (`-NextRace`); the user stopped the Azahar runs on
+                  2026-10-15. The harness covers them. Not seen on the
+                  device either: the smokeables now freed, and any FPS
+                  change from the flag.
                 - 37f-3: the pause's screens are driven by the pad
                   that paused, on every console, so one player's Quit
                   Race ends the race for all, as retail's split screen

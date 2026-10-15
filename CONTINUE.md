@@ -110,6 +110,19 @@ on the 15.5 FPS of an earlier run: that was the fire on track 11, and
 TASKS 46 must reach a steady 30 there and in every place like it.
 Next: TASKS 37 (multi-card multiplayer).**
 
+**Now (Session 107, 2026-10-15): TASKS 37f-2 is done (a rematch:
+Restart Race, Next Race, Restart Event in a wireless race). netrace
+waits at NR_ENDED after the end, and holds again for the event's
+next race or goes off for the frontend. Restart Race hung on a NULL
+WorldObject: GCC's strict aliasing at -O3 had dropped the loop that
+destroys the race's smokeables. The deletes' list head is a whole
+CollisionBody now, and the Makefile builds with
+-fno-strict-aliasing. Restart passed on two Azahars. The user said
+"Stop Azahar testing": Next Race was never run there, and no
+Azahar runs until the user asks. After the commit the user said to
+stop for now. Next, when told: 37f-3, 37g, TASKS 61, 46, 60 and
+59. See HANDOFF.md's Session 107.**
+
 **Now (Session 106, 2026-10-15): TASKS 37f-1 is done. A wireless
 race's lockstep ends after the frame that asks for the end's save,
 or with the pause's Quit Race, on every console on the same frame;

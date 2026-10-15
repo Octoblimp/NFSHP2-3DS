@@ -23111,3 +23111,134 @@ lockstep stops, and would race on alone: it must load and GO again in
 step. Then 37f-3, 37g, TASKS 61, 46, 60 and 59. Still to ask: the
 road's blink on the device again (TASKS 64), 47's bridge, 52's popups,
 and the next device log's `sends:` line for 65.
+
+## Session 107 -- 37f-2, a rematch in a wireless race
+
+The user's standing word: continue from the last session and never
+stop until the port is at 100%, one task at a time. The session ran
+over two sittings (2026-10-15, the night's stop and the morning). Late
+in it the user said "Stop Azahar testing" (the Next Race run was
+stopped and every copy closed), then "Once 37f-2 is committed fully,
+stop working for now". So 37f-2 is committed with Next Race and
+Restart Event checked by the harness only, and the work stops here.
+
+### The design
+
+- `netrace_end` no longer goes to `NR_OFF`: a new stage `NR_ENDED`
+  waits for what comes next. Once the flow is at
+  `BGF_LOADING_FRONTEND` or `BGF_IN_FRONTEND` netrace goes off
+  ("netrace: off, the frontend next"); the lobby's return was already
+  decided at the race's start by `raceReturn`.
+- The event's next race (Next Race; Restart Event): `netrace_hold`
+  takes `NR_ENDED` as well as `NR_LOADING`, counts `round` and says
+  "netrace: race N loaded", and holds again. A client's `LOADED` now
+  goes from `netrace_frame`'s `NR_HOLD` case (`saidLoaded`), not from
+  `netrace_hold`.
+- `NetRaceNet.busy` (`netstep_ending` in `main.c`): `netrace_frame`
+  returns at once while the last race's end is still on the link. So
+  a client's stop messages go before its `LOADED`, and the host's last
+  frames go before its `GO`; otherwise the next race's netstep would
+  read the old `stopAt` as a stop.
+- Leftovers of the last race (the host's last frames, a client's
+  stops) are read and dropped in `NR_HOLD`: `clientRead` reads only
+  between `NR_OFF` and `NR_RACING`, and `hostRead` the same.
+- Restart Race from the pause resets the race in place with the
+  coordinator kept, and stays in lockstep with nothing new (seen on
+  two Azahars, below).
+- `main.c`:
+  - `fedSetupNextRace` keeps `PlayerSettings[0]` as raced when netrace
+    is on (the event's next race would otherwise differ per console).
+  - `raceEventRestart` calls `netRaceGrid()` after `raceevent_restart`
+    when netrace is on: CPU racers first, the two players at cpu+1 and
+    cpu+2, the humans in AI places (driver 100+k) at cpu+3+k, then
+    `fred_calculate_starting_positions`.
+  - `netShownPlayer()`: a knocked-out player's console shows the other
+    player (`PlayerNetLocal`). Lap Knockout (GameType 4) is the race
+    event's mode for Next Race and Restart Event; the elimination is
+    between races.
+  - `lockTestFinish()` and the config item `WirelessTestFinish n`
+    (off by default): finishes a wireless race on lockstep frame n on
+    every console (`racecoordinator_the_race_has_finished`), so an
+    Azahar run can reach the results and Next Race. The gas alone does
+    not finish a race.
+
+### Restart Race's hang: strict aliasing
+
+The first Restart Race runs on two Azahars passed (seed ec5fd1d5, 18
+logged frames' parts the same on both), but the restart could hang in
+the world's update: WorldObjectList went round a NULL node. Temporary
+DIAG lines (removed since) showed two smokeables and 237 virgins still
+alive and on WorldObjectList at the restart, though their bodies were
+off CollisionBodyList and their pool freed.
+
+The cause was GCC's strict aliasing at -O3, not the port's logic:
+`delete_smokeable_collision_bodies` and the far-away delete moved the
+bodies onto a list whose head was a bare `CollisionBodyNode` on the
+stack, then emptied it through `CollisionBody*` links. To GCC a write
+through a CollisionBody could never touch an 8-byte node, so the head
+read as empty and the whole destroy loop was dropped. Every smokeable
+and virgin leaked at each race end and far-away delete. Once the head
+was a whole `CollisionBody`, `destroy_list`'s first push onto
+`CollisionBodyList` (a node reached as the list's end, the same way)
+used a head read before the write, and
+`collisionbody_update_max_width` walked a broken list.
+
+The fix:
+- `smokeable.c`: the list on the stack is a whole `CollisionBody`
+  (`move_to_list`, `destroy_list` take it), as the image's
+  bTList<CollisionBody> is reached.
+- `3DS Files/Makefile`: `-fno-strict-aliasing`, for the whole class
+  (the port reaches other lists' heads through their items' types).
+  A full rebuild; the ELF's producer string has the flag.
+- With it, Restart Race passed on seed 0ecec47b, no unmapped reads in
+  either Azahar's log. The race's CPU stages averaged 24.14 ms on A
+  and 24.51 on B, against 25.21 and 25.03 under strict aliasing: no
+  cost, if anything a little faster.
+- On the device this should also free the race's props at every race
+  end and far-away delete; before, the pool could fill and props stop
+  converting. Not seen on hardware yet, nor any FPS change.
+
+### What changed
+
+- `netrace.c/h`: `NR_ENDED`, `round`, `saidLoaded`, `NetRaceNet.busy`,
+  the hold for the next race, the reads' guards.
+- `main.c`: `netrace_end`'s stage, `busy` from `netstep_ending`,
+  `fedSetupNextRace`'s raced player, `netRaceGrid` after
+  `raceevent_restart`, `netShownPlayer`, `lockTestFinish`.
+- `configitems.c/h`: `WirelessTestFinish n` (off by default).
+- `smokeable.c`, `3DS Files/Makefile`: the strict-aliasing fix.
+- `tools/src/netrace_test.c`, `tools/netrace_check.py`: eight new
+  scenarios, the busy period, the new and moved mutations.
+- `tools/smokeable_check.py`: the list mutations' texts for the whole
+  CollisionBody head.
+- `tools/run_azahar_lobby.ps1`: `-Restart`, `-NextRace`, `-Finish`.
+- Docs: `netrace.md`, `netstep.md`, `lobby.md`, `end-game.md`,
+  `smokeable.md`, `collision-body.md`.
+
+### Checks
+
+- netrace_check: 36 scenarios, total faults 0, no warnings;
+  `--mutate` 194, 182 caught, 12 equivalent.
+- netstep_check: 39 scenarios, faults 0. lobby_check: 71 scenarios,
+  faults 0.
+- smokeable_check: 384 ops, 1238 lines, 0 differ; the nine list
+  mutations (`move-*`, `destroy-*`, `far-pool`, `far-type`,
+  `far-destroy`, `clear-delall`) caught.
+- tools/build_cia.ps1: built, relocations OK, shaders OK.
+- `run_azahar_lobby.ps1 -Consoles 2 -Race -Restart -Drive 30`: both
+  passed (racing, restarted in lockstep, racing again) on seed
+  0ecec47b with the fix; seed ec5fd1d5 before it.
+- Not run: `-NextRace` (Knockout finished by `WirelessTestFinish`,
+  the results' Next Race, the save, race 2 in step). Its first run was
+  stopped by the user's word. The harness's `next_*` scenarios cover
+  it.
+
+### Next
+
+The user said to stop once 37f-2 is committed. When work resumes:
+37f-3 (the pause driven by the pad that paused, on every console),
+37g, TASKS 61, 46, 60 and 59. No Azahar runs unless the user asks
+again. Still to ask the user: the road's blink on the device again
+(TASKS 64), 47's bridge, 52's popups, the next device log's `sends:`
+line for 65, and how the `-fno-strict-aliasing` build plays on the
+device (FPS, props).

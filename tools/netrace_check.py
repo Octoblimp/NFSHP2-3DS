@@ -26,7 +26,15 @@ shows, sends and ends with (the harness's header has the list):
   - the race's end (TASKS 37f): a racing console out of the race, the
     link's patience the race's again for the way back and the lobby told;
     a client racing alone after the host went the same; while loading,
-    with no wireless race, or a second time, nothing.
+    with no wireless race, or a second time, nothing;
+  - after the end (TASKS 37f-2): netrace off once the frontend loads (or
+    is in, the load between two frames), the lobby's message left to the
+    lobby; the event's next race held and GO again on every console, the
+    host's last frames or a client's stop still going long after the
+    end, three consoles, a client gone and the host gone while it loads,
+    and a next race's end then the frontend. Nothing of netrace's is read
+    or sent while the last race's end is on the link, and a client says
+    LOADED once a race.
 
 The harness prints "faults 0" after each scenario that holds and "total
 faults 0" at the end. A mutant is caught only when the harness finds a
@@ -299,9 +307,12 @@ MUTATIONS = [
       "sizeof(RideInfo),", "memcpy(&R->cars[p].settings, m.data + 1,"),
     M("nr-uncar", "                    R->cars[p].in = 0;\n", ""),
     M("nr-loaded", "                    R->loaded[p] = 1;\n", ""),
-    M("nr-client-racing-read", "    while (R->stage != NR_OFF && R->stage != "
+    M("nr-client-racing-read", "    while (R->stage > NR_OFF && R->stage < "
       "NR_RACING\n           && R->net.recv(0, &m)) {",
-      "    while (R->stage != NR_OFF && R->net.recv(0, &m)) {"),
+      "    while (R->stage > NR_OFF && R->net.recv(0, &m)) {"),
+    M("nr-client-off-read", "    while (R->stage > NR_OFF && R->stage < "
+      "NR_RACING\n", "    while (R->stage >= NR_OFF && R->stage < "
+      "NR_RACING\n"),
     M("nr-go-decode", "| (uint32_t)m.data[2] << 16", "| (uint32_t)m.data[2] << 8"),
     M("nr-go-hold", "            start(R->seed);\n", ""),
     # -- the frame
@@ -310,6 +321,22 @@ MUTATIONS = [
     M("nr-frame-off", "is down\");\n        R->stage = NR_OFF;\n",
       "is down\");\n"),
     M("nr-frame-racing", "    if (R->stage == NR_RACING) return;\n", ""),
+    M("nr-frame-ended", "    if (R->stage == NR_ENDED) {\n        if (gf->",
+      "    if (0) {\n        if (gf->"),
+    M("nr-frame-ended-loading", "        if (gf->current == BGF_LOADING_FRONTEND"
+      "\n            || gf->current == BGF_IN_FRONTEND) {",
+      "        if (gf->current == BGF_IN_FRONTEND) {"),
+    M("nr-frame-ended-in", "        if (gf->current == BGF_LOADING_FRONTEND"
+      "\n            || gf->current == BGF_IN_FRONTEND) {",
+      "        if (gf->current == BGF_LOADING_FRONTEND) {"),
+    M("nr-frame-ended-off", "            R->stage = NR_OFF;\n            say("
+      "\"netrace: off, the frontend next\");", "            say(\"netrace: "
+      "off, the frontend next\");"),
+    M("nr-frame-ended-say", "            say(\"netrace: off, the frontend "
+      "next\");\n", ""),
+    M("nr-frame-ended-return", "        }\n        return;\n    }\n    // The "
+      "last race's end", "        }\n    }\n    // The last race's end"),
+    M("nr-frame-busy", "    if (R->net.busy && R->net.busy()) return;\n", ""),
     M("nr-client-lost", "            if (!R->host && !placeAlive(0)) {",
       "            if (0) {"),
     M("nr-host-lost", "            if (R->host && clientsLeft() == 0) {",
@@ -323,6 +350,11 @@ MUTATIONS = [
     M("nr-frame-wait", "            showWait(gf);\n            break;\n\n"
       "        case NR_HOLD:", "            break;\n\n        case NR_HOLD:"),
     M("nr-hold-go", "                maybeGo();\n", ""),
+    M("nr-hold-send", "                R->net.send(0, NETRACE_MSG_LOADED, "
+      "&place, 1);\n", ""),
+    M("nr-hold-said", "                R->saidLoaded = 1;\n", ""),
+    M("nr-hold-said-guard", "            } else if (!R->saidLoaded) {",
+      "            } else {"),
     M("nr-hold-alone", "            } else if (!placeAlive(0)) {",
       "            } else if (0) {"),
     M("nr-hold-alone-seed", "                start(bDefaultSeed);",
@@ -379,12 +411,20 @@ MUTATIONS = [
       "    if (ready) build(gf);"),
     M("nr-hoststart-push", "else bgf_change_to_screen(gf, NETRACE_SCREEN_NAME, 1);",
       "else bgf_change_to_screen(gf, NETRACE_SCREEN_NAME, 0);"),
-    M("nr-hold-check", "if (R->stage != NR_LOADING) return 0;",
-      "if (R->stage == NR_OFF) return 0;"),
-    M("nr-hold-stage", "    R->stage = NR_HOLD;\n", ""),
-    M("nr-hold-host", "    if (R->host) {\n        say(\"netrace: loaded, holding",
-      "    if (0) {\n        say(\"netrace: loaded, holding"),
-    M("nr-hold-send", "        R->net.send(0, NETRACE_MSG_LOADED, &place, 1);\n", ""),
+    M("nr-hold-check", "if (R->stage != NR_LOADING && R->stage != NR_ENDED) "
+      "return 0;", "if (R->stage == NR_OFF) return 0;"),
+    M("nr-hold-ended", "if (R->stage != NR_LOADING && R->stage != NR_ENDED) "
+      "return 0;", "if (R->stage != NR_LOADING) return 0;"),
+    M("nr-hold-round-if", "    if (R->stage == NR_ENDED) {\n        R->round++;",
+      "    if (0) {\n        R->round++;"),
+    M("nr-hold-round", "        R->round++;\n", ""),
+    M("nr-hold-round-say", "        say(\"netrace: race %d loaded\", "
+      "R->round + 1);\n", ""),
+    M("nr-hold-stage", "    R->stage      = NR_HOLD;\n", ""),
+    M("nr-hold-unsaid", "    R->saidLoaded = 0;\n", ""),
+    M("nr-hold-host", "    if (R->host) say(\"netrace: loaded, holding for "
+      "the rest\");", "    if (0) say(\"netrace: loaded, holding for "
+      "the rest\");"),
     M("nr-back-guard", "    if (R->stage != NR_WAIT) return;\n    R->stage = NR_CARS;",
       "    R->stage = NR_CARS;"),
     M("nr-back-stage", "    if (R->stage != NR_WAIT) return;\n    R->stage = NR_CARS;",
@@ -409,16 +449,17 @@ MUTATIONS = [
       "            }\n"),
     # -- the race's end (37f)
     M("nr-end-racing", "    if (R->stage != NR_RACING) return;\n"
-      "    R->stage = NR_OFF;\n", "    R->stage = NR_OFF;\n"),
-    M("nr-end-off", "    R->stage = NR_OFF;\n    if (R->net.setPatience) "
-      "R->net.setPatience(NETRACE_PATIENCE_MS);\n    say(",
-      "    if (R->net.setPatience) R->net.setPatience(NETRACE_PATIENCE_MS);\n"
-      "    say("),
+      "    R->stage = NR_ENDED;\n", "    R->stage = NR_ENDED;\n"),
+    M("nr-end-ended", "    R->stage = NR_ENDED;\n    memset",
+      "    memset"),
+    M("nr-end-off", "    R->stage = NR_ENDED;\n    memset",
+      "    R->stage = NR_OFF;\n    memset"),
+    M("nr-end-loaded", "    memset(R->loaded, 0, sizeof R->loaded);\n", ""),
     M("nr-end-patience", "R->net.setPatience(NETRACE_PATIENCE_MS);\n"
       "    say(\"netrace: the race is over", "(void)0;\n"
       "    say(\"netrace: the race is over"),
-    M("nr-end-say", "    say(\"netrace: the race is over; the lobby next\");\n",
-      ""),
+    M("nr-end-say", "    say(\"netrace: the race is over; the lobby or the "
+      "next race next\");\n", ""),
     M("nr-end-back", "    lobby_back_next();\n", ""),
 ]
 
@@ -447,6 +488,10 @@ EQUIVALENT = {
     # can, the frame's look right after does the same.
     "nr-build-lost",
     "nr-chosen-lost",
+    # A client goes off inside its read only on a setup from another build
+    # (setupPiece, back to the lobby); what follows from that host is the
+    # rest of the setup and its GO, which the lobby would drop as well.
+    "nr-client-off-read",
     # Every console runs the same build, so the host's pointer is the same
     # static table.
     "nr-take-ptr",

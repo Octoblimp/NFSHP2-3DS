@@ -31,7 +31,8 @@ together, frame by frame, is 37d's (`docs/formats/netstep.md`).
 | `NR_WAIT` | "Wireless Race" | The host: every car in, the build. A client: the whole setup in. BACK: `NR_CARS`. |
 | `NR_LOADING` | The load, retail's own | Its end: `NR_HOLD` (`netrace_hold`). |
 | `NR_HOLD` | The loading screen, held | The host: every console racing has loaded. A client: GO. |
-| `NR_RACING` | The race, in lockstep (`netstep.c`) | Lockstep's stop: `NR_OFF` (`netrace_end`, 37f). |
+| `NR_RACING` | The race, in lockstep (`netstep.c`) | Lockstep's stop: `NR_ENDED` (`netrace_end`, 37f). |
+| `NR_ENDED` | The race over: its save, its unload | The frontend's load: `NR_OFF`. The event's next race loaded: `NR_HOLD` (`netrace_hold`, 37f-2). |
 | `NR_OFF` | No wireless race | `netrace_begin`. |
 
 ### The cars
@@ -179,16 +180,74 @@ Where the race leaves lockstep (`netstep.md`, "The end": after the end's
 save is asked for, or with the race gone by the pause's Quit), `main.c`
 calls `netrace_end`. From `NR_RACING` only, it:
 
-- goes to `NR_OFF`: no wireless race from here, so `netrace_active`
-  answers 0 and car select's and track select's hooks are retail's;
+- goes to `NR_ENDED`: the race is over, and the frontend or the
+  event's next race comes next (37f-2);
+- forgets which consoles had loaded, for the next race's hold;
 - gives the link `NETRACE_PATIENCE_MS` again: from here each console
-  saves on its own card, unloads and loads the frontend, in its own
-  time, before its lobby can say it is back;
-- says "netrace: the race is over; the lobby next";
+  saves on its own card, unloads, and loads the frontend or the next
+  race, in its own time;
+- says "netrace: the race is over; the lobby or the next race next";
 - and calls `lobby_back_next`, so the frontend comes back to the lobby
   with the link up (`lobby.md`, "After the race").
 
 Anywhere else it does nothing.
+
+At `NR_ENDED` netrace reads and sends nothing. Once the flow is loading
+the frontend, or is in it already (a load can end between two of
+netrace's frames), it goes to `NR_OFF` ("netrace: off, the frontend
+next"): no wireless race from here, so `netrace_active` answers 0, car
+select's and track select's hooks are retail's, and the link's messages
+are the lobby's.
+
+### The next race (TASKS 37f-2)
+
+Next Race and Restart Event on the End Game Menu go through the end's
+save, where lockstep stops, and load the event's next race: a
+Knockout's (GameType 4, the race event's mode). Every console runs the
+same results on the same pads up to the stop, so each loads the same
+next race. Two of the event's calls would make the consoles' races
+differ, and `main.c` keeps them the same:
+
+- `raceevent_setup_next_race` puts Fred's player 1 settings, each
+  console's own from its car select, into the race's;
+  `fedSetupNextRace` keeps the settings as raced.
+- `raceevent_restart` (Restart Event) puts the event's first grid back
+  in retail's order for one player; `netRaceGrid` puts netrace's back:
+  the CPU racers first, the two players behind them, then the consoles
+  in AI racers' places, and `fred_calculate_starting_positions`.
+
+A Knockout puts the last racer out between races, and racecoord makes
+no car for a player put out. That console then shows the other player
+(`netShownPlayer`, `PlayerNetLocal`) and runs on in lockstep, its pad
+driving nothing.
+
+The next race's load ends in the hold as the first did: `netrace_hold`
+takes `NR_ENDED` as it takes `NR_LOADING`, counts the race ("netrace:
+race N loaded") and holds. The host's GO waits for every console still
+on, on the seed as it is then.
+
+The last race's end may still be on the link then: the host serving its
+last frames to a client whose stop it has not heard, or a client saying
+its stop (`netstep_ending`, which `main.c` gives netrace as
+`NetRaceNet.busy`). Until it is through, netrace reads and sends
+nothing, so a client's LOADED comes after its stop and the host's GO
+after its last frames; else the next race's lockstep would take the
+last race's stop for its own. A client's LOADED goes on its first frame
+held and not busy. The last race's leftovers (the host's last frames, a
+client's further stops) are read and dropped while it holds.
+
+Restart Race, from the pause or the End Game Menu, resets the race in
+place without the save: the coordinator stays, and so does lockstep,
+with nothing of netrace's. On two Azahars (Session 107) it did, once
+the race's reset stopped leaking smokeables (`smokeable.md`, "Where the
+port differs"); Next Race and Restart Event are checked by the harness
+only, since the user stopped the Azahar runs before them.
+
+For Azahar, where the gas alone never finishes a race,
+`WirelessTestFinish n` in `nfshp2_config.txt` finishes a wireless race
+on lockstep frame n, or the first racing frame after it, on every
+console (`lockTestFinish`, `racecoordinator_the_race_has_finished`).
+It is off by default.
 
 ## The check
 
@@ -205,7 +264,7 @@ drawing a ride from `bDefaultSeed`), and a load of the scenario's
 frames, the loop stalled for most of them, that draws a different count
 of randoms on each console.
 
-28 scenarios: two consoles; the host waiting on two cars; a client's and
+36 scenarios: two consoles; the host waiting on two cars; a client's and
 the host's BACK; eight consoles; a client gone before its car, with its
 car in, of two waited for, while waiting, at car select, during the
 load; every client gone at the start, at car select, while the host
@@ -217,16 +276,31 @@ and no wireless race at all. Three are the race's end (37f,
 `netrace_end` at the scenario's event "end"): two consoles' race over,
 the end asked of the client while it still loads and of the host a
 second time changing nothing; a client that lost the host and raced
-alone; and the end of a race with no wireless race on. Each
-ended console must be `NR_OFF`, the lobby told once, and the link's
-patience NETRACE_PATIENCE_MS; anywhere else the end changes nothing.
+alone; and the end of a race with no wireless race on.
+
+Eight are 37f-2's: the frontend after the end, loading on one console
+and loaded on the other, the host's lobby message to the client left
+unread; the event's next race ("next") on two consoles; with the host's
+last frames served long after the end (a client's stop unheard); with a
+client still saying its stop when its next race has loaded; on three
+consoles, the one in an AI racer's place loading last; with a client
+gone, and with the host gone, while it loads (the client racing alone);
+and a next race, its end, and the frontend.
+
+After each end a console's fake netstep is busy for the scenario's
+frames: the host sends each racing client its last frames and reads the
+clients' messages of the race; a client sends its stop. Each ended
+console must be `NR_ENDED`, the lobby told once for each end, and the
+link's patience NETRACE_PATIENCE_MS; anywhere else the end changes
+nothing. Nothing of netrace's may be read or sent while its console is
+busy, and a client sends one LOADED a race.
 
 Every frame it checks the popup (one at most, only on "Wireless Race",
 the lobby's look), each console's line, the sounds, the link's patience,
 the messages (none too long, none to a peer not there), and that GO
 comes only once every console racing has held, once to each. At the end
 it checks each console's screen, stage and log lines, and that each
-racing client's race is the host's at GO: the parameters, the driver
+racing client's race is the host's at the last GO: the parameters, the driver
 table, the event, Fred's game type and players, the drivers, and the
 seed. The host's table must have the first client as the second player
 and the rest in AI racers' places, and the frontend's second player put
@@ -237,7 +311,7 @@ any other race's as track select left them).
 
 The last line is `total faults N`, and the check passes at 0.
 
-`--mutate` makes 177 mutations of `netrace.c`. 166 are caught and 11 are
+`--mutate` makes 194 mutations of `netrace.c`. 182 are caught and 12 are
 equivalent, each named in the script with its reason.
 
 ## On Azahar

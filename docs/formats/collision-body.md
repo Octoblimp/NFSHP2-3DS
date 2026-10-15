@@ -260,6 +260,12 @@ slack.
 defined in `carcollisionbody.c` until the AI, which reads them too, is
 ported.
 
+`CollisionBodyList` is an 8-byte node, and the list's code reaches it as
+a CollisionBody, the list's end, as the image does. Under GCC's strict
+aliasing a write through a body could not touch it, and a push kept a
+head it had read before; the Makefile builds with `-fno-strict-aliasing`
+(TASKS 37f-2, `smokeable.md`).
+
 Nothing writes Contact's five tuning globals either. Between them are
 `ContactDebug` (0), `Restitution` (0.1), `TestImpulse` (1.0) and
 `ContactFrictionCoefficient` (0.3), which nothing reads. CollisionImpulse's

@@ -274,30 +274,36 @@ void close_smokeables(void)
 {
 }
 
+// The list's head on the stack is a whole CollisionBody, as the image's
+// bTList<CollisionBody> is reached: through the bodies' own links. A bare
+// CollisionBodyNode written through them is, to GCC's strict aliasing at
+// -O3, never written, and the loop that empties the list went: every
+// smokeable and virgin stayed alive, off the body list, its WorldObject
+// still on WorldObjectList, after its pool was freed (Restart Race's
+// world went round a NULL node, TASKS 37f-2). The Makefile's
+// -fno-strict-aliasing covers CollisionBodyList, reached the same way.
+//
 // A body moved from CollisionBodyList to the tail of `list`.
-static void move_to_list(CollisionBodyNode *list, CollisionBody *b)
+static void move_to_list(CollisionBody *list, CollisionBody *b)
 {
-    CollisionBody *end = (CollisionBody *)(void *)list;
     CollisionBody *next = b->Link.next, *prev = b->Link.prev;
     CollisionBody *tail;
 
     prev->Link.next = next;
     next->Link.prev = prev;
-    tail = list->prev;
+    tail = list->Link.prev;
     tail->Link.next = b;
-    list->prev = b;
+    list->Link.prev = b;
     b->Link.prev = tail;
-    b->Link.next = end;
+    b->Link.next = list;
 }
 
 // Each body on `list` back to the head of CollisionBodyList, and then
 // destroyed with 3 (which takes it off again).
-static void destroy_list(CollisionBodyNode *list)
+static void destroy_list(CollisionBody *list)
 {
-    CollisionBody *end = (CollisionBody *)(void *)list;
-
-    while (list->next != end) {
-        CollisionBody *b = list->next;
+    while (list->Link.next != list) {
+        CollisionBody *b = list->Link.next;
         CollisionBody *next = b->Link.next, *prev = b->Link.prev;
         CollisionBody *head;
 
@@ -314,11 +320,11 @@ static void destroy_list(CollisionBodyNode *list)
 
 void delete_smokeable_collision_bodies(void)
 {
-    CollisionBodyNode list;
-    CollisionBody    *b, *next;
+    CollisionBody  list;
+    CollisionBody *b, *next;
 
-    list.next = (CollisionBody *)(void *)&list;
-    list.prev = (CollisionBody *)(void *)&list;
+    list.Link.next = &list;
+    list.Link.prev = &list;
     for (b = CollisionBodyList.next; b != BODY_END; b = next) {
         next = b->Link.next;
         if (b->Type == 2 || b->Type == 1)
@@ -329,13 +335,13 @@ void delete_smokeable_collision_bodies(void)
 
 void delete_far_away_smokeable_collision_bodies(void)
 {
-    CollisionBodyNode list;
-    CollisionBody    *b, *next;
+    CollisionBody  list;
+    CollisionBody *b, *next;
 
     if (SmokeableSlotPool == NULL)
         return;
-    list.next = (CollisionBody *)(void *)&list;
-    list.prev = (CollisionBody *)(void *)&list;
+    list.Link.next = &list;
+    list.Link.prev = &list;
     for (b = CollisionBodyList.next; b != BODY_END; b = next) {
         const bVector3 *v;
 

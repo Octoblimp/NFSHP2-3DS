@@ -44,8 +44,15 @@ APP_AUTHOR		:= NFSHP2-3DS project
 #---------------------------------------------------------------------------------
 ARCH	:=	-march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft
 
+# -fno-strict-aliasing: the port reaches its lists' heads through their
+# items' types, as the image does (CollisionBodyList, an 8-byte node, as a
+# CollisionBody). Under strict aliasing GCC takes a write through an item
+# for one that cannot touch a smaller head, and keeps the head it read
+# before: clear_smokeables dropped its whole destroy loop, and once that
+# was mended, its first push onto CollisionBodyList linked a stale head
+# (Restart Race, TASKS 37f-2).
 CFLAGS	:=	-g -Wall -O3 -mword-relocations \
-			-ffunction-sections \
+			-ffunction-sections -fno-strict-aliasing \
 			$(ARCH)
 
 CFLAGS	+=	$(INCLUDE) -D__3DS__

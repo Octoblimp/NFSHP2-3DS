@@ -277,8 +277,11 @@ console on the same pads, up to the frame whose Quit or Next Race asks
 for the save (`endGameAutosaveNow`). That frame is the race's last in
 lockstep (`netstep.md`, "The end"): from the next, each console answers
 its own save on its own card with its own pad, and its Quit comes back
-to the lobby (`lobby.md`, "After the race"). A Next Race after the stop
-would race on with no lockstep: 37f-2's.
+to the lobby (`lobby.md`, "After the race"). Next Race and Restart
+Event load the event's next race on every console, which holds for the
+host's GO and races in lockstep again (TASKS 37f-2, `netrace.md`, "The
+next race"). Restart Race resets the race in place without the save, in
+lockstep throughout.
 
 Three of retail's reads are tested first in the port:
 

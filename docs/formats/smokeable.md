@@ -115,6 +115,18 @@ are scaled by the barricade.
   slot, which the next init sets again.
 - **VirginSmokeable's name.** The port bounds the snprintf (the image's
   bSPrintf has none). The name is at most 15 + 23 characters.
+- **The deletes' list on the stack** is a whole CollisionBody, reached
+  through the bodies' own links, as the image's bTList<CollisionBody>
+  is. It was a bare CollisionBodyNode, and to GCC's strict aliasing at
+  -O3 a write through a CollisionBody could never touch it: the loop
+  that empties the list was dropped. Every smokeable and virgin then
+  stayed alive past the race's end and the far-away deletes, off the
+  body list but its WorldObject still on WorldObjectList, after its pool
+  was freed, and Restart Race's world update went round a NULL node
+  (TASKS 37f-2). Once that was mended, `destroy_list`'s first push onto
+  CollisionBodyList linked a stale head, reached the same way, so the
+  Makefile now builds with `-fno-strict-aliasing`. The port reaches
+  other lists' heads through their items' types too.
 
 ## The checker
 
@@ -134,7 +146,9 @@ The script covers:
 Results:
 - `--dump out/smokeable`: 384 ops, 1238 lines, 0 differ.
 - Mutations: 276 over `smokeable.c` and `smokeableinfo.c`, all caught or
-  equivalent. The equivalents are `rec-used`, `delete-flags`,
+  equivalent. The list's mutations (`move-*`, `destroy-*`, `far-pool`,
+  `far-type`, `far-destroy`, `clear-delall`) name the list's whole
+  CollisionBody since 37f-2. The equivalents are `rec-used`, `delete-flags`,
   `vconv-pos-raise`, `drain-null` and `move-timers`; the script states
   each one's reason.
 

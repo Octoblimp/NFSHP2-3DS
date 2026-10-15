@@ -524,8 +524,9 @@ static void clientRead(BGameFlow* gf)
 {
     WlMsg m;
 
-    // Not past GO: what follows it is the race's.
-    while (R->stage != NR_OFF && R->stage != NR_RACING
+    // Not past GO: what follows it is the race's. Before the next race's
+    // GO, the last race's leftovers (the host's last frames) are dropped.
+    while (R->stage > NR_OFF && R->stage < NR_RACING
            && R->net.recv(0, &m)) {
         if (m.type == NETRACE_MSG_SETUP && R->stage <= NR_WAIT) {
             setupPiece(gf, &m);
@@ -550,6 +551,18 @@ void netrace_frame(BGameFlow* gf)
     }
     // The race's messages are the race's (37d).
     if (R->stage == NR_RACING) return;
+    // After the race's end, the frontend: the lobby's from its load on.
+    // Else the event's next race is loading; its hold comes next.
+    if (R->stage == NR_ENDED) {
+        if (gf->current == BGF_LOADING_FRONTEND
+            || gf->current == BGF_IN_FRONTEND) {
+            R->stage = NR_OFF;
+            say("netrace: off, the frontend next");
+        }
+        return;
+    }
+    // The last race's end still on the link: its messages first.
+    if (R->net.busy && R->net.busy()) return;
     if (R->host) hostRead();
     else clientRead(gf);
     if (R->stage == NR_OFF) return;
@@ -585,6 +598,11 @@ void netrace_frame(BGameFlow* gf)
             } else if (!placeAlive(0)) {
                 say("netrace: the host is gone; racing alone");
                 start(bDefaultSeed);
+            } else if (!R->saidLoaded) {
+                uint8_t place = (uint8_t)R->race.place;
+
+                R->net.send(0, NETRACE_MSG_LOADED, &place, 1);
+                R->saidLoaded = 1;
             }
             break;
 
@@ -709,27 +727,29 @@ int netrace_host_start(BGameFlow* gf)
     return 1;
 }
 
+// A client's LOADED goes on its next frame (netrace_frame), once the
+// last race's end is through on the link.
 int netrace_hold(void)
 {
-    if (R->stage != NR_LOADING) return 0;
-    R->stage = NR_HOLD;
-    if (R->host) {
-        say("netrace: loaded, holding for the rest");
-    } else {
-        uint8_t place = (uint8_t)R->race.place;
-
-        R->net.send(0, NETRACE_MSG_LOADED, &place, 1);
-        say("netrace: loaded, holding for the host");
+    if (R->stage != NR_LOADING && R->stage != NR_ENDED) return 0;
+    if (R->stage == NR_ENDED) {
+        R->round++;
+        say("netrace: race %d loaded", R->round + 1);
     }
+    R->stage      = NR_HOLD;
+    R->saidLoaded = 0;
+    if (R->host) say("netrace: loaded, holding for the rest");
+    else say("netrace: loaded, holding for the host");
     return 1;
 }
 
 void netrace_end(void)
 {
     if (R->stage != NR_RACING) return;
-    R->stage = NR_OFF;
+    R->stage = NR_ENDED;
+    memset(R->loaded, 0, sizeof R->loaded);
     if (R->net.setPatience) R->net.setPatience(NETRACE_PATIENCE_MS);
-    say("netrace: the race is over; the lobby next");
+    say("netrace: the race is over; the lobby or the next race next");
     lobby_back_next();
 }
 

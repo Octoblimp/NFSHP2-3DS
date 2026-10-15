@@ -147,9 +147,12 @@ flow on the same pads (`main.c`, after the frame's checksum):
 
 There `netstep_stop(now)`, `lockhash_stop`, `netrace_end` (the link
 NETRACE_PATIENCE_MS again, through each console's save, unload and
-frontend load, and the lobby next: `lobby.md`) and a first
-`netstep_drain(now)`. The loop drains on each pass while
-`netstep_ending` says so.
+frontend load, and the lobby next: `lobby.md`; or the event's next race:
+`netrace.md`, "The next race") and a first `netstep_drain(now)`. The
+loop drains on each pass while `netstep_ending` says so, and netrace
+reads and sends nothing until it is through (`NetRaceNet.busy`), so the
+next race's LOADED and GO come after the last race's stop and last
+frames.
 
 From the stop on, every message says how many frames its sender ran
 (`stopAt`, 4 bytes after the checksum: the header is 19 bytes; none is
@@ -235,5 +238,26 @@ presses through the drive that the script did not send, so someone was
 most likely at the host's window. The pause took that A as Resume, as
 retail does. Since then each frame's presses are logged ("lockstep:
 frame N, port P's presses ..., screen ...") and so is each pause's
-port and frame ("pause: port P, frame F"). Not tried yet: the end after
-the results (Quit or Next Race once the race is over).
+port and frame ("pause: port P, frame F"). The end after the results,
+Quit or Next Race once the race is over, is 37f's and 37f-2's
+(`netrace.md`).
+
+Session 107 (37f-2), with `-Restart`: after the drive the host pauses,
+moves down to Restart and says OK; every copy must show the race's
+start again and race on for `-Drive` more seconds, never stopping its
+lockstep, every logged frame's parts the host's. The first runs passed
+(seed ec5fd1d5, 18 logged frames the same on both), but the restart
+could hang in the world's update on a NULL WorldObject: GCC's strict
+aliasing at -O3 had dropped the loop that destroys the race's
+smokeables (`smokeable.md`, "Where the port differs"). With the local
+list's head a whole CollisionBody and `-fno-strict-aliasing` in the
+Makefile, both copies passed on seed 0ecec47b with no unmapped reads,
+and the race's CPU stages averaged a little less than before (24.1 and
+24.5 ms against 25.2 and 25.0).
+
+`-NextRace` hosts Knockout, finishes the race on `-Finish`'s lockstep
+frame on every copy (`WirelessTestFinish`, `netrace.md`), passes the
+results with the host's A to Next Race and OK, says Yes to each copy's
+save, and must see race 2 loaded, a second GO on the host's seed and
+every copy racing again in step. It was never run through: the user
+stopped the Azahar runs on 2026-10-15 while its first run was going.
