@@ -110,6 +110,29 @@ on the 15.5 FPS of an earlier run: that was the fire on track 11, and
 TASKS 46 must reach a steady 30 there and in every place like it.
 Next: TASKS 37 (multi-card multiplayer).**
 
+**Now (Session 112, 2026-10-15): 37g-1 is done (2a9b396). A lost
+console holds the race on every console for `WirelessHoldSeconds` (90
+s), under a box that names it and counts down, the race's sound muted.
+Then its car is the CPU's from the frame of the first record built
+without it, and a pause it held goes to the lowest port still racing.
+A client that loses its host holds, then races alone.
+`run_azahar_lobby.ps1 -Race -Lose 1` and `-Lose 0` pass on two
+Azahars. The user wrote down TASKS 67 from a friend's 3DS photo: Select
+Car's car icons are off their boxes. Next: 37g-2 (re-peering a console
+whose link alone dropped), 37g-3, 37f's frame-1809 difference, 37d-2,
+then TASKS 61, 46, 60 and 59. See HANDOFF.md's Session 112.**
+
+**Now (Session 111, continued, 2026-10-15): 37g-1 is part-done and
+uncommitted. The user stopped the session. The working tree has
+netstep's hold, which passes 46 harness scenarios with 0 faults: a lost
+console holds the race on every console for `WirelessHoldSeconds` (90
+s), then its car goes to the CPU. It also has netrace's console names
+and held text (setup version 2), two new strings and the setting. Not
+done: main.c's hand-over, the overlay, the mute, and a pause whose
+owner is dropped; netrace_test; the checks, the build and the Azahar
+test. Then 37g-2 and 37g-3 (the rejoins), TASKS 61, 46, 60 and 59. See
+HANDOFF.md's "Session 111, continued".**
+
 **Now (Session 111, 2026-10-15): 37f-3 is done. Either player's pause
 in a wireless race pauses every console, and only that player's pad
 drives it, so one player's Quit Race or Restart is everyone's, as on

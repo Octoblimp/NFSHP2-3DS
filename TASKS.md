@@ -2758,6 +2758,34 @@ phases.
                   or as a cop, whichever it was. The record the host
                   first builds without the place (its live bit gone)
                   is the frame every console hands that car to the AI.
+                - [x] 37g-1: the hold, then the CPU. A lost console
+                      holds the race on every console for
+                      `WirelessHoldSeconds` (90), under a box that
+                      names it and counts down. Then its car is the
+                      AI's on the frame of the first record built
+                      without it. A client that loses its host holds,
+                      then races alone. Done in 2a9b396 (HANDOFF.md,
+                      Session 112):
+                      - netstep's hold. netstep_check: 47 scenarios,
+                        0 faults; 173 mutants, 170 caught, 3
+                        equivalent. Nothing goes over a lost link.
+                      - The setup carries the console names (version
+                        2). main.c draws the box and, for 4 s after
+                        the drop, "The CPU drives NAME's car." It
+                        mutes the race while held, and hands a pause
+                        the lost place held to the lowest live port.
+                      - `run_azahar_lobby.ps1 -Race -Lose 1`: B closed,
+                        the host held 10 s under the countdown, then
+                        handed B's car to the CPU on frame 718, and
+                        it passed the host's. `-Lose 0`: B held for
+                        the host, then raced alone from frame 773.
+                - [ ] 37g-2: a console whose link alone dropped is
+                      re-peered during the hold and goes on from its
+                      last frame. wireless.c ejects a lost peer for
+                      good today, and the network is closed mid-race.
+                - [ ] 37g-3: a restarted console rejoins through Local
+                      Wireless, then Join, known by its unique ID, and
+                      catches up.
 38. [x] **BUSTED! is flat and static.** The user's Azahar shot of
         2026-10-09: in the bust NIS, BUSTED! sits squashed, its top cut
         off, and never animates. Retail scales it from 5 down to ScaleX
@@ -3512,6 +3540,24 @@ phases.
           title in FBI: "It worked perfectly!" (2026-10-15). The badge
           turns in front of the still oval, the siren plays, the icon
           and title are new.
+67. [ ] **Select Car's car icons are off their boxes.** Reported on
+        2026-10-15: a friend testing multiplayer on a 3DS photographed
+        it, on the build before Session 112 (the CIA with the working
+        graphics, 80b7324). The user: "its not aligned to the box". In
+        the row of car icons under the car, the highlight box on the
+        first icon and the icon do not line up. The box's left half is
+        empty, and the icon starts at the box's middle and runs past its
+        right edge. The icons after it look shifted the same way. The
+        profile was new ("Cars Unlocked: 7/49", "NFS Points: 0"). The
+        photo is `out/carsel_icons_offset_2026-10-15.webp`
+        (git-ignored).
+        - Check it on Azahar first, from the main menu and from the
+          wireless lobby. If only the 3DS shows it, look at the GPU
+          (the icons' texture size, rounding); if Azahar shows it too,
+          look at the layout (`bcarsel.c`, SC-1's row of icons,
+          `docs/formats/car-select.md`).
+        - Compare with retail: the user's PCSX2 photos of the retail
+          frontend (2026-09-28) and `carsel_check`.
 
 ### The retail frontend
 

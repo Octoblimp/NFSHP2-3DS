@@ -23680,3 +23680,293 @@ one Next Race run of three. Still to ask the user: the road's blink on
 the device again (TASKS 64), 47's bridge, 52's popups, the next device
 log's `sends:` line for 65, and how the `-fno-strict-aliasing` build
 plays on the device.
+
+## Session 111, continued -- 37g-1 begun: the hold, then the CPU (uncommitted)
+
+The user stopped the session part-way through 37g-1: "Stop and write up
+HANDOFF.MD etc. then end". **Nothing of 37g-1 is committed or built.**
+The work is in the working tree. Of the files below, `git diff` shows
+only 37g-1's changes. main.c is not touched yet.
+
+### The plan: 37g in three slices
+
+- **37g-1 (in progress): the hold, then the CPU.** A console lost
+  mid-race holds the race on every console for `WirelessHoldSeconds`
+  (90 by default). A box over the top screen names the lost console
+  and counts down. Then that place's live bit is dropped, and every
+  console hands its car to the AI on the frame of the first record
+  built without the bit.
+- **37g-2: the rejoin of a console whose link alone dropped.** Its race
+  is still loaded. Re-peer it while the race is held, then go on from
+  its last frame. wireless.c's host ejects a lost peer
+  (`peer_lost`), and alive stays 0 for good. The network is closed
+  mid-race, so this needs a way back in.
+- **37g-3: a restarted console rejoins by its unique ID.** It comes in
+  through Local Wireless, then Join. Candidates for the ID are
+  CFGU_GenHashConsoleUnique and UDS's node info, as long as two Azahar
+  copies differ in it. It then catches up: the setup, the load, and
+  the records run fast from frame 0, or a snapshot.
+
+### Done so far (in the working tree)
+
+- **netstep.h/.c: the hold.**
+  - `NETSTEP_HOLD_MS` is 90000.
+  - `netstep_set_hold(ms)`: 0 means the default. netstep_start keeps
+    it from one GO to the next.
+  - `netstep_held(now, &msLeft)` gives the mask of held places and
+    the time left.
+  - New NetStep fields: `holdMs`, `polled`, `lost[]`, `lostAt[]`,
+    `held`, `heldLeft`.
+  - HEADER is 21 bytes now. Byte 19 is the host's held mask and byte
+    20 the seconds left. A client sends 0, 0 there.
+- **The host's poll (hostPoll), for each live place whose link is down:**
+  - Before the first poll, the place is dropped at once: "place %d
+    was gone at the start".
+  - On the first loss it is marked lost and kept live, so no record is
+    built: "place %d lost at frame %lu; held for %lu ms". Frames are
+    no longer sent to it.
+  - Past the hold it is dropped: "place %d is gone, from frame %lu;
+    its car to the CPU".
+- **A client that loses its host** holds the same way ("the host lost
+  at frame %lu; held for %lu ms"). Then it races alone: "the host is
+  gone, from frame %lu; racing alone, the other cars the CPU's". While
+  the host is lost the client sends no pads.
+- **The "back" paths are gone.** I had first written code for a lost
+  link that comes back, but wireless.c never revives one, so it could
+  not be tested. 37g-2 puts that back with the re-peering.
+- **tools/src/netstep_test.c: 46 scenarios, 0 faults** with
+  `python tools/netstep_check.py`. Changes:
+  - Links lost in the harness stay lost both ways (`g_lost`), as
+    wireless.c's do.
+  - New scenario fields: `hold`, `vanishAtStart`, `freezeAt[]`,
+    `freezeFor[]`.
+  - Checks for each line above and their timing against the hold
+    (`HOLD_SLACK` 3 ms). netstep_held is checked every ms.
+  - New scenarios: place 1 gone on a lossy link, a place gone at the
+    start, the host gone at the start, a client's loop frozen 6 s or
+    2 s, the host's frozen 5 s, and place 2's frozen 5 s on a lossy
+    link.
+  - **Not run yet:** `--mutate`. netstep_check.py's docstring still
+    needs the new scenarios listed.
+- **netrace.c/.h: the console names.**
+  - `SETUP_VERSION` is 2. SetupHeader carries each place's console name
+    (`name[WIRELESS_MAX_CONSOLES][WIRELESS_NAME_MAX]`), and the
+    `setup_fits` typedef checks that the setup still fits
+    NETRACE_SETUP_MAX.
+  - The host fills `R->names` with placeName in pack(). take() copies
+    them into each client's `R->names`.
+  - `netrace_place_name(p)`.
+  - `netrace_held_text(gf, places, msLeft, out, cap)` gives "The link
+    to $NAME was lost." (the names joined by ", "), then '@', then
+    "Reconnecting... m:ss".
+  - `netrace_cpu_text(gf, places, out, cap)` gives one "The CPU drives
+    $NAME's car." per place, joined by '@'.
+  - fillName now goes through `fillTok`.
+  - **netrace_test is not updated for SETUP_VERSION 2 yet.** Run
+    `python tools/netrace_check.py` and fix what it says.
+- **portlang.h/.c: two new strings** in the six languages,
+  `PORTLANG_RECONNECTING` ($N) and `PORTLANG_CPU_DRIVES` ($NAME).
+- **configitems.h/.c:** `ConfigWirelessHoldSeconds = 90`
+  ("WirelessHoldSeconds"). configitems.c is CRLF and the rest are LF;
+  it was edited with Python bytes.
+
+### Left for 37g-1
+
+1. **main.c, the hand-over.**
+   - `static uint8_t g_lockLive`, set to `racing` in netRaceGoRacing.
+   - A mask `g_lockCpu |= g_lockLive & ~r->live`, taken after lockFrame
+     returns true (`r = netstep_current()`) and before the world step.
+   - Every lockstep frame, for each place in the mask: the car is
+     `world_get_car_by_driver_number(netrace_driver(p))`. If it exists
+     and its `TheControlMode` is REAL_CONTROL, call
+     `car_set_control_mode(car, AI_CONTROL)` and log "lockstep: frame
+     %lu, place %d's car (driver %d) to the CPU".
+   - Retrying every frame covers a place gone at the start, before the
+     cars exist or before GO sets REAL_CONTROL. Every console has the
+     same records, so it is deterministic.
+   - The CPU notice (netrace_cpu_text) shows for about 4 s.
+   - A cop's car (COP_CONTROL) waits for TASKS 61. Every wireless
+     player is a racer until then.
+2. **main.c, the pause owned by a dropped place.**
+   `pause_menu_enter_pause` filters the pause's screens to the pauser's
+   port (pausemenu.c:158). If that place is dropped while paused,
+   nobody can drive the pause. On the hand-over frame, if
+   `ThePauseMenu->Port` is that place's port, either give the pause to
+   the lowest live port (pause_menu_enter_pause again), or
+   `request_unpause(UNPAUSE_REASON_RESUME_RACE)`. A Quit or Restart
+   popup already up keeps its own `joyPort` (bpopup.h:64), so dismiss
+   it first (bpopup_dismiss). It must be the same on every console.
+3. **main.c, the overlay.**
+   - After `uirender_draw_visible(&ui, 1.0f)` (main.c ~7890), when
+     `g_track.attached && netstep_on() && netstep_held(now, &left)`:
+     draw a C2D_DrawRectSolid box and `uirender_draw_wrapped` with
+     `botStyle(ui, white, px, true)` (FONT_A).
+   - Size the box with `uirender_wrap_height`. '@' breaks a line.
+   - netstep_held is 0 when off or alone.
+4. **main.c, the sound.** While held, `raceSoundMute(1)` if
+   `!gSoundModule.jb->muted` (check jb is not NULL), remembered so the
+   hold's end unmutes. No lockstep frame runs during the hold, so the
+   pause's own mute cannot change under it. Undo the mute at
+   netstep_stop.
+5. **main.c, the setting.** Call
+   `netstep_set_hold((uint32_t)ConfigWirelessHoldSeconds * 1000u)`
+   next to `netstep_init` (main.c ~7387). Check that the config file is
+   read before that line.
+6. **Checks.** netstep_check, its `--mutate` (in the background, and
+   no build while it runs), netrace_check and lobby_check.
+7. **Build** with tools/build_cia.ps1.
+8. **Test on two Azahars** with `run_azahar_lobby.ps1`. Put
+   `WirelessHoldSeconds 10` in the test config, close copy B mid-race,
+   and look for the box and countdown on A. After 10 s, A's log should
+   say "place 1 is gone" and the CPU should drive B's car. Then the
+   other way round: close A, and B races alone. Remove the setting
+   after.
+9. **Commit, then docs:**
+   - docs/formats/netstep.md: the hold, HEADER 21, bytes 19-20.
+   - TASKS 37g-1 checked.
+   - CONTINUE.
+
+### Next
+
+37g-1, then 37g-2, 37g-3, TASKS 61, 46, 60 and 59, one at a time. Still
+open:
+
+- **37f:** the checksum difference at frame 1809 in one Next Race run
+  of three.
+- **To ask the user:**
+  - TASKS 64: the road's blink.
+  - TASKS 47: the bridge.
+  - TASKS 52: the popups.
+  - TASKS 65: the device log's `sends:` line.
+  - How the `-fno-strict-aliasing` build plays on the device.
+
+## Session 112 -- 37g-1 done: the hold, then the CPU
+
+37g-1 is committed in 2a9b396, with the netstep, netrace, string and
+setting work from "Session 111, continued" and the rest below.
+
+### main.c
+
+- **The hand-over.** `lockHandOver`, called from lockFrame once the
+  frame's record is in and before the world steps:
+  - `g_lockLive` holds the places racing at GO (netRaceGoRacing). The
+    places that left the live bits are logged ("lockstep: frame n,
+    places xx dropped") and added to `g_lockCpu`.
+  - Every lockstep frame, each place in `g_lockCpu` whose car exists
+    and is REAL_CONTROL gets `car_set_control_mode(car, AI_CONTROL)`
+    ("lockstep: frame n, place p's car (driver d) to the CPU"). The
+    retry covers a place dropped before its car is built or set to
+    REAL_CONTROL. Every console has the same records, so the frame is
+    the same everywhere.
+  - A cop's car (COP_CONTROL) waits for TASKS 61: every wireless player
+    is a racer until then.
+- **The pause.** `lockPauseHandOver`: if the dropped place held the
+  pause (the Pause Menu's Port, or the coordinator's
+  PausedJoystickPort), the pause goes to the lowest live port with
+  pause_menu_enter_pause again. Any popup on the old port (Quit Race's
+  or Restart's question) takes the new port in `cfg.joyPort` and each
+  item's `joyPort`. Logged "the pause from port a to port b".
+- **The box.** `drawLockHeld`, drawn after `uirender_draw_visible`
+  while a wireless race is on. While held it shows `netrace_held_text`,
+  and for LOCK_NOTE_MS (4 s) after a drop it shows `netrace_cpu_text`.
+  '@' becomes '\n' for uirender_draw_wrapped, in botStyle's FONT_A at
+  16 px, centred on the top screen over a dark box with a red rule.
+- **The sound.** `lockHoldMute` calls raceSoundMute(1) while
+  netstep_held says so, unless the jukebox is already muted (the
+  pause). It unmutes when the hold ends and at the lockstep's stop.
+- **The setting.** `netstep_set_hold(ConfigWirelessHoldSeconds * 1000)`
+  after netstep_init. netstep_set_hold(0) now just stores 0, and
+  netstep_start turns 0 into NETSTEP_HOLD_MS.
+
+### The checks
+
+- **netrace_check: 36 scenarios, faults 0.** `checkNames` checks each
+  place's name against the lobby's, the held text at 75.5 s ("1:16"),
+  0:00 and 0:01, and the CPU text joined by '@'.
+- **netstep_check: 47 scenarios, faults 0.**
+  - checkHeld checks the time left exactly (`leftOf`): the host's to
+    the ms, a client's for its lost host, and a client on the host's
+    word never under the host's own.
+  - New: nothing may be sent over a link the harness has lost (fSend),
+    and a console alone holds for none.
+  - New scenario: "three, place 2 gone, then the host while it holds".
+    Place 1 holds on the host's word, then for the host, then races
+    alone. `hostSaw(p)` says when a client sees the host hold for a
+    place before the host goes.
+- **`--mutate`: 173 mutants, 170 caught, 3 equivalent.** The first run
+  left five:
+  - ns-hostpoll-sendlost and ns-clientpoll-nopads (sending over a lost
+    link) are caught by the fSend check.
+  - ns-held-on (netstep_held while alone) is caught by the alone check
+    and the new scenario.
+  - ns-sethold went with the simpler netstep_set_hold.
+  - ns-serving-live is EQUIVALENT: a place out of the live bits has
+    left, is lost for good, or never raced, and alive() is 0 for the
+    last two. **37g-2's re-peering makes the live test matter again.**
+- lobby_check: faults 0. The build passed (relocations and shaders OK).
+
+### Two Azahars: `run_azahar_lobby.ps1 -Race -Lose N`
+
+New switches: `-Lose N` closes copy N (0 the host) once `-Drive` is
+over, and `-HoldSeconds` (10) goes into every card's config as
+`WirelessHoldSeconds`. The rest keep the gas held for the hold plus
+25 s, with a shot every 2 s. The verdict:
+
+- With a client lost, the host logs it lost (held for HoldSeconds
+  * 1000 ms) and gone once each.
+- With the host lost, each client logs the host lost and gone once.
+- Every copy left logs the lost place's car to the CPU once, and with a
+  client lost, on the same frame on every copy.
+- The lost copy passes as "racing, then closed".
+
+Results with `-Consoles 2 -Drive 20`:
+
+- `-Lose 1`, seed 9c08c5df: PASS. The host held from frame 718 under
+  "The link to hp2join1 was lost. / Reconnecting... 0:07" (shot
+  A_18_held-3), the race still. After 10 s it logged "place 1 is gone"
+  and dropped place 1, and handed B's car to the CPU on frame 718,
+  under "The CPU drives hp2join1's car." (A_23_held-8). B's car then
+  passed the host's (0.95 s ahead in A_32_held-17).
+- `-Lose 0`, seed fbf75d38: PASS. B held for the host from frame 773
+  (B_15_held-3), then raced alone, the host's car the CPU's and ahead.
+  B's speed sits at 40 in 1st: copy B is Manual and the script never
+  shifts.
+
+### TASKS 67, reported this session
+
+The user sent a friend's photo from a real 3DS (the CIA before this
+session): in Select Car's row of car icons, the first icon's highlight
+box and the icon do not line up. The icon starts at the box's middle.
+The photo is `out/carsel_icons_offset_2026-10-15.webp`. The user said
+to write it down as a task; it has no place in the order yet.
+
+### Next: 37g-2, re-peering a console whose link alone dropped
+
+What stands in the way in wireless.c:
+
+- `peer_lost(p, why, eject)` marks the peer dead. The host's timeout
+  path ejects it (`udsEjectClient`) and puts its node in `goneMask`,
+  and read_status takes no node in goneMask until the status shows it
+  gone.
+- `client_came` refuses a new node while the network is closed
+  (`wireless_set_open(0)` at the lobby's start), ejecting it.
+- A client whose host goes quiet is WIRELESS_LOST for good.
+
+The plan to look at: during a hold, the host keeps the lost place
+(alive 0, its node and name). A node that comes back during the hold,
+with the same name, or later the unique ID (37g-3), is taken back into
+that place with a fresh link. netstep then sees alive(p) again, clears
+`lost[p]` and resends from the client's `need`. The netstep harness
+needs links that come back (g_lost cleared), and netstep needs its
+"back" paths (Session 111 removed them because nothing could test
+them). Check what Azahar does to a UDS node whose room member drops
+and comes back. A short loss can also be faked with a config line that
+stops pumping for N seconds.
+
+Still to ask the user:
+
+- TASKS 64: the road's blink.
+- TASKS 47: the bridge.
+- TASKS 52: the popups.
+- TASKS 65: the device log's `sends:` line.
+- How the `-fno-strict-aliasing` build plays on the device.
