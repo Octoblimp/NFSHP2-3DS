@@ -172,6 +172,27 @@ int32_t joyhid_bindings_valid(const JoyHidBindings *b);
 void joyhid_bind(uint8_t table[JOYHID_ACT_COUNT], int32_t action,
                  int32_t key);
 
+// 1 if joyhid_bind(table, action, key) would leave the throttle and the
+// brake each on a key: Options' Controller binds nothing else, so a car
+// can always go and stop (the swap can hand a key's old action the moved
+// action's NONE).
+int32_t joyhid_bind_keeps_drive(const uint8_t table[JOYHID_ACT_COUNT],
+                                int32_t action, int32_t key);
+
+// The controls file, controls.bin beside settings.db (main.c): "HP2K",
+// the version, the number of actions, then the racer's table and the
+// cop's, a byte an action.
+#define JOYHID_FILE_VERSION 1
+#define JOYHID_FILE_SIZE    (6 + 2 * JOYHID_ACT_COUNT)
+
+void joyhid_bindings_pack(const JoyHidBindings *b,
+                          uint8_t out[JOYHID_FILE_SIZE]);
+
+// `n` bytes of a controls file into *b: 1 when they are one and its
+// tables pass joyhid_bindings_valid, else 0 with *b untouched.
+int32_t joyhid_bindings_unpack(const uint8_t *in, uint32_t n,
+                               JoyHidBindings *b);
+
 // The JOYHID_* bit of bind key `k`, 0 for NONE or anything else.
 uint32_t joyhid_bind_key(int32_t k);
 

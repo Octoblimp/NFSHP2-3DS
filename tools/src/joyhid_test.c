@@ -533,6 +533,77 @@ int main(void)
     release();
     joyhid_default_bindings(&gJoyHidBindings);
 
+    // The controls file (joyconfig.h's controls.bin): changed tables come
+    // back as they went; a short, long, foreign, newer or broken file is
+    // refused and leaves the tables alone.
+    {
+        JoyHidBindings b, back, def;
+        uint8_t        file[JOYHID_FILE_SIZE + 1];
+        uint8_t        bad[JOYHID_FILE_SIZE];
+
+        joyhid_default_bindings(&def);
+        b = def;
+        joyhid_bind(b.racer, JOYHID_ACT_HUD, JOYHID_BIND_Y);
+        joyhid_bind(b.cop, JOYHID_ACT_EBRAKE, JOYHID_BIND_DDOWN);
+        joyhid_bindings_pack(&b, file);
+        if (memcmp(file, "HP2K", 4) != 0 || file[4] != JOYHID_FILE_VERSION
+            || file[5] != JOYHID_ACT_COUNT) {
+            printf("FAIL pack: header %02x %02x %02x %02x %u %u\n", file[0],
+                   file[1], file[2], file[3], file[4], file[5]);
+            failures++;
+        }
+        memset(&back, 0, sizeof back);
+        if (!joyhid_bindings_unpack(file, JOYHID_FILE_SIZE, &back)
+            || memcmp(&back, &b, sizeof b) != 0) {
+            printf("FAIL unpack: the packed tables did not come back\n");
+            failures++;
+        }
+        back = def;
+        if (joyhid_bindings_unpack(file, JOYHID_FILE_SIZE - 1, &back)
+            || joyhid_bindings_unpack(file, JOYHID_FILE_SIZE + 1, &back)
+            || memcmp(&back, &def, sizeof def) != 0) {
+            printf("FAIL unpack: a file of the wrong size was taken\n");
+            failures++;
+        }
+        for (int i = 0; i < 4; i++) {
+            memcpy(bad, file, sizeof bad);
+            if (i == 0) bad[0] = 'X';                      // not ours
+            if (i == 1) bad[4] = JOYHID_FILE_VERSION + 1;  // newer
+            if (i == 2) bad[5] = JOYHID_ACT_COUNT - 1;     // fewer actions
+            if (i == 3) bad[6] = bad[7];                   // a key twice
+            if (joyhid_bindings_unpack(bad, sizeof bad, &back)
+                || memcmp(&back, &def, sizeof def) != 0) {
+                printf("FAIL unpack: bad file %d was taken\n", i);
+                failures++;
+            }
+        }
+
+        // The page's guard: a car can always go and stop. The racer's
+        // e-brake to A would hand the throttle R, which is fine; the
+        // cop's e-brake has no key, so A or B to it would leave the
+        // throttle or the brake on none.
+        if (!joyhid_bind_keeps_drive(def.racer, JOYHID_ACT_EBRAKE,
+                                     JOYHID_BIND_A)
+            || joyhid_bind_keeps_drive(def.cop, JOYHID_ACT_EBRAKE,
+                                       JOYHID_BIND_A)
+            || joyhid_bind_keeps_drive(def.cop, JOYHID_ACT_EBRAKE,
+                                       JOYHID_BIND_B)
+            || !joyhid_bind_keeps_drive(def.cop, JOYHID_ACT_EBRAKE,
+                                        JOYHID_BIND_Y)
+            || !joyhid_bind_keeps_drive(def.cop, JOYHID_ACT_THROTTLE,
+                                        JOYHID_BIND_B)) {
+            printf("FAIL keeps_drive\n");
+            failures++;
+        }
+        b = def;
+        (void)joyhid_bind_keeps_drive(b.cop, JOYHID_ACT_EBRAKE,
+                                      JOYHID_BIND_A);
+        if (memcmp(&b, &def, sizeof def) != 0) {
+            printf("FAIL keeps_drive changed the table\n");
+            failures++;
+        }
+    }
+
     press("START", JOYHID_START, JOY_EVENT_START, 1, 1);
     press("SELECT", JOYHID_SELECT, JOY_EVENT_SELECT, 1, 1);
 

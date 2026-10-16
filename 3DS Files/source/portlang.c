@@ -132,6 +132,47 @@ static const char* const kStrings[PORTLANG_END - PORTLANG_FIRST][6] = {
     // Settings give it, where retail offered Dolby Pro Logic II (110011)
     { "Surround", "Surround", "Surround", "Surround", "Envolvente",
       "Surround" },
+    // PORTLANG_RACER and PORTLANG_COP: Options' Controller, whose keys are
+    // the racer's or the cop's car's (joyconfig.h)
+    { "Racer", "Pilote", "Fahrer", "Pilota", "Piloto", "F\xf6rare" },
+    { "Cop", "Policier", "Cop", "Poliziotto", "Poli", "Polis" },
+    // PORTLANG_ROADBLOCK and PORTLANG_HELICOPTER: the cop's calls, in the
+    // words retail's Be A Cop Blurb has for them (970001)
+    { "Roadblock", "Barrage routier", "Stra\xdf" "ensperre",
+      "Blocco stradale", "Corte de carretera", "V\xe4gsp\xe4rr" },
+    { "Helicopter", "H\xe9licopt\xe8re", "Helikopter", "Elicottero",
+      "Helic\xf3ptero", "Helikopter" },
+    // PORTLANG_CONTROLS_BLURB
+    { "Pick an action and press A, then press its new key. The action "
+      "that had that key takes the old one. On the top line, Left and "
+      "Right switch between the racer's keys and the cop's.",
+      "Choisissez une action et appuyez sur A, puis sur son nouveau "
+      "bouton. L'action qui avait ce bouton prend l'ancien. Sur la ligne "
+      "du haut, Gauche et Droite passent des boutons du pilote \xe0 ceux "
+      "du policier.",
+      "W\xe4hle eine Aktion und dr\xfc" "cke A, dann ihre neue Taste. Die "
+      "Aktion, die diese Taste hatte, bekommt die alte. In der obersten "
+      "Zeile wechseln Links und Rechts zwischen den Tasten des Fahrers "
+      "und denen des Cops.",
+      "Scegli un'azione e premi A, poi il suo nuovo tasto. L'azione che "
+      "aveva quel tasto prende quello vecchio. Sulla riga in alto, "
+      "Sinistra e Destra passano dai tasti del pilota a quelli del "
+      "poliziotto.",
+      "Elige una acci\xf3n y pulsa A, y luego su nuevo bot\xf3n. La "
+      "acci\xf3n que ten\xed" "a ese bot\xf3n se queda con el anterior. En "
+      "la l\xednea de arriba, Izquierda y Derecha cambian entre los "
+      "botones del piloto y los del poli.",
+      "V\xe4lj en handling och tryck p\xe5 A, sedan p\xe5 dess nya knapp. "
+      "Handlingen som hade knappen f\xe5r den gamla. P\xe5 \xf6versta "
+      "raden v\xe4xlar V\xe4nster och H\xf6ger mellan f\xf6rarens knappar "
+      "och polisens." },
+    // PORTLANG_CONTROLS_PRESS: $NAME is the action's label
+    { "Press the new key for $NAME. START cancels.",
+      "Appuyez sur le nouveau bouton pour $NAME. START annule.",
+      "Dr\xfc" "cke die neue Taste f\xfcr $NAME. START bricht ab.",
+      "Premi il nuovo tasto per $NAME. START annulla.",
+      "Pulsa el nuevo bot\xf3n para $NAME. START cancela.",
+      "Tryck p\xe5 den nya knappen f\xf6r $NAME. START avbryter." },
 };
 
 const char* portlang_get(int32_t languageEnum, int32_t id, size_t* outLen)

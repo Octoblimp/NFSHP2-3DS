@@ -413,6 +413,9 @@ frontend's own registration (`AddNormalMenuJoyHandlers`) comes with the
 menus that use it. So for now it runs the type monitor, and logs
 `joystick: port 0 type 121` once 32 more reads agree.
 
+Options' Controller, where the tables are picked and saved in
+controls.bin, is controller-config.md.
+
 ## Not ported
 
 * `JoystickDoSnapshot` (0x001514b0), which needs `ReplaySnapshot`.

@@ -403,6 +403,32 @@ static void keys(void)
     expect((int32_t)joyhid_bind_key(-1), 0, "key: -1's bit");
 }
 
+// HELPGLYPH_LAYOUT_KEYS, the Controller page's: each bind key's character
+// draws as that key, whatever the bindings say, and R3 (no key) as itself.
+static void keys_layout(void)
+{
+    char what[64];
+
+    for (int32_t k = 0; k < JOYHID_BIND_KEYS; k++) {
+        unsigned char c = helpglyph_key_char(k);
+
+        snprintf(what, sizeof what, "KEYS: %s's character", kKeyName[k]);
+        expect(c != 0, 1, what);
+        snprintf(what, sizeof what, "KEYS: %s draws as itself", kKeyName[k]);
+        expect(helpglyph_map(c, HELPGLYPH_LAYOUT_KEYS), helpglyph_key(k),
+               what);
+    }
+    expect(helpglyph_key_char(JOYHID_BIND_NONE), 0, "KEYS: none's character");
+    expect(helpglyph_key_char(JOYHID_BIND_KEYS), 0, "KEYS: 10's character");
+    expect(helpglyph_key_char(-1), 0, "KEYS: -1's character");
+    expect(helpglyph_map(0x8f, HELPGLYPH_LAYOUT_KEYS), 0x8f, "KEYS: R3");
+    // Rebinding moves nothing on the page's glyphs.
+    joyhid_bind(gJoyHidBindings.racer, JOYHID_ACT_THROTTLE, JOYHID_BIND_ZR);
+    expect(helpglyph_map(0x86, HELPGLYPH_LAYOUT_KEYS), ICON(HELPGLYPH_3DS_A),
+           "KEYS: Cross is A, rebound or not");
+    joyhid_default_bindings(&gJoyHidBindings);
+}
+
 static void rewrite(void)
 {
     // 970001, retail's manual cop pad, every language's.
@@ -464,6 +490,8 @@ int main(void)
     shared(JOYHID_LAYOUT_RACE, "RACE");
     shared(JOYHID_LAYOUT_COP, "COP");
     shared(JOYHID_LAYOUT_FE, "FE");
+    shared(HELPGLYPH_LAYOUT_KEYS, "KEYS");
+    keys_layout();
     rewrite();
 
     if (failures) {

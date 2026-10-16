@@ -68,6 +68,13 @@
 // anything below is the help character whose BUTTONSOUT glyph to draw.
 #define HELPGLYPH_ICON        0x100
 
+// A layout for the help characters alone, past joyhid's (JOYHID_LAYOUT_*),
+// which joyhid_build never sees: each DualShock button draws the 3DS key
+// in its place on the pad -- Cross A, Circle B, Triangle X, Square Y, L1
+// L, R1 R, L2 ZL, R2 ZR. Options' Controller page names keys with it
+// (joyconfig.h), whatever they do in a layout.
+#define HELPGLYPH_LAYOUT_KEYS 4
+
 // What help character `c` (0x80..0x9d) draws as in joyhid layout `layout`
 // (JOYHID_LAYOUT_*): HELPGLYPH_ICON + an icon, or a help character for
 // BUTTONSOUT -- `c` itself, or a D-pad's for R3 and a binding on D-pad
@@ -77,6 +84,10 @@ int32_t helpglyph_map(unsigned char c, int32_t layout);
 // How joyhid bind key `key` (JOYHID_BIND_*) draws: HELPGLYPH_ICON + an
 // icon, D-pad Up's or Down's help character, or -1 for none.
 int32_t helpglyph_key(int32_t key);
+
+// The help character that draws joyhid bind key `key` in
+// HELPGLYPH_LAYOUT_KEYS, or 0 for none.
+unsigned char helpglyph_key_char(int32_t key);
 
 // `s` as the 3DS has it in `layout`, in place: in COP, a Triangle, " + "
 // and then L2 or R2 is the one key. Returns the new length.

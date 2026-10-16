@@ -52,6 +52,23 @@ int32_t helpglyph_key(int32_t key)
     return -1;
 }
 
+typedef char helpglyph_layout_check[
+    (HELPGLYPH_LAYOUT_KEYS != JOYHID_LAYOUT_MENU
+     && HELPGLYPH_LAYOUT_KEYS != JOYHID_LAYOUT_RACE
+     && HELPGLYPH_LAYOUT_KEYS != JOYHID_LAYOUT_COP
+     && HELPGLYPH_LAYOUT_KEYS != JOYHID_LAYOUT_FE) ? 1 : -1];
+
+// HELPGLYPH_LAYOUT_KEYS: the bind keys' buttons, by JOYHID_BIND_*.
+static const unsigned char kKeyChar[JOYHID_BIND_KEYS] = {
+    HC_CROSS, HC_CIRCLE, HC_TRIANGLE, HC_SQUARE, HC_L1, HC_R1, HC_L2, HC_R2,
+    HC_DUP, HC_DDOWN,
+};
+
+unsigned char helpglyph_key_char(int32_t key)
+{
+    return key >= 0 && key < JOYHID_BIND_KEYS ? kKeyChar[key] : 0;
+}
+
 // The action whose button help character `c` draws in a race, or -1.
 static int32_t race_action(unsigned char c, int32_t cop)
 {
@@ -85,6 +102,12 @@ int32_t helpglyph_map(unsigned char c, int32_t layout)
             // An action on no key keeps retail's glyph.
             return g >= 0 ? g : c;
         }
+    } else if (layout == HELPGLYPH_LAYOUT_KEYS) {
+        int32_t k;
+
+        for (k = JOYHID_BIND_A; k <= JOYHID_BIND_ZR; k++)
+            if (kKeyChar[k] == c)
+                return ICON(k);   // the sheet's first eight
     } else {
         switch (c) {
         case HC_CROSS:

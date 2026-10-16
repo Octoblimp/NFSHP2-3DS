@@ -184,6 +184,46 @@ void joyhid_bind(uint8_t table[JOYHID_ACT_COUNT], int32_t action,
     table[action] = (uint8_t)key;
 }
 
+int32_t joyhid_bind_keeps_drive(const uint8_t table[JOYHID_ACT_COUNT],
+                                int32_t action, int32_t key)
+{
+    uint8_t t[JOYHID_ACT_COUNT];
+
+    memcpy(t, table, sizeof t);
+    joyhid_bind(t, action, key);
+    return t[JOYHID_ACT_THROTTLE] != JOYHID_BIND_NONE
+        && t[JOYHID_ACT_BRAKE] != JOYHID_BIND_NONE;
+}
+
+static const uint8_t kFileMagic[4] = { 'H', 'P', '2', 'K' };
+
+void joyhid_bindings_pack(const JoyHidBindings *b,
+                          uint8_t out[JOYHID_FILE_SIZE])
+{
+    memcpy(out, kFileMagic, sizeof kFileMagic);
+    out[4] = JOYHID_FILE_VERSION;
+    out[5] = JOYHID_ACT_COUNT;
+    memcpy(out + 6, b->racer, JOYHID_ACT_COUNT);
+    memcpy(out + 6 + JOYHID_ACT_COUNT, b->cop, JOYHID_ACT_COUNT);
+}
+
+int32_t joyhid_bindings_unpack(const uint8_t *in, uint32_t n,
+                               JoyHidBindings *b)
+{
+    JoyHidBindings got;
+
+    if (in == NULL || n != JOYHID_FILE_SIZE
+        || memcmp(in, kFileMagic, sizeof kFileMagic) != 0
+        || in[4] != JOYHID_FILE_VERSION || in[5] != JOYHID_ACT_COUNT)
+        return 0;
+    memcpy(got.racer, in + 6, JOYHID_ACT_COUNT);
+    memcpy(got.cop, in + 6 + JOYHID_ACT_COUNT, JOYHID_ACT_COUNT);
+    if (!joyhid_bindings_valid(&got))
+        return 0;
+    *b = got;
+    return 1;
+}
+
 uint32_t joyhid_bind_key(int32_t k)
 {
     return k >= 0 && k < JOYHID_BIND_KEYS ? kBindKey[k] : 0;

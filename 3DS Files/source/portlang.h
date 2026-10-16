@@ -42,6 +42,12 @@ enum {
     PORTLANG_COMING_BACK,                       // and $NAME's, to the rest
     PORTLANG_SURROUND,                          // Audio Mode's third value,
                                                 // for Dolby Pro Logic II
+    PORTLANG_RACER,                             // Controller's two tables
+    PORTLANG_COP,
+    PORTLANG_ROADBLOCK,                         // the cop's two calls
+    PORTLANG_HELICOPTER,
+    PORTLANG_CONTROLS_BLURB,                    // the page's bottom screen
+    PORTLANG_CONTROLS_PRESS,                    // and its wait, $NAME's key
     PORTLANG_END
 };
 

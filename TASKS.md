@@ -3891,7 +3891,7 @@ phases.
                 stays). Player 2 Options and Calibrate display offset are
                 hidden, so the list never scrolls.
                 `tools/run_azahar_display.ps1` passes.
-        - [ ] 71d: Controller (JoystickPreConfig): Configuration
+        - [x] 71d: Controller (JoystickPreConfig): Configuration
               (JoystickConfigScreen). Calibration and Vibration have
               nothing to work on with a 3DS, and Player 2 is hidden.
               **The user, 2026-10-16:** "I would like ZL to be the cop
@@ -3909,13 +3909,25 @@ phases.
                 the cell's full width. `joyhid_check` and
                 `helpglyph_check` pass, with changed bindings too, and an
                 ad-hoc pass of 34 mutations was all caught.
-              - [ ] The remap page: Configuration as a list of the
+              - [x] The remap page: Configuration as a list of the
                 actions, Racer and Cop on its arrows, A then a key to
                 bind (the key's old action takes the moved one's key),
                 the bindings in a file of their own beside settings.db,
                 and the save prompt when it is left changed. The
                 DualShock picture, Calibration, Vibration and Player 2's
                 rows hidden.
+                - Done in Session 116 (`joyconfig.c`,
+                  docs/formats/controller-config.md): PreConfig with
+                  Player 1's Configuration only, the Configuration page
+                  with every action's key as its 3DS icon, START stopping
+                  a wait, X the shown table's defaults, a bind that would
+                  leave the throttle or brake keyless refused, and the
+                  save prompt. The keys go in NFSHP2/SAVES/controls.bin
+                  (30 bytes) with settings.db and load with it. The
+                  bottom hint is two lines, A and B over X (the user,
+                  2026-10-16: one line was cut off). `joyhid_check`,
+                  `helpglyph_check` and `tools/run_azahar_controller.ps1`
+                  pass.
         - [ ] 71e: the pause menu's Options ("Pause Options", "Pause
               audio", "Pause display"), View Objective ("Race
               Objective") and View Cop Controls ("Pause BAC controls").

@@ -137,6 +137,10 @@ typedef struct {
 // race's while it runs, the menus' otherwise).
 #define UIR_HELP_LAYOUT_LIVE (-1)
 
+// main.c's: a help layout in place of joyhid's, or -1 for joyhid's. The
+// Controller page's HELPGLYPH_LAYOUT_KEYS (joyconfig.h) is the one.
+extern int32_t (*gUiHelpLayoutFn)(void);
+
 typedef struct {
     UIBundle  bundles[UIR_MAX_BUNDLES];
     int       numBundles;

@@ -101,6 +101,7 @@
 #include "nameentry.h"
 #include "audiooptions.h"
 #include "displayoptions.h"
+#include "joyconfig.h"
 #include "credits.h"
 #include "netrace.h"
 #include "netstep.h"
@@ -367,8 +368,10 @@ static const BScreenConfig kScreens[] = {
       audioopts_callback },
     { "JukeBox Music",           JUKEBOX_SCREEN,   // JukeBoxMusicScreen
       jukeboxscreen_callback },
-    { "Joystick PreConfig",      0x8bd5060bu,   // JoystickPreConfig
-      bgf_plain_screen_callback },
+    { "Joystick PreConfig",      JOYPRECONFIG_SCREEN,   // JoystickPreConfig
+      joypreconfig_callback },
+    { "Joystick Config Port1",   JOYCONFIG_SCREEN,   // JoystickConfigScreen
+      joyconfig_callback },
     { "Display Options",         DISPLAYOPTS_SCREEN,   // tDisplayOptionsScreen
       displayopts_callback },
     { "Customize P1 HUD",        CUSTOMHUD_SCREEN,   // tCustomizeHUDScreen
@@ -1843,6 +1846,54 @@ static int sdPath(const SdCard* c, char* out, size_t cap)
     return snprintf(out, cap, SAVES_DIR "/%s", c->name) < (int)cap;
 }
 
+// The controller's keys (joyconfig.h), which Fred has no room for: in
+// controls.bin beside settings.db, written with its every save and read
+// with its every load (hookFredLoaded). No file, or not one joyhid takes,
+// is the defaults.
+#define CONTROLS_FILE SAVES_DIR "/controls.bin"
+
+static void controlsSave(void)
+{
+    uint8_t buf[JOYHID_FILE_SIZE];
+    FILE*   f;
+    size_t  put;
+
+    joyhid_bindings_pack(&gJoyHidBindings, buf);
+    f = fopen(CONTROLS_FILE, "wb");
+    if (!f) {
+        logLine("memcard: could not open %s", CONTROLS_FILE);
+        return;
+    }
+    put = fwrite(buf, 1, sizeof buf, f);
+    if (fclose(f) != 0 || put != sizeof buf) {
+        logLine("memcard: could not write %s", CONTROLS_FILE);
+        return;
+    }
+    logLine("memcard: saved %s", CONTROLS_FILE);
+}
+
+static void controlsLoad(void)
+{
+    uint8_t buf[JOYHID_FILE_SIZE + 1];
+    FILE*   f = fopen(CONTROLS_FILE, "rb");
+    size_t  got;
+
+    if (!f) {
+        joyhid_default_bindings(&gJoyHidBindings);
+        logLine("memcard: no %s, the default keys", CONTROLS_FILE);
+        return;
+    }
+    got = fread(buf, 1, sizeof buf, f);
+    fclose(f);
+    if (!joyhid_bindings_unpack(buf, (uint32_t)got, &gJoyHidBindings)) {
+        joyhid_default_bindings(&gJoyHidBindings);
+        logLine("memcard: %s is not one (%u bytes), the default keys",
+                CONTROLS_FILE, (unsigned)got);
+        return;
+    }
+    logLine("memcard: loaded %s", CONTROLS_FILE);
+}
+
 // The whole file, or nothing: a short one is a failed load, as a card that
 // came out mid-read would be.
 static int sdLoad(SdCard* c)
@@ -1881,6 +1932,7 @@ static int sdSave(SdCard* c)
         return BMC_ERROR;
     }
     logLine("memcard: saved %s", path);
+    if (!strcmp(c->name, BMC_SAVE_NAME)) controlsSave();
     return BMC_OK;
 }
 
@@ -1983,6 +2035,7 @@ static void hookFredLoaded(void* user, uint8_t* fred)
     int mode = jb_audio_apply(&g_jukebox, fred + FRED_AUDIO_OPTIONS);
     sound_set_audio_mode(&gSoundModule, mode);
     logLine("audio options loaded: mode %d", mode);
+    controlsLoad();
 }
 
 // FlailerSetLanguageID: the Load/Save screen's Autosave line.
@@ -3437,6 +3490,16 @@ static void hookDisplayOptsLog(void* user, const char* line)
 {
     (void)user;
     logLine("%s", line);
+}
+
+// The Controller page's text, in the language up (joyconfig.h).
+static size_t hookJoyConfigText(void* user, int32_t id, char* out,
+                                size_t cap)
+{
+    (void)user;
+    if (cap) out[0] = '\0';
+    if (!g_boot.ui || !g_boot.ui->hasLang) return 0;
+    return langtab_copy(&g_boot.ui->lang, id, out, cap);
 }
 
 // Quick Race: retail's StartQuickRace (quickrace.h) fills the race and
@@ -6193,9 +6256,16 @@ static void drawBotDialog(UIRenderer* ui, const char* title, const char* body,
                                   boxW, frame);
         }
         if (hint && *hint) {
-            st = botFontStyle(ui, BOT_FONT_HELP, BOT_TEXT, 14.0f, false);
-            uirender_draw_wrapped(ui, hint, 0, &st, 10.0f, BOT_H - 25.0f,
-                                  BOT_W - 170.0f, frame);
+            // The last line where a one-line hint goes; more lines grow up
+            // into the gap under the popup, never into it. The small logo's
+            // left edge is at about x 176.
+            float hintW = BOT_W - 164.0f, hintY;
+            st    = botFontStyle(ui, BOT_FONT_HELP, BOT_TEXT, 14.0f, false);
+            hintY = BOT_H - 25.0f + uirender_line_height(ui, &st)
+                  - uirender_wrap_height(ui, hint, 0, &st, hintW);
+            if (hintY < BOT_BOX_BOT + 4.0f) hintY = BOT_BOX_BOT + 4.0f;
+            uirender_draw_wrapped(ui, hint, 0, &st, 10.0f, hintY, hintW,
+                                  frame);
         }
         drawBotLogo(ui, BOT_W - 78.0f, BOT_H - 22.0f, 0.5f, frame);
     }
@@ -8224,6 +8294,15 @@ int main(int argc, char** argv)
     displayHooks.log = hookDisplayOptsLog;
     displayopts_init(&displayHooks);
 
+    JoyConfigHooks joyConfigHooks;
+    memset(&joyConfigHooks, 0, sizeof joyConfigHooks);
+    joyConfigHooks.log   = hookDisplayOptsLog;
+    joyConfigHooks.noise = fesound_play;
+    joyConfigHooks.text  = hookJoyConfigText;
+    joyconfig_init(&joyConfigHooks);
+    // Options' Controller page names the keys themselves (joyconfig.h).
+    gUiHelpLayoutFn = joyconfig_help_layout;
+
     // Retail's main (0x0012f000), after InitializeEverything: with SkipFE
     // set, StartSkipFEGame on Fred, whose StartRace asks for
     // LOADING_TRACK_COMMON straight from NONE; else
@@ -8464,6 +8543,13 @@ int main(int argc, char** argv)
             // In the frontend the screens have the pad before the flow's
             // pass. A race's have it after the coordinator's queue and
             // the players' events, below.
+            // Options' Controller page has its keys first: X, and every
+            // key while it waits for one (joyconfig.h).
+            if (!raceUp) {
+                u32 took = joyconfig_input(kDown);
+                if (took) redraw = 1;
+                menuDown &= ~took;
+            }
             if (!raceUp && flowInput(menuDown, 0)) redraw = 1;
 
             // The local wireless link, on whichever screen: what came in,
@@ -8748,6 +8834,16 @@ int main(int argc, char** argv)
                     && g_flow.screen->callback == bgf_plain_screen_callback) {
                     body = kPlainScreenNote;
                     fade = frame = 1.0f;
+                }
+                if (g_flow.screen
+                    && g_flow.screen->callback == joyconfig_callback) {
+                    const char* b = joyconfig_bottom_body();
+                    const char* h = joyconfig_bottom_hint();
+                    if (b) {
+                        body = b;
+                        fade = frame = 1.0f;
+                    }
+                    if (h) hint = h;
                 }
                 if (g_flow.screen
                     && g_flow.screen->callback == debugmenu_callback) {

@@ -312,10 +312,17 @@ static C3D_Tex* icon_sheet(UIRenderer* r)
     return r->iconState > 0 ? &r->iconTex : NULL;
 }
 
+int32_t (*gUiHelpLayoutFn)(void);
+
 // The joyhid layout live now, whose keys the menus' and the HUD's button
-// icons name: main.c's answer, as joyhid_read asks it.
+// icons name: main.c's answer, as joyhid_read asks it, unless
+// gUiHelpLayoutFn has one of its own.
 static int32_t live_help_layout(void)
 {
+    int32_t own = gUiHelpLayoutFn ? gUiHelpLayoutFn() : -1;
+
+    if (own >= 0)
+        return own;
     return gJoyHidRaceLayoutFn ? gJoyHidRaceLayoutFn() : JOYHID_LAYOUT_MENU;
 }
 

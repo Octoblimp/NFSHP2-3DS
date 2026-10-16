@@ -24891,10 +24891,40 @@ Still in 71d: the remap page (Configuration as the list of actions,
 Racer/Cop, A then a key), the bindings' file beside settings.db and the
 save prompt.
 
+### 71d, second half: the remap page
+
+- **`joyconfig.c`**: Options' Controller. PreConfig keeps Player 1's
+  Configuration alone (Calibration, Vibration and Player 2 hidden). The
+  Configuration page lists every action with its key as the 3DS icon
+  (`HELPGLYPH_LAYOUT_KEYS` through uirender's `gUiHelpLayoutFn`), "Racer"
+  or "Cop" on the top line between the arrows. Left/Right or A there
+  switch tables; on an action, A waits for a key (the glyph blinks, START
+  stops it), X puts the shown table's defaults back. A bind that would
+  leave the throttle or brake with no key is refused
+  (`joyhid_bind_keeps_drive`). The racer's Zone rows show the shift keys
+  and the cop's show Roadblock and Helicopter.
+- **Save prompt** as Display Options: Yes to Autosave, No puts both tables
+  back, B stays.
+- **controls.bin**: "HP2K", version 1, 12 actions, the racer's and the
+  cop's tables (30 bytes) in NFSHP2/SAVES, written after settings.db and
+  read whenever settings.db loads (`hookFredLoaded`); a bad file keeps the
+  defaults.
+- **Bottom screen**: the blurb, or "Press the new key for ..." while
+  waiting. The user, mid-slice: the hint line was cut off; put A on top,
+  B beside it, Defaults under A. It is two lines now, and `drawBotDialog`
+  lifts a hint of more lines into the gap under the popup (one-line hints
+  stay put); the hint column is 156 px.
+- `joyhid_check` (pack/unpack, five bad files, keeps_drive) and
+  `helpglyph_check` (the KEYS layout) pass.
+- **`tools/run_azahar_controller.ps1`**: PASS (both tables, HUD on Y, the
+  cop's E-Brake refused A, START stop, X defaults, the prompt's B/No/Yes,
+  controls.bin's bytes, a second boot reading it). It re-reads the debug
+  log until the second table line is whole (a run read it cut short).
+- docs/formats/controller-config.md.
+
 ### Next
 
-1. 71d Controller, 71e the pause menu's screens (the pause audio page
-   shows Surround too).
-2. Help (TASKS 48), the "Memory Card (PS2)" text, stereo 3D (TASKS 59).
+1. 71e the pause menu's screens (the pause audio page shows Surround too).
+2. Help (TASKS 48) on Y, the "Memory Card (PS2)" text, stereo 3D (TASKS
+   59).
 3. The known bugs, then the verdict again.
-
