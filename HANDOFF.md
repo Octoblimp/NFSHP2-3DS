@@ -24968,6 +24968,14 @@ save prompt.
   "Pause BAC controls" as unregistered on the disc, though the name is
   in the ELF.
 
+### The bottom screen's logo, centred
+
+The user's 3DS showed the big logo right of centre. `drawBotLogo` centred
+NFS_LOGO_ALPHA's 296 x 80, but its faint streaks run out to the left
+only, so the lettering (bright pixels x 54..273, y 10..74) sat 16 px
+right. It now centres the lettering: in Azahar its middle moved from
+x 176 to 159.7. The small logo by the hint stays where it was.
+
 ### Next
 
 1. Help (TASKS 48) on Y, then the "Memory Card (PS2)" text, then stereo

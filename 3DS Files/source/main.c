@@ -6213,7 +6213,14 @@ static UIWrapStyle botFontStyle(UIRenderer* ui, uint32_t font,
     return f;
 }
 
-// The logo at `scale`, centred on (cx, cy), on whole pixels.
+// The middle of NFS_LOGO_ALPHA's lettering, as a fraction of the texture:
+// its bright pixels run x 54..273 and y 10..74 of the 296 x 80. The faint
+// streaks run on to x 8 on the left only, so the texture's own middle
+// reads as right of centre (the user's 3DS, 2026-10-16).
+#define BOT_LOGO_MID_X (163.5f / 296.0f)
+#define BOT_LOGO_MID_Y (42.0f / 80.0f)
+
+// The logo at `scale`, its lettering centred on (cx, cy), on whole pixels.
 static void drawBotLogo(UIRenderer* ui, float cx, float cy, float scale,
                         float alpha)
 {
@@ -6222,8 +6229,8 @@ static void drawBotLogo(UIRenderer* ui, float cx, float cy, float scale,
     if (alpha <= 0.0f || !uirender_texture_size(ui, BOT_TEX_LOGO, &w, &h))
         return;
     (void)uirender_draw_texture(ui, BOT_TEX_LOGO,
-                                floorf(cx - (float)w * scale * 0.5f),
-                                floorf(cy - (float)h * scale * 0.5f),
+                                floorf(cx - (float)w * scale * BOT_LOGO_MID_X),
+                                floorf(cy - (float)h * scale * BOT_LOGO_MID_Y),
                                 (float)w * scale, (float)h * scale,
                                 BOT_GS_FULL, BOT_GS_FULL, alpha);
 }
@@ -6279,7 +6286,8 @@ static void drawBotDialog(UIRenderer* ui, const char* title, const char* body,
             uirender_draw_wrapped(ui, hint, 0, &st, 10.0f, hintY, hintW,
                                   frame);
         }
-        drawBotLogo(ui, BOT_W - 78.0f, BOT_H - 22.0f, 0.5f, frame);
+        // Where it was when the texture's middle was centred, at x 242.
+        drawBotLogo(ui, BOT_W - 70.0f, BOT_H - 21.0f, 0.5f, frame);
     }
 
     // The biggest size the line fits at, centred as a block in the panel.
