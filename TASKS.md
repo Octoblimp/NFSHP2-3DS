@@ -3968,8 +3968,9 @@ phases.
         - the replay cameras;
         - the pause pages' changes recorded as special events
           (pauseoptions.c applies them at once today).
-        This is not on the 2026-10-16 launch list; ask the user where it
-        goes.
+        **The user, 2026-10-16:** "For replay feature, implement that
+        after task 59". So it comes right after the stereo 3D slider
+        (TASKS 59), before the known bugs and the launch verdict.
 
 ### The retail frontend
 

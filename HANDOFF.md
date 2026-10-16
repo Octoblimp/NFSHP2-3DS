@@ -24980,4 +24980,6 @@ x 176 to 159.7. The small logo by the hint stays where it was.
 
 1. Help (TASKS 48) on Y, then the "Memory Card (PS2)" text, then stereo
    3D (TASKS 59).
-2. The known bugs, then the verdict again.
+2. Replays (TASKS 72): the user, 2026-10-16, "implement that after task
+   59".
+3. The known bugs, then the verdict again.
