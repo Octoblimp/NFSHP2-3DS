@@ -24682,3 +24682,67 @@ The user is asleep. They said: "We'll continue tomorrow."
 The tree is clean apart from untracked crash dumps and captures in
 `3DS Files/`.
 
+## Session 115 -- 69f: a tournament and a knockout, end to end
+
+The user, 2026-10-17: "Good morning, go ahead and get back to work".
+
+### What was played (9e63bc8)
+
+All on Azahar with `run_azahar_career.ps1 -Race`, Championship tree:
+
+- **Event 6, the 3-race Jaguar XKR Tournament.** Race 1, Race Results,
+  Tourney Standings, Best Total Times, the End Game Menu with Next Race
+  (5 rows), the autosave, race 2. A reboot there: the tree reopens on
+  event 6 ("Next track: Coastal Parklands"), and A goes straight to race
+  2's track ("etv resume event 6", no car select). Race 2, Next Race,
+  race 3 (National Forest, "Race 3 of 3"), the standings (Player1 30
+  points), "Event 6 Passed", Scenic Drive II unlocked, Quit, the
+  autosave, back at the tree.
+- **Event 2, the time trial.** The projected lap of a 15 s test finish
+  (3:54.50) fails the 3:05.00 goal, as it should. With "TestFinishTime
+  120" it passed: Events 4 and 5 unlocked, the CL55 AMG earned ("10 out
+  of 49 cars"), "2 reward cars earned" in frontres.
+- **Event 5, the race knockout.** 3 races, Next Race twice; race 3's HUD
+  reads "1st / 2" (4 cars, then 3, then 2). "Event 5 Passed".
+
+And Hot Pursuit (`-CopsOn -Race -Event 1`): event 1, the Lotus Elise
+Delivery (point to point, 6 cop cars), passed; Events 2 and 3 unlocked
+in Ultimate Racer, the save, back at the tree.
+### What the script does now
+
+- **The End Game Menu.** `main.c` (`raceTestMenuLog`, with TestFinish
+  on) logs it once each time: whether Next Race is its first row, the
+  rows, the row highlighted, and whether it wraps. The script takes Next
+  Race (A, Left for the popup's Yes, A) while there is one, else goes to
+  Quit (Up once when it wraps) and says Yes.
+- **The autosave.** Its question ("overwrite?") starts on No, as
+  retail's does. A alone skipped the save, so a reboot lost the
+  career. The script presses Left, then A ("memcard: saved").
+- **A race's start** is "flow leave Pre Race Stats" counted per race.
+  The race's stage lines come every second, so race 1's counted for the
+  later ones and the gas (A held) never got past race 2's blurb.
+- **A resumed event** ("etv resume event") goes on without car select.
+- **-Path "down,right" -Event 5** steps the tree and checks the leaf.
+  From event 3, Down is 7 and 6 is left of it; from 6, Up is 3; from 2,
+  Down is 4 and 5 is right of it.
+- **"TestFinishTime s"** (`configitems.h`, off by default) gives the
+  player's car a lap of s seconds; `-LapSeconds`.
+- After a won tournament the details panel shows "Next track:" with
+  race 1's track: the race index is past the last track, and the panel
+  falls back to track 0. Not a fault.
+- Best Total Times stays empty after a test finish: a total time is
+  only recorded when every lap was completed (`highscore.c`).
+
+### Next
+
+1. **69g:**
+   - the Ultimate event;
+   - the unlocks in Quick Race and Select Car;
+   - Hot Pursuit's Be A Cop events.
+2. **The verdict list's 3 to 6:**
+   - the four plain Options screens;
+   - Help (TASKS 48);
+   - the "Memory Card (PS2)" text;
+   - stereo 3D (TASKS 59).
+3. **Then the known bugs**, then the verdict again.
+

@@ -3746,7 +3746,7 @@ phases.
           Selects' rows now write Fred's game type (`setEventTree`).
           Not ported: the reward's turning model (ModelViewer.obj) and
           the help menu (tHelpMenu).
-        - [ ] 69f: an event end to end on Azahar, in each tree: the
+        - [x] 69f: an event end to end on Azahar, in each tree: the
           tree, the event's panel and Select Car are done. Still to
           play: the race, the end screens, and back to the tree; a
           tournament's and a knockout's later races; the result saved
@@ -3759,7 +3759,28 @@ phases.
             new off-by-default "TestFinish n" (configitems.h), which
             finishes a lone console's race n seconds after GO. The user
             played the End Game Menu by hand and said it returns fine.
-          - Still open: a tournament's and a knockout's later races.
+          - Done 2026-10-17 (9e63bc8), all on Azahar with
+            `run_azahar_career.ps1 -Race`, which now answers the End Game
+            Menu (Next Race, or Quit after the last race) and says Yes to
+            each autosave:
+            - The save across a reboot. The autosave's question starts on
+              No, as retail's does, so A alone skips the save. With Yes,
+              the tree after a reboot still has the events opened.
+            - Championship event 6, the 3-race Jaguar XKR Tournament: race
+              1, Tourney Standings, Next Race, the save. After a reboot
+              the tree reopens on event 6, and A resumes at race 2's
+              track without car select (retail's resume). Race 3, the
+              standings (30 points), Event 6 Passed with Scenic Drive II,
+              Quit, the save, back at the tree.
+            - Event 2, the time trial: passed with the new off-by-default
+              "TestFinishTime s" (the player's lap; 2:00.00 against
+              3:05.00). The CL55 AMG was earned and events 4 and 5
+              opened. The projected lap (3:54.50) fails it, rightly.
+            - Event 5, the race knockout: 3 races, 4 cars down to 2, Next
+              Race twice, Event 5 Passed, back at the tree.
+            - Hot Pursuit's event 1, the Lotus Elise Delivery (point to
+              point, 6 cop cars): Events 2 and 3 unlocked in Ultimate
+              Racer, the save, back at the tree.
         - [ ] 69g: the rest: the Ultimate event, the unlocks in Quick
           Race and Select Car, Hot Pursuit's Be A Cop events.
 
