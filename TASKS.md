@@ -3167,7 +3167,7 @@ phases.
           ~32 ms run one after the other (50.8 ms a frame): TASKS 46's
           "GpuSends 1" is meant to overlap them.
 
-48. [ ] **The help menu (tHelpMenu).** Found on 2026-10-12 with TASKS
+48. [x] **The help menu (tHelpMenu).** Found on 2026-10-12 with TASKS
         43. The frontend shows a PS2 Circle and "help" bottom left;
         retail's Circle (MENU_HELP) summons tHelpMenu over the screen
         (`FlailerScreenList::JoyHandler`, 0x0016cab0, then 0x0016ca40).
@@ -3183,6 +3183,25 @@ phases.
         default". Y is MENU_SQUARE in `main.c`'s `kBinds` today (car
         select's orbit view, through joyhid's FE layout), so the screens
         that use Square need settling first.
+        Done in Session 117 (`helpmenu.c`, docs/formats/help-menu.md).
+        - Y slides the HELP panel in over the screen (GLOBALB's
+          0x087cd45c, half a second, the backdrop fading from x 320)
+          and out again. Each line's buttons draw as 3DS keys. While it
+          is coming in or there, the screen, its menu and the popups
+          hear nothing. The lines are each screen's HelpMenuItems, or
+          the override the setups, car select and the event tree set
+          (SetHelpOverride); the event tree's popup turns it off.
+        - The keys: Square moved from Y to X (car select's orbit view,
+          track select, the event tree, JukeBox, the credits' pause).
+          joyhid's frontend layout swaps B and X. The Mode Selects'
+          manual transmission is L held, as their help line says (it
+          was X).
+        - The bottom-left "Help" mark is BUTTONSOUT text ('k'), so
+          `uirender.c` now draws a BUTTONSOUT key glyph as the 3DS key:
+          Y there.
+        - `helpmenu_check`, `joyhid_check` and `helpglyph_check` pass;
+          `tools/run_azahar_help.ps1` passes (the main menu, Hot
+          Pursuit's Mode Select and Options; A swallowed under it).
 
 49. [x] **The joystick tables are the demo's.** Found on 2026-10-12.
         `scannertab.c` and `joyeventid.h` come from NFSHP2.ELF;

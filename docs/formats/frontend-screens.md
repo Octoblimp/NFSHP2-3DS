@@ -229,6 +229,11 @@ holding it while picking Quick Race is how a player asks for the other
 gearbox. (An earlier read of this file called the argument a two-player flag.
 It is not: it lands in `Fred.PlayerInfo[0].mPlayerSettings`, byte 3.)
 
+The button is L1 (scanner row 24), as the Mode Selects' help line 802231
+says: "L1 + Cross Manual Transmission in Quick Race". On the 3DS it is L,
+held, in `main.c`'s `flowInput`. The port held X until Square moved there
+(TASKS 48, when Help took Y).
+
 ## `CopsOffModeSelect`
 
 The same file again, with four differences and nothing else:

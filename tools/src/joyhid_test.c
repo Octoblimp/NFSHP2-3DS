@@ -323,26 +323,29 @@ int main(void)
     expect_not("race Y+ZL", JOY_EVENT_SHIFTDOWN);
     release();
 
-    // The frontend layout: B and Y swap, so Y is Square, car select's
-    // orbit view, and B Circle; X stays Triangle.
+    // The frontend layout: B and X swap, so X is Square, car select's
+    // orbit view, and B Triangle, the back; Y stays Circle, the help, as
+    // main.c's keys have them (2026-10-16).
+    pad.race = JOYHID_LAYOUT_FE;
+    pad.keys = JOYHID_X;
+    frame();
+    expect("fe X", JOY_EVENT_CARSEL_CHANGE_MODE, 1, 1);
+    expect("fe X", JOY_EVENT_MENU_SQUARE, 1, 1);
+    expect_not("fe X", JOY_EVENT_MENU_BACK);
+    expect_not("fe X", JOY_EVENT_HONK_HORN);
+    release();
     pad.race = JOYHID_LAYOUT_FE;
     pad.keys = JOYHID_Y;
     frame();
-    expect("fe Y", JOY_EVENT_CARSEL_CHANGE_MODE, 1, 1);
-    expect("fe Y", JOY_EVENT_MENU_SQUARE, 1, 1);
-    expect_not("fe Y", JOY_EVENT_MENU_HELP);
+    expect("fe Y", JOY_EVENT_MENU_HELP, 1, 1);
+    expect_not("fe Y", JOY_EVENT_CARSEL_CHANGE_MODE);
     release();
     pad.race = JOYHID_LAYOUT_FE;
     pad.keys = JOYHID_B;
     frame();
-    expect("fe B", JOY_EVENT_MENU_HELP, 1, 1);
+    expect("fe B", JOY_EVENT_MENU_BACK, 1, 1);
     expect_not("fe B", JOY_EVENT_CARSEL_CHANGE_MODE);
-    release();
-    pad.race = JOYHID_LAYOUT_FE;
-    pad.keys = JOYHID_X;
-    frame();
-    expect("fe X", JOY_EVENT_MENU_BACK, 1, 1);
-    expect_not("fe X", JOY_EVENT_HONK_HORN);
+    expect_not("fe B", JOY_EVENT_MENU_HELP);
     release();
     // The menu layout's B is still Square.
     pad.keys = JOYHID_B;

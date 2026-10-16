@@ -97,7 +97,7 @@ public class Hp2Cap {
 [void][Hp2Cap]::SetProcessDPIAware()
 
 $VK_A = 65; $VK_S = 83; $VK_M = 77; $VK_N = 78; $VK_T = 84; $VK_G = 71; $VK_H = 72; $VK_F = 70
-$VK_X = 88   # the 3DS Y on Azahar's default map: SQUARE
+$VK_X = 90   # the 3DS X on Azahar's default map: SQUARE
 
 $debugLog  = Join-Path $env:APPDATA "Azahar\sdmc\nfshp2_debug.txt"
 . (Join-Path $PSScriptRoot "azahar_debuglog.ps1")   # DebugLog 1
@@ -288,7 +288,7 @@ if ($atCarSel) {
         [Hp2Cap]::PressKey($hwnd, $VK_G)      # down, the other time of day
         Start-Sleep -Milliseconds 1200
         Shot "selecttrack-tod"
-        [Hp2Cap]::PressKey($hwnd, $VK_X)      # SQUARE (Y), the track's name
+        [Hp2Cap]::PressKey($hwnd, $VK_X)      # SQUARE (X), the track's name
         Start-Sleep -Milliseconds 1500
         Shot "selecttrack-square"
         [Hp2Cap]::PressKey($hwnd, $VK_S)      # B, back to car select

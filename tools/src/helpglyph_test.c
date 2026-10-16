@@ -7,7 +7,7 @@
 // changed ones. Be A Cop's calls go through joyhid_cop_calls, whose
 // Triangle and trigger are the Blurb's "Triangle + L2/R2", which
 // helpglyph_rewrite makes the one key. The menus hear main.c's frontend
-// keys (A select, B back, Y Square), so they are a table. joyhid_bind and
+// keys (A select, B back, X Square, Y help), so they are a table. joyhid_bind and
 // joyhid_bindings_valid are held to their promises here too.
 
 #include <stdio.h>
@@ -308,8 +308,8 @@ static void menus(int32_t layout, const char *name)
     expect(helpglyph_map(0x86, layout), ICON(HELPGLYPH_3DS_A), what);
     snprintf(what, sizeof what, "%s: Triangle is B, back", name);
     expect(helpglyph_map(0x87, layout), ICON(HELPGLYPH_3DS_B), what);
-    snprintf(what, sizeof what, "%s: Square is Y, MENU_SQUARE", name);
-    expect(helpglyph_map(0x88, layout), ICON(HELPGLYPH_3DS_Y), what);
+    snprintf(what, sizeof what, "%s: Square is X, MENU_SQUARE", name);
+    expect(helpglyph_map(0x88, layout), ICON(HELPGLYPH_3DS_X), what);
     snprintf(what, sizeof what, "%s: L1 is L", name);
     expect(helpglyph_map(0x8a, layout), ICON(HELPGLYPH_3DS_L), what);
     snprintf(what, sizeof what, "%s: R1 is R", name);
@@ -321,21 +321,27 @@ static void menus(int32_t layout, const char *name)
     snprintf(what, sizeof what, "%s: R3 is D-pad Down's", name);
     expect(helpglyph_map(0x8f, layout), 0x83, what);
 
-    // Circle has no frontend key of main.c's, so it is joyhid's: the key
-    // that presses it in this layout.
+    // Circle is main.c's help key, Y, and joyhid's too in both layouts.
     {
-        uint32_t      key = layout == JOYHID_LAYOUT_FE ? JOYHID_B : JOYHID_Y;
-        int32_t       icon = key == JOYHID_B ? HELPGLYPH_3DS_B
-                                             : HELPGLYPH_3DS_Y;
         unsigned char help[16];
-        int           n = pressed(key, 0, layout, help);
+        int           n = pressed(JOYHID_Y, 0, layout, help);
 
-        snprintf(what, sizeof what, "%s: %s presses Circle", name,
-                 key == JOYHID_B ? "B" : "Y");
+        snprintf(what, sizeof what, "%s: Y presses Circle", name);
         expect(n == 1 && help[0] == 0x89, 1, what);
-        snprintf(what, sizeof what, "%s: Circle draws as %s", name,
-                 key == JOYHID_B ? "B" : "Y");
-        expect(helpglyph_map(0x89, layout), ICON(icon), what);
+        snprintf(what, sizeof what, "%s: Circle draws as Y", name);
+        expect(helpglyph_map(0x89, layout), ICON(HELPGLYPH_3DS_Y), what);
+    }
+    // In the frontend joyhid presses Square on X and Triangle on B, as
+    // main.c's keys do: car select's orbit view and the scanners' back.
+    if (layout == JOYHID_LAYOUT_FE) {
+        unsigned char help[16];
+        int           n = pressed(JOYHID_X, 0, layout, help);
+
+        snprintf(what, sizeof what, "%s: X presses Square", name);
+        expect(n == 1 && help[0] == 0x88, 1, what);
+        n = pressed(JOYHID_B, 0, layout, help);
+        snprintf(what, sizeof what, "%s: B presses Triangle", name);
+        expect(n == 1 && help[0] == 0x87, 1, what);
     }
 }
 

@@ -277,7 +277,7 @@ Write-Host "Waiting for the main loop..."
 $booted = Wait-ForLog "entering main loop" 60
 Write-Host ("  main loop: {0}" -f $booted)
 
-$VK_X = 88   # the 3DS Y on Azahar's default map: SQUARE
+$VK_X = 90   # the 3DS X on Azahar's default map: SQUARE
 $VK_F = 70   # left
 
 $atTree = $false

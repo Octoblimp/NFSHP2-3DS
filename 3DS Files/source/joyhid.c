@@ -341,11 +341,11 @@ void joyhid_build(const JoyHidState *s, uint8_t buf[32])
                                       : gJoyHidBindings.racer);
         down |= s->calls & 0xffff;
     } else {
-        // The frontend's: Y reads as B (Square, as the menus' own Y is)
-        // and B as Y, so car select's orbit view is Y's and B only the
-        // menus' back.
+        // The frontend's: X reads as B (Square, as the menus' own X is)
+        // and B as X (Triangle, the menus' back), so car select's orbit
+        // view is X's and Y stays Circle, the help.
         if (s->race == JOYHID_LAYOUT_FE)
-            keys = swapKeys(keys, JOYHID_B, JOYHID_Y);
+            keys = swapKeys(keys, JOYHID_B, JOYHID_X);
         for (i = 0; i < sizeof(kMap) / sizeof(kMap[0]); i++)
             if (keys & kMap[i].key)
                 down |= 1u << kMap[i].button;

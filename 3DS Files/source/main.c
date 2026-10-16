@@ -152,6 +152,7 @@
 #include "threadguard.h"
 #include "heapcfg.h"
 #include "helisheet.h"
+#include "helpmenu.h"
 #include "logwriter.h"
 #include "geoview.h"
 #include "georender.h"
@@ -618,6 +619,9 @@ typedef struct {
 
 static Boot g_boot;
 static BGameFlow g_flow;
+// FlailerScreenList's tHelpMenu (+452), the HELP panel Y summons
+// (helpmenu.h).
+static HelpMenu g_help;
 static BScreens g_uiScreens;
 static BSetup   g_setup;
 
@@ -1193,10 +1197,11 @@ static void sndCarSoundMute(void* c, void* sound, int on)
     ((void (*)(void*, int32_t))e->fn)(vt_this(sound, e), on);
 }
 
-// joyhid's race layout, X the horn: only while the race runs, so every
-// menu -- the pause screen's included -- keeps X as "back". In Be A Cop,
-// in the player cop's car, L calls the roadblock and R the helicopter
-// as well (the user's mapping of 2026-10-11).
+// joyhid's race layout, X the horn: only while the race runs, so a race's
+// menus -- the pause screen's included -- keep X as the scanners' "back".
+// The frontend's layout has main.c's keys: B back, X Square, Y help. In
+// Be A Cop, in the player cop's car, L calls the roadblock and R the
+// helicopter as well (the user's mapping of 2026-10-11).
 static int32_t joyhidRaceLayout(void)
 {
     // This console's player: in a wireless race the pad read here is its.
@@ -3364,11 +3369,12 @@ static const NetRaceGame kNetRaceGame = {
     .goRacing      = netRaceGoRacing,
 };
 
-// SetHelpOverride (0x0016d448). The help menu (tHelpMenu) is not ported;
-// the table is logged so the screen's lines can be checked.
+// SetHelpOverride (0x0016d448): the lines Y's HELP panel shows instead of
+// the screen's, and the help on. They are logged too.
 static void hookSetupHelpOverride(void* user, const int32_t* lines)
 {
     (void)user;
+    helpmenu_set_override(&g_help, lines);
     if (!lines) {
         logLine("help override off");
         return;
@@ -3898,7 +3904,11 @@ static const struct { u32 key; BJoyEvent ev; } kBinds[] = {
     { KEY_DLEFT,  BJOY_SCROLL_LEFT },
     { KEY_DRIGHT, BJOY_SCROLL_RIGHT },
     { KEY_A,      BJOY_MENU_SELECT },
-    { KEY_Y,      BJOY_MENU_SQUARE },
+    // Y is MENU_HELP, retail's Circle (the user, 2026-10-16): flowInput
+    // toggles the HELP panel with it, and no menu does more. Square, which
+    // it was before, is X.
+    { KEY_Y,      BJOY_MENU_HELP },
+    { KEY_X,      BJOY_MENU_SQUARE },
     // The shoulders, as SCREEN_L1 and SCREEN_R1: JukeBox Music's L turns a
     // genre on and off.
     { KEY_L,      BJOY_MENU_L1 },
@@ -4887,16 +4897,62 @@ static BAnim* hookEtvAnim(void* user)
     return trackSelKit();
 }
 
-// The help menu's hide (0x001e3dd0); tHelpMenu is not ported.
+// 0x001e3dd0: the help off while the tree's popup is up, until the next
+// SetHelpOverride.
 static void hookEtvHideHelp(void* user)
 {
     (void)user;
-    logLine("help hidden");
+    helpmenu_disable(&g_help);
+    logLine("help off");
 }
 
 static void hookEtvJukebox(void* user)
 {
     hookJukebox(user, 1);
+}
+
+// ------------------------------------------------------- the HELP panel
+//
+// HelpMenuHooks (helpmenu.h): the strings car select's way, the common
+// region's MenuSelect, the screen by retail's enum, the flow's kit.
+
+static const char* helpTranslate(void* user, int32_t id)
+{
+    return hookCarSelTranslate(user, id);
+}
+
+static int helpSoundEnabled(void* user)
+{
+    (void)user;
+    return SoundEnabled;
+}
+
+static void helpPlaySelect(void* user)
+{
+    (void)user;
+    fesound_play(5, NULL);   // MenuSelect
+}
+
+static void helpScreenVisibility(void* user, uint32_t screen,
+                                 int32_t visibility)
+{
+    (void)user;
+    raceScreenVisibility(screen, visibility);
+    logLine("help %s", visibility == FLAILER_SCREEN_VISIBLE ? "shown"
+                                                           : "hidden");
+}
+
+static BAnim* helpAnim(void* user)
+{
+    (void)user;
+    return trackSelKit();
+}
+
+// CarSelector::CanEnterOrbitMode's tHelpMenu::IsActive.
+static int hookCarSelHelpActive(void* user)
+{
+    (void)user;
+    return helpmenu_is_active(&g_help);
 }
 
 static EtvHooks g_etvHooks;
@@ -6897,6 +6953,28 @@ static int flowInput(u32 kDown, int port)
     // stack under the race.
     u32 listDown = g_flow.screen ? kDown : 0;
 
+    // A screen given a port (hookSetScreenFilterPort) hears no other's;
+    // its menu filters the same.
+    int32_t filter = screenFilterPort(g_boot.screenHash);
+    bool    takes  = filter == -1 || filter == port;
+
+    // The list's MENU_HELP first (0x0016cab0, 0x0016ca40), Y on the 3DS:
+    // with no popup up, from a port the screen hears, a press summons the
+    // HELP panel with the override's lines or the screen's, or sends it
+    // away. While it is coming in or there, the popups, the screen and its
+    // menu hear nothing.
+    if ((listDown & KEY_Y) && !(g_boot.hasMenu && g_boot.menu.ignoreJoystick)
+        && !bpopup_any_active(&g_flow) && takes) {
+        helpmenu_toggle(&g_help,
+                        helpmenu_lines(&g_help, helpmenu_screen_lines(
+                                                    g_flow.screen->name)));
+        redraw = 1;
+    }
+    if (helpmenu_is_active(&g_help)) {
+        if (listDown) redraw = 1;
+        listDown = 0;
+    }
+
     // A popup that is up has each event before the screen and its menu,
     // and takes every one -- the memory card's messages ignore SELECT and
     // BACK, but the title underneath does not get them either.
@@ -6940,10 +7018,6 @@ static int flowInput(u32 kDown, int port)
     // consumes it, the current item has it as a select. That second half
     // is how START leaves PRESS START and skips the NFS intro; the title
     // screen only swallows the click.
-    // A screen given a port (hookSetScreenFilterPort) hears no other's;
-    // its menu filters the same.
-    int32_t filter = screenFilterPort(g_boot.screenHash);
-    bool    takes  = filter == -1 || filter == port;
     if (flowDown & KEY_START) {
         if (g_boot.hasMenu) {
             bmenu_joy(&g_boot.menu, port, BJOY_START, true);
@@ -6964,10 +7038,13 @@ static int flowInput(u32 kDown, int port)
     // handler for it and do nothing but remember whether it is down;
     // StartQuickRace reads that at the moment it runs. So it is a held
     // button, not a pressed one, and the state goes through every frame
-    // rather than on an edge.
+    // rather than on an edge. Retail's is L1, as the Mode Selects' help
+    // says ("L1 + Cross Manual Transmission in Quick Race"): L on the 3DS.
+    // It is the Mode Selects' own handler, not the list's, so the HELP
+    // panel does not stop it.
     if (port == 0)
         bscr_joy(&g_uiScreens, 0, BSCR_JOY_SELECT_TRANSMISSION,
-                 (hidKeysHeld() & KEY_X) ? 1 : 0);
+                 (hidKeysHeld() & KEY_L) ? 1 : 0);
 
     if (g_boot.hasMenu) {
         for (int i = 0; i < NUM_BINDS; i++) {
@@ -8182,6 +8259,22 @@ int main(int argc, char** argv)
     // class for every screen in the original.
     g_flow.anim = &g_uiScreens.anim;
 
+    // FlailerScreenList's constructor makes its tHelpMenu, on GLOBALB's
+    // help screen, which is loaded by now.
+    {
+        static const HelpMenuHooks helpHooks = {
+            .user                = &g_boot,
+            .translate           = helpTranslate,
+            .soundEnabled        = helpSoundEnabled,
+            .playSelect          = helpPlaySelect,
+            .setScreenVisibility = helpScreenVisibility,
+            .anim                = helpAnim,
+        };
+        helpmenu_construct(&g_help, &helpHooks, trackSelKit());
+        logLine("help: backdrop %s",
+                g_help.fade.exists ? "found" : "missing");
+    }
+
     // The race setup screens, on the same kit and the flow's clock.
     BSetupHooks setupHooks;
     memset(&setupHooks, 0, sizeof(setupHooks));
@@ -8232,6 +8325,7 @@ int main(int argc, char** argv)
     carselHooks.sound              = hookCarSelSound;
     carselHooks.stopSound          = hookCarSelStopSound;
     carselHooks.setHelpOverride    = hookSetupHelpOverride;
+    carselHooks.helpMenuActive     = hookCarSelHelpActive;
     carselHooks.summonPopup        = hookCarSelSummonPopup;
     carselHooks.dismissPopup       = hookCarSelDismissPopup;
     carselHooks.changeToScreen     = hookCarSelChangeToScreen;
@@ -8606,7 +8700,11 @@ int main(int argc, char** argv)
             // bgf_frame is the flow's service and the menus' tick both.
             // With no race the race's three stamps are the same tick.
             frameMark("flow");
-            if (raceStep) bgf_frame(&g_flow, RealTimeElapsed);
+            if (raceStep) {
+                bgf_frame(&g_flow, RealTimeElapsed);
+                // FlailerScreenList::Tick's last: the HELP panel's slide.
+                helpmenu_tick(&g_help, RealTimeElapsed);
+            }
             // The main menu's rows where its window puts them, over the
             // slide-in's groups (debugmenu.h).
             if (g_flow.screen

@@ -358,6 +358,31 @@ static C3D_Tex* help_glyph(UIRenderer* r, unsigned char c, int32_t layout,
     return &t->tex;
 }
 
+// The port's: text set in BUTTONSOUT itself, such as the frontend's "Help"
+// mark ('k', the PS2's Circle), is not help characters, so retail draws
+// the PS2 key. A glyph of the help table that helpglyph_map turns into a
+// 3DS key draws that key instead: `g` takes the icon's cell (BUTTONSOUT's
+// size and advance) and the answer is its sheet. Any other glyph keeps
+// `tex`.
+static C3D_Tex* buttonsout_key(UIRenderer* r, unsigned char ch, BGlyph* g,
+                               C3D_Tex* tex)
+{
+    for (int32_t i = 0; i < UIR_HELP_COUNT; i++) {
+        unsigned char hc     = (unsigned char)(UIR_HELP_FIRST + i);
+        int32_t       layout = live_help_layout();
+        BGlyph        key;
+        C3D_Tex*      t;
+
+        if (kHelpGlyph[i] != ch || !is_help_char(hc)) continue;
+        if (helpglyph_map(hc, layout) < HELPGLYPH_ICON) return tex;
+        t = help_glyph(r, hc, layout, &key);
+        if (!t) return tex;
+        *g = key;
+        return t;
+    }
+    return tex;
+}
+
 // ---------------------------------------------------------------------------
 // Drawing
 // ---------------------------------------------------------------------------
@@ -908,14 +933,20 @@ static void draw_text_clipped(UIRenderer* r, const BUIObject* o,
         }
 
         // The proportional path draws the glyph itself, at ScaleX once.
+        // A BUTTONSOUT key draws the 3DS one (buttonsout_key) unless it is
+        // clipped; no clipped text is in BUTTONSOUT.
         if (clip)
             draw_clipped_character(r, f, &g, penX + kern, o->y,
                                    g.width * o->scaleX, g.height * o->scaleY,
                                    color, v, clip);
-        else
-            draw_glyph(font_tex(r, f), &g, penX + kern, o->y,
-                       g.width * o->scaleX, g.height * o->scaleY, color, v,
-                       true);
+        else {
+            C3D_Tex* tex = font_tex(r, f);
+
+            if (o->fontHash == HELP_FONT_HASH)
+                tex = buttonsout_key(r, ch, &g, tex);
+            draw_glyph(tex, &g, penX + kern, o->y, g.width * o->scaleX,
+                       g.height * o->scaleY, color, v, true);
+        }
         penX += o->scaleX * (g.advance + kern);
     }
 }

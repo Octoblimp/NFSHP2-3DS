@@ -105,7 +105,7 @@ public class Hp2Dbg {
 
 $VK_A = 65; $VK_S = 83; $VK_M = 77; $VK_N = 78; $VK_T = 84; $VK_G = 71; $VK_H = 72; $VK_F = 70
 $VK_Q = 81; $VK_W = 87    # L and R
-$VK_Y = 88                # Y, the menus' SQUARE
+$VK_X = 90                # X, the menus' SQUARE
 
 $debugLog  = Join-Path $env:APPDATA "Azahar\sdmc\nfshp2_debug.txt"
 . (Join-Path $PSScriptRoot "azahar_debuglog.ps1")   # DebugLog 1
@@ -198,8 +198,8 @@ function Press([int]$vk, [int]$waitMs = 700) {
 # The boot as run_azahar_nameentry.ps1 has it, to the main menu. Options is
 # three down, and Credits (MENUITEM_6) five down in it. Back on the Credits
 # menu the row last picked is still highlighted, so each step is one down.
-#   Electronic Arts: the names roll up over the slideshow; Y pauses them
-#     and Y again lets them go; B back.
+#   Electronic Arts: the names roll up over the slideshow; X pauses them
+#     and X again lets them go; B back.
 #   Black Box Games: its logo movie, then its names on their own; B back.
 #   View Intro Movie: A ends it.
 #   The Making of HP2: B leaves it.
@@ -270,13 +270,13 @@ if ($atCredits) {
     Shot "ea-7s"
     Start-Sleep -Seconds 4
     Shot "ea-11s"
-    Press $VK_Y 300                           # Y: SQUARE, pause
+    Press $VK_X 300                           # X: SQUARE, pause
     $paused = Wait-ForLog "credits paused" 10
     Start-Sleep -Milliseconds 1500
     Shot "ea-paused"
     Start-Sleep -Milliseconds 2000
     Shot "ea-still-paused"
-    Press $VK_Y 300                           # Y: rolling again
+    Press $VK_X 300                           # X: rolling again
     $rolled = Wait-ForLog "credits rolling" 10
     Write-Host ("  pause: {0}, again: {1}" -f $paused, $rolled)
     Press $VK_G 400                           # a nudge
@@ -374,7 +374,7 @@ elseif ($unmapped)         { $verdict = "FAIL ($(@($unmapped).Count) unmapped ac
 elseif (-not $survived)    { $verdict = "FAIL (the app died)" }
 elseif (-not $atCredits)   { $verdict = "PARTIAL (never reached Credits)" }
 elseif (-not $ea)          { $verdict = "PARTIAL (Electronic Arts built no names)" }
-elseif (-not $paused)      { $verdict = "PARTIAL (Y did not pause the names)" }
+elseif (-not $paused)      { $verdict = "PARTIAL (X did not pause the names)" }
 elseif (-not $rolled)      { $verdict = "PARTIAL (Y again did not let them go)" }
 elseif (-not $eaBack)      { $verdict = "PARTIAL (B did not come back from Electronic Arts)" }
 elseif (-not $bbgLogo)     { $verdict = "PARTIAL (Black Box Games played no logo)" }

@@ -24983,3 +24983,40 @@ x 176 to 159.7. The small logo by the hint stays where it was.
 2. Replays (TASKS 72): the user, 2026-10-16, "implement that after task
    59".
 3. The known bugs, then the verdict again.
+
+## Session 117 -- TASKS 48: the HELP panel on Y
+
+The user: "Continue where you left off". Session 116 had built TASKS 48
+and written its Azahar run, and stopped at the session limit before the
+run.
+
+### 48 done
+
+- **`helpmenu.c`** ports tHelpMenu (0x001e3b88 .. 0x001e4170) and
+  FlailerScreenList's part: `flowInput` toggles it with Y when no popup
+  is up and the screen hears the port; while it is coming in or there,
+  the screen, its menu and the popups hear nothing. The lines are each
+  registered screen's HelpMenuItems, or SetHelpOverride's (the setups,
+  car select, the event tree); the event tree's popup turns the help off
+  (0x001e3dd0). Car select's CanEnterOrbitMode asks IsActive. See
+  docs/formats/help-menu.md.
+- **The keys**: Y is MENU_HELP; Square moved to X (`kBinds`), and
+  joyhid's frontend layout swaps B and X (it swapped B and Y). The Mode
+  Selects' manual transmission is L held, as line 802231 says ("L1 +
+  Cross"); it was X. `helpglyph_map`: Square draws X, Circle Y.
+- **The "Help" mark** bottom left is BUTTONSOUT text ('k', the PS2's
+  Circle), not a help character, so it still drew the PS2 Circle.
+  `uirender.c`'s `buttonsout_key` draws a BUTTONSOUT glyph of a key as
+  the 3DS key (unclipped proportional text): it shows Y now.
+- **Scripts**: `run_azahar_carsel.ps1`, `run_azahar_career.ps1` and
+  `run_azahar_credits.ps1` press 3DS X (keyboard Z, 90) for Square.
+- `helpmenu_check`, `joyhid_check`, `helpglyph_check` pass.
+  `tools/run_azahar_help.ps1`: PASS (Y in and out on the main menu, Hot
+  Pursuit's Mode Select and Options, A swallowed under it; the lines'
+  icons are the D-pad, A, B and L + A).
+
+### Next
+
+1. The "Memory Card (PS2)" text in the popups, then stereo 3D (TASKS 59).
+2. Replays (TASKS 72), after 59.
+3. The known bugs, then the verdict again.

@@ -14,9 +14,9 @@
 //     B          Square    menu square
 //     X          Triangle  menu back
 //     Y          Circle    menu help
-//     -- in the frontend, with no race, B and Y swap: Y is Square, car
-//        select's orbit view, as main.c's own menu keys have Y as Square
-//        and B as back.
+//     -- in the frontend, with no race, B and X swap: B is Triangle and
+//        X Square, car select's orbit view, as main.c's own menu keys
+//        have B as back, X as Square and Y as help (2026-10-16).
 //     L / R      L1 / R1
 //     ZL / ZR    L2 / R2
 //     D-pad      D-pad     menus
@@ -53,8 +53,9 @@
 // freeze and zoom.
 //
 // A and B are throttle and brake because they sit next to each other, as
-// Cross and Square do; the price is that the scanners' "back" is X, the
-// Triangle, and not B (main.c's frontend keys take B as back). The twelve
+// Cross and Square do; the price is that in a race's menus the scanners'
+// "back" is X, the Triangle, and not B (main.c's keys take B as back, and
+// the frontend's layout matches them). The twelve
 // pressure bytes read 255 for a held button and 0 otherwise -- the 3DS's
 // buttons are digital. ZL, ZR and the C-Stick exist only on a New 3DS; an
 // Old 3DS reads them as never pressed and centred, which leaves the
@@ -107,8 +108,9 @@ typedef struct JoyHidState {
 #define JOYHID_LAYOUT_MENU 0    // the map above
 #define JOYHID_LAYOUT_RACE 1    // the racer's bindings
 #define JOYHID_LAYOUT_COP  2    // the cop's bindings and calls
-#define JOYHID_LAYOUT_FE   3    // B and Y swapped: Y Square, car select's
-                                // orbit view (bcarsel.c), as kBinds has Y
+#define JOYHID_LAYOUT_FE   3    // B and X swapped: X Square, car select's
+                                // orbit view (bcarsel.c), and B Triangle,
+                                // as main.c's kBinds have them
 
 // The layout, asked once a reading; NULL is always MENU. main.c's answers
 // RACE while the race coordinator is in RACE_IN_PROGRESS, and COP then in

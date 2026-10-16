@@ -388,6 +388,13 @@ The last four all map to `'c'`. The glyph comes from `BUTTONSOUT` regardless
 of the text object's own `FontHash`, and the pen advances by that glyph's
 advance.
 
+Text set in `BUTTONSOUT` itself is not help characters: the frontend's
+"Help" mark is a text object whose string is `k`, the PS2's Circle, and
+retail draws it as that glyph. The port draws a glyph of the table above
+that `helpglyph.c` turns into a 3DS key as that key, in proportional text
+that is not clipped (`uirender.c`'s `buttonsout_key`), so the mark shows
+Y, the help key.
+
 ## The port
 
 `3DS Files/source/bui.[ch]` parses the format; `3DS Files/source/uirender.c`

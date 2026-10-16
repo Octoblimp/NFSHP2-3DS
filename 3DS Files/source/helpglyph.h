@@ -15,9 +15,8 @@
 //                                           the player bound to
 //     Cross          A                      throttle
 //     Triangle       B (main.c's back)      camera
-//     Square         Y (main.c's)           brake
-//     Circle         as joyhid has it:      horn
-//                    Y in MENU, B in FE
+//     Square         X (main.c's)           brake
+//     Circle         Y (help)               horn
 //     L1 / R1        L / R                  look back / e-brake
 //     L2 / R2        ZL / ZR                shift down / up; the cop's
 //                                           helicopter / roadblock
@@ -26,8 +25,9 @@
 //     left stick     the Circle Pad (retail's 0x90..0x94)
 //     right stick    the C-Stick (retail's 0x95..0x98)
 //
-// In the menus Triangle is B and Square Y because main.c's frontend keys
-// are what the menus hear: B pops the screen and Y is MENU_SQUARE, which
+// In the menus Triangle is B, Square X and Circle Y because main.c's
+// frontend keys are what the menus hear: B pops the screen, X is
+// MENU_SQUARE and Y summons the HELP panel (helpmenu.h, 2026-10-16), which
 // joyhid's frontend layout matches for car select's scanners. In a race
 // the keys are joyhid's gJoyHidBindings, the racer's or the cop's: the
 // defaults are joyhid.h's map, and Options' Controller changes them. A

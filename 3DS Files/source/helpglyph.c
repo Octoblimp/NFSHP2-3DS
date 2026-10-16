@@ -115,10 +115,9 @@ int32_t helpglyph_map(unsigned char c, int32_t layout)
         case HC_TRIANGLE:
             return ICON(HELPGLYPH_3DS_B);
         case HC_SQUARE:
-            return ICON(HELPGLYPH_3DS_Y);
+            return ICON(HELPGLYPH_3DS_X);
         case HC_CIRCLE:
-            return ICON(layout == JOYHID_LAYOUT_FE ? HELPGLYPH_3DS_B
-                                                   : HELPGLYPH_3DS_Y);
+            return ICON(HELPGLYPH_3DS_Y);
         case HC_L1:
             return ICON(HELPGLYPH_3DS_L);
         case HC_R1:
