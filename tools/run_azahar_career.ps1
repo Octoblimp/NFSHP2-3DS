@@ -15,8 +15,11 @@
 # -LapSeconds gives the player that lap instead of the projected one, for
 # a time trial's goal. -Path then picks the event first: D-pad steps on
 # the tree ("down,right"), checked against -Event when it is given,
-# instead of the tour. It captures each step and reports the flow's and
-# the view's lines. The capture and key methods are run_azahar_test.ps1's; see its
+# instead of the tour. -OpenUltimates first takes the debug menu's Open
+# the Ultimates ("DebugMenu 1" written for the run) and saves. The tree's
+# popup that says the Ultimate is open is closed whenever it shows (TASKS
+# 69g). It captures each step and reports the flow's and the view's
+# lines. The capture and key methods are run_azahar_test.ps1's; see its
 # header for why each is the way it is.
 #
 # sdmc:/nfshp2_config.txt must not set SkipFE: the run needs the frontend.
@@ -27,6 +30,7 @@
 #   powershell -File tools/run_azahar_career.ps1 -Race -FinishPlace 1
 #   powershell -File tools/run_azahar_career.ps1 -Race -Path down -Event 3
 #   powershell -File tools/run_azahar_career.ps1 -Race -Event 2 -LapSeconds 120
+#   powershell -File tools/run_azahar_career.ps1 -OpenUltimates -Path down,down
 
 param(
     [string]$AzaharExe = "C:\Program Files\Azahar\azahar.exe",
@@ -39,7 +43,8 @@ param(
     [int]$FinishPlace = 1,        # -Race: the player's place in it
     [int]$LapSeconds = 0,         # -Race: its lap instead of the projected one
     [string]$Path = "",           # D-pad steps on the tree to the event
-    [int]$Event = 0               # the event -Path must end on
+    [int]$Event = 0,              # the event -Path must end on
+    [switch]$OpenUltimates        # the debug menu's Open the Ultimates first
 )
 
 $ErrorActionPreference = "Stop"
@@ -63,21 +68,27 @@ if ((Test-Path $config) -and (Select-String -Path $config -Pattern "^\s*SkipFE\s
 # is skipped.
 $debugMenuOn = (Test-Path $config) -and
     (Select-String -Path $config -Pattern "^\s*DebugMenu\s+[1-9]" -Quiet)
+$addDebugMenu = $OpenUltimates -and -not $debugMenuOn
+if ($OpenUltimates) { $debugMenuOn = $true }
 
 # The config's lines without the test's finish, and with it for -Race.
 function Set-TestFinish([bool]$on) {
     $lines = @()
     if (Test-Path $config) {
         $lines = @(Get-Content $config | Where-Object { $_ -notmatch "^\s*TestFinish" })
+        if ($addDebugMenu) {
+            $lines = @($lines | Where-Object { $_ -notmatch "^\s*DebugMenu" })
+        }
     }
-    if ($on) {
+    if ($on -and $Race) {
         $lines += @("TestFinish $FinishSeconds", "TestFinishPlace $FinishPlace",
                     "TestFinishTime $LapSeconds")
     }
+    if ($on -and $addDebugMenu) { $lines += @("DebugMenu 1") }
     New-Item -ItemType Directory -Force -Path (Split-Path $config) | Out-Null
     Set-Content -Path $config -Value $lines -Encoding ASCII
 }
-Set-TestFinish $Race
+Set-TestFinish $true
 
 Add-Type @"
 using System;
@@ -295,12 +306,37 @@ if ($booted) {
     if (Enter-Screen $VK_M "New Main Menu") {   # START
         Start-Sleep -Milliseconds 1500
         Shot "mainmenu"
-        [Hp2Cap]::PressKey($hwnd, $VK_N)               # SELECT, nothing
-        Start-Sleep -Milliseconds 1500
+        if (-not $debugMenuOn) {
+            [Hp2Cap]::PressKey($hwnd, $VK_N)           # SELECT, nothing
+            Start-Sleep -Milliseconds 1500
+        }
+        if ($OpenUltimates) {
+            # Down four to the debug menu's item, the fifth (TASKS 68),
+            # and down five to its sixth row. B asks to save: Yes, then
+            # the card's own question, Left for its Yes.
+            for ($i = 0; $i -lt 4; $i++) { Press $VK_G }
+            if (Enter-Screen $VK_A "Port Debug Menu") {
+                for ($i = 0; $i -lt 5; $i++) { Press $VK_G }
+                Shot "debug-ultimates"
+                $ultOpened = Press-UntilCount $VK_A "debug menu: ultimates open" 1 2 10
+                Press $VK_S                            # B: the prompt
+                [void](Wait-ForLog "debug menu: asking to save" 10)
+                Start-Sleep -Milliseconds 1200
+                Press $VK_A                            # Yes
+                [void](Wait-ForLog "flow enter Autosave" 10)
+                Start-Sleep -Milliseconds 3500
+                Press $VK_F                            # to the card's Yes
+                Press $VK_A
+                $ultSaved = Wait-ForLog "memcard: saved" 15
+                [void](Wait-ForLogCount "flow enter New Main Menu [0-9a-f]{8}" 2 15)
+                Start-Sleep -Milliseconds 2000
+            }
+            Write-Host ("  Open the Ultimates: {0}, saved {1}" -f $ultOpened, $ultSaved)
+        }
         $atMode = $false
         if ($CopsOn) {
             $atMode = Enter-Screen $VK_A $modeSelect
-        } elseif (Press-UntilCount $VK_G "flow bracket 708a0bf1" 1 2 20) {
+        } elseif (Press-UntilCount $VK_G "flow bracket 708a0bf1" ((LogCount "flow bracket 708a0bf1") + 1) 6 20) {
             # down, World Racing
             $atMode = Enter-Screen $VK_A $modeSelect
         }
@@ -332,6 +368,27 @@ $onEvent = $true
 if ($atTree) {
     Start-Sleep -Seconds 2
     Shot "tree"
+    # The view opens on the popup (state 7) while an Ultimate is open
+    # and not won, each time until the tree is saved after it; A
+    # closes it.
+    Start-Sleep -Seconds 6
+    $open = @(Get-Content $debugLog | Where-Object { $_ -match "etv open tree" }) | Select-Object -Last 1
+    $ultPopup = $open -match "state 7 "
+    Write-Host ("  the Ultimate's popup: {0} ({1})" -f $ultPopup, $open)
+    Shot "ultimate-popup"
+    if ($ultPopup) {
+        Press $VK_A; Start-Sleep -Milliseconds 1500
+        Shot "popup-closed"
+        # popupClosed (0x001faea8) goes back to the view the save kept:
+        # the details, when the tree was left in them, where the D-pad
+        # does nothing. Their help says so; B goes back to the tree.
+        Start-Sleep -Seconds 8
+        $help = @(Get-Content $debugLog | Where-Object { $_ -match "^help override" }) | Select-Object -Last 1
+        if ($help -match "^help override (800037|800038|800049) ") {
+            Press $VK_S; Start-Sleep -Milliseconds 1500
+            Shot "popup-to-tree"
+        }
+    }
     if ($Path -ne "" -or $Event -gt 0) {
         # The save keeps the view (Fred.SelectedEventData[3]): a tree left
         # in the details opens in them, where the D-pad does nothing. B
@@ -343,7 +400,7 @@ if ($atTree) {
             Shot "tree-from-details"
         }
         $keys = @{ up = $VK_T; down = $VK_G; left = $VK_F; right = $VK_H }
-        foreach ($k in ($Path -split "," | Where-Object { $_ -ne "" })) {
+        foreach ($k in ($Path -split "[,\s]+" | Where-Object { $_ -ne "" })) {
             Press $keys[$k.Trim()]; Start-Sleep -Milliseconds 900
             Shot ("tree-" + $k.Trim())
         }
@@ -403,7 +460,8 @@ if ($atTree -and $onEvent) {
 }
 
 # -Race: A picks the car, and the flow leaves the frontend for the track.
-# Each race: A goes past the event's Pre Race Blurb and Pre Race Stats,
+# Each race: A goes past the event's Pre Race Blurb and Pre Race Stats
+# (Be A Cop has only the Blurb),
 # and the gas is held from then until the test's finish ends it, as
 # run_azahar_coprace.ps1 does. A then goes
 # through the end screens, one press each time the log has had its ~7 s
@@ -464,9 +522,15 @@ if (($atCarSel -or $resumed) -and $Race) {
         Start-Sleep -Seconds 4
         Shot ("race{0}-blurb" -f $races)
         # A on the event's Pre Race Blurb, then on its Pre Race Stats,
-        # until that is left for the countdown. (The race's stage lines
-        # come every second, so race 1's would count for the later ones.)
-        $going = Press-UntilCount $VK_A "flow leave Pre Race Stats" $races 10 12
+        # until the last of them is left for the countdown: the flow's
+        # change to no screen. Be A Cop has no Pre Race Stats (startrace.c,
+        # start_race_need_to_see_pre_race_stats), so its Blurb is the last.
+        # Counted from this race's Blurb on, whose line has all the earlier
+        # ones landed before it. (The race's stage lines come every second,
+        # so race 1's would count for the later ones.)
+        [void](Wait-ForLogCount "flow enter Pre Race Blurb" $races 30)
+        $toRace = "flow change \(null\)"
+        $going = Press-UntilCount $VK_A $toRace ((LogCount $toRace) + 1) 10 12
         Write-Host ("  race {0} going: {1}" -f $races, $going)
         if (-not $going) { break }
         $end = (Get-Date).AddSeconds($FinishSeconds + 40)
@@ -528,7 +592,7 @@ if (($atCarSel -or $resumed) -and $Race) {
 $survived = Alive
 if ($survived) { $proc | Stop-Process -Force }
 Start-Sleep -Milliseconds 600
-if ($Race) { Set-TestFinish $false }
+Set-TestFinish $false
 
 # --- the verdict ------------------------------------------------------------
 
@@ -557,7 +621,9 @@ elseif ($viewer.Count -gt 0 -and -not $debugMenuOn) {
 }
 elseif ($crash)          { $verdict = "FAIL (crash: $($crash[0]))" }
 elseif ($unmapped)       { $verdict = "FAIL ($(@($unmapped).Count) unmapped accesses, first: $(@($unmapped)[0]))" }
+elseif ($OpenUltimates -and -not ($ultOpened -and $ultSaved)) { $verdict = "PARTIAL (the debug menu's Open the Ultimates was not done and saved)" }
 elseif (-not $atTree)    { $verdict = "PARTIAL (never reached the event tree)" }
+elseif ($OpenUltimates -and -not $ultPopup) { $verdict = "PARTIAL (the tree opened without the Ultimate's popup)" }
 elseif (-not $onEvent)   { $verdict = "PARTIAL (-Path did not end on event $Event)" }
 elseif (-not $atDetails) { $verdict = "PARTIAL (A on the tree did not open the details)" }
 elseif (-not $atReward -and -not $Race) { $verdict = "PARTIAL (SQUARE on the details did not open the reward)" }
@@ -573,7 +639,7 @@ else                     { $verdict = "PASS (tree, details, reward, then car sel
 
 Write-Host ""
 Write-Host "=== flow ==="
-$dbg | Where-Object { $_ -match "flow (enter|leave|change|want|state RACING|unregistered)|etv |fred race setup|race: the test|race: rc \d+, stage 4|event|save|popup \d+ (summon|dismiss)|memcard|not ported|abort|assert|fatal" } |
+$dbg | Where-Object { $_ -match "flow (enter|leave|change|want|state RACING|unregistered)|etv |debug menu|fred race setup|race: the test|race: rc \d+, stage 4|event|save|popup \d+ (summon|dismiss)|memcard|not ported|abort|assert|fatal" } |
     Select-Object -Last 120 | ForEach-Object { Write-Host $_ }
 Write-Host ""
 Write-Host "=== nfshp2_debug.txt (last 20) ==="

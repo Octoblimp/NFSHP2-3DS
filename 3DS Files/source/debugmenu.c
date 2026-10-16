@@ -67,6 +67,7 @@ enum {
     ROW_FULL,
     ROW_UNLOCK,
     ROW_LOCK,
+    ROW_ULTIMATES,
     // Debug Race's.
     ROW_START,
     ROW_MODE,
@@ -104,6 +105,9 @@ static const struct {
     { "Lock Everything",
       "Press A to lock everything again, as on a new profile. Your NFS "
       "points stay as they are." },
+    { "Open the Ultimates",
+      "Press A to win every event of both careers but the two Ultimate "
+      "events, which open. Results you already have are kept." },
     { "Start Race",
       "Press A to start a race with the settings below." },
     { "Mode",
@@ -129,6 +133,7 @@ static const struct {
 
 static const int kMenuRows[] = {
     ROW_DEBUG_RACE, ROW_POINTS, ROW_FULL, ROW_UNLOCK, ROW_LOCK,
+    ROW_ULTIMATES,
 };
 static const int kRaceRows[] = {
     ROW_START, ROW_MODE, ROW_TRACK, ROW_TOD, ROW_DIRECTION, ROW_CAR,
@@ -506,6 +511,7 @@ static void valueText(int row, char* out, size_t cap)
         case ROW_FULL:
         case ROW_UNLOCK:
         case ROW_LOCK:
+        case ROW_ULTIMATES:
             if (sDone[row]) snprintf(out, cap, "Done");
             break;
         default:
@@ -660,13 +666,20 @@ static void setRewards(int32_t earned)
 
 // Every event of a tree whose result falls short: not passed, or a reward
 // not earned. Their results are made the best, as UnlockState makes them.
-static int unlockShort(EventTree* t)
+// Without `ultimate` the tree's Ultimate is left out and its result
+// cleared, so that it opens once the rest are won.
+static int unlockShort(EventTree* t, int ultimate)
 {
     int n = 0;
     if (!t) return 0;
     for (int i = 0; i < t->nEvents; i++) {
-        EventInfo* e       = &t->pEvents[i];
-        int        missing = event_info_get_status(e, NULL) != EVENT_PASSED;
+        EventInfo* e = &t->pEvents[i];
+        int        missing;
+        if (!ultimate && e->nNumber == EVENT_ULTIMATE) {
+            event_info_reset_state(e);
+            continue;
+        }
+        missing = event_info_get_status(e, NULL) != EVENT_PASSED;
         for (int j = 0; j < e->nRewards && !missing; j++)
             missing = !event_info_reward_earned(e, j);
         if (!missing) continue;
@@ -679,8 +692,10 @@ static int unlockShort(EventTree* t)
 // Set Save to 100%: retail's UnlockEvents, which nothing on the disc calls
 // (every event of both trees won, the Ultimate's too), and every task and
 // points reward taken. Unlock Everything: the events that fall short only.
-// Lock Everything: retail's LockEvents and the rewards cleared. Each makes
-// the car lists again from that, and none touches the points.
+// Lock Everything: retail's LockEvents and the rewards cleared. Open the
+// Ultimates: the events that fall short but the two Ultimates, which are
+// cleared, the rewards left as they are (TASKS 69g). Each makes the car
+// lists again from that, and none touches the points.
 static void act(int row)
 {
     switch (row) {
@@ -690,10 +705,16 @@ static void act(int row)
             say("save set to 100%%");
             break;
         case ROW_UNLOCK: {
-            int n = unlockShort(gChampionshipTree);
-            n += unlockShort(gHotPursuitTree);
+            int n = unlockShort(gChampionshipTree, 1);
+            n += unlockShort(gHotPursuitTree, 1);
             setRewards(1);
             say("unlocked, %d events filled in", n);
+            break;
+        }
+        case ROW_ULTIMATES: {
+            int n = unlockShort(gChampionshipTree, 0);
+            n += unlockShort(gHotPursuitTree, 0);
+            say("ultimates open, %d events filled in", n);
             break;
         }
         case ROW_LOCK:

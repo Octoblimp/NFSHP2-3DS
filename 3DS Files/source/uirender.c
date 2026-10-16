@@ -1254,7 +1254,9 @@ static UIWrapLine wrap_next(UIRenderer* r, UIFont* f, const char* s,
         BGlyph        g;
         float         adv = 0.0f;
 
-        if (ch == 10) {          // a hard break in the string itself
+        // A hard break in the string itself: a newline, or '@', which
+        // breaks a line in all of retail's text (draw_text_rect above).
+        if (ch == 10 || ch == '@') {
             ln.draw = i; ln.next = i + 1; ln.width = w * scale;
             return ln;
         }

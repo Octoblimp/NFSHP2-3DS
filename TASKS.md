@@ -3707,7 +3707,7 @@ phases.
           build cut to three rows, the window moving down to Options
           and the same three back from Options.
 
-69. [ ] **Career, 100%.** Asked for on 2026-10-15: "When you're done
+69. [x] **Career, 100%.** Asked for on 2026-10-15: "When you're done
         with this task, work on career, get career 100%, and as long as
         everything's fully implemented, excepting little things like
         working on multiplayer, lmk if its good for a public launch and
@@ -3781,8 +3781,46 @@ phases.
             - Hot Pursuit's event 1, the Lotus Elise Delivery (point to
               point, 6 cop cars): Events 2 and 3 unlocked in Ultimate
               Racer, the save, back at the tree.
-        - [ ] 69g: the rest: the Ultimate event, the unlocks in Quick
+        - [x] 69g: the rest: the Ultimate event, the unlocks in Quick
           Race and Select Car, Hot Pursuit's Be A Cop events.
+          - Done 2026-10-17, all on Azahar with `run_azahar_career.ps1
+            -Race`:
+            - Hot Pursuit's event 5, the first Be A Cop event: 3
+              arrests, Event 5 Passed, the Pursuit Crown Victoria
+              unlocked (14 of 49 cars), Pursuit Results, the End Game
+              Menu, Quit, the autosave, back at the tree. With
+              "TestFinish" on, a Be A Cop race arrests each racer through
+              the game's own pullover, and the last arrest wins it.
+            - The unlocks: Select Car's "Cars Unlocked: 12/49" is the 7
+              cars open from the start, the 3 event cars won (TS50, CL55,
+              Elise) and 2 points cars. Quick Race's Select Track locks
+              the tracks no event has given yet ("tracksel locked:" in
+              the trace), and Scenic Drive II opened after event 6.
+            - The Ultimate, event 32, the Hot Pursuit 2 Championship
+              Duel. Both trees share it, as retail's do (Fred's
+              pUltimateState). The debug menu's new "Open the Ultimates"
+              wins every other event of both trees and leaves the two
+              Ultimates open (`-OpenUltimates`). The tree then opens on
+              retail's popup ("It's time to take the big prize!"); A
+              closes it. The duel: 2 Ferrari 360 Spiders, 6 laps of
+              Coastal Parklands, Event 32 Passed, the Ferrari 360 Modena
+              Challenge unlocked, "Go to the Credits Menu to view your
+              Reward Movie", the save, back at the tree. From Hot
+              Pursuit's tree the same event shows passed and races again,
+              with Tickets in its results.
+          - Fixed on the way:
+            - The popup's text is in its own object's font and colour
+              (FRONTB's narrow face, grey), as retail draws it. In the
+              details' white it was unreadable on the bright picture.
+            - The bottom screen showed the tree's authoring placeholder
+              ("This is The Title of the Event...") under the popup.
+            - Long event descriptions lost their end: the translated
+              strings' ring held 256 bytes, and the longest is about 360.
+            - '@' breaks a line in wrapped text, as it does in all of
+              retail's text.
+          - Not ported: the reward's turning car model (ModelViewer.obj),
+            and the Credits menu the reward text sends the player to
+            (verdict list 3).
 
 70. [x] **The bottom screen, reworked before the launch.** Asked for on
         2026-10-16, after a look at the career's details page: "before
@@ -3799,6 +3837,31 @@ phases.
           Azahar with `tools/run_azahar_career.ps1`: the language
           screen, the main menu, the Mode Select, the tree, the details,
           the reward and Select Car.
+
+71. [ ] **The plain Options screens, before the launch.** Item 3 of the
+        2026-10-16 launch verdict. Each of these draws, but A does
+        nothing on it (`bgf_plain_screen_callback`), or it is not
+        registered at all:
+        - [ ] 71a: Credits (CreditsScreen 0x001f1f38): Electronic Arts
+              and Black Box Games scroll the credits (CreditsScroller,
+              screen 39c4c62c). View Intro Movie, The Making of HP2 and
+              View Reward Movie play their movies. The reward movie is
+              grayed until both Ultimates are won (0x002026f8).
+        - [ ] 71b: Audio (AudioOptionsScreen): the seven volume
+              sliders, Audio Mode, Jukebox, Default Volumes and Default
+              Jukebox. Ask to save when it is left with changes.
+        - [ ] 71c: Display (tDisplayOptionsScreen): Track Map,
+              Rearview Mirror, Units, Leaderboard, Jump Cams, Zone Cams
+              and Player 1 Options. Player 2's row is hidden.
+        - [ ] 71d: Controller (JoystickPreConfig): Configuration
+              (JoystickConfigScreen). Calibration and Vibration have
+              nothing to work on with a 3DS, and Player 2 is hidden.
+        - [ ] 71e: the pause menu's Options ("Pause Options", "Pause
+              audio", "Pause display"), View Objective ("Race
+              Objective") and View Cop Controls ("Pause BAC controls").
+              None of them is in `kScreens[]`, so ChangeToScreen finds no
+              screen for them. `screen_registry.py --check-port` missed
+              them: pausemenu.c names them through constants.
 
 ### The retail frontend
 

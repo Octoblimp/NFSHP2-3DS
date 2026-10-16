@@ -3185,6 +3185,29 @@ static void raceTestFinish(void)
         || r->StartGoTimeFrames == 0
         || WorldTimeFrames - r->StartGoTimeFrames < ConfigTestFinish * 60)
         return;
+    if (TheRaceParameters.BeACop && pCopManager != NULL) {
+        // Be A Cop: each racer arrested as an arrest's pullover ends
+        // (copmanager_end_pullover), and the last arrest wins the race
+        // for the cop with the clock's time left (TASKS 69g).
+        for (i = 0; i < r->NumRacingCars; i++) {
+            struct RacingCar* rc = r->pRacingCars[i];
+            tCarPulloverInfo* pl;
+
+            if (rc->FinishReason != RACING_CAR_NOT_FINISHED
+                || racingcar_get_player(rc) != NULL)
+                continue;
+            pl            = &pCopManager->CarPullovers[rc->pCar->CarIndex];
+            pl->bArrest   = 1;
+            pl->nCopIndex = -1;
+            copmanager_end_pullover(pCopManager, rc->pCar->CarIndex);
+        }
+        logLine("race: the test's finish, %ld s in, %ld arrests, %.1f s left",
+                (long)ConfigTestFinish,
+                (long)pCopManager->nBeACopNumArrestsMade,
+                (double)pCopManager->fBeACopTime);
+        racecoordinator_the_race_has_finished(pRaceCoordinator);
+        return;
+    }
     for (i = 0; i < r->NumRacingCars && ahead < place - 1; i++) {
         struct RacingCar* rc = r->pRacingCars[i];
 
@@ -3860,9 +3883,12 @@ static UIWrapStyle botStyle(UIRenderer* ui, uint32_t color, float px,
 static BCarSel g_carsel;
 
 // GetTranslatedString's answers, into a ring: one Printf can hold two, and
-// a popup keeps its message while the screen goes on translating.
+// a popup keeps its message while the screen goes on translating. Each
+// holds FE_ENGLISH's longest string (about 360 bytes, an event's
+// description); at 256 the tree's details and the Pre Race Blurb lost the
+// end of the long ones (TASKS 69g).
 #define CARSEL_RING     8
-#define CARSEL_RING_LEN 256
+#define CARSEL_RING_LEN 512
 
 static char* carselRing(void)
 {
@@ -4672,20 +4698,36 @@ static void hookEtvRenderTextRect(void* user, uint32_t screen,
     snprintf(g_etvText.text, sizeof g_etvText.text, "%s", text);
 }
 
+// A GS colour (0x80 is full, r g b a low byte first) as citro2d's plain one.
+static uint32_t gsPlainColor(uint32_t gs)
+{
+    uint32_t out = 0;
+    for (int i = 0; i < 4; i++) {
+        uint32_t c = ((gs >> (8 * i)) & 0xffu) * 2u;
+        out |= (c > 0xffu ? 0xffu : c) << (8 * i);
+    }
+    return out;
+}
+
 // After the top screen's layers. The inner (0x00144ed0) starts the pen at
 // the text object's top left and breaks a line at the box's right edge:
 // the box is the whole panel, the text object sits under the track's name.
+// The details' description is in the port's style. The Ultimate's popup is
+// in its text object's own, as retail draws both: FRONTB's narrow face
+// (fb79e54c, 27 high on the PS2's 480 lines) in grey. In the details' white
+// FONT_A at 10 the outline drowned it on the popup's bright picture.
 static void etvDrawText(UIRenderer* ui)
 {
-    float       x = 0.0f, y = 0.0f, bx = 0.0f, by = 0.0f, w;
+    float       x = 0.0f, y = 0.0f, bx = 0.0f, by = 0.0f, w, h;
     float       sx = 400.0f / 640.0f, sy = 240.0f / 480.0f;
     UIWrapStyle st;
+    struct FlailerTextChunk* t;
 
     if (!g_etvText.queued) return;
     g_etvText.queued = false;
-    if (g_etvText.alpha <= 0.0f
-        || !flailer_find_object(g_etvText.screen, g_etvText.object,
-                                FLAILER_TYPE_TEXT)
+    t = (struct FlailerTextChunk*)flailer_find_object(
+        g_etvText.screen, g_etvText.object, FLAILER_TYPE_TEXT);
+    if (g_etvText.alpha <= 0.0f || !t
         || !flailer_find_object(g_etvText.screen, g_etvText.rect,
                                 FLAILER_TYPE_BITMAP))
         return;
@@ -4694,6 +4736,17 @@ static void etvDrawText(UIRenderer* ui)
     w = bx + (float)flailer_get_width(g_etvText.screen, g_etvText.rect) - x;
     if (w <= 0.0f) return;
     st = botStyle(ui, C2D_Color32(0xff, 0xff, 0xff, 0xff), 10.0f, false);
+    if (g_etvText.screen == ETV_SCREEN_POPUP) {
+        UIWrapStyle own = st;
+        own.fontHash = t->FontHash;
+        own.color    = gsPlainColor(t->Color);
+        own.scale    = 1.0f;
+        h = uirender_line_height(ui, &own);
+        if (h > 0.0f) {
+            own.scale = t->Object.ScaleY * sy;
+            st = own;
+        }
+    }
     uirender_draw_wrapped(ui, g_etvText.text, 0, &st, x * sx, y * sy, w * sx,
                           g_etvText.alpha > 1.0f ? 1.0f : g_etvText.alpha);
 }
@@ -5933,8 +5986,13 @@ static bool  g_blurbHad;
 
 // Every screen in FRONTB.BUN ships the same authoring placeholder in
 // SCROLLING_TEXT and a screen whose blurb has not been set yet still has
-// it. Drawing that would be drawing a note to the artist.
-static const char kBlurbPlaceholder[] = "This text will scroll sideways";
+// it. Drawing that would be drawing a note to the artist. The event tree's
+// blurb has its own, which shows again while the Ultimate's popup has the
+// blurb frozen (banim_blurb_freeze empties it).
+static const char* const kBlurbPlaceholders[] = {
+    "This text will scroll sideways",
+    "This is The Title of the Event",
+};
 
 // A screen registered to bgf_plain_screen_callback draws and answers the
 // D-pad and nothing else, and it has no blurb object, so the panel says
@@ -5964,9 +6022,11 @@ static void liveBlurb(Boot* b, char* out, size_t cap)
     if (idx < 0) return;
     s = uirender_object_string(b->ui, b->project, (uint32_t)idx, &len);
     if (!s || len == 0) return;
-    if (len >= sizeof kBlurbPlaceholder - 1
-        && memcmp(s, kBlurbPlaceholder, sizeof kBlurbPlaceholder - 1) == 0)
-        return;
+    for (size_t i = 0;
+         i < sizeof kBlurbPlaceholders / sizeof kBlurbPlaceholders[0]; i++) {
+        size_t n = strlen(kBlurbPlaceholders[i]);
+        if (len >= n && memcmp(s, kBlurbPlaceholders[i], n) == 0) return;
+    }
     // Not a C string: the language table hands back a pointer and a length,
     // and an inline placeholder can fill MaxChars with no terminator.
     if (len > cap - 1) len = cap - 1;

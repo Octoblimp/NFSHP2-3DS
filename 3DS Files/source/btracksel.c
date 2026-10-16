@@ -1051,6 +1051,17 @@ static SelectTrackScreen* screenNew(BScreenCallbackData* data)
     p->haveMover = 1;
     trace(h, "tracksel up, %d tracks, track %d", (int)p->mgr.count,
           (int)p->data[0]);
+    if (h->trace) {
+        // The locked ones, for the career's unlock checks (TASKS 69g).
+        char   line[160];
+        size_t n = (size_t)snprintf(line, sizeof line, "tracksel locked:");
+        for (i = 0; i < p->mgr.count && n < sizeof line - 8; i++)
+            if (p->mgr.tracks[i].vis == 2)
+                n += (size_t)snprintf(line + n, sizeof line - n, " %d%s",
+                                      (int)p->mgr.tracks[i].ti->TrackNumber,
+                                      p->mgr.tracks[i].dir ? "R" : "");
+        trace(h, "%s", line);
+    }
     return p;
 }
 

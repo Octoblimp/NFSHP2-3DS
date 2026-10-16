@@ -35,7 +35,8 @@
 #define DEBUGMENU_FILL_5      0xca37bd3eu   // "PORT_FILL_5"
 // The screen both are copied from: Be The Cop Setup.
 #define DEBUGMENU_SOURCE      0xd1eadbcau
-// Debug Menu's rows; Debug Race has all seven and scrolls.
+// Debug Menu's slots, its six rows scrolling in them; Debug Race has all
+// seven and scrolls too.
 #define DEBUGMENU_ROWS        5
 // The second screen's ChangeToScreen name (the first's is gameflow.h's
 // BGF_DEBUG_MENU_NAME).

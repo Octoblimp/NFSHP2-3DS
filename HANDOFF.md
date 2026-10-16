@@ -24733,16 +24733,44 @@ in Ultimate Racer, the save, back at the tree.
 - Best Total Times stays empty after a test finish: a total time is
   only recorded when every lap was completed (`highscore.c`).
 
+### 69g done (2026-10-17)
+
+All on Azahar with `tools/run_azahar_career.ps1 -Race`:
+
+- **Hot Pursuit's event 5, Be A Cop.** 3 arrests, Event 5 Passed, the
+  Pursuit Crown Victoria (14 of 49 cars), Pursuit Results, Quit, the
+  autosave, back at the tree. "TestFinish" in Be A Cop arrests each
+  racer through the game's own pullover (`raceTestFinish`).
+- **The unlocks.** Select Car's "Cars Unlocked: 12/49" = 7 open cars +
+  3 event cars + 2 points cars. Select Track logs "tracksel locked: ..."
+  with TestFinish on.
+- **The Ultimate (event 32).** Both trees share its state, as retail's
+  do, so winning it in one tree passes it in the other. The debug menu's
+  "Open the Ultimates" (`-OpenUltimates`) wins everything else and
+  leaves both open. The tree opens on retail's popup, which the script
+  now always closes with A when it shows. The duel was won: the Ferrari
+  360 Modena Challenge, the save, back at the tree. It was raced again
+  from Hot Pursuit's tree (Tickets in the results).
+- **Fixes:** the popup's text uses its own font and colour
+  (`etvDrawText`, `gsPlainColor`); the tree's placeholder is filtered
+  off the bottom screen (`kBlurbPlaceholders`); the translated-string
+  ring is now 512 bytes (`CARSEL_RING_LEN`); '@' breaks a line in
+  `wrap_next`.
+- **Found for the list:** the pause menu's Options, View Objective and
+  Cop Controls change to screens the port never registered ("Pause
+  Options", "Race Objective", "Pause BAC controls"). They are part of
+  verdict item 3 now. The reward text sends the player to the Credits
+  menu's View Reward Movie (`MOVIES\INTRO\REWARD_EN.AVI`, 31 MB, not on
+  the card yet).
+
 ### Next
 
-1. **69g:**
-   - the Ultimate event;
-   - the unlocks in Quick Race and Select Car;
-   - Hot Pursuit's Be A Cop events.
-2. **The verdict list's 3 to 6:**
-   - the four plain Options screens;
+1. **The verdict list's 3 to 6:**
+   - the plain Options screens: Credits (with its scrollers and
+     movies), Audio, Display, Controller, and the pause menu's Options,
+     Objective and Cop Controls;
    - Help (TASKS 48);
    - the "Memory Card (PS2)" text;
    - stereo 3D (TASKS 59).
-3. **Then the known bugs**, then the verdict again.
+2. **Then the known bugs**, then the verdict again.
 

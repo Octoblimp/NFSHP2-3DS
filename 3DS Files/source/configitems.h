@@ -170,7 +170,8 @@ int32_t config_skip_fe(void);
 // the event tree (TASKS 69f). Off by default (2026-10-16).
 // "TestFinishTime s" gives the player's car a lap of s seconds instead of
 // the time projected from how far it got, so a time trial's goal can be
-// met (2026-10-17).
+// met (2026-10-17). In Be A Cop each racer is arrested instead, and the
+// last arrest wins the race for the cop.
 extern int32_t ConfigTestFinish;            // 0
 extern int32_t ConfigTestFinishPlace;       // 1
 extern int32_t ConfigTestFinishTime;        // 0
