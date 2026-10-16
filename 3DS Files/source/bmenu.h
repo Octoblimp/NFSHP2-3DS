@@ -170,6 +170,13 @@ struct BMenu {
 bool bmenu_open(BMenu* m, BUI* ui, BUIScreen* screen,
                 BMenuCallback callback, void* user);
 
+// The port's: the items put in the order `rank` gives (lowest first; equal
+// ranks keep MENUITEM_n's order), for a screen whose rows the port lays out
+// in another order than their numbers (the main menu, debugmenu.h). The
+// moves follow the list, so up and down go by the order on screen. The
+// current item stays the same item.
+void bmenu_reorder(BMenu* m, int (*rank)(uint32_t itemHash));
+
 // FlailerScreen::Activate's tail: sends MENUITEM_ACTIVATE to every item,
 // selects `startItem` (an index into the list, clamped to the head), then
 // highlights the first enabled item at or after it.

@@ -759,7 +759,23 @@ static void menuCallback(BMenu* m, BScreenMessage msg,
     // an exit animation clears Param on PAD_UP/PAD_DOWN to freeze the
     // selection while the items slide away. A fresh block, which is what
     // this used to build, threw all of that away and forwarded SELECT only.
+    //
+    // The main menu's rows are the port's to lay out (debugmenu.h, TASKS
+    // 68): a row highlighted is scrolled into the window before the screen
+    // moves the brackets to its mask, and the window laid out again after,
+    // as SelectionSet has then shown the mask of the row left.
+    bool mainMenu = msg == BMSG_MENUITEM_HIGHLIGHT && data && g_flow.screen
+                    && g_flow.screen->hash == BGF_SCREEN_NEW_MAIN_MENU;
+    int  top      = mainMenu ? debugmenu_main_show(data->itemHash) : -1;
     if (data) bgf_send(&g_flow, msg, data);
+    if (mainMenu) {
+        static int shownTop = -1;
+        debugmenu_main_show(data->itemHash);
+        if (top >= 0 && top != shownTop) {
+            logLine("main menu: rows from %d", top);
+            shownTop = top;
+        }
+    }
 }
 
 // The screen viewer's menu. It browses every screen in every bundle,
@@ -1364,6 +1380,10 @@ static void hookOpenScreen(void* user, const BScreenConfig* cfg)
         b->menu.sound = fesound_play;      // MakeFrontendSound
         b->menu.filterPort = screenFilterPort(cfg->hash);
         b->hasMenu = true;
+        // The main menu in the port's order, Local Wireless above Options
+        // (debugmenu.h): the moves follow the rows as drawn.
+        if (cfg->hash == BGF_SCREEN_NEW_MAIN_MENU)
+            bmenu_reorder(&b->menu, debugmenu_main_rank);
     }
 }
 
@@ -7996,6 +8016,11 @@ int main(int argc, char** argv)
             // With no race the race's three stamps are the same tick.
             frameMark("flow");
             if (raceStep) bgf_frame(&g_flow, RealTimeElapsed);
+            // The main menu's rows where its window puts them, over the
+            // slide-in's groups (debugmenu.h).
+            if (g_flow.screen
+                && g_flow.screen->hash == BGF_SCREEN_NEW_MAIN_MENU)
+                debugmenu_main_tick();
             MainLoopTiming.ServiceGameFlow = bGetTicker();
             MainLoopTiming.MenuSystemTick = MainLoopTiming.ServiceGameFlow;
             MainLoopTiming.GenerateJoyEvents = MainLoopTiming.ServiceGameFlow;

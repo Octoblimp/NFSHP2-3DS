@@ -3,8 +3,8 @@
 The port's own debug menu. Retail's frontend has none. Its "Debug Menu"
 (INGAMEB d4742cd7, PauseDebugMenu) is a pause screen of in-race toggles,
 and the disc never reaches it. This one is the main menu's fifth item,
-"Debug Menu", under Local Wireless (TASKS 63, `docs/formats/lobby.md`).
-It stays hidden until one of two things shows it:
+"Debug Menu", the only one under Options (TASKS 68, "The main menu's
+order" below). It stays hidden until one of two things shows it:
 
 - L, R and D-Pad Up pressed together on the main menu (an Easter egg's
   sound plays);
@@ -26,25 +26,96 @@ changes, and bui reads the copy in its place.
 **The main menu.** NEW_MAIN_MENU gains six objects, two rows of three.
 Its bottom filler (the tallest BOTTOM_MASK, from y 228 at ScaleY 7.063,
 down to 341) is cut to a separator (ScaleY 0.625, 10 px) for good, and
-the two rows take the 113 px it covered. Each row is a row's step (55
-px) below the one above, as MENUITEM_2 to MENUITEM_3 and MI_2_MASK to
-MI_3_MASK are; each label a copy of MENUITEM_3 (Options) at
-MENUITEM_2's X, each mask a copy of MI_3_MASK, each filler a copy of the
-cut filler from under its mask down to where that filler ended:
+the two rows take the 113 px it covered. Each label is a copy of
+MENUITEM_3 (Options) at MENUITEM_2's X, each mask a copy of MI_3_MASK,
+each filler a copy of the cut filler from under its slot's mask down to
+where that filler ended. Then the rows are laid out in the port's order
+(below), which puts Local Wireless in Options' place and Options a row
+down:
 
 | Object | Name | Shown | What it is |
 |---|---|---|---|
-| Local Wireless | MENUITEM_4 | yes | y 236, LanguageID 2000000 |
-| Its mask | MI_4_MASK | yes | y 238 |
-| Its filler | `PORT_WIRELESS_FILL` | yes | y 283 to 341, ScaleY 3.625 |
+| Local Wireless | MENUITEM_4 | yes | y 181, LanguageID 2000000 |
+| Its mask | MI_4_MASK | yes | y 183 |
+| The fourth slot's filler | `PORT_FILL_4` | yes | y 283 to 341, ScaleY 3.625 |
 | The debug item | `PORT_DEBUG_ITEM` | no | y 291, "Debug Menu" |
 | Its mask | `PORT_DEBUG_MASK` | no | y 293 |
-| Its filler | `PORT_DEBUG_FILL` | no | y 338 to 341, ScaleY 0.1875 |
+| The fifth slot's filler | `PORT_FILL_5` | no | y 338 to 341, ScaleY 0.1875 |
+| Options (retail's) | MENUITEM_3 | yes | y 236, was 181 |
+| Its mask (retail's) | MI_3_MASK | yes | y 238, was 183 |
 
-`debugmenu_reveal` makes the last three visible. It also writes
-MENUITEM_5 and MI_5_MASK over the two hidden names, and cuts Local
-Wireless's filler to a separator above the item. The main menu is
-entered again afterwards, so its menu and SelectionSet find the item.
+`debugmenu_reveal` writes MENUITEM_5 and MI_5_MASK over the two hidden
+names, puts the row last in the order and lays the rows out again,
+which shows its three objects and cuts the fourth slot's filler to a
+separator above it. The main menu is entered again afterwards, so its
+menu and SelectionSet find the item.
+
+## The main menu's order
+
+The user, 2026-10-15: "Every option should be above "Options" except
+"Debug Menu"", and the menu should scroll "if there's too many items to
+fit at once" (TASKS 68). The rows are:
+
+| Row | Item | Mask |
+|---|---|---|
+| 1 | Hot Pursuit, MENUITEM_1 | MI_1_MASK |
+| 2 | World Racing, MENUITEM_2 | MI_2_MASK |
+| 3 | Local Wireless, MENUITEM_4 | MI_4_MASK |
+| 4 | Options, MENUITEM_3 | MI_3_MASK |
+| 5 | Debug Menu, MENUITEM_5, once shown | MI_5_MASK |
+
+A row the port adds later goes above Options too.
+
+The panel has five slots, 55 px apart: retail's three rows (labels at y
+71, 126 and 181, masks at 73, 128 and 183), then two more a row's step
+down. `debugmenu_patch.c` keeps the rows in that order and writes each
+row's label and mask Y to its slot's, in the buffer bui reads live; X
+stays the row's own, so Options keeps the two pixels it sits right of
+the rest in retail. main.c's `bmenu_reorder` (bmenu.h) sorts the
+screen's FlailerMenu by `debugmenu_main_rank`, so Up and Down go by the
+rows as drawn, and gameflow's saved item (an index) means the same row
+each time.
+
+With more rows than slots, a window of five follows the highlight:
+`debugmenu_main_show`, from main.c's menu callback on each highlight,
+moves it just far enough to hold the row, and lays the rows out again.
+Rows outside the window are hidden, label and mask. Under the slots in
+use, each filler is a separator but the last row's, which runs down to
+the panel's bottom (341); a slot not in use has none. Each slot's
+filler is its own object: retail's two thin separators under the first
+two, retail's cut filler under the third, `PORT_FILL_4` and
+`PORT_FILL_5` under the last two. With the looping moves, Down from the
+last row brings the window back to the top, and Up from the first takes
+it to the bottom.
+
+Three things on the screen move or read the rows and are kept in step:
+
+- The brackets (MI_OVERSCORE and MI_UNDERSCORE) move to the
+  highlighted row's mask in gameflow's OnHighlight. So the window moves
+  before the highlight reaches the screen.
+- SelectionSet (IndicatorMode 1) shows every mask but the highlighted
+  row's. It shows the mask of the row left after the window has moved,
+  and that row may be out of it now. So the rows are laid out again
+  after the screen has had the highlight, with every mask in the
+  window shown but the highlighted row's and the rest hidden.
+- The slide-in (tSlideInAnimation, ticked by gameflow's mainMenuTick)
+  moves each MENUITEM_n_GROUP to the Y its MI_n_MASK had when the
+  screen opened, and the screen's close puts each group back there.
+  The port's two rows are copies of Options' label and mask, group and
+  all, so they slide with Options, as the third row does in retail. Once
+  the window has moved, the groups' Ys are not the rows': the groups
+  would put World Racing over Local Wireless on the way back from
+  Options. So main.c lays the rows out again after each frame's tick
+  on the main menu (`debugmenu_main_tick`), and only X is the slide's.
+
+Five rows fit, so today the window never moves. The log says
+`main menu: rows from n` when the window's first row changes. A test
+build with the window cut to three rows, on Azahar (run_azahar_test):
+down three from Hot Pursuit, the window moved ("rows from 1") to World
+Racing, Local Wireless and Options, the brackets on Options; back from
+Options, the same three, the brackets where they were. Before the
+frame's layout, that return showed an empty first slot and World
+Racing over Local Wireless.
 
 **The two screens.** Both come after the last screen and are copies of
 Be The Cop Setup (d1eadbca). Each copy is renamed and titled, and its
@@ -135,9 +206,19 @@ car 4`.
 
 - `tools/debugmenu_check.py`: the patch against retail's FRONTB, byte
   for byte but what it changes (the six objects, each row and filler
-  where the rows above put it, and the cut filler), and the reveal,
-  which changes the debug row's three and Local Wireless's filler and
-  nothing else.
+  where its slot puts it, Options' label and mask a row down, and the
+  cut filler), and the reveal, which changes the debug row's three and
+  the fourth slot's filler and nothing else. Then the order (the rank
+  of MENUITEM_1 to 5) and the scroll: with 3, 4 and 5 slots, the
+  highlight down the rows twice round, up twice round and up once more,
+  each step's labels, masks and fillers against a model of the window,
+  and the window clamped when the slots grow. After each step a tick:
+  every label and mask moved down, as a group's saved Y leaves them,
+  then `debugmenu_main_tick`, which must give the step back. Eighteen
+  hand mutants of the layout and the tick, all caught.
+- `tools/bmenu_check.py`: `bmenu_reorder` on every FRONTB menu, by the
+  item's hash mod 3, against the Python model: the order kept for equal
+  ranks, the current item kept, the moves by the new order.
 - `tools/run_azahar_debugmenu.ps1`:
   - By default: the chord, the points, Set Save to 100%, B and B on
     the prompt, Debug Race's rows scrolled and wrapped, then Start

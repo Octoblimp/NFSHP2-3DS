@@ -6,9 +6,10 @@ screen (the user, 2026-10-13). Its multiplayer is local wireless, with
 up to eight New 3DS consoles (`docs/formats/wireless.md`). The lobby is
 where they find each other before car select.
 
-Since TASKS 63 the way in is the main menu's own fourth row, Local
-Wireless, under Options, and the host sets the race up after Host, not
-before. The user, 2026-10-14: a top-level entry "may be better", and
+Since TASKS 63 the way in is the main menu's own row, Local Wireless,
+and the host sets the race up after Host, not before. Since TASKS 68 it
+is the third row, above Options (`docs/formats/debug-menu.md`, "The
+main menu's order"). The user, 2026-10-14: a top-level entry "may be better", and
 setting up then picking Local Wireless "can confuse people". It used to
 be Players 2 on the Challenge, which also hid that a client's mode is the
 host's.

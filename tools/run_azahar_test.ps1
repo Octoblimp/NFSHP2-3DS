@@ -379,12 +379,15 @@ if ($booted) {
             Shot "copson-missing"
         }
 
-        # MENUITEM_3 is Options, two down from the top.
+        # MENUITEM_3 is Options, three down from the top, under Local
+        # Wireless (TASKS 68).
         [Hp2Cap]::PressKey($hwnd, $VK_G)
         Start-Sleep -Milliseconds 400
         [Hp2Cap]::PressKey($hwnd, $VK_G)
         Start-Sleep -Milliseconds 400
-        Shot "mainmenu-down2"
+        [Hp2Cap]::PressKey($hwnd, $VK_G)
+        Start-Sleep -Milliseconds 400
+        Shot "mainmenu-down3"
         [Hp2Cap]::PressKey($hwnd, $VK_A)      # A, select
         if (Wait-ForLog "flow enter Options" 10) {
             Start-Sleep -Milliseconds 1200

@@ -3659,6 +3659,34 @@ phases.
         - Compare with retail: the user's PCSX2 photos of the retail
           frontend (2026-09-28) and `carsel_check`.
 
+68. [x] **The main menu's order, and scrolling.** Asked for on
+        2026-10-15: "I also want scrolling up and down implemented on
+        the main menu if there's too many items to fit at once. Every
+        option should be above "Options" except "Debug Menu" so "Local
+        Wireless" should be above "Options" not below it".
+        - The order: Hot Pursuit, World Racing, Local Wireless, Options,
+          then Debug Menu once shown, the only row under Options. A row
+          the port adds later goes above Options too.
+        - The panel holds five rows (55 px apart, the 45 px masks and
+          10 px separators). Past that the rows scroll: the highlight
+          moving off the last row shown brings the next one up, and
+          likewise at the top.
+        - Done before the rest of TASKS 37, then TASKS 67, then career
+          (the user's order of the same day).
+        - [x] Done in Session 112 (`docs/formats/debug-menu.md`, "The
+          main menu's order"). `debugmenu_patch.c` keeps the rows in
+          that order and writes each one's label and mask to its slot;
+          `bmenu_reorder` sorts the menu the same way, so Up and Down
+          go by the rows drawn. A window of five rows follows the
+          highlight (`debugmenu_main_show`), and the rows are laid out
+          again after each frame's tick, over the slide-in's groups
+          (`debugmenu_main_tick`). debugmenu_check (the scroll with 3,
+          4 and 5 rows, and a tick after each step; 18 of 18 hand
+          mutants) and bmenu_check (the reorder, 0 differ) pass. On
+          Azahar: the order, Debug Menu under Options, and, in a test
+          build cut to three rows, the window moving down to Options
+          and the same three back from Options.
+
 ### The retail frontend
 
 Asked for on 2026-09-28. The user sent seven PCSX2 photos of the retail

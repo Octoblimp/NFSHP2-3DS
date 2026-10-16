@@ -303,6 +303,26 @@ def run(out, screen, first):
     for it in m.items:
         out.append("reopen %d %08x" % (it["id"], m.colors[it["obj"]]))
 
+    # The port's bmenu_reorder, on the menu made again: a stable sort by
+    # the item's hash mod 3, the current item kept.
+    again = Menu(out, screen, first)
+    for it in again.items:
+        again.colors[it["obj"]] = m.colors[it["obj"]]
+        it["saved"] = m.colors[it["obj"]]
+    if len(again.items) > 1:
+        again.current = 1
+        cur = again.items[1]["hash"]
+        again.items.sort(key=lambda it: it["hash"] % 3)
+        again.current = [it["hash"] for it in again.items].index(cur)
+        again.dump("reorder")
+        again.activate(0)
+        again.dump("reorderactivate")
+        again.joy(0, SCROLL_DOWN, True)
+        again.dump("reorderdown")
+        again.joy(0, SCROLL_UP, True)
+        again.joy(0, SCROLL_UP, True)
+        again.dump("reorderup")
+
 
 def py_lines(path):
     data = Path(path).read_bytes()

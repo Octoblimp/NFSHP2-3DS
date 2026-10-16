@@ -1,6 +1,6 @@
 # Runs the Local Wireless lobby (TASKS 37b, lobby.h) between 2 to 8 Azahar
 # instances in a room of their own. Each boots the game to the main menu
-# and selects Local Wireless, its fourth row (TASKS 63). A hosts: World
+# and selects Local Wireless, its third row (TASKS 63, 68). A hosts: World
 # Racing on the mode question (Hot Pursuit with -CopsOn), then the
 # Challenge, its Players reading Local Wireless, selected as it stands,
 # back to the lobby. The rest search, find A's race and join it, and A
@@ -607,10 +607,9 @@ $boot = @(
     Step "title" @{ Pattern = "flow vis object b5761d00 b070dbc9 1"; Wait = 15; Optional = $true; Settle = 900 }
     Step "main menu" @{ Key = $VK_START; Pattern = "flow enter New Main Menu [0-9a-f]{8}"; Tries = 2 }
     Step "main menu up" @{ Pattern = "screen New Main Menu [0-9a-f]{8} .* last HIGHLIGHT"; Optional = $true; Settle = 1000 }
-    # Local Wireless, the fourth row: down past World Racing and Options,
-    # each move seen in its brackets (MI_2_MASK, MI_3_MASK, MI_4_MASK).
+    # Local Wireless, the third row, above Options (TASKS 68): down past
+    # World Racing, each move seen in its brackets (MI_2_MASK, MI_4_MASK).
     Step "to world racing" @{ Key = $VK_DOWN; Pattern = "flow bracket 708a0bf1"; Tries = 2 }
-    Step "to options" @{ Key = $VK_DOWN; Pattern = "flow bracket 72df3492"; Tries = 2 }
     Step "to wireless" @{ Key = $VK_DOWN; Pattern = "flow bracket 75345d33"; Tries = 2; Settle = 1000;
                          Shot = "main-menu" }
     Step "lobby" @{ Key = $VK_A; Pattern = "lobby: ask"; Wait = 30; Settle = 1000; Shot = "ask" }

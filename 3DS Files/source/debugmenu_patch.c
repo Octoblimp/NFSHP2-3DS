@@ -12,6 +12,10 @@
 // in the chunk is a multiple of 4, so a malloc'd buffer keeps every
 // payload 4-aligned.
 //
+// The main menu's rows are then laid out in the port's order (TASKS 68):
+// only their Ys and visibility change, in the buffer the patch returned,
+// which bui reads live. The panel holds five rows; past that they scroll.
+//
 // Free of <3ds.h>, like bui.c, for tools/debugmenu_check.py.
 
 #include "debugmenu.h"
@@ -42,6 +46,7 @@
 // NEW_MAIN_MENU's objects the new rows are made from (gameflow.h).
 #define MAIN_MENU       0xae0f8aa1u
 #define MENUITEM(n)     (0x52e039f2u + (uint32_t)(n))
+#define MI_1_MASK       0x6e34e350u
 #define MI_2_MASK       0x708a0bf1u
 #define MI_3_MASK       0x72df3492u
 #define MI_4_MASK       0x75345d33u
@@ -56,10 +61,19 @@
 // is the row's 45 pixels, and the two thin BOTTOM_MASKs' 0.625 the 10
 // between rows. The third BOTTOM_MASK, at 7.063, fills the panel below
 // Options: 113 pixels, room for two more rows and their separators. It
-// becomes the separator above Local Wireless, and Local Wireless's own
-// filler the one above the debug menu's row once that is shown.
+// becomes the separator under the third row, and the fillers the port
+// adds under the fourth and fifth each the separator under its row or,
+// under the last row shown, the panel down to where the third ended.
 #define MASK_UNIT       16.0f
 #define SEPARATOR_SCALE 0.625f
+
+// The main menu's order (TASKS 68, the user's ask of 2026-10-15): every
+// row above Options but the debug menu's, which is the only one under it.
+// Hot Pursuit, World Racing, Local Wireless, Options, then Debug Menu once
+// shown. MAIN_SLOTS rows fit the panel, a row's step (55 px) apart; with
+// more, the window of rows shown follows the highlight.
+#define MAIN_SLOTS      5
+#define MAIN_ROWS       5
 
 // What the debug screens leave out of Be The Cop Setup: its eighth row
 // (label, value, mask), the two blooms' spare texts, and the scroll clip.
@@ -94,6 +108,27 @@ typedef struct {
 static uint8_t* sBuf;
 static Row      sWireless, sDebug;
 static int      sRevealed;
+
+// A main menu row in the port's order: its MENUITEM_n, and its label's and
+// mask's payloads in sBuf.
+typedef struct {
+    uint32_t item;
+    size_t   label, mask;
+} MainRow;
+
+static MainRow sRows[MAIN_ROWS];
+static int     sNumRows;
+// Each slot's label and mask Y: retail's three rows, then a row's step at
+// a time below Options' (put_row's). The filler under each slot's mask
+// that the layout sets, 0 under the first two (retail's thin separators,
+// left as they are). Where retail's filler ended.
+static float   sLabelY[MAIN_SLOTS], sMaskY[MAIN_SLOTS];
+static size_t  sFill[MAIN_SLOTS];
+static float   sBottom;
+// The slots in use (MAIN_SLOTS but in tools/debugmenu_check.py), the
+// first row shown, and the highlighted row, whose mask SelectionSet's
+// IndicatorMode 1 keeps off; -1 for none.
+static int     sSlots = MAIN_SLOTS, sTop, sCurrent = -1;
 
 static uint32_t rd32(const uint8_t* p)
 {
@@ -238,10 +273,10 @@ static const uint8_t* find_object(const uint8_t* payload, uint32_t size,
     return best;
 }
 
-// What the new rows are copied from: the last two of retail's three, and
-// the filler under them.
+// Retail's three rows, the last two of which the new rows are copied from,
+// and the filler under them.
 typedef struct {
-    const uint8_t *item2, *item3, *mask2, *mask3, *fill;
+    const uint8_t *item1, *item2, *item3, *mask1, *mask2, *mask3, *fill;
     uint32_t       s3, sm3, sf;
 } MenuParts;
 
@@ -287,21 +322,29 @@ static int put_row(Out* o, const MenuParts* m, int row, Row* r,
 
 // NEW_MAIN_MENU as it is, but for its bottom filler cut to a separator,
 // then six objects after its own, and its NumObjects up by six: Local
-// Wireless's row, shown, and the debug menu's under it, hidden.
+// Wireless's row, shown, and the debug menu's under it, hidden. The
+// fourth and fifth slots' rows and fillers, which the layout then moves:
+// Local Wireless goes up into the third slot, Options down into the
+// fourth. Retail's rows kept in sRows, and the slots.
 static int put_main_menu(Out* o, const uint8_t* payload, uint32_t size)
 {
     MenuParts  m;
     uint32_t   s2 = 0, sm2 = 0;
-    size_t     hdr, def = 0, filler = 0;
+    size_t     hdr, def = 0, filler = 0, label[3] = {0}, mask[3] = {0};
     BChunkIter it;
+    int        i;
 
     memset(&m, 0, sizeof m);
+    m.item1 = find_object(payload, size, MENUITEM(1), 0, NULL);
     m.item2 = find_object(payload, size, MENUITEM(2), 0, &s2);
     m.item3 = find_object(payload, size, MENUITEM(3), 0, &m.s3);
+    m.mask1 = find_object(payload, size, MI_1_MASK, 0, NULL);
     m.mask2 = find_object(payload, size, MI_2_MASK, 0, &sm2);
     m.mask3 = find_object(payload, size, MI_3_MASK, 0, &m.sm3);
     m.fill  = find_object(payload, size, BOTTOM_MASK, 1, &m.sf);
-    if (!m.item2 || !m.item3 || !m.mask2 || !m.mask3 || !m.fill) return 0;
+    if (!m.item1 || !m.item2 || !m.item3 || !m.mask1 || !m.mask2
+        || !m.mask3 || !m.fill)
+        return 0;
 
     hdr = open_chunk(o, BUI_CHUNK_SCREEN);
     bchunk_begin(&it, payload, 0, size);
@@ -309,6 +352,12 @@ static int put_main_menu(Out* o, const uint8_t* payload, uint32_t size)
         size_t at = put_chunk(o, it.type, it.payload, it.size);
         if (it.type == BUI_CHUNK_SCREENDEF) def = at;
         if (it.payload == m.fill) filler = at;
+        if (it.payload == m.item1) label[0] = at;
+        if (it.payload == m.item2) label[1] = at;
+        if (it.payload == m.item3) label[2] = at;
+        if (it.payload == m.mask1) mask[0] = at;
+        if (it.payload == m.mask2) mask[1] = at;
+        if (it.payload == m.mask3) mask[2] = at;
     }
     if (o->failed || !def || !filler) return 0;
     o->p[def + SCREEN_NUM_OBJS] += 6;     // 31 on disc, so no carry
@@ -317,8 +366,7 @@ static int put_main_menu(Out* o, const uint8_t* payload, uint32_t size)
     // Local Wireless (TASKS 63): its LanguageID the port's (portlang.h),
     // the inline string the same in English.
     if (!put_row(o, &m, 1, &sWireless, BGF_ITEM_MENUITEM_4, "MENUITEM_4",
-                 MI_4_MASK, "MI_4_MASK", DEBUGMENU_WIRELESS_FILL,
-                 "PORT_WIRELESS_FILL", 1))
+                 MI_4_MASK, "MI_4_MASK", DEBUGMENU_FILL_4, "PORT_FILL_4", 1))
         return 0;
     set_string(o, sWireless.item, "Local Wireless");
     wr32(o->p + sWireless.item + TEXT_LANGUAGE, PORTLANG_LOCAL_WIRELESS);
@@ -326,13 +374,76 @@ static int put_main_menu(Out* o, const uint8_t* payload, uint32_t size)
     // The debug menu, under names the menu does not look for until it is
     // shown.
     if (!put_row(o, &m, 2, &sDebug, DEBUGMENU_ITEM_HIDDEN, "MENUITEM_5",
-                 DEBUGMENU_MASK_HIDDEN, "MI_5_MASK", DEBUGMENU_FILL,
-                 "PORT_DEBUG_FILL", 0))
+                 DEBUGMENU_MASK_HIDDEN, "MI_5_MASK", DEBUGMENU_FILL_5,
+                 "PORT_FILL_5", 0))
         return 0;
     set_string(o, sDebug.item, "Debug Menu");
-
     close_chunk(o, hdr);
-    return !o->failed;
+    if (o->failed) return 0;
+
+    // The slots: retail's three rows, then the two put_row put below them.
+    for (i = 0; i < 3; i++) {
+        sLabelY[i] = rdf(o->p + label[i] + OBJ_Y);
+        sMaskY[i]  = rdf(o->p + mask[i] + OBJ_Y);
+    }
+    sLabelY[3] = rdf(o->p + sWireless.item + OBJ_Y);
+    sMaskY[3]  = rdf(o->p + sWireless.mask + OBJ_Y);
+    sLabelY[4] = rdf(o->p + sDebug.item + OBJ_Y);
+    sMaskY[4]  = rdf(o->p + sDebug.mask + OBJ_Y);
+    sFill[2]   = filler;
+    sFill[3]   = sWireless.fill;
+    sFill[4]   = sDebug.fill;
+    sBottom    = rdf(m.fill + OBJ_Y) + rdf(m.fill + OBJ_SCALE_Y) * MASK_UNIT;
+
+    sRows[0] = (MainRow){MENUITEM(1), label[0], mask[0]};
+    sRows[1] = (MainRow){MENUITEM(2), label[1], mask[1]};
+    sRows[2] = (MainRow){BGF_ITEM_MENUITEM_4, sWireless.item, sWireless.mask};
+    sRows[3] = (MainRow){MENUITEM(3), label[2], mask[2]};
+    sNumRows = 4;
+    return 1;
+}
+
+// The rows from sTop in the slots, the rest hidden, label and mask: a
+// row's label and mask Y are its slot's, its X its own (Options' stays two
+// pixels right of the rest, as retail has it). The masks shown but the
+// highlighted row's. Under the slots in use, each filler a separator but
+// the last row's, which runs down to the panel's bottom; none under a slot
+// not in use.
+static void layout(void)
+{
+    int n = sNumRows < sSlots ? sNumRows : sSlots;
+    int i;
+
+    if (!sBuf || !sNumRows) return;
+    if (sTop > sNumRows - n) sTop = sNumRows - n;
+    if (sTop < 0) sTop = 0;
+    for (i = 0; i < sNumRows; i++) {
+        const MainRow* r    = &sRows[i];
+        int            slot = i - sTop;
+        int            in   = slot >= 0 && slot < n;
+        if (in) {
+            wrf(sBuf + r->label + OBJ_Y, sLabelY[slot]);
+            wrf(sBuf + r->mask + OBJ_Y, sMaskY[slot]);
+        }
+        sBuf[r->label + OBJ_VISIBILITY] = (uint8_t)in;
+        sBuf[r->mask + OBJ_VISIBILITY]  = (uint8_t)(in && i != sCurrent);
+    }
+    for (i = 0; i < MAIN_SLOTS; i++) {
+        size_t fill = sFill[i];
+        if (!fill) continue;
+        sBuf[fill + OBJ_VISIBILITY] = (uint8_t)(i < n);
+        wrf(sBuf + fill + OBJ_SCALE_Y,
+            i < n - 1 ? SEPARATOR_SCALE
+                      : (sBottom - rdf(sBuf + fill + OBJ_Y)) / MASK_UNIT);
+    }
+}
+
+static int main_row(uint32_t itemHash)
+{
+    int i;
+    for (i = 0; i < sNumRows; i++)
+        if (sRows[i].item == itemHash) return i;
+    return -1;
 }
 
 static int left_out(uint32_t hash, int rows)
@@ -403,7 +514,12 @@ uint8_t* debugmenu_patch_frontend(const uint8_t* data, size_t len,
     memset(&o, 0, sizeof o);
     memset(&sWireless, 0, sizeof sWireless);
     memset(&sDebug, 0, sizeof sDebug);
+    memset(sFill, 0, sizeof sFill);
+    sBuf      = NULL;
     sRevealed = 0;
+    sNumRows  = 0;
+    sTop      = 0;
+    sCurrent  = -1;
     flailer = bchunk_find(data, 0, len, BUI_CHUNK_FLAILER, &size);
     if (!flailer) return NULL;
 
@@ -440,27 +556,59 @@ uint8_t* debugmenu_patch_frontend(const uint8_t* data, size_t len,
         free(o.p);
         memset(&sWireless, 0, sizeof sWireless);
         memset(&sDebug, 0, sizeof sDebug);
+        sNumRows = 0;
         return NULL;
     }
     sBuf = o.p;
+    layout();
     if (outLen) *outLen = o.len;
     return o.p;
 }
 
 int debugmenu_reveal(void)
 {
-    if (!sBuf || !sDebug.item || sRevealed) return 0;
+    if (!sBuf || !sDebug.item || sRevealed || sNumRows == MAIN_ROWS)
+        return 0;
     wr32(sBuf + sDebug.item + OBJ_NAME_HASH, BGF_ITEM_MENUITEM_5);
     wr32(sBuf + sDebug.mask + OBJ_NAME_HASH, MI_5_MASK);
-    sBuf[sDebug.item + OBJ_VISIBILITY] = 1;
-    sBuf[sDebug.mask + OBJ_VISIBILITY] = 1;
-    sBuf[sDebug.fill + OBJ_VISIBILITY] = 1;
-    wrf(sBuf + sWireless.fill + OBJ_SCALE_Y, SEPARATOR_SCALE);
+    sRows[sNumRows++] = (MainRow){BGF_ITEM_MENUITEM_5, sDebug.item,
+                                  sDebug.mask};
     sRevealed = 1;
+    layout();
     return 1;
 }
 
 int debugmenu_revealed(void)
 {
     return sRevealed;
+}
+
+int debugmenu_main_rank(uint32_t itemHash)
+{
+    int i = main_row(itemHash);
+    return i < 0 ? MAIN_ROWS : i;
+}
+
+int debugmenu_main_show(uint32_t itemHash)
+{
+    int i = main_row(itemHash);
+    int n = sNumRows < sSlots ? sNumRows : sSlots;
+
+    if (!sBuf || i < 0) return -1;
+    if (i < sTop) sTop = i;
+    else if (i >= sTop + n) sTop = i - n + 1;
+    sCurrent = i;
+    layout();
+    return sTop;
+}
+
+void debugmenu_main_tick(void)
+{
+    layout();
+}
+
+void debugmenu_main_set_slots(int slots)
+{
+    sSlots = slots < 3 ? 3 : slots > MAIN_SLOTS ? MAIN_SLOTS : slots;
+    layout();
 }

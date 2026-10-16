@@ -10,6 +10,10 @@
 //     step <label> <current> <id:state:color> ...
 //     reopen <itemID> <savedColor>     (a second menu, after bmenu_close)
 //
+// and then the port's bmenu_reorder on that second menu: the items by
+// MENUITEM_n's hash mod 3 (ties, to show the order kept), the current item
+// kept, then activated and moved down by the new order.
+//
 // tools/bmenu_check.py prints the same from an independent Python model
 // built on tools/flailer_dump.py and diffs the two. The point is the same
 // as for the other modules: two implementations written from the same
@@ -66,6 +70,11 @@ static void dump(BMenu* m, const char* label)
         printf(" %d:%u:%08x", m->items[i].itemID, m->items[i].state, colour);
     }
     putchar('\n');
+}
+
+static int rank_mod3(uint32_t itemHash)
+{
+    return (int)(itemHash % 3u);
 }
 
 static void run(BUI* ui, BUIScreen* screen)
@@ -146,6 +155,18 @@ static void run(BUI* ui, BUIScreen* screen)
         for (int i = 0; i < again.numItems; i++)
             printf("reopen %d %08x\n", again.items[i].itemID,
                    again.items[i].savedColor);
+    if (again.numItems > 1) {
+        again.current = 1;
+        bmenu_reorder(&again, rank_mod3);
+        dump(&again, "reorder");
+        bmenu_activate(&again, 0);
+        dump(&again, "reorderactivate");
+        bmenu_joy(&again, 0, BJOY_SCROLL_DOWN, true);
+        dump(&again, "reorderdown");
+        bmenu_joy(&again, 0, BJOY_SCROLL_UP, true);
+        bmenu_joy(&again, 0, BJOY_SCROLL_UP, true);
+        dump(&again, "reorderup");
+    }
 }
 
 int main(int argc, char** argv)

@@ -24340,3 +24340,83 @@ Still to ask the user:
 - Whether 37g-2 (out of range and back) and 37g-3 (a console restarted)
   work on real 3DSes.
 - Where TASKS 67 (Select Car's icons) goes in the order.
+
+## Session 112, continued -- TASKS 68: the main menu's order, and scrolling
+
+The user, 2026-10-15: "Task 67 is next after task 37, followed by
+getting career fully up and running. I also want scrolling up and down
+implemented on the main menu if there's too many items to fit at once.
+Every option should be above "Options" except "Debug Menu" so "Local
+Wireless" should be above "Options" not below it". The menu came
+first, as TASKS 68.
+
+**The order.** Hot Pursuit, World Racing, Local Wireless, Options, then
+Debug Menu once shown. `debugmenu_patch.c` still adds the two rows in
+the fourth and fifth slots (the copies of Options' label and mask, and
+the fillers renamed `PORT_FILL_4` and `PORT_FILL_5`), then keeps the
+rows in a table in the order and writes each row's label and mask Y to
+its slot's (labels 71 to 291, masks 73 to 293, 55 px apart). X stays
+each row's own. The reveal adds the debug row last. main.c's
+`hookOpenScreen` sorts the main menu's FlailerMenu by
+`debugmenu_main_rank` with the new `bmenu_reorder` (a stable sort that
+keeps the current item), so Up and Down go by the rows drawn, and
+gameflow's saved item (an index) means the same row each time.
+
+**The scroll.** A window of `sSlots` rows (5) follows the highlight:
+main.c's menu callback calls `debugmenu_main_show` before the screen
+has the highlight (the brackets read the mask's place) and again after
+(SelectionSet has just shown the old row's mask, which may be out of
+the window). Rows out of the window are hidden. Under the slots in use
+each filler is a separator but the last, which runs to the panel's
+bottom. With five rows the window never moves, so it was checked two
+ways:
+
+- debugmenu_check: with 3, 4 and 5 rows held, the highlight down the
+  rows twice round, up twice round and up once more, each step's
+  labels, masks and fillers against a model of the window.
+- A test build with the window cut to three rows, on Azahar. Down
+  three moved it ("main menu: rows from 1") to World Racing, Local
+  Wireless and Options, with the brackets on Options. Not committed;
+  the CIA is the five-row build.
+
+**The slide-in.** Back from Options in that test build, the first slot
+was empty and World Racing lay over Local Wireless. The main menu's
+tSlideInAnimation moves each MENUITEM_n_GROUP to the Y its mask had
+when the screen opened. Then the screen's close (~AnimationGroup) puts
+each group back there. The port's two rows are in MENUITEM_3_GROUP
+(copies of Options', group and all), so they slide with Options, as
+retail's third row does. Once the window has moved, the groups' Ys are
+not the rows'. Fixed by laying the rows out again after each frame's
+tick on the main menu (`debugmenu_main_tick`, from main.c after
+`bgf_frame`). The slide still owns X. The harness now follows each step
+with a tick: every label and mask moved down, then the tick, which must
+give the step back. A tick that does nothing is caught, 18 of 18 hand
+mutants in all. On Azahar again, the return from Options showed the
+same three rows with the brackets on Options.
+
+**Checked:**
+
+- debugmenu_check: ok.
+- bmenu_check: the reorder on every FRONTB menu, 0 differ.
+- run_azahar_debugmenu: PASS, Debug Menu under Options.
+- run_azahar_test on the five-row build: PASS. Down three is Options,
+  and back from Options the four rows are as they were.
+- The scripts that walk the main menu go by the new order
+  (run_azahar_lobby, run_azahar_nameentry, run_azahar_test).
+
+### Next
+
+37f-2's open difference (frame 1809, the rejoined copy's frame 450 and
+the host's 917 against B's first run), then 37d-2, then TASKS 67
+(Select Car's icons off their boxes), then career fully working, then
+TASKS 61, 46, 60 and 59.
+
+Still to ask the user:
+
+- TASKS 64: the road's blink.
+- TASKS 47: the bridge.
+- TASKS 52: the popups.
+- TASKS 65: the device log's `sends:` line.
+- How the `-fno-strict-aliasing` build plays on the device.
+- Whether 37g-2 (out of range and back) and 37g-3 (a console restarted)
+  work on real 3DSes.

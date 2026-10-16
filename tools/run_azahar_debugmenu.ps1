@@ -255,7 +255,7 @@ if ($booted) {
         Shot "mainmenu"
         if ($Cop) {
             # The config showed the item at boot: down four to it, the
-            # fifth, under Local Wireless (TASKS 63).
+            # fifth, under Options (TASKS 68).
             for ($i = 0; $i -lt 4; $i++) { Press $VK_G }
             $shown = $true
             Shot "fifth-item"

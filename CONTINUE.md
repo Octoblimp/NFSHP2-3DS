@@ -110,6 +110,16 @@ on the 15.5 FPS of an earlier run: that was the fire on track 11, and
 TASKS 46 must reach a steady 30 there and in every place like it.
 Next: TASKS 37 (multi-card multiplayer).**
 
+**Now (Session 112, continued, 2026-10-15): TASKS 68 is done. The
+main menu reads Hot Pursuit, World Racing, Local Wireless, Options, and
+Debug Menu, once shown, is the only row under Options. Past five rows
+the menu scrolls, a window that follows the highlight
+(`docs/formats/debug-menu.md`, "The main menu's order"). The user's
+order of 2026-10-15: the rest of TASKS 37 (37f-2's open difference,
+then 37d-2), then TASKS 67 (Select Car's icons off their boxes), then
+career fully working, then TASKS 61, 46, 60 and 59. See HANDOFF.md's
+"Session 112, continued -- TASKS 68".**
+
 **Now (Session 112, continued, 2026-10-15): 37g-3 is done (2d84039,
 b8bace6), and with it 37g. A console closed or switched off mid-race
 comes back through Local Wireless, Join. The racing host lets it back

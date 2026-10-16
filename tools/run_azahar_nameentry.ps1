@@ -329,7 +329,8 @@ if ($booted) {
 
     if (Wait-ForLog "flow enter New Main Menu" 12) {
         Start-Sleep -Milliseconds 2000
-        Press $VK_G                           # Cops On
+        Press $VK_G                           # World Racing
+        Press $VK_G                           # Local Wireless
         Press $VK_G                           # Options
         Press $VK_A 300
         if (Wait-ForLog "flow enter Options" 10) {

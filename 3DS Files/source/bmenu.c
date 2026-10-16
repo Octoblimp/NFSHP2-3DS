@@ -59,6 +59,29 @@ bool bmenu_open(BMenu* m, BUI* ui, BUIScreen* screen,
     return true;
 }
 
+void bmenu_reorder(BMenu* m, int (*rank)(uint32_t itemHash))
+{
+    uint32_t cur;
+
+    if (!m || !rank || m->numItems < 2) return;
+    cur = m->current >= 0 ? m->items[m->current].itemHash : 0;
+    // An insertion sort: a handful of items, and it keeps equal ranks in
+    // the order they came.
+    for (int i = 1; i < m->numItems; i++) {
+        BMenuItem it = m->items[i];
+        int       r  = rank(it.itemHash);
+        int       j  = i;
+        while (j > 0 && rank(m->items[j - 1].itemHash) > r) {
+            m->items[j] = m->items[j - 1];
+            j--;
+        }
+        m->items[j] = it;
+    }
+    if (m->current >= 0)
+        for (int i = 0; i < m->numItems; i++)
+            if (m->items[i].itemHash == cur) m->current = i;
+}
+
 static void send(BMenu* m, BScreenMessage msg, BScreenCallbackData* data,
                  bool playSound)
 {
