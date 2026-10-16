@@ -519,8 +519,8 @@ static const BOptionItem kOptionItems[7] = {
     { 100026, "Language Options",   true,  false },  // 7 Languages
 };
 
-// OptionsScreenBase (0x001e53d0) then tOptionsScreen (0x001e09d0).
-static void optionsConstruct(BScreens* s, BScreenInstance* inst,
+// OptionsScreenBase (0x001e53d0).
+static void optbaseConstruct(BScreens* s, BScreenInstance* inst,
                              uint32_t screen)
 {
     memset(inst, 0, sizeof(*inst));
@@ -537,6 +537,13 @@ static void optionsConstruct(BScreens* s, BScreenInstance* inst,
                          BSCR_OBJ_BLOOM_TEXT_2, -1);
     inst->hasBloom2 = true;
     HOOK(s, startMovie, "MOVIES\\options_movie_new.AVI");
+}
+
+// OptionsScreenBase then tOptionsScreen (0x001e09d0).
+static void optionsConstruct(BScreens* s, BScreenInstance* inst,
+                             uint32_t screen)
+{
+    optbaseConstruct(s, inst, screen);
     trace(s, "Options ctor %08x", (unsigned)screen);
 
     // The one rule in the derived constructor: on NTSC there is no language
@@ -653,6 +660,52 @@ static void optionsFirstCrack(BScreens* s, BScreenInstance* inst,
         return;
     }
     optionsHandleEvent(s, inst, msg, data);
+}
+
+// ------------------------------------------- OptionsScreenBase, exported
+
+BAnim* bscr_anim(void)
+{
+    return g_screens ? clock(g_screens) : NULL;
+}
+
+void bscr_optbase_construct(BScreenInstance* inst, uint32_t screen)
+{
+    if (g_screens) optbaseConstruct(g_screens, inst, screen);
+}
+
+void bscr_optbase_destruct(BScreenInstance* inst)
+{
+    if (!g_screens || !inst->live) return;
+    kitDestruct(g_screens, inst);
+    memset(inst, 0, sizeof(*inst));
+}
+
+void bscr_optbase_highlight(BScreenInstance* inst, BScreenCallbackData* data,
+                            uint32_t mask)
+{
+    if (g_screens) optionsHandleHighlight(g_screens, inst, data, mask);
+}
+
+int bscr_optbase_first_crack(BScreenInstance* inst, BScreenMessage msg,
+                             BScreenCallbackData* data)
+{
+    BScreens* s = g_screens;
+
+    if (!s) return 0;
+    if (msg == BMSG_MENUITEM_HIGHLIGHT) {
+        optionsHandleHighlight(s, inst, data, 0);
+    } else if (msg == BMSG_SCREEN_TICK) {
+        kitTick(s, inst);
+    }
+    if (!inst->exitActive) return 0;
+    exitHandleMessages(s, inst, msg, data);
+    return 1;
+}
+
+void bscr_optbase_exit(BScreenInstance* inst, const char* name)
+{
+    if (g_screens) exitStart(g_screens, inst, name);
 }
 
 // tOptionsScreen::Callback (0x001e0d18) into OptionsScreenBase::BaseCallback

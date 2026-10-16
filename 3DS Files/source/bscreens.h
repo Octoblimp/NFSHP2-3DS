@@ -244,3 +244,31 @@ void bscr_options_callback(BGameFlow* gf, BScreenMessage msg,
 #define BSCR_JOY_SELECT_TRANSMISSION 23
 void bscr_joy(BScreens* s, int port, int joyEvent, int pressed);
 
+// OptionsScreenBase (0x001f4c98 in retail) for the Options pages ported in
+// files of their own, Audio Options and JukeBox Music (audiooptions.c).
+// Each keeps its own BScreenInstance; all of them run on the module's
+// instance that bscr_init installed, and do nothing without one.
+//
+// The clock, synced to the flow's RealTimer, for the kit's calls the page
+// makes itself (its blurb's NewText and Animate).
+BAnim* bscr_anim(void);
+// The constructor: the slide-in, both blooms, the SelectionSet over
+// MI_1_MASK .. MI_8_MASK, the blurb on SCROLLING_TEXT, and the menus' movie.
+void bscr_optbase_construct(BScreenInstance* inst, uint32_t screen);
+void bscr_optbase_destruct(BScreenInstance* inst);
+// HandleHighlight (0x001f4e68): the bloom on the item, then the brackets and
+// the SelectionSet on `mask`. A mask of 0 is MI_n_MASK by the item's number
+// (MENUITEM_1..7), as FirstCrackAtMessage passes it.
+void bscr_optbase_highlight(BScreenInstance* inst, BScreenCallbackData* data,
+                            uint32_t mask);
+// FirstCrackAtMessage (0x001f4f88) up to the derived HandleEvent: the
+// highlight and the tick, then the exit animation if one is running.
+// Returns 1 when the exit animation had the message; the derived
+// HandleEvent must not run then, and the page may have been torn down.
+int  bscr_optbase_first_crack(BScreenInstance* inst, BScreenMessage msg,
+                              BScreenCallbackData* data);
+// tExitScreenAnimation(screen, name, 1) at +92, the brackets' group added:
+// the page slides out and `name` comes up with this page pushed. `name`
+// is kept, not copied.
+void bscr_optbase_exit(BScreenInstance* inst, const char* name);
+

@@ -62,10 +62,18 @@ at most `0x7fff` and the table at most 16383, neither side can exceed `0x7ffe`.
 `pan = -128` indexes `table[-1]`, reading the `u16` in front of the table. On
 the play path that cannot happen -- `-128` means "use the patch's own pan" and
 is substituted before the call -- but `bSnd_SetVoicePan(v, -128)` reaches it.
-**The port clamps to -127 instead**, which is the one place `bsnd.c`
+**The port clamps to -127 instead**, one of two places `bsnd.c`
 deliberately does not do what the ROM does; reading off the front of a table
 is not behaviour worth reproducing, and no disc patch has a nonzero pan to
 reach it with anyway.
+
+The other is mode 3. In Prologic `bSnd_SetVoiceVolume` skips the pan path for
+the IOP's surround encode, which the port does not have. **The port's Prologic
+takes the stereo path** and `bsnd_set_mode` sets the 3DS mixer to
+`NDSP_OUTPUT_SURROUND` (mono to `NDSP_OUTPUT_MONO`, stereo to
+`NDSP_OUTPUT_STEREO`), so Audio Options' Dolby Pro Logic II is the console's
+Surround. A first cut returned early there instead, and every volume change in
+that mode (engines, fades, the sliders) went nowhere.
 
 ## Azimuth
 

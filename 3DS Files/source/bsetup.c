@@ -1237,6 +1237,35 @@ static void scrollEvent(BSetup* s, BScrollList* l, BScreenMessage msg,
     }
 }
 
+// The list for the screens ported outside this file (bsetup.h).
+void bscroll_init(BSetup* s, BScrollList* l, uint32_t screen, uint32_t first,
+                  uint32_t last, uint32_t up, uint32_t down, uint32_t clip)
+{
+    scrollInit(s, l, screen, first, last, up, down, clip);
+}
+
+void bscroll_add_objects(BSetup* s, BScrollList* l, const uint32_t* objects,
+                         int n)
+{
+    scrollAddObjects(s, l, objects, n);
+}
+
+void bscroll_release(BSetup* s, BScrollList* l)
+{
+    scrollRelease(s, l);
+}
+
+void bscroll_event(BSetup* s, BScrollList* l, BScreenMessage msg,
+                   const BScreenCallbackData* data)
+{
+    scrollEvent(s, l, msg, data);
+}
+
+uint32_t bscroll_current_mask(const BScrollList* l)
+{
+    return scrollCurrentMask(l);
+}
+
 // ------------------------------------------------------ RaceSetupBaseClass
 
 // The three tables BuildMenu reads, eight each: the items (0x00313e38),

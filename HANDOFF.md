@@ -24805,9 +24805,35 @@ on their screen.
 - **`tools/run_azahar_credits.ps1`** walks all of it: PASS. The menu
   keeps the row last picked, so each step is one Down.
 
+### 71b done
+
+- **`audiooptions.c`** ports AudioOptionsScreen, JukeBoxMusicScreen and
+  FlailerSlider (0x0016dc20 .., 0x001ef3c8 .. 0x001f127c). See
+  docs/formats/audio-options.md.
+- **For it:** `bscroll_*` and `barrows_*` are exported from `bsetup.c`,
+  and `BSCROLL_MAX_ELEMENTS` is 32 (Audio Options scrolls 26 objects).
+  `bscr_optbase_*` in `bscreens.c` is OptionsScreenBase: the blurb, the
+  highlight, the exit animation; Display (71c) and the pause pages will
+  use it too. `jukebox.c` gained the genre manager (`jb_genre_populate`)
+  and `jb_audio_default_jukebox`. main.c binds L and R to
+  `BJOY_MENU_L1`/`R1`.
+- **The save prompt** as the user asked on 2026-10-13: Audio Options
+  snapshots the options when entered from Options (JukeBox's changes
+  count). Leaving with changes asks: Yes goes to Autosave, No puts the
+  options back, B stays.
+- **Audio Mode.** The user asked mid-session whether Dolby is needed on a
+  3DS. They picked Mono / Stereo / Surround: mode 2 shows as
+  `PORTLANG_SURROUND`, and `bsnd_set_mode` sets `NDSP_OUTPUT_SURROUND`
+  (mono and stereo their own). Prologic used to return early from
+  `bsnd_set_voice_volume`, freezing every volume in that mode; it takes
+  the stereo path now (docs/formats/sound-driver.md).
+- **`tools/run_azahar_audio.ps1`**: PASS (slider, mode, JukeBox genre,
+  tune, status, L; the prompt's B, No and Yes; saved on Autosave).
+
 ### Next
 
-1. 71b Audio, 71c Display, 71d Controller, 71e the pause menu's screens.
+1. 71c Display, 71d Controller, 71e the pause menu's screens (the pause
+   audio page shows Surround too).
 2. Help (TASKS 48), the "Memory Card (PS2)" text, stereo 3D (TASKS 59).
 3. The known bugs, then the verdict again.
 

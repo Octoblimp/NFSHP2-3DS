@@ -128,6 +128,10 @@ static const char* const kStrings[PORTLANG_END - PORTLANG_FIRST][6] = {
       "$NAME sta rientrando in gara... $N%",
       "$NAME vuelve a la carrera... $N %",
       "$NAME kommer tillbaka till loppet... $N %" },
+    // PORTLANG_SURROUND: the 3DS's own Surround output, the name its System
+    // Settings give it, where retail offered Dolby Pro Logic II (110011)
+    { "Surround", "Surround", "Surround", "Surround", "Envolvente",
+      "Surround" },
 };
 
 const char* portlang_get(int32_t languageEnum, int32_t id, size_t* outLen)

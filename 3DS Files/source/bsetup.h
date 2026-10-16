@@ -308,8 +308,9 @@ typedef struct BChallengeScreen {
 //
 // tMenuAnimElement (0x00249c78), 64 bytes: the node, SavedY (+8), YAnim
 // (+12) and the chunk (+60, its name here). The list mallocs one per
-// object; the port keeps them in the list.
-#define BSCROLL_MAX_ELEMENTS 16
+// object; the port keeps them in the list, as many as Audio Options adds
+// (26, audiooptions.c).
+#define BSCROLL_MAX_ELEMENTS 32
 
 typedef struct BMenuAnimElement {
     uint32_t object;   // +60, Obj
@@ -330,6 +331,22 @@ typedef struct BScrollList {
     uint32_t         clipPoly;          // +48
     int32_t          numMenuItemsToScroll;   // +52
 } BScrollList;
+
+// tScrollingMenuList for the screens that are not RaceSetupBaseClass's
+// (Audio Options): the constructor (0x00249de0, `first` and `last` the
+// items whose Ys bound the window), AddObjects (0x00249ff8), the
+// destructor (0x00249ed0), HandleEvent (0x0024a480) and
+// GetCurrentMenuMask (0x0024a368). The caller sets numMenuItemsToScroll,
+// as retail's constructors do after AddObjects.
+void     bscroll_init(BSetup* s, BScrollList* l, uint32_t screen,
+                      uint32_t first, uint32_t last, uint32_t up,
+                      uint32_t down, uint32_t clip);
+void     bscroll_add_objects(BSetup* s, BScrollList* l,
+                             const uint32_t* objects, int n);
+void     bscroll_release(BSetup* s, BScrollList* l);
+void     bscroll_event(BSetup* s, BScrollList* l, BScreenMessage msg,
+                       const BScreenCallbackData* data);
+uint32_t bscroll_current_mask(const BScrollList* l);
 
 // ------------------------------------------------------ RaceSetupBaseClass
 

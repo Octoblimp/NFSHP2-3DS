@@ -143,7 +143,21 @@ void bsnd_close(BsndDriver* d)
     d->patchCount = 0;
 }
 
-void bsnd_set_mode(BsndDriver* d, uint8_t mode) { d->mode = mode; }
+#ifdef __3DS__
+static void hw_output_mode(uint8_t mode);
+#endif
+
+void bsnd_set_mode(BsndDriver* d, uint8_t mode)
+{
+    // bSnd_SetMono/SetStereo/SetPrologic store the mode and leave the rest
+    // to the IOP. The 3DS mixer has the three outputs its System Settings
+    // offer, so the port picks the one each mode means; Dolby Pro Logic II
+    // has no decoder on the other end and plays as the console's Surround.
+    d->mode = mode;
+#ifdef __3DS__
+    if (d->sink) hw_output_mode(mode);
+#endif
+}
 
 void bsnd_set_load_path(BsndDriver* d, const char* path)
 {
@@ -692,9 +706,11 @@ bool bsnd_channel_busy(const BsndDriver* d, uint16_t voice)
 void bsnd_set_voice_volume(BsndDriver* d, uint16_t voice, uint16_t volume)
 {
     // bSnd_SetVoiceVolume, 0x0024a8d0. Prologic has its own path in the
-    // original and does not pan; here it simply leaves the mix alone.
+    // original, which matrixes the volume into the IOP's surround encode.
+    // The port has no encode (the mixer's Surround does that work), so
+    // Prologic takes the stereo path: returning here, as a first cut did,
+    // froze every engine, fade and slider at its starting volume.
     unsigned w = voice_width(d, voice), n;
-    if (d->mode == BSND_MODE_PROLOGIC) return;
     for (n = 0; n < w; n++) {
         BsndVoice* v = &d->voice[voice + n];
         uint16_t l, r;
@@ -915,6 +931,14 @@ void bsnd_update(BsndDriver* d)
 static ndspWaveBuf gWave[BSND_MAX_VOICES];
 static ndspAdpcmData gAdpcm[BSND_MAX_VOICES];
 static bool gNdspReady;
+
+static void hw_output_mode(uint8_t mode)
+{
+    if (!gNdspReady) return;
+    ndspSetOutputMode(mode == BSND_MODE_MONO     ? NDSP_OUTPUT_MONO
+                      : mode == BSND_MODE_PROLOGIC ? NDSP_OUTPUT_SURROUND
+                      : NDSP_OUTPUT_STEREO);
+}
 
 // hw_mix's gain on every voice, 6 dB.
 #define BSND_HW_GAIN 2.0f

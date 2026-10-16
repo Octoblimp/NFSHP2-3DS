@@ -99,6 +99,7 @@
 #include "lobby.h"
 #include "lockhash.h"
 #include "nameentry.h"
+#include "audiooptions.h"
 #include "credits.h"
 #include "netrace.h"
 #include "netstep.h"
@@ -361,8 +362,10 @@ static const BScreenConfig kScreens[] = {
     // checks every row of this table against it and lists what is left.
     { "View Event Tree",         0x147f8a59u,   // tEventTreeView
       eventtreeview_screen_callback },
-    { "Audio Options",           0xe116761cu,   // AudioOptionsScreen
-      bgf_plain_screen_callback },
+    { "Audio Options",           AUDIOOPTS_SCREEN,   // AudioOptionsScreen
+      audioopts_callback },
+    { "JukeBox Music",           JUKEBOX_SCREEN,   // JukeBoxMusicScreen
+      jukeboxscreen_callback },
     { "Joystick PreConfig",      0x8bd5060bu,   // JoystickPreConfig
       bgf_plain_screen_callback },
     { "Display Options",         0x8bc68340u,   // tDisplayOptionsScreen
@@ -3811,6 +3814,10 @@ static const struct { u32 key; BJoyEvent ev; } kBinds[] = {
     { KEY_DRIGHT, BJOY_SCROLL_RIGHT },
     { KEY_A,      BJOY_MENU_SELECT },
     { KEY_Y,      BJOY_MENU_SQUARE },
+    // The shoulders, as SCREEN_L1 and SCREEN_R1: JukeBox Music's L turns a
+    // genre on and off.
+    { KEY_L,      BJOY_MENU_L1 },
+    { KEY_R,      BJOY_MENU_R1 },
 };
 #define NUM_BINDS ((int)(sizeof(kBinds) / sizeof(kBinds[0])))
 
@@ -4175,6 +4182,12 @@ static void hookNameEntryLog(void* user, const char* line)
 {
     (void)user;
     logLine("name entry: %s", line);
+}
+
+static void hookAudioOptsLog(void* user, const char* line)
+{
+    (void)user;
+    logLine("%s", line);
 }
 
 static void hookCarSelLoaderFrontEnd(void* user)
@@ -8183,6 +8196,13 @@ int main(int argc, char** argv)
     nameHooks.keyboard = hookNameKeyboard;
     nameHooks.log      = hookNameEntryLog;
     nameentry_init(&nameHooks);
+
+    AudioOptionsHooks audioHooks;
+    memset(&audioHooks, 0, sizeof audioHooks);
+    audioHooks.log     = hookAudioOptsLog;
+    audioHooks.jukebox = &g_jukebox;
+    audioHooks.sound   = &gSoundModule;
+    audioopts_init(&audioHooks);
 
     // Retail's main (0x0012f000), after InitializeEverything: with SkipFE
     // set, StartSkipFEGame on Fred, whose StartRace asks for

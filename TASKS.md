@@ -3859,9 +3859,22 @@ phases.
               - The card needs REWARD_EN/FR.AVI and MAKEOF_EN.AVI (349
                 MB) from the disc for the last two rows. Without them the
                 rows go straight back to the menu.
-        - [ ] 71b: Audio (AudioOptionsScreen): the seven volume
+        - [x] 71b: Audio (AudioOptionsScreen): the seven volume
               sliders, Audio Mode, Jukebox, Default Volumes and Default
               Jukebox. Ask to save when it is left with changes.
+              - Done in Session 116 (`audiooptions.c`,
+                docs/formats/audio-options.md): the sliders easing to their
+                volumes, the scrolling list, Audio Mode, JukeBox Music
+                (genres, tunes playing as picked, each tune's status, L
+                for a genre on or off, the favourite line), both
+                Defaults, and the save prompt (Yes to the Autosave
+                screen, No puts the options back, B stays).
+                `tools/run_azahar_audio.ps1` passes.
+              - Audio Mode is Mono / Stereo / Surround, the user's pick of
+                2026-10-16: retail's Dolby Pro Logic II plays and shows as
+                the 3DS's Surround output. Fixed on the way: Prologic
+                skipped `bsnd_set_voice_volume`, so every volume froze in
+                that mode.
         - [ ] 71c: Display (tDisplayOptionsScreen): Track Map,
               Rearview Mirror, Units, Leaderboard, Jump Cams, Zone Cams
               and Player 1 Options. Player 2's row is hidden.

@@ -58,7 +58,9 @@ enum { BSND_KEY_OFF = 0, BSND_KEY_ON = 3, BSND_KEY_RELEASE = 4 };
 
 // bSnd_GetMode/bSnd_SetMono/bSnd_SetStereo/bSnd_SetPrologic. Mode below 2
 // collapses pan to centre inside GetVolumesFromPan (0x0024d94c), and mode 3
-// skips the pan path in bSnd_SetVoiceVolume entirely (0x0024a928).
+// skips the pan path in bSnd_SetVoiceVolume entirely (0x0024a928) for the
+// IOP's surround encode. The port has no encode: mode 3 takes the stereo
+// path and sets the 3DS mixer to Surround (bsnd_set_mode).
 enum { BSND_MODE_MONO = 1, BSND_MODE_STEREO = 2, BSND_MODE_PROLOGIC = 3 };
 
 // The streams. bSound::Initialize asks bSnd_Initialize for one stereo stream

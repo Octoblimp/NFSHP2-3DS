@@ -285,6 +285,27 @@ uint32_t    jb_current_track(const JBSound* s);           // 0x001af040
 void jb_audio_from_sound(JBSound* s, uint8_t* ao, int tunes, int audioMode);
 // InitWithDefaults (0x001ef1c8), and GenreMgr::Populate (0x001ef240) in it.
 void jb_audio_init_with_defaults(JBSound* s, uint8_t* ao, int audioMode);
+// 0x001af1e0, Audio Options' Default Jukebox: every tune's status back to
+// its name's, the selection, both favourites and the genre back to 0, and
+// every genre on.
+void jb_audio_default_jukebox(JBSound* s, uint8_t* ao);
+
+// GenreMgr, 268 bytes in retail (a count, then six genres of 44 bytes: the
+// name, how many tunes, and the tunes' places in the list). Populate
+// (0x001ef240) numbers each tune's genre in the order they first turn up
+// and writes the number into its AudioPlaylistOnOff. Retail has no cap on
+// either count; the port stops at six genres and 32 tunes a genre.
+#define JB_MAX_GENRES 6
+typedef struct {
+    char    name[JB_NAME_MAX];
+    int32_t numTracks;
+    int8_t  tracks[JB_AO_MAX_TUNES];
+} JBGenre;
+typedef struct {
+    int32_t numGenres;
+    JBGenre genre[JB_MAX_GENRES];
+} JBGenreMgr;
+void jb_genre_populate(JBSound* s, JBGenreMgr* g, uint8_t* ao);
 // 0x001ef120, the options applied: the seven volumes into bSound, the saved
 // ones, SetSelection(5). Returns the int16 SetAudioMode is handed last.
 int  jb_audio_apply(JBSound* s, const uint8_t* ao);

@@ -40,6 +40,8 @@ enum {
     PORTLANG_CATCHING_UP,                       // back after a restart
                                                 // (37g-3), $N percent
     PORTLANG_COMING_BACK,                       // and $NAME's, to the rest
+    PORTLANG_SURROUND,                          // Audio Mode's third value,
+                                                // for Dolby Pro Logic II
     PORTLANG_END
 };
 

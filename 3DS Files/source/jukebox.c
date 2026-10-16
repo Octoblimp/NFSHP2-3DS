@@ -907,53 +907,65 @@ void jb_audio_from_sound(JBSound* s, uint8_t* ao, int tunes, int audioMode)
     ao[JB_AO_AUDIO_MODE + 1] = (uint8_t)(audioMode >> 8);
 }
 
-// GenreMgr, on InitWithDefaults' stack: six genres, each a name and the
-// tunes that have it.
-typedef struct {
-    char    name[JB_NAME_MAX];
-    int32_t numTracks;
-    int8_t  tracks[JB_AO_MAX_TUNES];
-} JBGenre;
+void jb_genre_populate(JBSound* s, JBGenreMgr* g, uint8_t* ao)
+{
+    // Each tune's genre numbered in the order they first turn up -- Rock
+    // 0, Techno 1 on the retail cartridge.
+    memset(g, 0, sizeof *g);
+    int32_t n = (int32_t)rd32(ao + JB_AO_NUM_TUNES);
+    for (int32_t i = 0; i < n; i++) {
+        uint8_t* e = ao + JB_AO_TUNE_LIST + 4 * i;
+        const char* name = jb_track_string(s, (int8_t)e[0], (int8_t)e[1],
+                                           JB_TRACK_GENRE);
+        if (!name || !*name) {
+            continue;
+        }
+        int32_t k;
+        for (k = 0; k < g->numGenres; k++) {
+            if (strcmp(name, g->genre[k].name) == 0) {
+                break;
+            }
+        }
+        if (k == g->numGenres) {
+            if (g->numGenres >= JB_MAX_GENRES) {
+                continue;               // past retail's six: its stack
+            }
+            jb_copy_name(g->genre[k].name, name);
+            g->numGenres++;
+        }
+        e[3] = (uint8_t)k;
+        if (g->genre[k].numTracks < JB_AO_MAX_TUNES) {
+            g->genre[k].tracks[g->genre[k].numTracks++] = (int8_t)i;
+        }
+    }
+}
 
 void jb_audio_init_with_defaults(JBSound* s, uint8_t* ao, int audioMode)
 {
+    JBGenreMgr genres;
+
     jb_audio_from_sound(s, ao, 1, audioMode);
     wr32(ao + JB_AO_FE_FAVOURITE, 5);
     ao[JB_AO_GENRE_MASK] = 0xff;
     wr32(ao + JB_AO_SELECTED_SONG, 0);
     wr32(ao + JB_AO_INGAME_FAVOURITE, 0);
     ao[JB_AO_CURR_GENRE] = 0;
+    jb_genre_populate(s, &genres, ao);
+}
 
-    // GenreMgr::Populate: each tune's genre numbered in the order they
-    // first turn up -- Rock 0, Techno 1 on the retail cartridge.
-    JBGenre genre[6];
-    int32_t genres = 0;
-    memset(genre, 0, sizeof genre);
+void jb_audio_default_jukebox(JBSound* s, uint8_t* ao)
+{
     int32_t n = (int32_t)rd32(ao + JB_AO_NUM_TUNES);
-    for (int32_t i = 0; i < n; i++) {
+
+    for (int32_t i = 0; i < n && i < JB_AO_MAX_TUNES; i++) {
         uint8_t* e = ao + JB_AO_TUNE_LIST + 4 * i;
-        const char* g = jb_track_string(s, (int8_t)e[0], (int8_t)e[1], 3);
-        if (!g || !*g) {
-            continue;
-        }
-        int32_t k;
-        for (k = 0; k < genres; k++) {
-            if (strcmp(g, genre[k].name) == 0) {
-                break;
-            }
-        }
-        if (k == genres) {
-            if (genres >= 6) {
-                continue;               // past retail's six: its stack
-            }
-            jb_copy_name(genre[k].name, g);
-            genres++;
-        }
-        e[3] = (uint8_t)k;
-        if (genre[k].numTracks < JB_AO_MAX_TUNES) {
-            genre[k].tracks[genre[k].numTracks++] = (int8_t)i;
-        }
+        e[2] = (uint8_t)jb_track_status(s, (int8_t)e[0], (int8_t)e[1]);
     }
+    wr32(ao + JB_AO_SELECTED_SONG, 0);
+    ao[JB_AO_GENRE_MASK] = 0xff;
+    wr32(ao + JB_AO_FE_FAVOURITE, 0);
+    wr32(ao + JB_AO_INGAME_FAVOURITE, 0);
+    ao[JB_AO_CURR_GENRE] = 0;
 }
 
 int jb_audio_apply(JBSound* s, const uint8_t* ao)
