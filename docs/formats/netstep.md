@@ -117,7 +117,7 @@ other side still needs, sent again every 16 ms:
 | 0x16 | `NETSTEP_MSG_PADS` | a client | header, then its pads from `first` |
 | 0x17 | `NETSTEP_MSG_FRAMES` | the host | header, then the records from `first` |
 
-The header, 21 bytes, little-endian:
+The header, 23 bytes, little-endian:
 
 | Offset | Size | |
 |---|---|---|
@@ -129,6 +129,8 @@ The header, 21 bytes, little-endian:
 | 15 | 4 | `stopAt`: the frames the sender ran before its stop (0xffffffff: still on; 37f) |
 | 19 | 1 | the places the host holds for, a bit each (a client's: 0; 37g) |
 | 20 | 1 | the hold's seconds left, rounded up (a client's: 0) |
+| 21 | 1 | the places loading or catching up after a restart, a bit each (a client's: 0; 37g-3) |
+| 22 | 1 | how far the furthest behind of them has got, in percent (a client's: 0) |
 
 A pad is the 8 bytes above. A record is its step `q` (1/3600 s), the
 live places' mask, then the pad of each live place in place order. A
@@ -204,15 +206,72 @@ for example when a console goes out of range and back:
   its car the CPU's. A host that refused a client never sends it a
   record, so a refused client cannot be taken for back. A console that
   comes back on the link but sends no pads cannot be either. One that
-  restarted and joined from the lobby is such a console, until 37g-3.
-  Without this rule the host would wait for its pads for good, the link
-  kept up by its keepalives.
+  restarted and joined from the lobby is such a console until netrace
+  lets it back in (37g-3, below). Without this rule the host would wait
+  for its pads for good, the link kept up by its keepalives.
 
 For the Azahar runs, `WirelessTestDropFrame n` (and `WirelessTestDropMs`,
 5000) makes a console's wireless deaf from lockstep frame n
 (`wireless_test_deaf`). It hears nothing and sends nothing, so each end
 of its links times out. It tries no rejoin until the deafness ends.
-37g-3 (a console restarted and joining again) is still to come.
+
+### Back after a restart (TASKS 37g-3)
+
+A console switched off or closed mid-race comes back from its own menus:
+Local Wireless, Join, the host's race found and joined (`lobby.md`,
+"Back in a race"). The host's wireless takes the node back into the lost
+place as in 37g-2, by its user name and friend code seed, and netrace
+hears its REJOIN and asks netstep to let it in (`netrace.md`, "Back
+after a restart"):
+
+- **The records kept.** From GO the host keeps every record it builds
+  (`hist`): its step, its places, a bit for each pad not the last
+  record's and those pads, with every NETSTEP_HIST_KEY'th (64) record
+  whole, a key to read from. It grows in 32 KB blocks, up to 128 (4 MB).
+  A block not had stops it (`histFull`), and a rejoin is then refused:
+  "place p asks back in, but the records from frame n were not kept".
+- **The rejoin.** `netstep_rejoin(p, now)` takes a place the race holds
+  for (lost, still live, not left), and starts its hold again, for the
+  load: "place p restarted and asks back in at frame n; held for t ms
+  more". Its pads and checksums from before are dropped, another run's.
+  While it loads (`rejoin` 1) the host sends it nothing of netstep's:
+  what it gets then is netrace's, the setup and its GO.
+- **Catching up.** Its first pads end the load (`rejoin` 2) and its
+  hold ("place p back at frame n"). The host then sends it the records
+  from frame 0, NETSTEP_BURST (4) messages each resend: on from where
+  the last burst ended while its need moves, from its need again after
+  two sends without a move (a message lost), and never past its ring
+  beyond the frames it has run (its checksum's frame). The host builds
+  no record while a place catches up, so the race stays held on every
+  console. Once its pad for the record held on is in and that record
+  is built: "place p caught up at frame n, after t ms".
+- **The console back.** It runs the records as any client does.
+  `netstep_behind()`, the host's last need less the frame it runs, says
+  how far behind it is. Past NETSTEP_BEHIND (6) records main.c runs the
+  frames undrawn, and from its GO until the host's first record is in
+  (`netrace_back_in`: the first NETSTEP_DELAY records are its own, made
+  at GO, and say nothing of how far behind), with only its progress
+  every 250 ms
+  (`LOCK_CATCH_DRAW_MS`): "Catching up with the race... N%" in the
+  hold's box over a black top screen (`netrace_catch_up_text`, N the
+  records run of all to run). Its sound is under a master volume of 0
+  ("lockstep: frame n, catching up begins"), and fades back in as after
+  an applet once it is in step ("catching up is over"). So the race's
+  start, its grid, fly-by and countdown, is never shown on it: those are
+  the race's past, run on the records' presses, and it is straight back
+  in the race once in step (the user's ask). The CPU's notes are not
+  shown while it catches up either. The hang
+  watchdog's beat is per loop, so the undrawn frames do not trip it.
+- **Every other console.** Each FRAMES message carries the places
+  loading or catching up and how far the furthest behind has got
+  (header bytes 21 and 22; `netstep_rejoining`, the host's own from its
+  places' needs). main.c shows "NAME is coming back into the race...
+  N%" in the hold's box (`netrace_back_text`) in place of that place's
+  hold, and mutes the race while either holds.
+
+Only an event's first race takes a console back: netrace refuses one in a
+later race. A place gone past its hold cannot come back, and its car
+stays the CPU's.
 
 ## The end (TASKS 37f)
 
@@ -308,9 +367,33 @@ hold. The scenarios:
 - two links cut at once, back one after the other;
 - place 2's link cut on a lossy link.
 
+Since 37g-3, a restart: a client's console off mid-race, its link and
+its netstep gone, back in from its menus while the host holds for it,
+loading, then running the race again from frame 0 on the records kept
+since GO, undrawn while they are well ahead, the race held until it has
+caught up. The history is 16 KB here, in 256-byte blocks, so records
+cross blocks. The scenarios:
+
+- of two, of three on a lossy link, of eight, and of eight on a link
+  slower than a burst's gap, caught up in time;
+- both clients, one caught up while the other loads; the same one twice;
+- place 2 gone first, its records with it and then without;
+- a load most of the hold, junk pads on the link while it loads;
+- late in the race, most of the records kept;
+- the host gone while it is still behind;
+- too late, gone after the hold; past the records kept, refused.
+
+The pads change between the keys of the records kept, in their presses
+or their last byte alone. `netstep_rejoining` is checked every ms
+against the log on the host and the host's word on a client; the host's
+messages to a place catching up go NETSTEP_BURST at a time, never past
+the ring it has, and none to one loading, whose netrace's word netstep
+leaves on the link. It is caught up on the frame held on, its pad for
+it put.
+
 "Back" must be said once on each end for each cut, and no record may
-drop the place. In all: 55 scenarios, faults 0. `--mutate`: 190
-mutations, 187 caught, 3 equivalent (named in the check).
+drop the place. In all: 67 scenarios, faults 0. `--mutate`: 259
+mutations, 253 caught, 6 equivalent (named in the check).
 `tools/netrace_check.py` checks the names the setup carries and the
 box's texts.
 
@@ -457,3 +540,39 @@ console is taken back the same way and sends none. Both were run again:
   said place 1 back only once it heard again and B's pads came, after
   2139 ms; B said the host back after 2056 ms, both at frame 301. All 17
   logged frames' parts the same.
+
+Session 112, continued (37g-3), with `-Rejoin 1`: each card's config
+has `WirelessHoldSeconds 150`. After 30 s of driving B is closed, its
+`user/sysdata/mac.txt` deleted, and started again, and the script walks
+it through Local Wireless, Join, and back into the race. Azahar's NWM
+EjectClient is a stub, so the host keeps a closed copy's station and
+refuses its MAC again ("there is already a connected client with that
+MAC-Adress"); with the file gone Azahar makes a new one. A real host's
+UDS drops the station, and the game matches by name and friend code
+seed, not MAC.
+
+- The first full run lost B again 4 s after its GO: its first frame
+  attaches the track with no pump, and the host's link timeout (3 s)
+  ran out. The link now has netrace's patience from the host's RESUME
+  until the place is in step (netrace.md).
+- With it (seed 7dbec474, track 11): the host lost B at frame 981 and
+  held. B came back with MAC 40:F4:07:37:D6:C1 (68:BD:13:01:3D:13
+  before) as node 3, in place 1 with the same friend code seed
+  (cf4c0002eb6d5d11). It had the setup again (1988 bytes), loaded, had
+  its GO 7 s after its join, and ran frames 3 to 975 undrawn in about
+  6 s. The host said place 1 back after 16036 ms of hold and caught up
+  after 22153 ms, gave the link its own patience back, and both raced
+  on 30 s more.
+- B's world after the catch-up was not the host's. Its parts first
+  differed at frame 450, in the players part (the two players' cars);
+  frames 0, 150 and 300 matched. Netstep's checksums differed at frame
+  980, the first one B compared. B's first run matched the host at
+  every frame logged to 900, but the host's checksum differed from it
+  at frame 917, before B was closed. Both are now TASKS 37f-2's open
+  difference.
+- B's catching up began at frame 3, not 0. Frames 0 to 2 are its own
+  records, made at GO, and the host's first record had not yet said how
+  far behind it was, so they could be drawn. `g_lockBack` is now kept
+  through them. That change was built, not run.
+- The verdict wanted the host to say "node n back in place 1"; the
+  number is wireless's peer slot (0 here), and the check now takes any.

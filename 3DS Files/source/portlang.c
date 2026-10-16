@@ -114,6 +114,20 @@ static const char* const kStrings[PORTLANG_END - PORTLANG_FIRST][6] = {
     { "The CPU drives $NAME's car.", "L'IA conduit la voiture de $NAME.",
       "Die KI f\xe4hrt das Auto von $NAME.", "La CPU guida l'auto di $NAME.",
       "La CPU conduce el coche de $NAME.", "Datorn k\xf6r $NAMEs bil." },
+    // PORTLANG_CATCHING_UP: $N is how far, in percent
+    { "Catching up with the race... $N%",
+      "Rattrapage de la course... $N %",
+      "Das Rennen wird aufgeholt... $N %",
+      "Recupero della gara... $N%",
+      "Alcanzando la carrera... $N %",
+      "Kommer ikapp loppet... $N %" },
+    // PORTLANG_COMING_BACK: the same, $NAME's
+    { "$NAME is coming back into the race... $N%",
+      "$NAME revient dans la course... $N %",
+      "$NAME kehrt ins Rennen zur\xfc" "ck... $N %",
+      "$NAME sta rientrando in gara... $N%",
+      "$NAME vuelve a la carrera... $N %",
+      "$NAME kommer tillbaka till loppet... $N %" },
 };
 
 const char* portlang_get(int32_t languageEnum, int32_t id, size_t* outLen)

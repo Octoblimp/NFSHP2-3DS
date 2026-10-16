@@ -40,6 +40,19 @@
 // have loaded, and a client that loses the host at the hold starts alone.
 // What a race does with a console gone is 37f's.
 //
+// A console back after a restart (37g-3): its lobby joined the racing
+// host into the place of one the race holds for (37g-2's rejoin, by its
+// name) and said so (LOBBY_MSG_REJOIN), which netstep leaves on the link
+// for the host's netrace. In the event's first race, the race lets it
+// back in (netstep_rejoin) and answers (LOBBY_MSG_RESUME: the place and
+// Start's mode) with the setup it built, again. The console takes it
+// from its lobby and loads (LobbyRace.resume); once it says it loaded,
+// the host sends it GO with the race's seed, and it runs the race from
+// its first frame on the host's records until it has caught up
+// (netstep.h). In a later race, the setup kept is the first's, so the
+// answer is empty: refused. Given up on as it loads (the hold over), it
+// is sent off the network.
+//
 // The race's end (37f): lockstep stops on every console after the same
 // frame (netstep.h) and netrace_end leaves the race NR_ENDED. From there
 // the frontend (each console back to the lobby, and netrace off once it
@@ -95,6 +108,20 @@ typedef struct NetRaceNet {
     // The last race's end still on the link (netstep_ending): nothing of
     // netrace's read or sent until it is through. NULL: never.
     int           (*busy)(void);
+    // The next message from peer i, left on the link (37g-3).
+    int           (*peek)(int i, WlMsg* out);
+    // A console back in place `p` after a restart (37g-3): netstep_rejoin,
+    // 1 when let in; the places still loading or catching up
+    // (netstep_rejoining); and peer i sent off the network
+    // (wireless_drop). NULL: no console comes back.
+    int           (*rejoin)(int p);
+    uint8_t       (*rejoining)(void);
+    void          (*drop)(int i);
+    // Peer i's link's own patience (37g-3), as setPatience's: a console
+    // back after a restart has netrace's from its RESUME until it has
+    // caught up, over its load and its first frame's long preparation; 0
+    // the link's own. NULL: none.
+    void          (*setPeerPatience)(int i, uint32_t ms);
 } NetRaceNet;
 
 // The game's, where a global will not do.
@@ -152,6 +179,12 @@ typedef struct NetRace {
     size_t       setupLen, setupGot;
     uint32_t     seed;                             // GO's
     int          lastGone;                         // the place, or -1
+    // Back after a restart (37g-3): a client's, its race taken from its
+    // lobby; the host's, by place, the setup sent again and GO not yet,
+    // and its link on netrace's patience until it has caught up.
+    int          resumed;
+    int          resuming[WIRELESS_MAX_CONSOLES];
+    int          patient[WIRELESS_MAX_CONSOLES];
     // Each place's console, Latin-1: the host's own, and every client's
     // from the setup (37g).
     char         names[WIRELESS_MAX_CONSOLES][WIRELESS_NAME_MAX];
@@ -167,7 +200,8 @@ void netrace_bind(NetRace* r);
 void netrace_init(const NetRaceNet* net, const NetRaceGame* game,
                   NetRaceLogFn log);
 
-// The lobby's Start (LobbyStartFn).
+// The lobby's Start (LobbyStartFn), or its answer from a racing host to
+// a console back after a restart (race->resume): the setup next.
 void netrace_begin(const LobbyRace* race);
 
 // A wireless race set up or run: from the lobby's Start until the link
@@ -184,6 +218,10 @@ int netrace_driver(int p);
 // and this console's place.
 const LobbyRace* netrace_race(void);
 
+// 1 on a console back after a restart (37g-3), in the race it came back
+// into: from its GO it runs the race's past, undrawn, until it is in step.
+int netrace_back_in(void);
+
 // Place `p`'s console name, Latin-1, once the race is built; else "".
 const char* netrace_place_name(int p);
 
@@ -196,6 +234,17 @@ void netrace_held_text(const BGameFlow* gf, uint8_t places, uint32_t msLeft,
 // Past the hold: that the CPU drives each of `places`' cars now.
 void netrace_cpu_text(const BGameFlow* gf, uint8_t places, char* out,
                       size_t cap);
+
+// Over a race held for consoles back after a restart (37g-3,
+// netstep_rejoining): that each of `places` is coming back, and how far
+// the furthest behind has got, `pct`; on the end of `out`, after a '@'
+// when it has a line already.
+void netrace_back_text(const BGameFlow* gf, uint8_t places, int pct,
+                       char* out, size_t cap);
+
+// On the console itself as it catches up: how far, `pct`.
+void netrace_catch_up_text(const BGameFlow* gf, int pct, char* out,
+                           size_t cap);
 
 // Each frame, after the link's pump, wherever the flow is: what came in,
 // the setup moved on, and "Wireless Race"'s popup kept up.

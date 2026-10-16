@@ -27,6 +27,8 @@ typedef enum {
     LS_SEARCHING,   // scanning, with nothing found yet
     LS_FOUND,       // a race found: Join or Next
     LS_JOINED,      // on a host's network, until it starts
+    LS_RESUMING,    // back in a race after a restart (37g-3): its setup
+                    // coming, then its load
     LS_GONE         // on to car select, with the link up
 } LobbyState;
 
@@ -242,15 +244,16 @@ static void backDone(void)
 
 // What came from client `i`: whether it says it is back. Nothing else is
 // the lobby's (the race's last, its stop said again), and none of it may
-// reach the next race.
+// reach the next race. A client that joined (37g-3: one that restarted
+// and came back as the race ended) waits in its lobby, as good as back.
 static void readBack(int i)
 {
     WlMsg m;
     char  name[WIRELESS_NAME_MAX];
 
     while (L.net.recv(i, &m)) {
-        if (m.type != LOBBY_MSG_BACK || i >= WIRELESS_MAX_CONSOLES
-            || !L.awaited[i])
+        if ((m.type != LOBBY_MSG_BACK && m.type != LOBBY_MSG_REJOIN)
+            || i >= WIRELESS_MAX_CONSOLES || !L.awaited[i])
             continue;
         L.awaited[i] = 0;
         lobby_latin1(name, sizeof name, L.net.peerName(i));
@@ -312,7 +315,8 @@ static void offNotice(BGameFlow* gf)
 static int radioWent(void)
 {
     if (L.state != LS_HOSTING && L.state != LS_SEARCHING
-        && L.state != LS_FOUND && L.state != LS_JOINED)
+        && L.state != LS_FOUND && L.state != LS_JOINED
+        && L.state != LS_RESUMING)
         return 0;
     if (!radioOff()) return 0;
     linkDown();
@@ -566,9 +570,12 @@ static void showJoined(BGameFlow* gf)
     showPopup(gf, 0, 0, 0, 0, 0, 0);
 }
 
+// Joined, it says so: a host racing takes it back into its place
+// (37g-3), and one in its lobby lets it be.
 static void joinFound(BGameFlow* gf)
 {
     const WirelessHost* h = &L.hosts[L.hostIndex];
+    uint8_t             none = 0;
 
     lobby_latin1(L.hostName, sizeof L.hostName, h->name);
     if (!L.net.join(h->scanIndex)) {
@@ -576,7 +583,37 @@ static void joinFound(BGameFlow* gf)
         return;
     }
     say("lobby: joined %s", L.hostName);
+    L.net.send(0, LOBBY_MSG_REJOIN, &none, 1);
     showJoined(gf);
+}
+
+// The racing host's answer to the join (37g-3): this console back in its
+// place, Start's mode, and the race's setup after, which the race takes
+// while the wait stays up; it loads from here. Nothing in it: the race
+// would not take it back.
+static void resumed(BGameFlow* gf, const WlMsg* m)
+{
+    LobbyRace race;
+
+    if (m->len < 4) {
+        say("lobby: %s's race would not take this console back",
+            L.hostName);
+        linkDown();
+        notice(gf, PORTLANG_JOIN_FAILED, L.hostName, LS_ASK);
+        return;
+    }
+    say("lobby: back in %s's race, place %d of %d, game type %d, cops %s",
+        L.hostName, m->data[1], m->data[0], m->data[2],
+        m->data[3] ? "on" : "off");
+    raceInit(&race, m->data[0], m->data[1]);
+    race.gameType = m->data[2];
+    race.copsOn   = m->data[3] != 0;
+    race.resume   = 1;
+    race.peer[0]  = 0;
+    memcpy(race.hostName, L.hostName, sizeof race.hostName);
+    L.wasHost = 0;
+    L.state   = LS_RESUMING;
+    if (L.onStart) L.onStart(&race);
 }
 
 // Back from the race (lobby_back_next), the link as the race left it:
@@ -669,6 +706,11 @@ static void tick(BGameFlow* gf)
                     say("lobby: %s is back", L.hostName);
                     backDone();
                 }
+                // What follows it is the race's.
+                if (m.type == LOBBY_MSG_RESUME) {
+                    resumed(gf, &m);
+                    return;
+                }
                 if (m.type != LOBBY_MSG_START || m.len < 2) continue;
                 say("lobby: started by %s, place %d of %d", L.hostName,
                     m.data[1], m.data[0]);
@@ -692,6 +734,15 @@ static void tick(BGameFlow* gf)
             }
             break;
         }
+
+        // The race reads the link; the host lost is the lobby's to say.
+        case LS_RESUMING:
+            if (L.net.state() != WIRELESS_CONNECTED) {
+                say("lobby: lost %s as the race came back", L.hostName);
+                linkDown();
+                notice(gf, PORTLANG_LINK_LOST, L.hostName, LS_ASK);
+            }
+            break;
 
         default:
             break;
@@ -768,6 +819,7 @@ static void answer(BGameFlow* gf, int a)
             break;
 
         case LS_JOINED:
+        case LS_RESUMING:
             if (a == A_BACK) toAsk(gf);
             else showPopup(gf, 0, 0, 0, 0, 0, 0);
             break;
@@ -800,6 +852,14 @@ void lobby_cpu_wish(LobbyCpuFn fn)
 void lobby_back_next(void)
 {
     L.backNext = 1;
+}
+
+void lobby_resume_failed(BGameFlow* gf, int32_t id, const char* name)
+{
+    if (L.state != LS_RESUMING) return;
+    say("lobby: the race did not come back");
+    linkDown();
+    notice(gf, id, name, LS_ASK);
 }
 
 void lobby_notice_next(int32_t id, const char* name)
@@ -847,12 +907,11 @@ void lobby_callback(BGameFlow* gf, BScreenMessage msg,
             toAsk(gf);
             break;
 
-        // Gone on with the race: the link stays. Gone any other way: down.
+        // Gone on with the race, or to its load: the link stays. Gone any
+        // other way: down.
         case BMSG_SCREEN_UNACTIVATE:
-            if (L.state != LS_GONE) {
-                hidePopup(gf);
-                linkDown();
-            }
+            hidePopup(gf);
+            if (L.state != LS_GONE && L.state != LS_RESUMING) linkDown();
             L.state = LS_OFF;
             break;
 

@@ -211,6 +211,37 @@ On ACTIVATE with that set (`backFromRace`):
   link goes down. The return is never left over for the next time the
   lobby comes up, nor are the awaited flags once the link goes down.
 
+### Back in a race (TASKS 37g-3)
+
+A console switched off or closed mid-race comes back the way it came:
+Local Wireless, Join, the host's race found and joined. Each joiner,
+once joined, sends `LOBBY_MSG_REJOIN` (0x19, one byte) to the host:
+
+- A host in its lobby lets it be: a joiner is listed as ever. Back from
+  a race, a client still awaited that sends REJOIN in place of BACK
+  (one that restarted as the race ended, and joined again) is as good
+  as back.
+- A racing host has let the node on only into the place of a console
+  the race holds for, by its name and friend code seed (37g-2,
+  `wireless.md`). Its race answers (`netrace.md`, "Back after a
+  restart") with `LOBBY_MSG_RESUME` (0x1a): the consoles, the place, and
+  Start's game type and cops.
+
+The joiner waits as it does for Start, and RESUME starts its race from
+the lobby ("lobby: back in NAME's race, place p of n, game type t, cops
+on/off"): `LobbyRace.resume` is 1, and the lobby goes to `LS_RESUMING`,
+the wait still up. The race's setup comes next, and the console loads
+from here, with no car select: its car is the one in the setup. The
+lobby screen's going (the load) keeps the link up, as car select's
+does. While it waits, the host lost says "The link to NAME was lost."
+("lost NAME as the race came back"), and B goes back to the question.
+
+RESUME of one byte is a race that will not take the console back (an
+event's later race, its records not kept, or the hold over): "Could not
+join the race.", OK, the question, the link down ("lobby: NAME's race
+would not take this console back"). A setup the race cannot take ends
+the same way (`lobby_resume_failed`, "the race did not come back").
+
 ### Wireless communication off (TASKS 62)
 
 The 3DS can have its wireless communication turned off: from the HOME
@@ -381,7 +412,7 @@ Restart passed in Session 107; Next Race was never run through.
 `tools/lobby_check.py` builds `tools/src/lobby_test.c` with `lobby.c`,
 `portlang.c` and the real flow and popups under them (`gameflow.c`,
 `bpopup.c`, `memcard.c`, `banim.c`). A fake network stands in for
-`wireless.c`. It runs 58 scenarios, each a script of presses and of
+`wireless.c`. It runs 80 scenarios, each a script of presses and of
 what the network does: hosting alone, with one, with seven and with a
 full network; clients coming and going; the network going; joining,
 Next past every race, a failed join, a lost host, leaving; no wireless;
@@ -407,7 +438,16 @@ back; one gone while awaited and its place taken; the network gone or
 the wireless off on the way; a joiner's wait and its next race, the
 host lost on the way or while awaited; the race's notice winning, and
 a race joined again after it with no return left over; the host's B
-with a client awaited, then Host again. The harness's Challenge and
+with a client awaited, then Host again. Nine are a race come back to
+after a restart (TASKS 37g-3, the key "RL" the race's take from the
+lobby, "F" its failure): a client restarted as the race ended, its
+REJOIN as good as its BACK; a joiner taken back into a racing host's
+race (something else read first), its load from the lobby, back as
+from car select and on to the next race; the same on a console that
+hosted before; refused; the host lost as the race comes back; the
+setup not taken; B while it waits; the wireless off while it waits; the
+race's failure with no race come back, waiting for Start and on car
+select. The harness's Challenge and
 Single Race Setup are screens of nothing whose select and BACK are
 presses. Every host scenario's Host goes through the mode (Hot Pursuit)
 and the setup's select in one press.
@@ -449,14 +489,22 @@ At every frame and after every press it checks:
   the race's timeout kept until every other console still on is back,
   then the link's own, given back once; a client gone while awaited,
   its place taken by the next, and one who comes after listed at once;
-  no return and no awaited flag left over once the link goes down;
+  no return and no awaited flag left over once the link goes down; a
+  client's REJOIN (restarted as the race ended) as good as its BACK;
+- back in a race (37g-3): each join's REJOIN, one byte, once and on the
+  frame of the join, a host's lobby passing over it; a racing host's
+  RESUME starting the race from the lobby with `resume` set, the place
+  and mode it said, the host's peer and name, the lobby reading nothing
+  more until the race is back from its load; a refusal's line, OK, the
+  question and the link down; the race's failure acting only while it
+  waits on that race, the link down after;
 - no popup put up again just as it was on a frame with no press;
 - where each scenario ends, and the lines its log must say, in order.
 
 The last line is `total faults N`, and the check passes at 0.
 
-`--mutate` makes 170 mutations of `lobby.c` and one of `gameflow.c`'s
-return (out of tree, in parallel). Of the 171, 165 are caught and 6
+`--mutate` makes 196 mutations of `lobby.c` and one of `gameflow.c`'s
+return (out of tree, in parallel). Of the 197, 191 are caught and 6
 are equivalent, named in the script:
 
 - `lb-latin1-two`: a two-byte lead's bit 5 is always clear, so masking

@@ -47,7 +47,16 @@ what it shows and does each frame (the harness's header has the list):
     wireless off on the way; a joiner waiting for the host, the host lost
     on the way or while awaited, the race's own notice first; the link's
     timeout the race's until every console is back, then given back once;
-    the link down and up again with no return left over.
+    the link down and up again with no return left over; a client back
+    restarted, its rejoin as good as its back, and no console said back
+    that was not in the race;
+  - a console back after a restart (TASKS 37g-3): its rejoin said once as
+    it joins; a racing host's answer after something else, the start told
+    with resume, the place and mode it said, the race loaded from the
+    lobby and back in it as from car select, then the next race; refused,
+    the host lost, the race's failure, B and the wireless off as it waits
+    for the setup; the race's failure with no race come back; a console
+    that hosted a race first, back from this one as the joiner it is.
 
 The harness prints "faults 0" after each scenario that holds and "total
 faults 0" at the end. A mutant is caught only when the harness finds a
@@ -269,8 +278,10 @@ MUTATIONS = [
       "if (m.len < 2) continue;"),
     M("lb-recv-goon", "                goOn(gf);\n                return;\n",
       "                return;\n"),
-    M("lb-lost", "            if (L.net.state() != WIRELESS_CONNECTED) {",
-      "            if (L.net.state() == WIRELESS_OFF) {"),
+    M("lb-lost", "            if (L.net.state() != WIRELESS_CONNECTED) {\n"
+      "                say(\"lobby: lost %s\", L.hostName);",
+      "            if (L.net.state() == WIRELESS_OFF) {\n"
+      "                say(\"lobby: lost %s\", L.hostName);"),
     M("lb-lost-down", "                say(\"lobby: lost %s\", L.hostName);\n"
       "                linkDown();\n",
       "                say(\"lobby: lost %s\", L.hostName);\n"),
@@ -285,11 +296,12 @@ MUTATIONS = [
       "                L.state = LS_OFF;\n"),
     M("lb-activate", "                break;\n            }\n            toAsk(gf);\n",
       "                break;\n            }\n"),
-    M("lb-unactivate", "            if (L.state != LS_GONE) {",
-      "            if (1) {"),
-    M("lb-unactivate-down", "                hidePopup(gf);\n"
-      "                linkDown();\n            }",
-      "                hidePopup(gf);\n            }"),
+    M("lb-unactivate", "if (L.state != LS_GONE && L.state != "
+      "LS_RESUMING) linkDown();", "if (1) linkDown();"),
+    M("lb-unactivate-down", "if (L.state != LS_GONE && L.state != "
+      "LS_RESUMING) linkDown();", "(void)0;"),
+    M("lb-unactivate-hide", "        case BMSG_SCREEN_UNACTIVATE:\n"
+      "            hidePopup(gf);\n", "        case BMSG_SCREEN_UNACTIVATE:\n"),
     M("lb-quiet-noise", "                if (data) data->noise = BSND_NONE;\n"
       "                break;", "                break;"),
     M("lb-back-noise", "if (data->param == A_BACK) data->noise = BSND_MENU_CANCEL;",
@@ -315,10 +327,10 @@ MUTATIONS = [
     M("lb-radio-hosting", "if (L.state != LS_HOSTING && L.state != LS_SEARCHING",
       "if (L.state != LS_SEARCHING"),
     M("lb-radio-searching", " && L.state != LS_SEARCHING\n", "\n"),
-    M("lb-radio-found", "        && L.state != LS_FOUND && L.state != LS_JOINED)",
-      "        && L.state != LS_JOINED)"),
-    M("lb-radio-joined", "        && L.state != LS_FOUND && L.state != LS_JOINED)",
-      "        && L.state != LS_FOUND)"),
+    M("lb-radio-found", "        && L.state != LS_FOUND && L.state != LS_JOINED\n",
+      "        && L.state != LS_JOINED\n"),
+    M("lb-radio-joined", "        && L.state != LS_FOUND && L.state != LS_JOINED\n",
+      "        && L.state != LS_FOUND\n"),
     M("lb-radio-went-down", "    if (!radioOff()) return 0;\n    linkDown();\n",
       "    if (!radioOff()) return 0;\n"),
     M("lb-radio-tick", "    if (radioWent()) {\n        offNotice(gf);\n"
@@ -392,9 +404,8 @@ MUTATIONS = [
       "    if (L.net.setPatience) L.net.setPatience(0);\n"),
     M("lb-backdone-patience",
       "    if (L.net.setPatience) L.net.setPatience(0);\n", ""),
-    M("lb-readback-type",
-      "if (m.type != LOBBY_MSG_BACK || i >= WIRELESS_MAX_CONSOLES",
-      "if (i >= WIRELESS_MAX_CONSOLES"),
+    M("lb-readback-type", "        if ((m.type != LOBBY_MSG_BACK && m.type != "
+      "LOBBY_MSG_REJOIN)\n            || i", "        if ((0)\n            || i"),
     M("lb-readback-clear", "        L.awaited[i] = 0;\n        lobby_latin1",
       "        lobby_latin1"),
     M("lb-forget-keep",
@@ -465,6 +476,63 @@ MUTATIONS = [
     G("lb-gf-return", "    if (back && onStack(gf, back))\n"
       "        bgf_pop_until(gf, back);\n    else if (gameType == 8",
       "    if (gameType == 8"),
+    # -- a console back after a restart (37g-3)
+    M("lb-readback-rejoin", "        if ((m.type != LOBBY_MSG_BACK && m.type != "
+      "LOBBY_MSG_REJOIN)\n", "        if ((m.type != LOBBY_MSG_BACK)\n"),
+    M("lb-radio-resuming", "        && L.state != LS_RESUMING)\n        "
+      "return 0;", ")\n        return 0;"),
+    M("lb-join-rejoin", "    L.net.send(0, LOBBY_MSG_REJOIN, &none, 1);\n", ""),
+    M("lb-resumed-len", "    if (m->len < 4) {\n        say(\"lobby: %s's race",
+      "    if (0) {\n        say(\"lobby: %s's race"),
+    M("lb-resumed-refused-down", "            L.hostName);\n        linkDown();\n"
+      "        notice(gf, PORTLANG_JOIN_FAILED, L.hostName, LS_ASK);",
+      "            L.hostName);\n        notice(gf, PORTLANG_JOIN_FAILED, "
+      "L.hostName, LS_ASK);"),
+    M("lb-resumed-refused-notice", "        linkDown();\n        notice(gf, "
+      "PORTLANG_JOIN_FAILED, L.hostName, LS_ASK);\n        return;",
+      "        linkDown();\n        return;"),
+    M("lb-resumed-consoles", "raceInit(&race, m->data[0], m->data[1]);",
+      "raceInit(&race, 2, m->data[1]);"),
+    M("lb-resumed-place", "raceInit(&race, m->data[0], m->data[1]);",
+      "raceInit(&race, m->data[0], 1);"),
+    M("lb-resumed-gametype", "    race.gameType = m->data[2];\n", ""),
+    M("lb-resumed-cops", "    race.copsOn   = m->data[3] != 0;\n"
+      "    race.resume", "    race.resume"),
+    M("lb-resumed-resume", "    race.resume   = 1;\n", ""),
+    M("lb-resumed-peer", "    race.peer[0]  = 0;\n    memcpy(race.hostName",
+      "    memcpy(race.hostName"),
+    M("lb-resumed-name", "    memcpy(race.hostName, L.hostName, sizeof "
+      "race.hostName);\n    L.wasHost = 0;", "    L.wasHost = 0;"),
+    M("lb-resumed-washost", "    L.wasHost = 0;\n    L.state   = LS_RESUMING;",
+      "    L.state   = LS_RESUMING;"),
+    M("lb-resumed-state", "    L.state   = LS_RESUMING;\n    if (L.onStart)",
+      "    if (L.onStart)"),
+    M("lb-resumed-onstart", "    L.state   = LS_RESUMING;\n    if (L.onStart) "
+      "L.onStart(&race);\n}", "    L.state   = LS_RESUMING;\n}"),
+    M("lb-joined-resume", "                if (m.type == LOBBY_MSG_RESUME) {",
+      "                if (0) {"),
+    M("lb-joined-resume-return", "                    resumed(gf, &m);\n"
+      "                    return;\n", "                    resumed(gf, &m);\n"),
+    M("lb-resuming-lost", "        case LS_RESUMING:\n            if "
+      "(L.net.state() != WIRELESS_CONNECTED) {", "        case LS_RESUMING:\n"
+      "            if (0) {"),
+    M("lb-resuming-down", "                say(\"lobby: lost %s as the race came "
+      "back\", L.hostName);\n                linkDown();\n",
+      "                say(\"lobby: lost %s as the race came back\", "
+      "L.hostName);\n"),
+    M("lb-resuming-back", "        case LS_JOINED:\n        case LS_RESUMING:\n"
+      "            if (a == A_BACK)", "        case LS_JOINED:\n"
+      "            if (a == A_BACK)"),
+    M("lb-resume-failed-state", "    if (L.state != LS_RESUMING) return;\n"
+      "    say(\"lobby: the race did not come back\");",
+      "    say(\"lobby: the race did not come back\");"),
+    M("lb-resume-failed-down", "    say(\"lobby: the race did not come back\");"
+      "\n    linkDown();\n", "    say(\"lobby: the race did not come back\");"
+      "\n"),
+    M("lb-resume-failed-notice", "    notice(gf, id, name, LS_ASK);\n}\n\n"
+      "void lobby_notice_next", "}\n\nvoid lobby_notice_next"),
+    M("lb-unactivate-resuming", "if (L.state != LS_GONE && L.state != "
+      "LS_RESUMING) linkDown();", "if (L.state != LS_GONE) linkDown();"),
 ]
 
 EQUIVALENT = {

@@ -34,7 +34,15 @@ shows, sends and ends with (the harness's header has the list):
     end, three consoles, a client gone and the host gone while it loads,
     and a next race's end then the frontend. Nothing of netrace's is read
     or sent while the last race's end is on the link, and a client says
-    LOADED once a race.
+    LOADED once a race;
+  - a console back after a restart (TASKS 37g-3): in an AI racer's place
+    and the second player's (Lap Knockout's state), let back in with the
+    setup again and GO on the race's seed once it has loaded, the same
+    race as the host's; refused by netstep, in the event's next race, and
+    as the host loads that race; given up on as it loads (sent off the
+    network, then racing alone), gone again as it loads, restarted twice;
+    a setup sent again from another build (the lobby's to say); the host
+    gone between its answer and the setup.
 
 The harness prints "faults 0" after each scenario that holds and "total
 faults 0" at the end. A mutant is caught only when the harness finds a
@@ -98,7 +106,7 @@ def M(name, before, after):
 
 MUTATIONS = [
     # -- the places
-    M("nr-fill-skip", "tmpl += 5;", "tmpl += 2;"),
+    M("nr-fill-skip", "            tmpl += n;", "            tmpl += 2;"),
     M("nr-alive-self", "    if (p == R->race.place) return 1;\n", ""),
     M("nr-alive-peer", "return peer >= 0 && R->net.peerAlive && "
       "R->net.peerAlive(peer);", "return peer >= 0;"),
@@ -182,9 +190,8 @@ MUTATIONS = [
     M("nr-go-seed", "    R->seed = bDefaultSeed;\n", ""),
     M("nr-go-bytes", "m[2] = (uint8_t)(R->seed >> 16);",
       "m[2] = (uint8_t)(R->seed >> 8);"),
-    M("nr-go-alive", "        if (R->driver[p] >= 0 && placeAlive(p))\n"
-      "            R->net.send", "        if (R->driver[p] >= 0)\n"
-      "            R->net.send"),
+    M("nr-go-alive", "        if (R->driver[p] >= 0 && placeAlive(p)) "
+      "sendGo(p);", "        if (R->driver[p] >= 0) sendGo(p);"),
     M("nr-go-start", "    start(R->seed);\n}", "}"),
     # -- the build
     M("nr-airide-range", "if (ai < 0 || ai >= R->humanAI) return 0;",
@@ -264,8 +271,9 @@ MUTATIONS = [
     # -- the take
     M("nr-take-version", "|| h.version != SETUP_VERSION || h.consoles",
       "|| h.consoles"),
-    M("nr-take-back", "        backToLobby(gf, R->race.hostName);\n        return;\n"
-      "    }\n\n    s += sizeof h", "        return;\n    }\n\n    s += sizeof h"),
+    M("nr-take-back", "        } else {\n            backToLobby(gf, "
+      "R->race.hostName);\n        }\n        return;\n    }\n\n    s += "
+      "sizeof h", "        }\n        return;\n    }\n\n    s += sizeof h"),
     M("nr-take-ptr", "    TheRaceParameters.pDriverInfoTable = DriverInfoTable;\n",
       ""),
     M("nr-take-cams", "    own.JumpCams = rp.GlobalDisplaySettings.JumpCams;\n", ""),
@@ -320,7 +328,8 @@ MUTATIONS = [
       "if (0) {"),
     M("nr-frame-off", "is down\");\n        R->stage = NR_OFF;\n",
       "is down\");\n"),
-    M("nr-frame-racing", "    if (R->stage == NR_RACING) return;\n", ""),
+    M("nr-frame-racing", "        if (R->host) racingRead();\n        "
+      "return;\n", "        if (R->host) racingRead();\n"),
     M("nr-frame-ended", "    if (R->stage == NR_ENDED) {\n        if (gf->",
       "    if (0) {\n        if (gf->"),
     M("nr-frame-ended-loading", "        if (gf->current == BGF_LOADING_FRONTEND"
@@ -366,8 +375,8 @@ MUTATIONS = [
       "R->driver[p] = -1;\n    if (R->net.setPatience)",
       "    if (R->net.setPatience)"),
     M("nr-begin-patience", "if (R->net.setPatience) "
-      "R->net.setPatience(NETRACE_PATIENCE_MS);\n    say(\"netrace: begin",
-      "(void)0;\n    say(\"netrace: begin"),
+      "R->net.setPatience(NETRACE_PATIENCE_MS);\n    if (race->resume",
+      "(void)0;\n    if (race->resume"),
     M("nr-begin-ai", "    if (R->host) {\n        TheRaceParameters.NumAICars",
       "    if (0) {\n        TheRaceParameters.NumAICars"),
     M("nr-begin-ai-count", "TheRaceParameters.NumAICars = race->cpu + "
@@ -461,6 +470,126 @@ MUTATIONS = [
     M("nr-end-say", "    say(\"netrace: the race is over; the lobby or the "
       "next race next\");\n", ""),
     M("nr-end-back", "    lobby_back_next();\n", ""),
+    # -- a console back after a restart (37g-3)
+    M("nr-init-drivers", "    for (p = 0; p < WIRELESS_MAX_CONSOLES; p++) "
+      "R->driver[p] = -1;\n}", "}"),
+    M("nr-resume-round", "if (R->round != 0 || !R->net.rejoin || "
+      "!R->net.rejoin(p)) {", "if (!R->net.rejoin || !R->net.rejoin(p)) {"),
+    M("nr-resume-rejoin", "if (R->round != 0 || !R->net.rejoin || "
+      "!R->net.rejoin(p)) {", "if (R->round != 0) {"),
+    M("nr-resume-refuse-send", "        R->net.send(peer, LOBBY_MSG_RESUME, m, "
+      "1);\n", ""),
+    M("nr-resume-refuse-len", "R->net.send(peer, LOBBY_MSG_RESUME, m, 1);",
+      "R->net.send(peer, LOBBY_MSG_RESUME, m, sizeof m);"),
+    M("nr-resume-refuse-return", "            p, R->round + 1);\n        "
+      "return;\n", "            p, R->round + 1);\n"),
+    M("nr-resume-consoles", "m[0] = (uint8_t)R->race.consoles;", "m[0] = 0;"),
+    M("nr-resume-place", "m[1] = (uint8_t)p;", "m[1] = 0;"),
+    M("nr-resume-gametype", "m[2] = (uint8_t)R->race.gameType;", "m[2] = 0;"),
+    M("nr-resume-cops", "m[3] = (uint8_t)R->race.copsOn;", "m[3] = 0;"),
+    M("nr-resume-setup", "    sendSetup(p);\n    R->resuming[p] = 1;",
+      "    R->resuming[p] = 1;"),
+    M("nr-resume-resuming", "    sendSetup(p);\n    R->resuming[p] = 1;",
+      "    sendSetup(p);"),
+    M("nr-hostread-rejoin", "                case LOBBY_MSG_REJOIN:\n"
+      "                    resume(p);\n                    break;\n", ""),
+    M("nr-racing-read", "        if (R->host) racingRead();\n", ""),
+    M("nr-racing-mask", "uint8_t mask = R->net.rejoining ? "
+      "R->net.rejoining() : 0;", "uint8_t mask = 0xff;"),
+    M("nr-racing-mask-zero", "uint8_t mask = R->net.rejoining ? "
+      "R->net.rejoining() : 0;", "uint8_t mask = 0;"),
+    M("nr-racing-driver", "if (peer < 0 || R->driver[p] < 0) continue;",
+      "if (peer < 0) continue;"),
+    M("nr-racing-alive", "        if (!placeAlive(p)) {\n            "
+      "R->resuming[p] = 0;\n            R->patient[p]  = 0;\n"
+      "            continue;\n        }\n", ""),
+    M("nr-racing-alive-patient", "            R->patient[p]  = 0;\n"
+      "            continue;", "            continue;"),
+    M("nr-racing-giveup", "if (R->resuming[p] && !((mask >> p) & 1)) {",
+      "if (0) {"),
+    M("nr-racing-giveup-clear", "            R->resuming[p] = 0;\n"
+      "            R->patient[p]  = 0;\n            say(\"netrace: place %d "
+      "given up", "            R->patient[p]  = 0;\n            say(\"netrace: "
+      "place %d given up"),
+    M("nr-racing-giveup-patient", "            R->patient[p]  = 0;\n"
+      "            say(\"netrace: place %d given up",
+      "            say(\"netrace: place %d given up"),
+    M("nr-resume-patient", "    R->patient[p] = 1;\n", ""),
+    M("nr-resume-peerpat", "        R->net.setPeerPatience(peer, "
+      "NETRACE_PATIENCE_MS);", "        ;"),
+    M("nr-resume-peerpat-ms", "        R->net.setPeerPatience(peer, "
+      "NETRACE_PATIENCE_MS);", "        R->net.setPeerPatience(peer, 0);"),
+    M("nr-instep", "if (R->patient[p] && !((mask >> p) & 1)) {", "if (0) {"),
+    M("nr-instep-mask", "if (R->patient[p] && !((mask >> p) & 1)) {",
+      "if (R->patient[p]) {"),
+    M("nr-instep-patient", "if (R->patient[p] && !((mask >> p) & 1)) {",
+      "if (!((mask >> p) & 1)) {"),
+    M("nr-instep-clear", "            R->patient[p] = 0;\n"
+      "            if (R->net.setPeerPatience) R->net.setPeerPatience(peer, 0);",
+      "            if (R->net.setPeerPatience) R->net.setPeerPatience(peer, 0);"),
+    M("nr-instep-give", "            if (R->net.setPeerPatience) "
+      "R->net.setPeerPatience(peer, 0);\n", ""),
+    M("nr-instep-give-ms", "R->net.setPeerPatience(peer, 0);\n            say(",
+      "R->net.setPeerPatience(peer, NETRACE_PATIENCE_MS);\n            say("),
+    M("nr-instep-say", "            say(\"netrace: place %d in step; its "
+      "link's own patience\", p);\n", ""),
+    M("nr-backin", "    return R->resumed && R->round == 0;",
+      "    return 0;"),
+    M("nr-backin-round", "    return R->resumed && R->round == 0;",
+      "    return R->resumed;"),
+    M("nr-backin-resumed", "    return R->resumed && R->round == 0;",
+      "    return R->round == 0;"),
+    M("nr-racing-drop", "            if (R->net.drop) R->net.drop(peer);\n", ""),
+    M("nr-racing-rejoin", "if (m.type == LOBBY_MSG_REJOIN) {", "if (0) {"),
+    M("nr-racing-loaded", "} else if (m.type == NETRACE_MSG_LOADED && "
+      "R->resuming[p]) {", "} else if (0) {"),
+    M("nr-racing-loaded-resuming", "} else if (m.type == NETRACE_MSG_LOADED && "
+      "R->resuming[p]) {", "} else if (m.type == NETRACE_MSG_LOADED) {"),
+    M("nr-racing-go", "                sendGo(p);\n", ""),
+    M("nr-racing-go-clear", "                R->resuming[p] = 0;\n"
+      "                sendGo(p);", "                sendGo(p);"),
+    M("nr-resumed-lost", "                if (!placeAlive(0)) {\n"
+      "                    R->stage = NR_OFF;", "                if (0) {\n"
+      "                    R->stage = NR_OFF;"),
+    M("nr-resumed-off", "                    R->stage = NR_OFF;\n"
+      "                    say(\"netrace: the host is gone before",
+      "                    say(\"netrace: the host is gone before"),
+    M("nr-resumed-branch", "            if (R->resumed) {\n"
+      "                if (!placeAlive(0)) {", "            if (0) {\n"
+      "                if (!placeAlive(0)) {"),
+    M("nr-begin-resume", "    if (race->resume && !R->host) {",
+      "    if (0) {"),
+    M("nr-begin-resume-wait", "        R->stage   = NR_WAIT;\n", ""),
+    M("nr-begin-resumed", "        R->resumed = 1;\n", ""),
+    M("nr-take-resume-failed", "        if (R->resumed) {\n            "
+      "R->stage = NR_OFF;", "        if (0) {\n            R->stage = NR_OFF;"),
+    M("nr-take-resume-off", "            R->stage = NR_OFF;\n            "
+      "lobby_resume_failed", "            lobby_resume_failed"),
+    M("nr-take-resume-say", "            lobby_resume_failed(gf, "
+      "PORTLANG_JOIN_FAILED, R->race.hostName);\n", ""),
+    M("nr-take-push", "    if (R->resumed) bgf_push_screen(gf, "
+      "LOBBY_SCREEN_NAME);\n", ""),
+    M("nr-take-push-always", "    if (R->resumed) bgf_push_screen",
+      "    if (1) bgf_push_screen"),
+    # -- the lines over a console coming back, and its own (37g-3)
+    M("nr-backtext-skip", "        if (!((places >> p) & 1)) continue;\n"
+      "        fillTok(mid,", "        fillTok(mid,"),
+    M("nr-backtext-order", "        fillTok(mid, sizeof mid, text(gf, "
+      "PORTLANG_COMING_BACK), \"$NAME\",\n                \"\\x01\");",
+      "        fillTok(mid, sizeof mid, text(gf, PORTLANG_COMING_BACK), "
+      "\"$NAME\",\n                R->names[p]);"),
+    M("nr-backtext-pct", "    snprintf(num, sizeof num, \"%d\", pct);\n"
+      "    for (p = 0;", "    snprintf(num, sizeof num, \"%d\", 0);\n"
+      "    for (p = 0;"),
+    M("nr-backtext-name", "        fillTok(mid, sizeof mid, line, \"\\x01\", "
+      "R->names[p]);", "        fillTok(mid, sizeof mid, line, \"\\x01\", "
+      "R->names[0]);"),
+    M("nr-backtext-clear", "        addLine(out, cap, mid);\n",
+      "        out[0] = 0;\n        addLine(out, cap, mid);\n"),
+    M("nr-catch-pct", "    snprintf(num, sizeof num, \"%d\", pct);\n"
+      "    fillTok(out, cap, text(gf, PORTLANG_CATCHING_UP)",
+      "    snprintf(num, sizeof num, \"%d\", 0);\n"
+      "    fillTok(out, cap, text(gf, PORTLANG_CATCHING_UP)"),
 ]
 
 EQUIVALENT = {
@@ -503,6 +632,17 @@ EQUIVALENT = {
     # its car select goes on to Select Track, which netrace_car_chosen
     # takes.
     "nr-hoststart-host",
+    # Once built every place still on drives (above), so a place racing
+    # past GO with no driver has no console: a peer the host has lost.
+    "nr-racing-driver",
+    # A LOADED comes in a race only from a console back after a restart,
+    # resumed until its GO: one given up on is off the network, and one
+    # gone and back says REJOIN first.
+    "nr-racing-loaded-resuming",
+    # A place sent away is lost at once (wireless_drop's peer_lost), so the
+    # next frame's look forgets it as gone.
+    "nr-racing-giveup-clear",
+    "nr-racing-giveup-patient",
 }
 
 

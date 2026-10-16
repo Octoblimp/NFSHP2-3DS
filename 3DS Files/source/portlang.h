@@ -37,6 +37,9 @@ enum {
     PORTLANG_HOST_MODE,                         // Host's question, TASKS 63
     PORTLANG_RECONNECTING,                      // a race held, $N left (37g)
     PORTLANG_CPU_DRIVES,                        // past it, $NAME's car
+    PORTLANG_CATCHING_UP,                       // back after a restart
+                                                // (37g-3), $N percent
+    PORTLANG_COMING_BACK,                       // and $NAME's, to the rest
     PORTLANG_END
 };
 

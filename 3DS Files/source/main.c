@@ -2943,6 +2943,7 @@ static bool g_lockRaced;    // a lockstep frame ran with the coordinator up
 static bool g_lockEnd;      // the frame asked for the end's save (37f)
 static u32  g_lockMenu;     // the flow's presses since the last begin
 static bool g_lockFinished; // WirelessTestFinish's finish made (37f-2)
+static bool g_lockBack;     // back after a restart, no host's record yet
 // A console lost (37g): the places racing at GO, those dropped since
 // (their cars the CPU's), the CPU's notice (its places, when it went up,
 // in ms) and the hold's mute.
@@ -2957,6 +2958,12 @@ static bool     g_lockMuted;
 // whether WirelessTestDropFrame's deafness was made.
 static uint32_t g_lockRejoinAt;
 static bool     g_lockDropped;
+// A console back after a restart (37g-3), well behind the race: its
+// frames undrawn but for its progress every LOCK_CATCH_DRAW_MS, and its
+// sound down until it is in step.
+#define LOCK_CATCH_DRAW_MS 250
+static uint32_t g_lockCatchDrawAt;
+static bool     g_lockCatchMuted;
 
 static const LobbyNet kLobbyNet = {
     .start      = lobbyNetStart,
@@ -3023,6 +3030,17 @@ static int lobbyCpuWish(void)
     }
 }
 
+// A console back in a race after a restart (37g-3): let in by lockstep.
+static int netRaceRejoin(int p)
+{
+    return netstep_rejoin(p, (uint32_t)osGetTime());
+}
+
+static uint8_t netRaceRejoining(void)
+{
+    return netstep_rejoining(NULL);
+}
+
 // A wireless race's setup (netrace.h): the same link, and the game's
 // StartRace, rides, characters and flow.
 static const NetRaceNet kNetRaceNet = {
@@ -3033,6 +3051,11 @@ static const NetRaceNet kNetRaceNet = {
     .recv        = lobbyNetRecv,
     .setPatience = wireless_set_patience,
     .busy        = netstep_ending,
+    .peek        = lobbyNetPeek,
+    .rejoin      = netRaceRejoin,
+    .rejoining   = netRaceRejoining,
+    .drop        = wireless_drop,
+    .setPeerPatience = wireless_set_peer_patience,
 };
 
 static void netRaceStartRace(void)
@@ -3080,6 +3103,7 @@ static void netRaceGoRacing(void)
     g_lockEnd = false;
     g_lockMenu = 0;
     g_lockFinished = false;
+    g_lockBack = netrace_back_in() != 0;
     g_lockLive = racing;
     g_lockCpu = 0;
     g_lockNote = 0;
@@ -5419,11 +5443,23 @@ static void lockPauseHandOver(uint8_t live)
             (unsigned long)netstep_frame(), from, to);
 }
 
+// Well behind the race's last record: a console back after a restart,
+// running the race from GO on the host's records (37g-3). It is from its
+// GO, before its first record says how far behind: it shows none of the
+// race's start (the grid, the fly-by, the countdown), and is straight
+// back in the race once it has caught up. The first NETSTEP_DELAY records
+// are its own, made at GO, and say nothing of the host's.
+static bool lockCatchingUp(void)
+{
+    return g_lockBack || netstep_behind() > NETSTEP_BEHIND;
+}
+
 // The cars of the places dropped from the record (37g: a console lost past
 // its hold, or gone) go to the CPU on the frame of the first record without
 // them, before its world step: the same frame on every console. A car not
 // made yet, or not yet a player's, is tried again each frame. A cop's car
-// waits for TASKS 61. The CPU's notice is shown a few seconds.
+// waits for TASKS 61. The CPU's notice is shown a few seconds, but not by a
+// console catching up: that is the race's past.
 static void lockHandOver(void)
 {
     const NetStepFrame* r = netstep_current();
@@ -5436,9 +5472,11 @@ static void lockHandOver(void)
 
         logLine("lockstep: frame %lu, places %02x dropped",
                 (unsigned long)netstep_frame(), (unsigned)gone);
-        if (now - g_lockNoteAt >= LOCK_NOTE_MS) g_lockNote = 0;
-        g_lockNote |= gone;
-        g_lockNoteAt = now;
+        if (!lockCatchingUp()) {
+            if (now - g_lockNoteAt >= LOCK_NOTE_MS) g_lockNote = 0;
+            g_lockNote |= gone;
+            g_lockNoteAt = now;
+        }
         g_lockCpu |= gone;
         lockPauseHandOver(r->live);
     }
@@ -5512,6 +5550,27 @@ static void lockHoldMute(bool held)
     g_lockMuted = held;
 }
 
+// A console catching up (37g-3) runs the race's past fast: its sound the
+// game's as ever, under the master volume, down until it is in step and
+// then faded in as after an applet. The game's own mute is the past's to
+// change (a pause in it), so it is left alone.
+static void lockCatchUpMute(bool on)
+{
+    if (on == g_lockCatchMuted) return;
+    g_lockCatchMuted = on;
+    logLine("lockstep: frame %lu, catching up %s",
+            (unsigned long)netstep_frame(), on ? "begins" : "is over");
+    if (!gAudioUp) return;
+    if (on) {
+        ndspSetMasterVol(0.0f);
+        gHold = HOLD_APPLET;
+        return;
+    }
+    gHold      = HOLD_WAIT;
+    gHoldUntil = svcGetSystemTick();
+    audioHoldTick();
+}
+
 // A wireless race's frame in lockstep (netstep.h), at the top of the loop
 // where the real step is measured. A frame begins by putting this
 // console's pad and its step -- from the last frame's begin to this one's
@@ -5548,6 +5607,7 @@ static bool lockFrame(uint32_t* ticker)
         svcSleepThread(1000000LL);
     }
     r = netstep_current();
+    if (netstep_frame() >= NETSTEP_DELAY) g_lockBack = false;
     RealTimeElapsedQuantized = r->q;
     RealTimeElapsed = GetRealTimeElapsedFromQuantized(r->q);
     g_lockWaiting = false;
@@ -5704,8 +5764,10 @@ static void drawBotPanel(UIRenderer* ui, const char* title, const char* body,
 
 // Over a wireless race held for a lost console (37g), a box across the top
 // screen: whose link was lost and the time left. Past the hold, for a few
-// seconds, whose car the CPU drives now. The port's own, in the panel's
-// colours: retail had no link to lose.
+// seconds, whose car the CPU drives now. For a console back after a
+// restart (37g-3), loading or catching up, that it is coming back and how
+// far; on that console, how far it has caught up. The port's own, in the
+// panel's colours: retail had no link to lose.
 #define HELD_BOX_X   24.0f
 #define HELD_BOX_PAD 10.0f
 #define HELD_BACK    RGBA8(0x0b, 0x0d, 0x12, 0xe0)
@@ -5713,17 +5775,26 @@ static void drawBotPanel(UIRenderer* ui, const char* title, const char* body,
 static void drawLockHeld(UIRenderer* ui)
 {
     char        text[320];
-    uint32_t    now = (uint32_t)osGetTime(), left;
-    uint8_t     held = netstep_held(now, &left);
+    uint32_t    now = (uint32_t)osGetTime(), left, behind = netstep_behind();
+    uint8_t     pct, back = netstep_rejoining(&pct);
+    uint8_t     held = netstep_held(now, &left) & (uint8_t)~back;
     UIWrapStyle st;
     float       boxW = 400.0f - HELD_BOX_X * 2.0f, textW, h, y;
 
-    if (held)
-        netrace_held_text(&g_flow, held, left, text, sizeof text);
-    else if (g_lockNote && now - g_lockNoteAt < LOCK_NOTE_MS)
-        netrace_cpu_text(&g_flow, g_lockNote, text, sizeof text);
-    else
-        return;
+    text[0] = 0;
+    if (lockCatchingUp()) {
+        uint32_t ran = netstep_frame();
+
+        netrace_catch_up_text(&g_flow, ran + behind
+                              ? (int)((uint64_t)ran * 100u / (ran + behind))
+                              : 0, text, sizeof text);
+    } else {
+        if (held) netrace_held_text(&g_flow, held, left, text, sizeof text);
+        if (back) netrace_back_text(&g_flow, back, pct, text, sizeof text);
+        if (!held && !back && g_lockNote && now - g_lockNoteAt < LOCK_NOTE_MS)
+            netrace_cpu_text(&g_flow, g_lockNote, text, sizeof text);
+    }
+    if (!text[0]) return;
     // '@' breaks a line in retail's text; the wrap breaks at a newline.
     for (char* c = text; *c; c++)
         if (*c == '@') *c = '\n';
@@ -5738,6 +5809,26 @@ static void drawLockHeld(UIRenderer* ui)
     C2D_DrawRectSolid(HELD_BOX_X, y, 0.0f, boxW, 2.0f, BOT_ACCENT);
     uirender_draw_wrapped(ui, text, 0, &st, HELD_BOX_X + HELD_BOX_PAD,
                           y + HELD_BOX_PAD, textW, 1.0f);
+}
+
+// A console catching up (37g-3), a few times a second: its progress over
+// a black top screen, the race's past not worth the drawing.
+static void lockCatchUpDraw(UIRenderer* ui)
+{
+    uint32_t now = (uint32_t)osGetTime();
+
+    if (now - g_lockCatchDrawAt < LOCK_CATCH_DRAW_MS) return;
+    g_lockCatchDrawAt = now;
+    C3D_FrameBegin(0);
+    C2D_Prepare();
+    C3D_DepthTest(false, GPU_GREATER, GPU_WRITE_COLOR);
+    C2D_TargetClear(g_top, C2D_Color32(0, 0, 0, 0xFF));
+    C2D_SceneBegin(g_top);
+    drawLockHeld(ui);
+    C2D_Flush();
+    C2D_TargetClear(g_bot, BOT_BACK);
+    C2D_SceneBegin(g_bot);
+    C3D_FrameEnd(0);
 }
 
 // Wheel and MellowMover ask for the ground through a seam shaped for the
@@ -7809,7 +7900,9 @@ int main(int argc, char** argv)
         FrameCounter = (int32_t)C3D_FrameCounter(0);
         if (lockOn) {
             raceStep = lockFrame(&frameTicker);
-            lockHoldMute(netstep_held((uint32_t)osGetTime(), NULL) != 0);
+            lockHoldMute(netstep_held((uint32_t)osGetTime(), NULL) != 0
+                         || netstep_rejoining(NULL) != 0);
+            lockCatchUpMute(lockCatchingUp());
             lockRejoin((uint32_t)osGetTime());
         } else {
             prepare_real_timestep_from_ticker(&frameTicker);
@@ -7962,6 +8055,7 @@ int main(int argc, char** argv)
                 netstep_drain(now);
                 g_lockEnd = false;
                 lockHoldMute(false);
+                lockCatchUpMute(false);
                 wireless_set_rejoin(0, NULL);
             }
 
@@ -8003,6 +8097,17 @@ int main(int argc, char** argv)
             if (raceHoldsLoadingScreen()) {
                 frameMark("race: the Loading screen held");
                 C3D_FrameSync();
+                (void)service_resource_loading();
+                bootServiceLoads(&g_boot);
+                continue;
+            }
+
+            // A console back after a restart, well behind (37g-3): the
+            // race's frames as fast as they run, undrawn but for the
+            // progress now and then; the loads served still.
+            if (lockOn && lockCatchingUp()) {
+                frameMark("race: catching up");
+                lockCatchUpDraw(&ui);
                 (void)service_resource_loading();
                 bootServiceLoads(&g_boot);
                 continue;

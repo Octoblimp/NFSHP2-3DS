@@ -130,6 +130,10 @@ const char   *wireless_peer_name(int i);
 // has gone, or with no such peer.
 WlLink       *wireless_peer_link(int i);
 
+// The host's: client i sent off the network, its place kept as one
+// lost's: a console the race gave up on as it loaded again (37g-3).
+void          wireless_drop(int i);
+
 // The host's: the places of the consoles that went, cleared.
 void          wireless_forget_lost(void);
 
@@ -137,6 +141,9 @@ void          wireless_forget_lost(void);
 // now and to come, until wireless_start: 0 is wlproto's WL_TIMEOUT_MS.
 // The race's setup asks for longer while the consoles load (netrace.c).
 void          wireless_set_patience(uint32_t ms);
+// Peer i's link's alone (37g-3), until the next wireless_set_patience or
+// the link's take-back; 0 the link's own.
+void          wireless_set_peer_patience(int i, uint32_t ms);
 
 // This console's user name as the network has it (UTF-8), or "" when on
 // no network.

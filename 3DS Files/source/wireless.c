@@ -462,7 +462,8 @@ static Peer *take_back(uint16_t node, const char *name, uint64_t seed)
         p->joinedAt = W.now;
         wl_link_init(&p->link, send_packet, (void *)(uintptr_t)node, W.now);
         wl_link_set_timeout(&p->link, W.patience);
-        LOG("wireless: node %u (%s) back in place %d", node, name, i);
+        LOG("wireless: node %u (%s) back in place %d, seed %016llx", node,
+            name, i, (unsigned long long)seed);
         return p;
     }
     return NULL;
@@ -499,7 +500,8 @@ static void client_came(uint16_t node)
         return;
     }
     p->seed = seed;
-    LOG("wireless: node %u (%s) joined", node, name);
+    LOG("wireless: node %u (%s) joined, seed %016llx", node, name,
+        (unsigned long long)seed);
 }
 
 // Who is on the network: the host gives each client that comes a place
@@ -628,6 +630,13 @@ WlLink *wireless_peer_link(int i)
     return wireless_peer_alive(i) ? &W.peers[i].link : NULL;
 }
 
+void wireless_drop(int i)
+{
+    if (!W.host || !wireless_peer_alive(i))
+        return;
+    peer_lost(&W.peers[i], "sent away", 1);
+}
+
 void wireless_forget_lost(void)
 {
     int i, j = 0;
@@ -652,6 +661,14 @@ void wireless_set_patience(uint32_t ms)
     for (i = 0; i < W.numPeers; i++)
         wl_link_set_timeout(&W.peers[i].link, ms);
     LOG("wireless: patience %lu ms", (unsigned long)(ms ? ms : WL_TIMEOUT_MS));
+}
+
+void wireless_set_peer_patience(int i, uint32_t ms)
+{
+    if (i < 0 || i >= W.numPeers) return;
+    wl_link_set_timeout(&W.peers[i].link, ms);
+    LOG("wireless: peer %d's patience %lu ms", i,
+        (unsigned long)(ms ? ms : WL_TIMEOUT_MS));
 }
 
 const char *wireless_self_name(void)

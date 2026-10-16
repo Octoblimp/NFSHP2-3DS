@@ -36,7 +36,7 @@ The beacon's application data says which hosts are the port's:
 | Offset | Size | What |
 |---|---|---|
 | 0 | 4 | `N` `H` `P` `2` |
-| 4 | 1 | wlproto's version (1) |
+| 4 | 1 | wlproto's version (2 since 37g-3; 1 before) |
 | 5 | 1 | n, the length of the caller's bytes (at most 64) |
 | 6 | n | the caller's bytes (the soak's are `SOAK`) |
 
@@ -79,11 +79,23 @@ A lost console can come back mid-race (TASKS 37g-2, `netstep.md`).
   with the same user name. The friend code seeds (`uds_friendcodeseed`)
   must match too, when both are known. `ok` must also say the race still
   holds for that peer. The node gets a new link, and the log says "node n
-  (NAME) back in place i", i being its place among the host's peers (0
-  the first client). Any other node is ejected.
+  (NAME) back in place i, seed s", i being its place among the host's
+  peers (0 the first client). Any other node is ejected.
 - **The client.** `wireless_rejoin` leaves the old network and scans by
   the host's MAC address, saved at the join (`udsScanBeacons`'s filter).
   It then joins again, the host its one peer.
+- **A console restarted (37g-3).** It comes back through the lobby's
+  Join, a scan and join of its own, and the host takes it back as
+  above. Its race then lets it in or not (`netrace.md`, "Back after a
+  restart"). Each node's seed is logged as it joins ("node n (NAME)
+  joined, seed s") and as it comes back, to see it is the same console.
+- **Sent away.** `wireless_drop(i)`, the host's, ejects client i, its
+  place kept as a lost one's: the race's for a console it gave up on as
+  it loaded after a restart.
+- **One link's patience.** `wireless_set_peer_patience(i, ms)` sets peer
+  i's link's timeout alone (0 its own), until the next
+  `wireless_set_patience` or the link's take-back: netrace's for a
+  console back after a restart until it has caught up.
 
 `wireless_test_deaf(ms)` makes the console drop every packet it pulls
 and every packet it sends for that long. It is the Azahar runs' out of
@@ -97,7 +109,7 @@ up to 1478. All numbers are little-endian.
 | Offset | Size | What |
 |---|---|---|
 | 0 | 1 | magic, 0x48 (`H`) |
-| 1 | 1 | version, 1 |
+| 1 | 1 | version, 2 (`WL_VERSION`; 1 before 37g-3, whose consoles do not meet these) |
 | 2 | 2 | ack: the next reliable number the sender has yet to deliver. Its top bit is 0. |
 | 4 | 1 | count: how many messages follow |
 | 5 | 2 | CRC |

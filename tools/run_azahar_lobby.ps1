@@ -128,6 +128,25 @@
 # None says a place gone, no car goes to the CPU, and every copy's parts
 # stay the host's to the end.
 #
+# With -Rejoin N (TASKS 37g-3; -Race; a client, 1 B, ...) each card's
+# config has the hold (150 s unless -HoldSeconds says), and once the
+# driving is done copy N is closed, its logs kept as *.before, and started
+# again on a new MAC (Azahar's host never forgets a station: its
+# EjectClient is a stub, so the old MAC is refused; a real host's UDS
+# drops it): the game from its start, Local Wireless, Join, the host's race
+# found and joined, and the console taken back in its place. It loads the
+# race, gets GO on the host's seed and runs the race from its start on the
+# host's records, undrawn but for its progress, while the rest hold with
+# its name and how far it has got (a shot of each every 10 s). The host
+# must log the place lost, back after a restart, asking back in, loaded
+# again and caught up, and its node back in place; the restarted copy
+# back in the race in its place, one GO and one lockstep start, its
+# catching up begun and over; no other copy catching up, no place gone and
+# no car the CPU's. Each node's friend code seed is shown as the host saw
+# it join and come back. Every copy then drives -Drive seconds more, and
+# every copy's parts must be the host's, the restarted copy's both before
+# its close and from its new start.
+#
 # Usage:
 #   powershell -File tools/run_azahar_lobby.ps1
 #   powershell -File tools/run_azahar_lobby.ps1 -Consoles 4
@@ -144,6 +163,7 @@
 #   powershell -File tools/run_azahar_lobby.ps1 -Consoles 2 -Race -Lose 1
 #   powershell -File tools/run_azahar_lobby.ps1 -Consoles 2 -Race -Lose 0
 #   powershell -File tools/run_azahar_lobby.ps1 -Consoles 2 -Race -Drop 1
+#   powershell -File tools/run_azahar_lobby.ps1 -Consoles 2 -Race -Rejoin 1
 #
 # Screenshots of each copy go to %TEMP%\nfshp2_lobby. Exit code 0 when
 # every copy reached Select Car from the lobby (with -Race: racing, every
@@ -151,7 +171,8 @@
 # race and on to Select Car again; with -Restart: racing again after the
 # restart; with -NextRace: racing in the event's next race; with -Lose:
 # the lost copy's car the CPU's on every other; with -Drop: the dropped
-# copy back in the race on every copy).
+# copy back in the race on every copy; with -Rejoin: the restarted copy
+# back in its place and caught up, in step with every copy).
 
 param(
     [ValidateRange(2, 8)]
@@ -170,11 +191,13 @@ param(
     [ValidateRange(-1, 7)]
     [int]$Lose = -1,              # -Race: the copy closed once the driving is done, 0 the host (37g-1)
     [ValidateRange(1, 255)]
-    [int]$HoldSeconds = 10,       # -Lose, -Drop: the hold, the cards' WirelessHoldSeconds (-Drop's 30)
+    [int]$HoldSeconds = 10,       # -Lose, -Drop, -Rejoin: the hold, the cards' WirelessHoldSeconds (-Drop's 30, -Rejoin's 150)
     [ValidateRange(-1, 7)]
     [int]$Drop = -1,              # -Race: the copy whose wireless goes deaf mid-race, 0 the host (37g-2)
     [int]$DropFrame = 300,        # -Drop: the lockstep frame it goes deaf on
     [int]$DropMs = 5000,          # -Drop: for how long
+    [ValidateRange(-1, 7)]
+    [int]$Rejoin = -1,            # -Race: the client closed once the driving is done, then started again (37g-3)
     [ValidateRange(-1, 7)]
     [int]$Cpu = 2,                # the host's CPU racers; -1 as shown
     [int]$Drive = 30,             # -Race: seconds of gas once all race
@@ -205,6 +228,13 @@ if ($Drop -ge 0 -and ($Quit -or $Restart -or $NextRace -or $Lose -ge 0)) {
 }
 if ($Drop -ge $Consoles) { throw "-Drop ${Drop}: there are only $Consoles copies" }
 if ($Drop -ge 0 -and -not $PSBoundParameters.ContainsKey("HoldSeconds")) { $HoldSeconds = 30 }
+if ($Rejoin -ge 0 -and -not $Race) { throw "-Rejoin restarts a copy mid-race: it needs -Race" }
+if ($Rejoin -eq 0) { throw "-Rejoin 0: the host's race ends with the host; a client comes back" }
+if ($Rejoin -ge 0 -and ($Quit -or $Restart -or $NextRace -or $Lose -ge 0 -or $Drop -ge 0)) {
+    throw "-Rejoin ends the run: no -Quit, -Restart, -NextRace, -Lose or -Drop with it"
+}
+if ($Rejoin -ge $Consoles) { throw "-Rejoin ${Rejoin}: there are only $Consoles copies" }
+if ($Rejoin -ge 0 -and -not $PSBoundParameters.ContainsKey("HoldSeconds")) { $HoldSeconds = 150 }
 
 $root = Split-Path -Parent $PSScriptRoot
 if ($Target3dsx -eq "") { $Target3dsx = Join-Path $root "3DS Files\NFSHP2-3DS.3dsx" }
@@ -412,7 +442,7 @@ function Prepare([string]$name, [string]$nick, [bool]$isHost) {
     $lines = @("DebugLog 1")
     if ($WirelessOff) { $lines += "WirelessOff 1" }
     if ($NextRace) { $lines += "WirelessTestFinish $Finish" }
-    if ($Lose -ge 0 -or $Drop -ge 0) { $lines += "WirelessHoldSeconds $HoldSeconds" }
+    if ($Lose -ge 0 -or $Drop -ge 0 -or $Rejoin -ge 0) { $lines += "WirelessHoldSeconds $HoldSeconds" }
     if ($Drop -ge 0 -and $name -eq $letters[$Drop]) {
         $lines += "WirelessTestDropFrame $DropFrame"
         $lines += "WirelessTestDropMs $DropMs"
@@ -420,9 +450,10 @@ function Prepare([string]$name, [string]$nick, [bool]$isHost) {
     Set-Content -Path (Join-Path $user "sdmc\nfshp2_config.txt") -Encoding ASCII -Value $lines
     LinkData $user ($NoDsp -or ($SilentClients -and -not $isHost))
     $log = Join-Path $user "sdmc\nfshp2_debug.txt"
-    Remove-Item $log -ErrorAction SilentlyContinue
     $azLog = Join-Path $user "log\azahar_log.txt"
-    Remove-Item $azLog -ErrorAction SilentlyContinue
+    foreach ($f in @($log, "$log.before", $azLog, "$azLog.before")) {
+        Remove-Item $f -ErrorAction SilentlyContinue
+    }
     return [pscustomobject]@{
         Name = $name; Nick = $nick; IsHost = $isHost; Exe = $exe; Log = $log;
         AzLog = $azLog; Proc = $null; Hwnd = [IntPtr]::Zero; Joined = $false;
@@ -695,6 +726,24 @@ if ($Race) {
     ) + $raceEnd
 }
 
+# -Rejoin (37g-3): the restarted copy's way back, from its boot: Join,
+# the host's race found and joined, the host's word that it is back in its
+# place, the setup, the load, GO, and its catching up begun and over.
+$rejoinSteps = $boot + @(
+    Step "join pick" @{ Key = $VK_RIGHT; Settle = 700 }
+    Step "search" @{ Key = $VK_A; Pattern = "lobby: searching"; Settle = 500; Shot = "re-searching" }
+    Step "found" @{ Pattern = "lobby: found 1 of \d+, hp2host"; Wait = 90; Settle = 1000; Shot = "re-found" }
+    Step "join" @{ Key = $VK_A; Pattern = "lobby: joined hp2host"; Settle = 500 }
+    Step "back in" @{ Pattern = "lobby: back in hp2host's race, place $Rejoin of $Consoles"; Wait = 30;
+                     Settle = 500; Shot = "back-in" }
+    Step "taken" @{ Pattern = "netrace: setup taken"; Wait = 120; Settle = 500; Shot = "re-loading" }
+    Step "go" @{ Pattern = "netrace: go, seed"; Wait = 240 }
+    Step "catching up" @{ Pattern = "lockstep: frame \d+, catching up begins"; Wait = 60; Settle = 1000;
+                         Shot = "catching-up" }
+    Step "caught up" @{ Pattern = "lockstep: frame \d+, catching up is over"; Wait = 240; Settle = 3000;
+                       Shot = "caught-up" }
+)
+
 # The unlocked cars car select counts ("carsel player p on ...: n cars, u
 # unlocked"), 0 before its line.
 function Unlocked($side) {
@@ -909,7 +958,7 @@ function Advance($side) {
                 $side.Seen[$step.Name] = $true
                 $side.SettleUntil = $now.AddMilliseconds($step.Settle)
                 $side.Phase = "settle"
-                if ($step.Name -match "^(lobby|host|mode|challenge|set up|the host's mode|search|found|join|started|car select|all in|start|track select|host start|built|car sent|taken|go|racing|race on|host off|join off|ok|pause|paused|probed|probe down|down held|probe start|start held|to quit|quit|to ok|quit ok|race over|back|every back|start again|started again|car select again|to race type|to players|to restart|restart|restart ok|restarted|racing again|finished|results|to the menu|on next race|next race|next ok|autosave|save ask|to yes|save yes|race 2|go again)$") {
+                if ($step.Name -match "^(lobby|host|mode|challenge|set up|the host's mode|search|found|join|started|car select|all in|start|track select|host start|built|car sent|taken|go|racing|race on|host off|join off|ok|pause|paused|probed|probe down|down held|probe start|start held|to quit|quit|to ok|quit ok|race over|back|every back|start again|started again|car select again|to race type|to players|to restart|restart|restart ok|restarted|racing again|finished|results|to the menu|on next race|next race|next ok|autosave|save ask|to yes|save yes|race 2|go again|back in|catching up|caught up)$") {
                     Say $side $step.Name
                 }
             } elseif ($now -gt $side.Deadline) {
@@ -1071,6 +1120,61 @@ try {
     if ($Drop -ge 0 -and (NoneFailed)) {
         Write-Host ("  [{0,5:N0}s] driving on: {1} deaf from frame {2} for {3} ms, the hold {4} s" -f (Elapsed), $sides[$Drop].Name, $DropFrame, $DropMs, $HoldSeconds)
         DriveAll "dropped" ($HoldSeconds + 30) 3
+    }
+    # -Rejoin (37g-3): a client closed mid-race and started again, its way
+    # back walked while the rest hold, then the gas on every copy again.
+    # The game makes its log anew at boot, so the old one is kept aside
+    # and gone before the start: the walk reads the new one alone.
+    if ($Rejoin -ge 0 -and (NoneFailed)) {
+        $re = $sides[$Rejoin]
+        Write-Host ("  [{0,5:N0}s] closing {1} mid-race to start it again, the hold {2} s" -f (Elapsed), $re.Name, $HoldSeconds)
+        $re.Lost = $true
+        $re.Proc | Stop-Process -Force
+        $re.Proc.WaitForExit(15000) | Out-Null
+        foreach ($f in @($re.Log, $re.AzLog)) {
+            if (Test-Path $f) { Move-Item -Path $f -Destination "$f.before" -Force }
+        }
+        # A real host's UDS forgets a station it ejects; Azahar's EjectClient
+        # is a stub, and its host refuses that MAC again ("already a
+        # connected client with that MAC-Adress"). The copy comes back on
+        # a new one, as Azahar makes when sysdata's mac.txt is gone; the
+        # game knows it by its name and friend code seed, not its MAC.
+        $macFile = Join-Path (Split-Path -Parent $re.Exe) "user\sysdata\mac.txt"
+        $oldMac = if (Test-Path $macFile) { (Get-Content $macFile -Raw).Trim() } else { "none" }
+        Remove-Item $macFile -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
+        Launch $re
+        $newMac = if (Test-Path $macFile) { (Get-Content $macFile -Raw).Trim() } else { "none yet" }
+        Write-Host "  $($re.Name): MAC $oldMac before, $newMac now"
+        $re.Lost = $false
+        $re.Joined = $false
+        JoinRoom $re
+        if (-not $re.Joined) {
+            $re.Failed = "not in the room again"
+        } else {
+            $re.Steps = $rejoinSteps
+            $re.Step = 0; $re.Phase = "start"; $re.Done = $false; $re.Mark = 0; $re.Seen = @{}
+            $end = (Get-Date).AddSeconds(420)
+            $nextShot = (Get-Date).AddSeconds(10)
+            $n = 0
+            while ((Get-Date) -lt $end -and -not $re.Done -and -not $re.Failed) {
+                Advance $re
+                if ((Get-Date) -ge $nextShot) {
+                    $n++
+                    foreach ($s in $sides) { if ($s -ne $re) { Shot $s "hold-$n" } else { Shot $s "back-$n" } }
+                    $nextShot = $nextShot.AddSeconds(10)
+                }
+                Start-Sleep -Milliseconds 250
+            }
+            if (-not $re.Done -and -not $re.Failed) {
+                $re.Failed = "out of time on '$($re.Steps[$re.Step].Name)'"
+                Shot $re "timeout-rejoin"
+            }
+            foreach ($s in $sides) {
+                if (-not (Alive $s) -and -not $s.Failed) { $s.Failed = "Azahar exited during the rejoin" }
+            }
+        }
+        if ($Drive -gt 0 -and (NoneFailed)) { DriveAll "rejoined" }
     }
     # -Quit: the pauser's pause and Quit, every copy back to the lobby and
     # on to Select Car again, each on its own clock as before.
@@ -1265,8 +1369,14 @@ if ($Race) {
     }
     $hostParts = Parts $h
     Write-Host "Host: parts of $($hostParts.Count) frames"
-    for ($i = 1; $i -lt $sides.Count; $i++) {
-        $s = $sides[$i]
+    $compared = @($sides | Select-Object -Skip 1)
+    $before = $null
+    if ($Rejoin -gt 0 -and (Test-Path "$($sides[$Rejoin].Log).before")) {
+        $before = [pscustomobject]@{ Name = "$($sides[$Rejoin].Name)-before"; Log = "$($sides[$Rejoin].Log).before";
+                                     Failed = $null }
+        $compared += $before
+    }
+    foreach ($s in $compared) {
         $mine = Parts $s
         $same = 0
         $first = $null
@@ -1293,6 +1403,9 @@ if ($Race) {
         if ($Drive -gt 0 -and $same -eq 0 -and $null -eq $first -and -not $s.Failed) {
             $s.Failed = "no parts compared with the host's"
         }
+    }
+    if ($before -and $before.Failed -and -not $sides[$Rejoin].Failed) {
+        $sides[$Rejoin].Failed = "before its close: $($before.Failed)"
     }
 
     # Each copy's car and transmission, the clients' as the host got them.
@@ -1392,6 +1505,59 @@ if ($Race) {
         }
     }
 
+    # -Rejoin (37g-3): the restarted copy back in its place on the host,
+    # loaded again, GO, and caught up; its own catching up begun and over,
+    # no other copy's; no place gone and no car the CPU's anywhere. The
+    # friend code seeds the host saw, for the record.
+    if ($Rejoin -ge 0) {
+        $re = $sides[$Rejoin]
+        foreach ($s in $sides) {
+            Write-Host "--- $($s.Name) the rejoin ---"
+            LogLines $s "netstep: (place \d+ (lost|back|is gone|restarted|asks back|caught up)|the host (lost|back|is gone))|netrace: (place \d+ (back after|loaded again|given up|in step)|back in the race)|lobby: (back in|found|joined|.*would not take)|wireless: (node \d+ .*(back in place|joined|sent away|timed out|left)|back on|open to|closed to|peer \d+'s patience)|lockstep: frame \d+, (places|place \d+'s car|catching up)" |
+                ForEach-Object { Write-Host "  $_" }
+        }
+        $h = $sides[0]
+        $nick = $re.Nick
+        $says = @(
+            "netstep: place $Rejoin lost at frame \d+; held for $($HoldSeconds * 1000) ms"
+            "netrace: place $Rejoin back after a restart; the setup again"
+            "netstep: place $Rejoin restarted and asks back in at frame \d+"
+            "netrace: place $Rejoin loaded again; go, seed"
+            "netstep: place $Rejoin caught up at frame \d+"
+            "wireless: node \d+ \($nick\) back in place \d+, seed"
+            "wireless: peer \d+'s patience 30000 ms"
+            "netrace: place $Rejoin in step; its link's own patience"
+            "wireless: peer \d+'s patience 3000 ms"
+        )
+        foreach ($say in $says) {
+            $n = @(LogLines $h $say).Count
+            if ($n -ne 1 -and -not $h.Failed) { $h.Failed = "'$say' $n times" }
+        }
+        $seeds = @(LogLines $h "wireless: node \d+ \(.*\) (joined|back in place \d+), seed [0-9a-f]+" |
+                   ForEach-Object { [regex]::Match($_, "\((.*)\) (joined|back in place \d+), seed ([0-9a-f]+)") } |
+                   ForEach-Object { "$($_.Groups[1].Value) $($_.Groups[2].Value): $($_.Groups[3].Value)" })
+        Write-Host "Friend code seeds the host saw:"
+        $seeds | ForEach-Object { Write-Host "  $_" }
+        $mineSays = @(
+            "lobby: back in hp2host's race, place $Rejoin of $Consoles"
+            "netrace: back in the race, place $Rejoin of $Consoles"
+            "lockstep: frame 0, catching up begins"
+            "lockstep: frame \d+, catching up is over"
+        )
+        foreach ($say in $mineSays) {
+            $n = @(LogLines $re $say).Count
+            if ($n -ne 1 -and -not $re.Failed) { $re.Failed = "'$say' $n times" }
+        }
+        foreach ($s in $sides) {
+            $bad = @("netstep: place \d+ is gone", "netstep: the host is gone", "lockstep: frame \d+, place \d+'s car")
+            if ($s -ne $re) { $bad += "lockstep: frame \d+, catching up" }
+            foreach ($b in $bad) {
+                $n = @(LogLines $s $b).Count
+                if ($n -ne 0 -and -not $s.Failed) { $s.Failed = "'$b' $n times" }
+            }
+        }
+    }
+
     # -Quit (37f) and -NextRace (37f-2): every copy's lockstep stopped once,
     # on the host's frame, and the host heard every client's stop.
     if ($Quit -or $NextRace) {
@@ -1485,6 +1651,7 @@ $goal = if ($WirelessOff) { "the wireless-off line, then the question" }
         elseif ($NextRace) { "racing, the results, Next Race, racing again in lockstep" }
         elseif ($Lose -ge 0) { "racing, a copy closed, held for, its car the CPU's" }
         elseif ($Drop -ge 0) { "racing, a copy deaf, held for, back in lockstep" }
+        elseif ($Rejoin -ge 0) { "racing, a copy restarted, back in its place, caught up in lockstep" }
         elseif ($Race) { "racing" } else { "Select Car" }
 foreach ($s in $sides) {
     $g = if ($s.Lost) { "racing, then closed" } else { $goal }
@@ -1500,6 +1667,7 @@ if ($failed.Count -eq 0) {
     elseif ($Lose -gt 0) { Write-Host "All $Consoles raced on seed $hostSeed; $($sides[$Lose].Name) closed, held for $HoldSeconds s, its car the CPU's on frame $handFrame on every copy left." }
     elseif ($Lose -ge 0) { Write-Host "All $Consoles raced on seed $hostSeed; the host closed, held for $HoldSeconds s, then every client raced alone, its car the CPU's." }
     elseif ($Drop -ge 0) { Write-Host "All $Consoles raced on seed $hostSeed; $($sides[$Drop].Name) deaf from frame $DropFrame for $DropMs ms, held for, found its host again and raced on in lockstep." }
+    elseif ($Rejoin -ge 0) { Write-Host "All $Consoles raced on seed $hostSeed; $($sides[$Rejoin].Name) closed, started again, back in its place, caught up from GO on the host's records and raced on in lockstep." }
     elseif ($Race) { Write-Host "All $Consoles racing from the lobby, GO on seed $hostSeed." }
     else { Write-Host "All $Consoles reached Select Car from the lobby." }
 } else {

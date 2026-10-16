@@ -253,22 +253,28 @@ static void start(uint32_t seed)
     if (R->game.goRacing) R->game.goRacing();
 }
 
-// The host's: every console racing and still on has loaded.
-static void maybeGo(void)
+// GO to place `p`: the race's seed.
+static void sendGo(int p)
 {
     uint8_t m[4];
-    int     p;
 
-    for (p = 1; p < R->race.consoles; p++)
-        if (R->driver[p] >= 0 && placeAlive(p) && !R->loaded[p]) return;
-    R->seed = bDefaultSeed;
     m[0] = (uint8_t)R->seed;
     m[1] = (uint8_t)(R->seed >> 8);
     m[2] = (uint8_t)(R->seed >> 16);
     m[3] = (uint8_t)(R->seed >> 24);
+    R->net.send(R->race.peer[p], NETRACE_MSG_GO, m, sizeof m);
+}
+
+// The host's: every console racing and still on has loaded.
+static void maybeGo(void)
+{
+    int p;
+
     for (p = 1; p < R->race.consoles; p++)
-        if (R->driver[p] >= 0 && placeAlive(p))
-            R->net.send(R->race.peer[p], NETRACE_MSG_GO, m, sizeof m);
+        if (R->driver[p] >= 0 && placeAlive(p) && !R->loaded[p]) return;
+    R->seed = bDefaultSeed;
+    for (p = 1; p < R->race.consoles; p++)
+        if (R->driver[p] >= 0 && placeAlive(p)) sendGo(p);
     start(R->seed);
 }
 
@@ -437,7 +443,12 @@ static void take(BGameFlow* gf)
         || need != R->setupLen || rp.NumDriverInfo != h.numDrivers) {
         say("netrace: the setup is not this build's (%u bytes)",
             (unsigned)R->setupLen);
-        backToLobby(gf, R->race.hostName);
+        if (R->resumed) {
+            R->stage = NR_OFF;
+            lobby_resume_failed(gf, PORTLANG_JOIN_FAILED, R->race.hostName);
+        } else {
+            backToLobby(gf, R->race.hostName);
+        }
         return;
     }
 
@@ -471,6 +482,9 @@ static void take(BGameFlow* gf)
     say("netrace: setup taken, track %d, %d drivers, driver %d, seed %08lx",
         (int)TheRaceParameters.TrackNumber, (int)h.numDrivers,
         R->driver[R->race.place], (unsigned long)h.seed);
+    // Back after a restart, it loads from the lobby itself: the race comes
+    // back to the lobby, as from the screens over it.
+    if (R->resumed) bgf_push_screen(gf, LOBBY_SCREEN_NAME);
     if (R->game.startLoading) R->game.startLoading();
 }
 
@@ -499,6 +513,37 @@ static void setupPiece(BGameFlow* gf, const WlMsg* m)
 }
 
 // ------------------------------------------------------------ the frame
+
+// The host's, to a console back in place `p` after a restart: let back
+// in, in the event's first race alone, with Start's mode and the setup
+// again; else an answer with nothing in it.
+static void resume(int p)
+{
+    uint8_t m[4];
+    int     peer = R->race.peer[p];
+
+    if (R->round != 0 || !R->net.rejoin || !R->net.rejoin(p)) {
+        m[0] = 0;
+        R->net.send(peer, LOBBY_MSG_RESUME, m, 1);
+        say("netrace: place %d back after a restart, in race %d; refused",
+            p, R->round + 1);
+        return;
+    }
+    m[0] = (uint8_t)R->race.consoles;
+    m[1] = (uint8_t)p;
+    m[2] = (uint8_t)R->race.gameType;
+    m[3] = (uint8_t)R->race.copsOn;
+    R->net.send(peer, LOBBY_MSG_RESUME, m, sizeof m);
+    sendSetup(p);
+    R->resuming[p] = 1;
+    // Its link waits as long as at the race's start, over its load and its
+    // first frame's preparation, until it has caught up.
+    R->patient[p] = 1;
+    if (R->net.setPeerPatience)
+        R->net.setPeerPatience(peer, NETRACE_PATIENCE_MS);
+    say("netrace: place %d back after a restart; the setup again, %u bytes",
+        p, (unsigned)R->setupLen);
+}
 
 static void hostRead(void)
 {
@@ -534,8 +579,63 @@ static void hostRead(void)
                     R->loaded[p] = 1;
                     say("netrace: place %d loaded", p);
                     break;
+                // A console back after a restart (37g-3), heard only past
+                // the race it came back in: an event's next race's, so
+                // refused.
+                case LOBBY_MSG_REJOIN:
+                    resume(p);
+                    break;
                 default:
                     break;
+            }
+        }
+    }
+}
+
+// The host's while racing (37g-3): from a place the race holds for, a
+// console back after a restart, then its load; anything else there is
+// the race's. One given up on as it loads goes off the network; one
+// caught up has its link's own patience back.
+static void racingRead(void)
+{
+    uint8_t mask = R->net.rejoining ? R->net.rejoining() : 0;
+    WlMsg   m;
+    int     p;
+
+    for (p = 1; p < R->race.consoles; p++) {
+        int peer = R->race.peer[p];
+
+        if (peer < 0 || R->driver[p] < 0) continue;
+        // A link lost is taken back with the race's patience.
+        if (!placeAlive(p)) {
+            R->resuming[p] = 0;
+            R->patient[p]  = 0;
+            continue;
+        }
+        if (R->resuming[p] && !((mask >> p) & 1)) {
+            R->resuming[p] = 0;
+            R->patient[p]  = 0;
+            say("netrace: place %d given up on as it loaded; sent away", p);
+            if (R->net.drop) R->net.drop(peer);
+            continue;
+        }
+        if (R->patient[p] && !((mask >> p) & 1)) {
+            R->patient[p] = 0;
+            if (R->net.setPeerPatience) R->net.setPeerPatience(peer, 0);
+            say("netrace: place %d in step; its link's own patience", p);
+        }
+        while (R->net.peek && R->net.peek(peer, &m)) {
+            if (m.type == LOBBY_MSG_REJOIN) {
+                R->net.recv(peer, &m);
+                resume(p);
+            } else if (m.type == NETRACE_MSG_LOADED && R->resuming[p]) {
+                R->net.recv(peer, &m);
+                R->resuming[p] = 0;
+                sendGo(p);
+                say("netrace: place %d loaded again; go, seed %08lx", p,
+                    (unsigned long)R->seed);
+            } else {
+                break;
             }
         }
     }
@@ -570,8 +670,12 @@ void netrace_frame(BGameFlow* gf)
         R->stage = NR_OFF;
         return;
     }
-    // The race's messages are the race's (37d).
-    if (R->stage == NR_RACING) return;
+    // The race's messages are the race's (37d), but for a console back
+    // after a restart (37g-3).
+    if (R->stage == NR_RACING) {
+        if (R->host) racingRead();
+        return;
+    }
     // After the race's end, the frontend: the lobby's from its load on.
     // Else the event's next race is loading; its hold comes next.
     if (R->stage == NR_ENDED) {
@@ -592,6 +696,15 @@ void netrace_frame(BGameFlow* gf)
     switch (R->stage) {
         case NR_CARS:
         case NR_WAIT:
+            // Back after a restart, the lobby is up, and says the host
+            // lost.
+            if (R->resumed) {
+                if (!placeAlive(0)) {
+                    R->stage = NR_OFF;
+                    say("netrace: the host is gone before the setup came");
+                }
+                break;
+            }
             if (!R->host && !placeAlive(0)) {
                 backToLobby(gf, R->race.hostName);
                 break;
@@ -642,12 +755,15 @@ void netrace_bind(NetRace* r)
 void netrace_init(const NetRaceNet* net, const NetRaceGame* game,
                   NetRaceLogFn log)
 {
+    int p;
+
     memset(R, 0, sizeof *R);
     if (net) R->net = *net;
     if (game) R->game = *game;
     R->log      = log;
     R->popup    = -1;
     R->lastGone = -1;
+    for (p = 0; p < WIRELESS_MAX_CONSOLES; p++) R->driver[p] = -1;
 }
 
 void netrace_begin(const LobbyRace* race)
@@ -668,6 +784,13 @@ void netrace_begin(const LobbyRace* race)
     R->host     = race->place == 0;
     for (p = 0; p < WIRELESS_MAX_CONSOLES; p++) R->driver[p] = -1;
     if (R->net.setPatience) R->net.setPatience(NETRACE_PATIENCE_MS);
+    if (race->resume && !R->host) {
+        R->stage   = NR_WAIT;
+        R->resumed = 1;
+        say("netrace: back in the race, place %d of %d; the setup next",
+            race->place, race->consoles);
+        return;
+    }
     say("netrace: begin, place %d of %d", race->place, race->consoles);
     // The host's CPU racers, and the third to eighth consoles in AI racers'
     // places, so there are as many by track select (Lap Knockout counts
@@ -697,6 +820,11 @@ int netrace_place(void)
 const LobbyRace* netrace_race(void)
 {
     return &R->race;
+}
+
+int netrace_back_in(void)
+{
+    return R->resumed && R->round == 0;
 }
 
 const char* netrace_place_name(int p)
@@ -750,6 +878,33 @@ void netrace_cpu_text(const BGameFlow* gf, uint8_t places, char* out,
                  R->names[p]);
         addLine(out, cap, line);
     }
+}
+
+// The name goes in last, so that no "$N" in it is taken for the percent.
+void netrace_back_text(const BGameFlow* gf, uint8_t places, int pct,
+                       char* out, size_t cap)
+{
+    char line[256], mid[256], num[8];
+    int  p;
+
+    snprintf(num, sizeof num, "%d", pct);
+    for (p = 0; p < WIRELESS_MAX_CONSOLES; p++) {
+        if (!((places >> p) & 1)) continue;
+        fillTok(mid, sizeof mid, text(gf, PORTLANG_COMING_BACK), "$NAME",
+                "\x01");
+        fillTok(line, sizeof line, mid, "$N", num);
+        fillTok(mid, sizeof mid, line, "\x01", R->names[p]);
+        addLine(out, cap, mid);
+    }
+}
+
+void netrace_catch_up_text(const BGameFlow* gf, int pct, char* out,
+                           size_t cap)
+{
+    char num[8];
+
+    snprintf(num, sizeof num, "%d", pct);
+    fillTok(out, cap, text(gf, PORTLANG_CATCHING_UP), "$N", num);
 }
 
 int netrace_driver(int p)

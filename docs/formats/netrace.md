@@ -172,7 +172,64 @@ GO is read: what comes next is the race's.
 - Only the lobby takes the link down, with its screen up. If the link is
   down anyway, netrace stops (`NR_OFF`).
 
-What a race does with a console gone is 37g's.
+What a race does with a console gone is 37g's (`netstep.md`, "A
+console lost").
+
+## Back after a restart (TASKS 37g-3)
+
+A console switched off or closed mid-race can come back into its place
+while the race holds for it. Its lobby joins the racing host (the
+host's wireless takes the node back into the lost place by its name and
+friend code seed, 37g-2) and sends `LOBBY_MSG_REJOIN` (0x19), as every
+joiner does (`lobby.md`, "Back in a race"). netstep leaves what is not
+its own on the link for netrace.
+
+The host, racing (`racingRead`, each frame at `NR_RACING`), peeks at
+each place's link:
+
+- **REJOIN.** In the event's first race, if `netstep_rejoin` lets the
+  place back in, it answers `LOBBY_MSG_RESUME` (0x1a): the consoles, the
+  place, Start's game type and cops, 4 bytes. It then sends the setup it
+  built again ("netrace: place p back after a restart; the setup again,
+  n bytes"), and the place is `resuming`. Otherwise it answers 1 byte,
+  0: refused ("...; refused"). A later race refuses, as the setup kept is
+  the first race's; so does a REJOIN heard while the event's next race
+  is set up or loads (`hostRead`).
+- **LOADED** from a place resuming: GO to it alone, on the race's seed
+  ("place p loaded again; go, seed s"). It then runs the race from frame
+  0 on netstep's records until it has caught up.
+- **Its link's patience.** From RESUME the place's link has netrace's
+  patience (`NETRACE_PATIENCE_MS`, `wireless_set_peer_patience`), as
+  every link has at a race's start: the console loads, and its first
+  frame prepares the track's drawing for seconds with no pump, while
+  the host races on with the link's own timeout (3 s). Once netstep no
+  longer has the place loading or catching up, the link's own comes
+  back ("place p in step; its link's own patience"). The first Azahar
+  run without it lost the console as it prepared its first frame, 4 s
+  after GO.
+- A place resuming that netstep no longer holds for (its hold over as it
+  loads) is given up on and sent off the network (`wireless_drop`, its
+  place kept as a lost one's): "place p given up on as it loaded; sent
+  away". The race goes on with its car the CPU's.
+
+The console back gets RESUME in its lobby, which starts the race with
+`LobbyRace.resume` set. `netrace_begin` then goes straight to `NR_WAIT`
+with no car select ("netrace: back in the race, place p of n; the setup
+next"). It takes the setup as any client does, the lobby still up, and
+pushes the lobby's screen back before loading, so the race comes back to
+the lobby as it does from the screens over it. A setup from another
+build ends it in the lobby (`lobby_resume_failed`: "Could not join the
+race.", OK, the question). With the host lost before the setup came,
+netrace goes off ("the host is gone before the setup came") and the
+lobby, still up, says the link was lost. Its LOADED and the host's GO
+follow as at a race's start.
+
+While a place loads or catches up, every console's box over the held
+race says "NAME is coming back into the race... N%"
+(`netrace_back_text`, N from `netstep_rejoining`), and the console back
+says "Catching up with the race... N%" (`netrace_catch_up_text`), each in
+the six languages (`portlang.c`). The name goes in last, so a "$N" in a
+console's name is not taken for the percent.
 
 ## The race's end (TASKS 37f)
 
@@ -266,7 +323,7 @@ drawing a ride from `bDefaultSeed`), and a load of the scenario's
 frames, the loop stalled for most of them, that draws a different count
 of randoms on each console.
 
-36 scenarios: two consoles; the host waiting on two cars; a client's and
+48 scenarios: two consoles; the host waiting on two cars; a client's and
 the host's BACK; eight consoles; a client gone before its car, with its
 car in, of two waited for, while waiting, at car select, during the
 load; every client gone at the start, at car select, while the host
@@ -289,6 +346,19 @@ consoles, the one in an AI racer's place loading last; with a client
 gone, and with the host gone, while it loads (the client racing alone);
 and a next race, its end, and the frontend.
 
+Twelve are 37g-3's, a console restarted mid-race (the event "boot": its
+game from the start, its lobby joined to the host in its place again):
+in an AI racer's place, back in through its lobby, the setup again, its
+load, and GO on the race's seed, its race the host's; the second
+player's, in a Lap Knockout; the same, caught up and on to the event's
+next race with the rest; refused, netstep not having it back; lost
+in the event's next race, and back as the host loads that race, both
+refused; given up on as it loads ("holdover"), sent off the network and
+racing alone; a setup sent again from another build, the lobby's to
+say; gone again as it loads; restarted twice; lost again as it catches
+up, and restarted once more; the host gone between its answer and the
+setup. The fake netstep has a place caught up 20 frames after its GO.
+
 After each end a console's fake netstep is busy for the scenario's
 frames: the host sends each racing client its last frames and reads the
 clients' messages of the race; a client sends its stop. Each ended
@@ -300,7 +370,22 @@ busy, and a client sends one LOADED a race.
 Every frame it checks the popup (one at most, only on "Wireless Race",
 the lobby's look), each console's line, the sounds, the link's patience,
 the messages (none too long, none to a peer not there), and that GO
-comes only once every console racing has held, once to each. At the end
+comes only once every console racing has held, once to each. A console
+back after a restart (37g-3) sends REJOIN only after one; the host
+answers RESUME only to a REJOIN, once each: one byte (refused) past the
+event's first race, when it is not racing, or when netstep will not
+have it back, else the consoles, its place and Start's mode. Only the
+host asks netstep, and only for a racing place that restarted. The
+console's lobby reads nothing but the host's frames before the answer,
+its race starts from its lobby, the lobby under it, and its GO comes
+once it has loaded, the race's records after it. One given up on as it
+loads is sent off the network before its GO, netstep done with it. A
+setup it cannot take is the lobby's to say, once, netrace off. The
+host's link to it has netrace's patience from the answer that let it
+back in while netstep has it, and its own again within two frames of
+netstep letting it go; a link taken back has the race's. At each GO,
+`netrace_back_in` is 1 only on a console in the race it came back into.
+At the end
 it checks each console's screen, stage and log lines, and that each
 racing client's race is the host's at the last GO: the parameters, the driver
 table, the event, Fred's game type and players, the drivers, and the
@@ -313,7 +398,7 @@ any other race's as track select left them).
 
 The last line is `total faults N`, and the check passes at 0.
 
-`--mutate` makes 194 mutations of `netrace.c`. 182 are caught and 12 are
+`--mutate` makes 252 mutations of `netrace.c`. 236 are caught and 16 are
 equivalent, each named in the script with its reason.
 
 ## On Azahar

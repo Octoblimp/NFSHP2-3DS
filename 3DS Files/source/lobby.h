@@ -47,6 +47,16 @@
 // left it long for the loads). With the link gone on the way, the line
 // that says so, as before.
 //
+// A joiner says so to the host it joins (LOBBY_MSG_REJOIN), which a host
+// in its lobby lets be. A host racing has let it on only into the place
+// of a console the race holds for, by its name (37g-2): one that
+// restarted mid-race and came back through Join (37g-3). Its race then
+// answers (LOBBY_MSG_RESUME) with the place and Start's mode, and the
+// race's setup after; the joiner waits on as it did for Start, and goes
+// to the race's load from here, no car select (LobbyRace.resume). An
+// answer with nothing in it is a race that will not take it back: the
+// line that it could not join, OK, the question.
+//
 // Host-buildable: the link is the LobbyNet's, wireless.h's on the 3DS and
 // a script in tools/src/lobby_test.c.
 
@@ -73,8 +83,11 @@ typedef struct BGameFlow BGameFlow;
 
 // The lobby's reliable messages. 37c's come after.
 enum {
-    LOBBY_MSG_START = 0x10,     // the host's: the race is on
-    LOBBY_MSG_BACK  = 0x18,     // either's: back from the race (37f)
+    LOBBY_MSG_START  = 0x10,    // the host's: the race is on
+    LOBBY_MSG_BACK   = 0x18,    // either's: back from the race (37f)
+    LOBBY_MSG_REJOIN = 0x19,    // a joiner's, on joining (37g-3)
+    LOBBY_MSG_RESUME = 0x1a,    // the racing host's answer: consoles,
+                                // place, game type, cops; none: refused
 };
 
 // The link, as wireless.h has it. The lobby calls nothing else.
@@ -129,7 +142,9 @@ void lobby_cpu_wish(LobbyCpuFn fn);
 // `copsOn` are the host's Fred.GameType (the gameflow's gameType hook)
 // and cops, on every console, for a client's car select: a client comes
 // from the main menu, not from a setup of its own. -1 and 0 from a host
-// that did not send them.
+// that did not send them. `resume` is 1 on a console back in a race it
+// was in before a restart (37g-3): the race is on, and its setup comes
+// at once.
 typedef struct LobbyRace {
     int  consoles;
     int  place;
@@ -138,9 +153,11 @@ typedef struct LobbyRace {
     int  cpu;
     int  gameType;
     int  copsOn;
+    int  resume;
 } LobbyRace;
 
-// Told on Start, on every console, before it goes on to car select.
+// Told on Start, on every console, before it goes on to car select; and
+// on a console back in a race (`resume`), the lobby still up.
 typedef void (*LobbyStartFn)(const LobbyRace* race);
 void lobby_on_start(LobbyStartFn fn);
 
@@ -158,6 +175,11 @@ void lobby_notice_next(int32_t id, const char* name);
 // When the lobby is next come back to, it is from the race with the link
 // up (netrace_end): the host's list or a client's wait, as before Start.
 void lobby_back_next(void);
+
+// A console back in a race (37g-3) that could not take its setup: the
+// line `id` with `name` (Latin-1), OK, the question, the link down. Only
+// while the lobby waits on that race.
+void lobby_resume_failed(BGameFlow* gf, int32_t id, const char* name);
 
 // The ScreenCallback, for kScreens[]: LOBBY_SCREEN_NAME's.
 void lobby_callback(BGameFlow* gf, BScreenMessage msg,
