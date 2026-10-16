@@ -24,7 +24,8 @@
 # -Calls are single presses, "key:seconds" into the gas, each with a shot
 # after it. The default is the horn (X, 90; the cop's target) at 6, 10
 # and 14 seconds, so a chase is open for the calls: R (87, the helicopter)
-# at 22 and L (81, the roadblock) at 40 (joyhid_cop_keys).
+# at 22 and L (81, the roadblock) at 40 (joyhid_cop_calls, the default
+# cop bindings).
 
 param(
     [int]$FlybySeconds = 60,      # the most from the track's attach to the race
@@ -222,17 +223,22 @@ if ($booted) {
     }
     if (Wait-ForLog "^movie open MOVIES/INTRO/NFSINTRO" 40) {
         Start-Sleep -Seconds 2
-        [void](Press-Until $VK_M "flow title skip" 6 3)   # START: stop the intro
+        # 20 s a press: a second START here passes the title, and the one
+        # below then picks Hot Pursuit.
+        [void](Press-Until $VK_M "flow title skip" 3 20)   # START: stop the intro
     } else {
         [void](Wait-ForLog "flow title idle" 20)
     }
     [void](Wait-ForLog "flow vis object b5761d00 b070dbc9 1" 15)
     Start-Sleep -Milliseconds 900
-    if (Press-Until $VK_M "flow enter New Main Menu" 6 3) {   # START
+    # 20 s a press: a second START on New Main Menu picks Hot Pursuit, and
+    # the A below then starts a quick race.
+    if (Press-Until $VK_M "flow enter New Main Menu" 3 20) {   # START
         Start-Sleep -Milliseconds 1200
-        # 15 s a press: this line has come later than 8 s, and a second A
-        # lands on Cops On Mode Select and starts a quick race.
-        if (Press-Until $VK_A "flow enter Cops On Mode Select" 3 15) {   # A, Hot Pursuit
+        # 30 s a press: these lines have come later than 15 s while the
+        # menu's movie plays, and a second A lands on Cops On Mode Select
+        # and starts a quick race.
+        if (Press-Until $VK_A "flow enter Cops On Mode Select" 2 30) {   # A, Hot Pursuit
             # A press before the menu has its first item is dropped.
             [void](Wait-ForLog "screen Cops On Mode Select .* last HIGHLIGHT" 10)
             Start-Sleep -Milliseconds 2500

@@ -5260,6 +5260,11 @@ static void logRaceState(void)
                     c->pCarDriver ? (double)c->pCarDriver->Steering : -1.0,
                     bodies, dynamic, (double)WorldTimeElapsed);
         }
+        // The player's nitro, as careffects.c reads it for the flames.
+        if (c->TheMovementMode == PHYSICS_MOVEMENT && c->pCarMover != NULL
+            && ((PhysicsCar*)(void*)c->pCarMover)->pEngine != NULL
+            && ((PhysicsCar*)(void*)c->pCarMover)->pEngine->NitroFlag != 0)
+            logLine("race: car 0 nitro on");
     }
     // Each AI racer: where it is, its modes, the action it is carrying
     // out and what its PsychoDriver is asked for and does.

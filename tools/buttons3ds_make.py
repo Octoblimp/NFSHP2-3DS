@@ -73,7 +73,7 @@ LETTERS = {
 }
 # Width over height, for the letters' boxes.
 ASPECT = {"A": 0.86, "B": 0.72, "X": 0.80, "Y": 0.84, "L": 0.62, "R": 0.74,
-          "Z": 0.70}
+          "Z": 0.62}
 
 
 def draw_letter(d, ch, x, y, h, stroke, rgb):
@@ -192,9 +192,12 @@ def icon(name):
                   1.6 * SS)
         draw_text(d, name, cx, 11.75 * SS, 10.0 * SS, 2.4 * SS, WHITE, 0)
     elif name in ("ZL", "ZR"):
-        rect_body(img, 3.0 * SS, 2.0 * SS, 23.0 * SS, 21.0 * SS, 3.5 * SS,
+        # The cell's full width and taller than L and R, so the two
+        # letters can be as bold as L's one: at the size the menus draw
+        # them, about 16 x 14, thinner ones ran together (2026-10-16).
+        rect_body(img, 0.5 * SS, 1.5 * SS, 25.5 * SS, 21.5 * SS, 3.5 * SS,
                   1.6 * SS)
-        draw_text(d, name, cx, cy, 9.0 * SS, 2.0 * SS, WHITE, 1.2 * SS)
+        draw_text(d, name, cx, cy, 11.5 * SS, 2.2 * SS, WHITE, 1.4 * SS)
     elif name == "CPAD":
         # The Circle Pad: a disc in a round well.
         round_body(img, cx, cy, 10.4 * SS)

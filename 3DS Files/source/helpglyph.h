@@ -11,26 +11,31 @@
 // or to the BUTTONSOUT glyph that still fits: the D-pad's four, START and
 // SELECT.
 //
-//                    menus (MENU, FE)   race (RACE)   Be A Cop (COP)
-//     Cross          A                  A             A
-//     Triangle       B (main.c's back)  Y             Y
-//     Square         Y (main.c's)       B             B
-//     Circle         as joyhid has it:  X (the horn)  X (the target)
+//                    menus (MENU, FE)       a race (RACE, COP): the key
+//                                           the player bound to
+//     Cross          A                      throttle
+//     Triangle       B (main.c's back)      camera
+//     Square         Y (main.c's)           brake
+//     Circle         as joyhid has it:      horn
 //                    Y in MENU, B in FE
-//     L1 / R1        L / R              L / R         L / R
-//     L2 / R2        ZL / ZR            ZL / ZR       R / L (the
-//                                                     helicopter, the
-//                                                     roadblock)
-//     R3             D-pad Down, the nitro's (joyhid's double of R3)
+//     L1 / R1        L / R                  look back / e-brake
+//     L2 / R2        ZL / ZR                shift down / up; the cop's
+//                                           helicopter / roadblock
+//     R3             D-pad Down             nitro boost
+//     D-pad Up       D-pad Up               cycle HUD
 //     left stick     the Circle Pad (retail's 0x90..0x94)
 //     right stick    the C-Stick (retail's 0x95..0x98)
 //
 // In the menus Triangle is B and Square Y because main.c's frontend keys
 // are what the menus hear: B pops the screen and Y is MENU_SQUARE, which
-// joyhid's frontend layout matches for car select's scanners. In the cop's
-// car L and R are the calls whatever the transmission, where retail's
-// manual pad needs Triangle with L2 or R2 (970001); helpglyph_rewrite
-// drops the "Triangle +" so that line reads as the 3DS's.
+// joyhid's frontend layout matches for car select's scanners. In a race
+// the keys are joyhid's gJoyHidBindings, the racer's or the cop's: the
+// defaults are joyhid.h's map, and Options' Controller changes them. A
+// key draws as its icon, D-pad Up and Down as BUTTONSOUT's; an action on
+// no key keeps retail's glyph. In the cop's car the calls are one key
+// each whatever the transmission, where retail's manual pad needs
+// Triangle with L2 or R2 (970001); helpglyph_rewrite drops the "Triangle
+// +" so that line reads as the 3DS's.
 
 #ifndef HELPGLYPH_H
 #define HELPGLYPH_H
@@ -65,8 +70,13 @@
 
 // What help character `c` (0x80..0x9d) draws as in joyhid layout `layout`
 // (JOYHID_LAYOUT_*): HELPGLYPH_ICON + an icon, or a help character for
-// BUTTONSOUT -- `c` itself but for R3, which is D-pad Down's.
+// BUTTONSOUT -- `c` itself, or a D-pad's for R3 and a binding on D-pad
+// Up or Down.
 int32_t helpglyph_map(unsigned char c, int32_t layout);
+
+// How joyhid bind key `key` (JOYHID_BIND_*) draws: HELPGLYPH_ICON + an
+// icon, D-pad Up's or Down's help character, or -1 for none.
+int32_t helpglyph_key(int32_t key);
 
 // `s` as the 3DS has it in `layout`, in place: in COP, a Triangle, " + "
 // and then L2 or R2 is the one key. Returns the new length.

@@ -3179,6 +3179,10 @@ phases.
         the event tree's SyncHelpMenu. The 3DS key needs choosing (B is
         back and A select; X is free outside car select), and the 'k'
         text then draws that key's icon.
+        **The user, 2026-10-16:** "Help button can be mapped to Y by
+        default". Y is MENU_SQUARE in `main.c`'s `kBinds` today (car
+        select's orbit view, through joyhid's FE layout), so the screens
+        that use Square need settling first.
 
 49. [x] **The joystick tables are the demo's.** Found on 2026-10-12.
         `scannertab.c` and `joyeventid.h` come from NFSHP2.ELF;
@@ -3890,6 +3894,28 @@ phases.
         - [ ] 71d: Controller (JoystickPreConfig): Configuration
               (JoystickConfigScreen). Calibration and Vibration have
               nothing to work on with a 3DS, and Player 2 is hidden.
+              **The user, 2026-10-16:** "I would like ZL to be the cop
+              boost button ... add icons for ZL, ZR as well ... make
+              whatever controls you have now (including ZL for boost) the
+              default, and make it user-changeable".
+              - [x] The keys as tables (Session 116): `joyhid.c`'s
+                `gJoyHidBindings`, a racer's and the cop's, each action on
+                one of ten keys (A, B, X, Y, L, R, ZL, ZR, D-pad Up and
+                Down) and pressing its configuration 30 button. The
+                defaults are the old map with the cop's boost on ZL and
+                its shift down on D-pad Down. `joyhid_cop_calls` makes the
+                calls from whatever keys hold them, and the help glyphs
+                follow the tables. ZL and ZR's icons drawn again, bold and
+                the cell's full width. `joyhid_check` and
+                `helpglyph_check` pass, with changed bindings too, and an
+                ad-hoc pass of 34 mutations was all caught.
+              - [ ] The remap page: Configuration as a list of the
+                actions, Racer and Cop on its arrows, A then a key to
+                bind (the key's old action takes the moved one's key),
+                the bindings in a file of their own beside settings.db,
+                and the save prompt when it is left changed. The
+                DualShock picture, Calibration, Vibration and Player 2's
+                rows hidden.
         - [ ] 71e: the pause menu's Options ("Pause Options", "Pause
               audio", "Pause display"), View Objective ("Race
               Objective") and View Cop Controls ("Pause BAC controls").

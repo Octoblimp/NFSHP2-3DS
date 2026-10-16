@@ -259,55 +259,93 @@ with no frontend frames for the 32 reads. So `main.c` calls
 `StartSkipFEGame`. Without that, the SkipFE race opened the pause menu on
 its first frame.
 
-| 3DS | DualShock 2 | In a race (configuration 30) |
-|-----|-------------|------------------------------|
-| A | Cross | throttle; menu select |
-| B | Square | brake |
-| X | Triangle; Circle racing | menu back; horn while racing |
-| Y | Circle; Triangle racing | menu help; camera (on release), combo modifier while racing |
-| L, R | L1, R1 | look back, e-brake; in Be A Cop, the roadblock and the helicopter |
-| ZL, ZR | L2, R2 | shift down, up; with Y (X in a menu) held, zone / pursuit calls |
-| D-pad | D-pad | digital steer, HUD (Up); menus |
-| D-pad Down | Down and R3 | nitro |
+In the menus (the `MENU` and `FE` layouts) the keys are a fixed map:
+
+| 3DS | DualShock 2 | In a menu |
+|-----|-------------|-----------|
+| A | Cross | select |
+| B | Square | menu square (car select's orbit view is Y's in `FE`, which swaps B and Y) |
+| X | Triangle | back |
+| Y | Circle | help |
+| L, R | L1, R1 | |
+| ZL, ZR | L2, R2 | |
+| D-pad | D-pad | scroll |
+| D-pad Down | Down and R3 | (nothing in a menu reads R3) |
 | START, SELECT | START, SELECT | |
-| Circle Pad | left stick | steering; menu analog |
-| C-Stick | right stick | alternate throttle (up) and brake (down) |
+| Circle Pad | left stick | menu analog |
+| C-Stick | right stick | |
 
 A and B take the throttle and brake because they sit next to each other,
 as Cross and Square do; the price is that the frontend's "back", which is
 `MENU_BACK` and so Triangle, is X rather than B.
 
-**The race layout.** While the race coordinator is in `RACE_IN_PROGRESS`
-(`gJoyHidRaceLayoutFn`, which `main.c` binds), `joyhid_build` swaps X and
-Y before the map: X reads as Circle, the horn -- or a cop car's lights and
-siren -- and Y as Triangle, the camera and the combo modifier. The user
-asked for the horn on X (2026-10-09). The flyby, the countdown, the pause
-screen, the replays and the results keep the menu layout, so X is "back"
-wherever there is a menu. The swap is upstream of the scanners, so the
-joylog and replays see the DualShock buttons as before. R3 goes on D-pad Down
-because nothing reads R3 in a menu or Down in a race. A held button's
-pressure byte reads 255 and a released one 0. A stick maps
-±`JOYHID_STICK_FULL` (144 of the Circle Pad's nominal 156, which a worn pad
-or a diagonal falls short of) onto 0..255, Y inverted -- the DualShock's Y
-is 0 at the top. ZL, ZR and the C-Stick are the New 3DS's; an Old 3DS reads
-them as released and centred.
+**The race layouts.** While the race coordinator is in `RACE_IN_PROGRESS`
+(`gJoyHidRaceLayoutFn`, which `main.c` binds), `joyhid_build` reads ten
+keys -- A, B, X, Y, L, R, ZL, ZR and D-pad Up and Down -- through
+`gJoyHidBindings`: one table for a racer (`JOYHID_LAYOUT_RACE`) and one for
+the cop's car in Be A Cop (`JOYHID_LAYOUT_COP`). Each entry puts an action
+on a key, and the action presses its configuration 30 button:
 
-**Be A Cop's L and R.** The user's mapping of 2026-10-11, which replaced
-12m-3's D-pad calls: in Be A Cop, in the cop's car, L calls a roadblock
-and R the helicopter. X, the horn, stays the cop's target: in retail
-`HONK_HORN` goes to `BeACopToggleSirenAndLights`, which changes the chase
-target. The nitro stays on D-pad Down. Retail's two calls are combos,
-`REQUEST_HELICOPTER` TRIANGLE + L2 and `REQUEST_ROADBLOCK` TRIANGLE + R2
-(rows 160 and 161 in configuration 30), so the race layout's Y + ZL and
-Y + ZR make them too. `gJoyHidRaceLayoutFn` answers `JOYHID_LAYOUT_COP` in
-a Be A Cop race when player 1's car is the player cop's, and
-`joyhid_cop_keys` then rewrites the keys before the map:
+| Action | Button | Racer's key | Cop's key |
+|--------|--------|-------------|-----------|
+| throttle | Cross | A | A |
+| brake | Square | B | B |
+| e-brake | R1 | R | none |
+| horn / siren | Circle | X | X (the target) |
+| camera | Triangle (on release; the combos' modifier) | Y | Y |
+| look back | L1 | L | none |
+| shift up | R2 | ZR | ZR |
+| shift down | L2 | ZL | D-pad Down |
+| cycle HUD | D-pad Up | D-pad Up | D-pad Up |
+| nitro boost | R3 | none | ZL |
+| roadblock | Triangle + R2, a call | none | L |
+| helicopter | Triangle + L2, a call | none | R |
 
-- L and R are dropped, so the cop has no look back or e-brake.
-- A new press of L sends Y (Triangle) for one reading, then Y + ZR (the
-  roadblock), then Y alone, so R2 lets go behind Triangle's veto and
-  shifts nothing. R does the same with ZL (the helicopter). Pressing
+Those are the defaults: the user's horn on X (2026-10-09), the cop's calls
+on L and R (2026-10-11) and the cop's boost on ZL (2026-10-16), when the
+user asked for every key to be changeable. D-pad Down, the nitro's key
+before, took ZL's shift down. The fixed keys, racing or not: D-pad Left
+and Right steer, START pauses, SELECT is SELECT, the Circle Pad is the
+left stick (steering) and the C-Stick the right (alternate throttle up,
+brake down). The camera key held with shift down or up is retail's combo,
+the zone freeze and zoom for a racer (and in the cop's car the helicopter
+and roadblock, as retail has them).
+
+- `joyhid_bind(table, action, key)` puts an action on a key. The action
+  that had the key takes the moved action's old key, so a table stays one
+  key an action. `key` NONE takes the action off its key.
+- `joyhid_bindings_valid` is what a file read back must pass: every entry
+  a bind key or NONE, and no key on two actions of a table.
+- A key on no action presses nothing. An action on no key keeps retail's
+  glyph in the help text.
+- Nitro only works in the cop's car (`realdriver_joy_nitro_boost`), so a
+  racer's boost, roadblock and helicopter are on no key.
+
+The tables are upstream of the scanners, so the joylog and replays see the
+DualShock buttons as before, and a wireless race sends each console's own
+built bytes, so each player's bindings are their own. The flyby, the
+countdown, the pause screen, the replays and the results keep the menu
+layout, so X is "back" wherever there is a menu. A held button's pressure
+byte reads 255 and a released one 0. A stick maps ±`JOYHID_STICK_FULL`
+(144 of the Circle Pad's nominal 156, which a worn pad or a diagonal falls
+short of) onto 0..255, Y inverted -- the DualShock's Y is 0 at the top.
+ZL, ZR and the C-Stick are the New 3DS's; an Old 3DS reads them as
+released and centred.
+
+**Be A Cop's calls.** Retail's two calls are combos, `REQUEST_HELICOPTER`
+TRIANGLE + L2 and `REQUEST_ROADBLOCK` TRIANGLE + R2 (rows 160 and 161 in
+configuration 30). The cop's roadblock and helicopter keys make them in
+one press. X, the horn, stays the cop's target: in retail `HONK_HORN` goes
+to `BeACopToggleSirenAndLights`, which changes the chase target.
+`gJoyHidRaceLayoutFn` answers `JOYHID_LAYOUT_COP` in a Be A Cop race when
+player 1's car is the player cop's, and `joyhid_cop_calls` then adds the
+call's buttons to the reading (`JoyHidState.calls`):
+
+- A new press of the roadblock's key adds Triangle for one reading, then
+  Triangle + R2, then Triangle alone, so R2 lets go behind Triangle's veto
+  and shifts nothing. The helicopter's does the same with L2. Pressing
   both at once calls the helicopter.
+- The call keys press nothing of their own.
 - Triangle lets go on the next reading, which raises `CAMERA_POV_CHANGE`.
   The request's handler (`playerinput.c`) has just set
   tIgnoreNextPovChange, which holds that off for a second, the same as
@@ -315,9 +353,6 @@ a Be A Cop race when player 1's car is the player cop's, and
 - A press during a call's three readings is dropped. Holding the key
   calls once. A key held into the cop layout calls nothing, since the
   keys held in the other layouts are noted too.
-
-The D-pad steers as in any race, Up still cycles the HUD and Down is
-still the nitro (R3).
 
 **The Circle Pad in the menus.** TASKS 42, asked for on 2026-10-11: the
 Circle Pad moves through every menu as the D-pad does. The port's menus
@@ -359,8 +394,15 @@ cop layout, L and R each raise their request on the second frame and
 only there, with the camera change on the fourth and no look back,
 e-brake, gear change or horn. The checks cover both keys at once, a
 press during a call, a key held over from the race layout, a second
-press, the D-pad's steer, X's horn, and Up and Down. Thirteen mutations
-of `joyhid_cop_keys` are all caught.
+press, the D-pad's steer, X's horn, ZL's nitro, Down's downshift, Y +
+Down's helicopter, and a racer's free Down. Then the bindings change --
+the racer's throttle onto ZR, the cop's roadblock onto X and boost onto
+B -- and each key raises its new event while the menus keep theirs.
+`helpglyph_check.py` holds the help glyphs to the same tables, default and
+changed, and `joyhid_bind`'s swaps to their promise. An ad-hoc pass of 34
+mutations of the binding code (`joyhid_cop_calls`, the build, the
+defaults, `joyhid_bind`, `joyhid_bindings_valid` and `helpglyph_map`'s
+race half) was all caught (2026-10-16).
 
 `main.c` installs the map and calls `InitJoystick` at boot, and runs
 `ReadJoystickData` and `GenerateJoyEvents` once a frame after the HID scan,

@@ -6,8 +6,9 @@
 // Where joystick_check.py holds the joystick layer to the image, this holds
 // the map to its own promise: that A is the throttle and the menus' select,
 // that X held turns ZL into the zone freeze rather than a downshift, and so
-// on down the list, for configuration 30. The Be A Cop layout's L and R
-// (joyhid_cop_keys) go through the same path, as joyhid_read sends them.
+// on down the list, for configuration 30, with the default bindings and
+// changed ones. The Be A Cop layout's calls (joyhid_cop_calls) go through
+// the same path, as joyhid_read sends them.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -62,7 +63,8 @@ static int32_t read_pad(int32_t port, uint8_t *buf)
 
     if (port != 0)
         return 0;
-    s.keys = joyhid_cop_keys(&cop, s.keys, s.race == JOYHID_LAYOUT_COP);
+    s.calls = joyhid_cop_calls(&cop, s.keys, s.race == JOYHID_LAYOUT_COP,
+                               gJoyHidBindings.cop);
     joyhid_build(&s, buf);
     return 1;
 }
@@ -443,17 +445,93 @@ int main(void)
     frame();
     expect("cop X", JOY_EVENT_HONK_HORN, 1, 1);
     release();
-    // D-pad Up and Down keep the HUD and the nitro.
+    // D-pad Up keeps the HUD; ZL is the nitro (the user's, 2026-10-16)
+    // and D-pad Down the downshift, ZL's old job.
     pad.race = JOYHID_LAYOUT_COP;
     pad.keys = JOYHID_DUP;
     frame();
     expect("cop Up", JOY_EVENT_CYCLE_HUD, 1, 1);
     release();
     pad.race = JOYHID_LAYOUT_COP;
+    pad.keys = JOYHID_ZL;
+    frame();
+    expect("cop ZL", JOY_EVENT_NITRO_BOOST, 1, 1);
+    expect_not("cop ZL", JOY_EVENT_SHIFTDOWN);
+    expect_not("cop ZL", JOY_EVENT_REQUEST_HELICOPTER);
+    release();
+    pad.race = JOYHID_LAYOUT_COP;
     pad.keys = JOYHID_DDOWN;
     frame();
-    expect("cop Down", JOY_EVENT_NITRO_BOOST, 1, 1);
+    expect("cop Down", JOY_EVENT_SHIFTDOWN, 1, 1);
+    expect_not("cop Down", JOY_EVENT_NITRO_BOOST);
     release();
+    pad.race = JOYHID_LAYOUT_COP;
+    pad.keys = JOYHID_ZR;
+    frame();
+    expect("cop ZR", JOY_EVENT_SHIFTUP, 1, 1);
+    release();
+    // Y + Down, by hand, is still retail's combo: the helicopter.
+    pad.race = JOYHID_LAYOUT_COP;
+    pad.keys = JOYHID_Y;
+    frame();
+    frame();
+    pad.keys = JOYHID_Y | JOYHID_DDOWN;
+    frame();
+    expect("cop Y+Down", JOY_EVENT_REQUEST_HELICOPTER, 1, 1);
+    expect_not("cop Y+Down", JOY_EVENT_SHIFTDOWN);
+    release();
+    // A racer has no nitro and Down is free.
+    pad.race = JOYHID_LAYOUT_RACE;
+    pad.keys = JOYHID_DDOWN;
+    frame();
+    expect_not("race Down", JOY_EVENT_NITRO_BOOST);
+    expect_not("race Down", JOY_EVENT_SHIFTDOWN);
+    release();
+
+    // Changed bindings: the racer's throttle on ZR (shift up takes A), the
+    // cop's roadblock on X (the horn takes L) and boost on B (the brake
+    // takes ZL).
+    joyhid_bind(gJoyHidBindings.racer, JOYHID_ACT_THROTTLE, JOYHID_BIND_ZR);
+    joyhid_bind(gJoyHidBindings.cop, JOYHID_ACT_ROADBLOCK, JOYHID_BIND_X);
+    joyhid_bind(gJoyHidBindings.cop, JOYHID_ACT_BOOST, JOYHID_BIND_B);
+    pad.race = JOYHID_LAYOUT_RACE;
+    pad.keys = JOYHID_ZR;
+    frame();
+    expect("rebound race ZR", JOY_EVENT_THROTTLE_ANALOG, 250, 255);
+    expect_not("rebound race ZR", JOY_EVENT_SHIFTUP);
+    release();
+    pad.race = JOYHID_LAYOUT_RACE;
+    pad.keys = JOYHID_A;
+    frame();
+    expect("rebound race A", JOY_EVENT_SHIFTUP, 1, 1);
+    expect_not("rebound race A", JOY_EVENT_THROTTLE_ANALOG);
+    release();
+    cop_call("rebound cop X", JOYHID_X, JOY_EVENT_REQUEST_ROADBLOCK,
+             JOY_EVENT_SHIFTUP);
+    pad.race = JOYHID_LAYOUT_COP;
+    pad.keys = JOYHID_L;
+    frame();
+    expect("rebound cop L", JOY_EVENT_HONK_HORN, 1, 1);
+    expect_not("rebound cop L", JOY_EVENT_REQUEST_ROADBLOCK);
+    release();
+    pad.race = JOYHID_LAYOUT_COP;
+    pad.keys = JOYHID_B;
+    frame();
+    expect("rebound cop B", JOY_EVENT_NITRO_BOOST, 1, 1);
+    expect_not("rebound cop B", JOY_EVENT_BRAKE_ANALOG);
+    release();
+    pad.race = JOYHID_LAYOUT_COP;
+    pad.keys = JOYHID_ZL;
+    frame();
+    expect("rebound cop ZL", JOY_EVENT_BRAKE_ANALOG, 250, 255);
+    release();
+    // The menus never move: A is still select and B Square.
+    pad.race = JOYHID_LAYOUT_MENU;
+    pad.keys = JOYHID_A;
+    frame();
+    expect("rebound menu A", JOY_EVENT_MENU_SELECT, 1, 1);
+    release();
+    joyhid_default_bindings(&gJoyHidBindings);
 
     press("START", JOYHID_START, JOY_EVENT_START, 1, 1);
     press("SELECT", JOYHID_SELECT, JOY_EVENT_SELECT, 1, 1);
@@ -561,6 +639,12 @@ int main(void)
                 if (set & 1u << k)
                     s.keys |= keys[k];
             s.race = (int32_t)(set % 4);
+            if (set % 5 == 1)
+                s.calls = JOYHID_DS2_TRIANGLE;
+            else if (set % 5 == 2)
+                s.calls = JOYHID_DS2_TRIANGLE | JOYHID_DS2_L2;
+            else if (set % 5 == 3)
+                s.calls = JOYHID_DS2_TRIANGLE | JOYHID_DS2_R2;
             s.cx = sticks[set % 3][0];
             s.cy = sticks[set % 3][1];
             s.sx = sticks[set % 3][2];

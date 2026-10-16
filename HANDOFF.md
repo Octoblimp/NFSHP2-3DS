@@ -24849,6 +24849,48 @@ on their screen.
 - **`tools/run_azahar_display.ps1`**: PASS (six rows, HUD seven rows, the
   prompt's B, No with the settings put back, Yes saved on Autosave).
 
+### 71d, first half: the keys as tables
+
+The user, mid-71d: "I would like ZL to be the cop boost button ... add
+icons for ZL, ZR as well ... make whatever controls you have now
+(including ZL for boost) the default, and make it user-changeable". Then:
+"Help button can be mapped to Y by default" (TASKS 48's key; Y is the
+menus' Square today, so that clash is settled with 48).
+
+- **`joyhid.c`'s `gJoyHidBindings`**: a racer's table and the cop's, each
+  of the twelve actions (throttle, brake, e-brake, horn, camera, look
+  back, shift up and down, HUD, boost, roadblock, helicopter) on one of
+  ten keys or none. `joyhid_build`'s RACE and COP layouts press each held
+  key's action's configuration 30 button; D-pad Left/Right, START,
+  SELECT and the sticks stay fixed. The menus' map is unchanged.
+- **Defaults** are the old map, with the cop's boost on ZL and its shift
+  down on D-pad Down (the user's ask). The racer's D-pad Down is free.
+- **`joyhid_cop_calls`** replaces `joyhid_cop_keys`: it watches whatever
+  keys the cop's roadblock and helicopter are on and returns the
+  DualShock buttons of the call (`JoyHidState.calls`).
+- **`joyhid_bind`** swaps (the key's old action takes the moved action's
+  old key); **`joyhid_bindings_valid`** is for a file read back.
+- **`helpglyph_map`** reads the tables in a race: the Blurb's R3 is ZL's
+  icon for the cop now. `helpglyph_key` draws a bind key.
+- **ZL/ZR icons** drawn again (`buttons3ds_make.py`): the cell's full
+  width, taller, bolder letters.
+- `joyhid_check` and `helpglyph_check` pass, with changed bindings too; an
+  ad-hoc pass of 34 mutations of the new code was all caught.
+- `main.c` logs "race: car 0 nitro on" while the player's engine is on
+  nitro (DebugLog only).
+- **Azahar**: `run_azahar_coprace.ps1 -WatchSeconds 70 -SkipBlurb -Calls
+  "49:4,90:8,87:22,81:40,49:50"` reached You're The Cop's race; each ZL
+  press logged "race: car 0 nitro on". The car left the road on the gas
+  alone, so no chase opened for the calls; their keys are the old ones,
+  and `joyhid_check` covers them.
+- `run_azahar_coprace.ps1` waits 20 s a START and 30 s an A on the way in:
+  the log came later than 8 s, and the second START picked Hot Pursuit,
+  so the A started a quick race (three runs did).
+
+Still in 71d: the remap page (Configuration as the list of actions,
+Racer/Cop, A then a key), the bindings' file beside settings.db and the
+save prompt.
+
 ### Next
 
 1. 71d Controller, 71e the pause menu's screens (the pause audio page
