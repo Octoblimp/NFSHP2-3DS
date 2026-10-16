@@ -101,6 +101,7 @@ $VK_X = 88   # the 3DS Y on Azahar's default map: SQUARE
 
 $debugLog  = Join-Path $env:APPDATA "Azahar\sdmc\nfshp2_debug.txt"
 . (Join-Path $PSScriptRoot "azahar_debuglog.ps1")   # DebugLog 1
+. (Join-Path $PSScriptRoot "azahar_viewers.ps1")    # DebugMenu 1, for SELECT
 $azaharLog = Join-Path $env:APPDATA "Azahar\log\azahar_log.txt"
 Remove-Item $debugLog  -ErrorAction SilentlyContinue
 Remove-Item $azaharLog -ErrorAction SilentlyContinue

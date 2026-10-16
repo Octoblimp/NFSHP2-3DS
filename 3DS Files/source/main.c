@@ -8221,7 +8221,11 @@ int main(int argc, char** argv)
 
         // The viewers are the frontend's: the track viewer would read a
         // second track over the race's, and the race stops for neither.
-        if ((kDown & KEY_SELECT) && !raceUp && !g_track.attached) {
+        // They are developer tools, so only with the debug menu: "DebugMenu
+        // 1" or the main menu's L + R + D-Pad Up (launch blocker 1,
+        // 2026-10-16). The flow never has SELECT otherwise.
+        if ((kDown & KEY_SELECT) && !raceUp && !g_track.attached
+            && (ConfigDebugMenu || debugmenu_revealed())) {
             mode = (mode + 1) % MODE_COUNT;
             if (mode != MODE_SCREENS && vHasMenu) {
                 bmenu_unactivate(&vMenu);

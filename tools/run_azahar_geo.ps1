@@ -140,6 +140,7 @@ $VK_LEFT = 37; $VK_UP = 38; $VK_RIGHT = 39; $VK_DOWN = 40
 
 $debugLog = Join-Path $env:APPDATA "Azahar\sdmc\nfshp2_debug.txt"
 . (Join-Path $PSScriptRoot "azahar_debuglog.ps1")   # DebugLog 1
+. (Join-Path $PSScriptRoot "azahar_viewers.ps1")    # DebugMenu 1, for SELECT
 Remove-Item $debugLog -ErrorAction SilentlyContinue
 Get-ChildItem $OutDir -Filter *.png -ErrorAction SilentlyContinue | Remove-Item -Force
 

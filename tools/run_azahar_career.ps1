@@ -38,6 +38,11 @@ $config = Join-Path $env:APPDATA "Azahar\sdmc\nfshp2_config.txt"
 if ((Test-Path $config) -and (Select-String -Path $config -Pattern "^\s*SkipFE\s+[1-9]" -Quiet)) {
     throw "$config turns SkipFE on; this run needs the frontend"
 }
+# SELECT on the main menu must not open the viewers without the debug menu
+# (launch blocker 1). With "DebugMenu 1" on the card it may, so the check
+# is skipped.
+$debugMenuOn = (Test-Path $config) -and
+    (Select-String -Path $config -Pattern "^\s*DebugMenu\s+[1-9]" -Quiet)
 
 Add-Type @"
 using System;
@@ -249,6 +254,8 @@ if ($booted) {
     if (Enter-Screen $VK_M "New Main Menu") {   # START
         Start-Sleep -Milliseconds 1500
         Shot "mainmenu"
+        [Hp2Cap]::PressKey($hwnd, $VK_N)               # SELECT, nothing
+        Start-Sleep -Milliseconds 1500
         $atMode = $false
         if ($CopsOn) {
             $atMode = Enter-Screen $VK_A $modeSelect
@@ -336,8 +343,13 @@ if (-not $atReward) {
     $atReward = @($dbg | Where-Object { $_ -match "help override (800044|800052)" }).Count -gt 0
 }
 
+$viewer = @($dbg | Where-Object { $_ -match "^mode [1-3]$|^geoview: entered|^trackview: entered" })
+
 $verdict = "UNKNOWN"
 if (-not $booted)        { $verdict = "FAIL (never reached the main loop)" }
+elseif ($viewer.Count -gt 0 -and -not $debugMenuOn) {
+    $verdict = "FAIL (SELECT opened a viewer without the debug menu: $($viewer[0]))"
+}
 elseif ($crash)          { $verdict = "FAIL (crash: $($crash[0]))" }
 elseif ($unmapped)       { $verdict = "FAIL ($(@($unmapped).Count) unmapped accesses, first: $(@($unmapped)[0]))" }
 elseif (-not $atTree)    { $verdict = "PARTIAL (never reached the event tree)" }
@@ -360,5 +372,7 @@ $az | Where-Object { $_ -match "Error|Critical|PANIC" } | Select-Object -Last 12
     ForEach-Object { Write-Host $_ }
 Write-Host ""
 Write-Host "=== Result ==="
+if ($debugMenuOn) { Write-Host "SELECT:     not checked (DebugMenu 1 on the card)" }
+else { Write-Host ("SELECT:     {0} viewer line(s)" -f $viewer.Count) }
 Write-Host ("Verdict:    {0}" -f $verdict)
 Write-Host ("Screenshots: {0} in {1}" -f $step, $OutDir)

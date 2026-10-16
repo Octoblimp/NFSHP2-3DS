@@ -24583,7 +24583,11 @@ Given to the user after TASKS 70. Before a public launch:
 
 1. SELECT in the frontend cycles into the developer viewers (geometry,
    track, screens) in every build (`main.c`, `KEY_SELECT`). Gate it
-   behind the debug menu.
+   behind the debug menu. **Done:** SELECT reaches them only with
+   "DebugMenu 1" or the L + R + D-Pad Up chord. The five scripts that
+   press SELECT dot-source `tools/azahar_viewers.ps1`, which writes the
+   line to Azahar's card. `run_azahar_career.ps1` presses SELECT on the
+   main menu and fails if a viewer opens (checked only without the line).
 2. Career end to end (69f, 69g): an event's race, its end screens, back
    to the tree, the result saved and the next event open; the
    tournaments' and knockouts' later races, the Ultimate event, the Be A
