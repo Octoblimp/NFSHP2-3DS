@@ -209,6 +209,7 @@
 #include "raceinit.h"
 #include "raceovermsg.h"
 #include "racerun.h"
+#include "racesplit.h"
 #include "raceupdate.h"
 #include "raceparams.h"
 #include "rcpost.h"
@@ -3168,8 +3169,9 @@ static void lockTestFinish(void)
 // TestFinish (configitems.h): a race on this console alone finished that
 // many seconds after its GO (StartGoTimeFrames), once. The player's car
 // crosses in place TestFinishPlace, behind the first cars of the
-// leadership order; the race finish does the rest. A race whose players have all finished is left
-// alone, so a tournament's next race gets its own.
+// leadership order; the race finish does the rest. A race whose players
+// have all finished is left alone, so a tournament's next race gets its
+// own. TestFinishTime sets the player's lap instead of projecting it.
 static void raceTestFinish(void)
 {
     Race*   r = pCurrentRace;
@@ -3194,14 +3196,52 @@ static void raceTestFinish(void)
     }
     for (i = 0; i < r->NumRacingCars; i++) {
         struct RacingCar* rc = r->pRacingCars[i];
+        uint32_t          lap = (uint32_t)ConfigTestFinishTime * 4000u;
 
-        if (rc->FinishReason == RACING_CAR_NOT_FINISHED
-            && racingcar_get_player(rc) != NULL)
+        if (rc->FinishReason != RACING_CAR_NOT_FINISHED
+            || racingcar_get_player(rc) == NULL)
+            continue;
+        if (ConfigTestFinishTime <= 0) {
             race_finish_car(r, i, 0, 0, RACING_CAR_NORMAL_COMPLETION);
+            continue;
+        }
+        // TestFinishTime: each lap that long. A place given keeps the
+        // times as set, where none projects them.
+        racingcar_get_last_best_lap_time(rc)->PackedTime = lap;
+        rc->RaceTime.PackedTime = lap * (uint32_t)r->NumLapsInRace;
+        race_finish_car(r, i, race_get_next_finish_rank(r), 0,
+                        RACING_CAR_NORMAL_COMPLETION);
     }
-    logLine("race: the test's finish, %ld s in, place %ld",
-            (long)ConfigTestFinish, (long)place);
+    logLine("race: the test's finish, %ld s in, place %ld, lap %ld s",
+            (long)ConfigTestFinish, (long)place, (long)ConfigTestFinishTime);
     racecoordinator_the_race_has_finished(pRaceCoordinator);
+}
+
+// With TestFinish on, the End Game Menu in the log, once each time it
+// comes up: whether its first row is Next Race (endgame.c, has_next_race),
+// its rows that can be chosen, the one highlighted and whether it wraps,
+// so run_azahar_career.ps1 knows how far Quit is.
+static void raceTestMenuLog(void)
+{
+    static bool logged;
+    const BScreenConfig* s = g_flow.screen;
+    const BMenu*         m = &g_boot.menu;
+    int                  rows = 0;
+
+    if (ConfigTestFinish <= 0) return;
+    if (s == NULL || s->name == NULL || strcmp(s->name, kEndGameMenuScreen)) {
+        logged = false;
+        return;
+    }
+    if (logged || !g_boot.hasMenu || m->current < 0) return;
+    for (int i = 0; i < m->numItems; i++)
+        if (m->items[i].state & BMENU_ENABLED) rows++;
+    logged = true;
+    logLine("race: the test's end game menu, next race %d, rows %d, row %d,"
+            " loop %d",
+            (int)(fred_is_multi_track(&Fred)
+                  && fred_is_there_another_race(&Fred)),
+            rows, m->current, (int)m->looping);
 }
 
 static const NetRaceGame kNetRaceGame = {
@@ -8345,6 +8385,7 @@ int main(int argc, char** argv)
             if (raceUp && pRaceCoordinator != NULL) {
                 if (raceStep) raceFrame();
                 if (!lockOn && pRaceCoordinator != NULL) raceTestFinish();
+                if (!lockOn) raceTestMenuLog();
                 // GenerateJoyEvents hands the Flailer and the players the
                 // same events, after ExecuteQueuedMessages: the START that
                 // resumes the race posts the unpause, and the players,

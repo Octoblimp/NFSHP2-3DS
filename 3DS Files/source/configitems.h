@@ -168,8 +168,12 @@ int32_t config_skip_fe(void);
 // rest as SimulateRaceFinish has them (racecoordinator_the_race_has_
 // finished). The Azahar runs' way to an event's end screens and back to
 // the event tree (TASKS 69f). Off by default (2026-10-16).
+// "TestFinishTime s" gives the player's car a lap of s seconds instead of
+// the time projected from how far it got, so a time trial's goal can be
+// met (2026-10-17).
 extern int32_t ConfigTestFinish;            // 0
 extern int32_t ConfigTestFinishPlace;       // 1
+extern int32_t ConfigTestFinishTime;        // 0
 
 typedef void (*ConfigItemsLogFn)(const char *line);
 
