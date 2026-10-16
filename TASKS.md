@@ -3703,6 +3703,51 @@ phases.
           build cut to three rows, the window moving down to Options
           and the same three back from Options.
 
+69. [ ] **Career, 100%.** Asked for on 2026-10-15: "When you're done
+        with this task, work on career, get career 100%, and as long as
+        everything's fully implemented, excepting little things like
+        working on multiplayer, lmk if its good for a public launch and
+        I'll launch it". Career is the two event trees, Championship
+        (World Racing's "World Championship") and Hot Pursuit (Hot
+        Pursuit's "Ultimate Road Racer"), 32 events each.
+        - What the port has: the trees, their state in Fred, the
+          unlocks (`eventtree.c`, RE-6a), the event being raced
+          (`raceevent.c`), the races an event sets and its cars
+          (`eventrace.c`, `fredevent.c`), and the end screens (Reward,
+          Events Unlocked, Tourney Standings; `endevent.c`). The flow's
+          way back from a race already pops to "View Event Tree" for
+          game types 8 and 9.
+        - What it lacks: the "View Event Tree" screen itself, retail's
+          tEventTreeView (`0x001f5dd0` .. `0x001fbb00`, about 6,000
+          instructions, many of them retail-only). It is registered to
+          the empty callback, so it draws its chunk and A does
+          nothing. Under it are tEventLeaf, tEventGroup, tEventBlurb,
+          tParallaxer, tTreeDetails (the event's panel and its
+          StartEvent) and tTreeReward with retail's new reward view.
+          EventTree's own BuildTree, Update and Render are dead code
+          (nothing calls them).
+        - [x] 69a: the decode, `docs/formats/event-tree-view.md`: the
+          retail layout, every function, the view states, the
+          messages, and the Flailer objects, textures and models used.
+        - [ ] 69b: the leaves and groups (tEventLeaf, tEventGroup),
+          tEventBlurb and tParallaxer, with a checker against retail.
+        - [ ] 69c: the view's logic: the constructor and destructor,
+          finding leaves, moving the highlight, the zoom and the pan,
+          the move between the tree, the details and the reward, the
+          tick, the messages; with a checker.
+        - [ ] 69d: the panels: tTreeDetails (Render, Activate,
+          StartEvent, HandleMessages) and the reward view; with a
+          checker.
+        - [ ] 69e: the draw: the leaves, the connection bars, the
+          indicator, and the panels, on the port's Flailer and models.
+        - [ ] 69f: an event end to end on Azahar, in each tree: the
+          tree, the event's panel, Select Car with the event's cars,
+          the race, the end screens, back to the tree; a tournament's
+          and a knockout's later races; the result saved and the next
+          event open.
+        - [ ] 69g: the rest: the Ultimate event, the unlocks in Quick
+          Race and Select Car, Hot Pursuit's Be A Cop events.
+
 ### The retail frontend
 
 Asked for on 2026-09-28. The user sent seven PCSX2 photos of the retail
