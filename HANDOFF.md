@@ -24774,3 +24774,40 @@ All on Azahar with `tools/run_azahar_career.ps1 -Race`:
    - stereo 3D (TASKS 59).
 2. **Then the known bugs**, then the verdict again.
 
+## Session 116 -- 71a: Credits
+
+The user: "Continue where you left off ... never stop working, get port
+to where I can publish it publicly (so like 100%)", with the task list
+on their screen.
+
+### 71a done
+
+- **`credits.c`** ports retail's CreditsScreen, CreditsScroller,
+  CreditsLine, the slideshow and the movie player (0x001f1f38 ..
+  0x001f33b8). Seven names go to three callbacks in `kScreens[]`. See
+  docs/formats/credits.md.
+- **The rolls.** Electronic Arts' ids are 501000..501614 and Black Box's
+  are 601000..601226 (0x92ba8). I first read 0x92ba8 as 600000: Black
+  Box's roll was blank, and the user saw it while the run played. The
+  `$RGB`/`$FONT` markup picks each line's colour and font. The lines are
+  cut to the panel by the text clip (`uirender.c`'s `poly_clip_box`,
+  from the session before). The CREDITS_BG slideshow crossfades behind
+  them. Y pauses the roll.
+- **`fredTranslate`** held 64 bytes and cut the headings ("Senior
+  Development Direc"). It holds 512 now, as the car-select ring does.
+- **`tSlideOnScreen`** (`banim_slide_on_*`, from the session before)
+  slides the Credits panel on over Options.
+- **The movies** play on the title's planes: the intro, the making-of
+  (4:3), the reward, and Black Box's logo, which goes on to its roll.
+  `REWARD_EN/FR.AVI`, `MAKEOF_EN.AVI` and `NFSINTRO_FR.AVI` were copied
+  from `extracted-retail/` to Azahar's card. The user's card needs them
+  too, or those rows go straight back.
+- **`tools/run_azahar_credits.ps1`** walks all of it: PASS. The menu
+  keeps the row last picked, so each step is one Down.
+
+### Next
+
+1. 71b Audio, 71c Display, 71d Controller, 71e the pause menu's screens.
+2. Help (TASKS 48), the "Memory Card (PS2)" text, stereo 3D (TASKS 59).
+3. The known bugs, then the verdict again.
+

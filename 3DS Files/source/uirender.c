@@ -566,14 +566,6 @@ typedef struct {
     float tlx, tly, brx, bry;
 } UIClipBox;
 
-static void draw_bitmap_clipped(UIRenderer* r, const BUIObject* o,
-                                const UIView* v, const UIClipBox* clip);
-
-static void draw_bitmap(UIRenderer* r, const BUIObject* o, const UIView* v)
-{
-    draw_bitmap_clipped(r, o, v, NULL);
-}
-
 // `clip` NULL draws the whole quad. Otherwise a quad wholly outside the box
 // is dropped, and one across its edges is cut to them, its sheet rectangle
 // moving in step; a rotated one or a filling override is not cut.
@@ -836,17 +828,9 @@ static void draw_clipped_character(UIRenderer* r, UIFont* f, const BGlyph* g,
                                    uint32_t color, const UIView* v,
                                    const UIClipBox* s);
 
-static void draw_text_clipped(UIRenderer* r, const BUIObject* o,
-                              const UIView* v, const UIClipBox* clip);
-
-// Render__16FlailerTextChunk (retail 0x001422f0).
-static void draw_text(UIRenderer* r, const BUIObject* o, const UIView* v)
-{
-    draw_text_clipped(r, o, v, NULL);
-}
-
-// `clip` NULL draws every glyph whole; otherwise each glyph is cut to the
-// box, as RenderCharacter's MaybeClipPoly cuts it.
+// Render__16FlailerTextChunk (retail 0x001422f0). `clip` NULL draws every
+// glyph whole; otherwise each glyph is cut to the box, as RenderCharacter's
+// MaybeClipPoly cuts it.
 static void draw_text_clipped(UIRenderer* r, const BUIObject* o,
                               const UIView* v, const UIClipBox* clip)
 {
@@ -1192,7 +1176,7 @@ void uirender_clear_strips(UIRenderer* r)
 
 // GetScaledWidth__16FlailerTextChunk (0x0013e8b0) and GetScaledHeight
 // (0x0013e858), which are what ScaleAboutCenter divides to find the centre
-// it scales about. Width is the same sum draw_text() lays down; height is
+// it scales about. Width is the same sum draw_text_clipped() lays down; height is
 // the font's line height truncated to an int *before* ScaleY multiplies it,
 // which is the cvt.w.s at 0x0013e880 and not a rounding accident. Both are
 // 0 for an object whose font is not loaded, exactly as the originals return
@@ -1215,7 +1199,7 @@ static UIFont* wrap_font(UIRenderer* r, const UIWrapStyle* st)
 // One character's glyph and its sheet (NULL when the font has none), from
 // the run's own font or -- for a button icon -- help_glyph's, in the live
 // layout: the bottom screen's help line names the keys the menu up hears.
-// Same test as draw_text(); see IsHelpCharacter.
+// Same test as draw_text_clipped(); see IsHelpCharacter.
 static bool wrap_glyph(UIRenderer* r, UIFont* f, unsigned char ch,
                        C3D_Tex** outTex, BGlyph* out)
 {
@@ -1480,7 +1464,7 @@ bool uirender_object_bounds(UIRenderer* r, const BUI* ui, uint32_t index,
 
     uint16_t tw = t->override ? t->overrideW : t->w;
     uint16_t th = t->override ? t->overrideH : t->h;
-    // The same truncation draw_bitmap() does, because the original takes the
+    // The same truncation draw_bitmap_clipped() does, because the original takes the
     // size from the TextureInfo and casts.
     box[0] = o.x;
     box[1] = o.y;
@@ -1604,6 +1588,45 @@ static UIView screen_view(const UIRenderer* r, const BUIScreen* screen,
     return v;
 }
 
+// The box an object's ClipToPoly cuts it to, as the screen render loop
+// (0x00145f30) works it out: the first object of that name on the screen,
+// visible or not. A text object is cut only when its FormatOptions has
+// FORMAT_CLIP, to the poly's integer GetWidth/GetHeight with 4 off the left
+// (RenderFlailerText's min and max); a bitmap always, to its float size
+// (SetFlailerTextClipWindow, 0x00141798). False: drawn whole.
+static bool poly_clip_box(UIRenderer* r, const BUI* ui,
+                          const BUIScreen* screen, const BUIObject* o,
+                          UIClipBox* box)
+{
+    if (!o->clipToPoly) return false;
+    if (o->type == BUI_TYPE_TEXT && !(o->format & BUI_FMT_CLIP)) return false;
+    for (uint32_t i = 0; i < screen->count; i++) {
+        uint32_t  idx = screen->first + i;
+        BUIObject p;
+        if (!bui_object(ui, idx, &p) || p.nameHash != o->clipToPoly) continue;
+        float w = 0.0f, h = uirender_object_height(r, ui, idx);
+        if (p.type == BUI_TYPE_BITMAP) {
+            int32_t tw, th;
+            if (uirender_texture_size(r, p.textureHash, &tw, &th))
+                w = (float)tw * p.scaleX;
+        } else {
+            w = (float)uirender_object_width(r, ui, idx);
+        }
+        if (o->type == BUI_TYPE_TEXT) {
+            box->tlx = p.x + 4.0f;
+            box->brx = p.x + (float)(int32_t)w;
+            box->bry = p.y + (float)(int32_t)h;
+        } else {
+            box->tlx = p.x;
+            box->brx = p.x + w;
+            box->bry = p.y + h;
+        }
+        box->tly = p.y;
+        return true;
+    }
+    return false;
+}
+
 // One object of `layer`, if it is visible there and placed on `target`
 // (UIR_TARGET_*), moved by its placement.
 static void draw_object(UIRenderer* r, BUI* ui, const BUIScreen* screen,
@@ -1624,8 +1647,12 @@ static void draw_object(UIRenderer* r, BUI* ui, const BUIScreen* screen,
         ov.originX += p->dx * v->scaleX;
         ov.originY += p->dy * v->scaleY;
     }
-    if (o.type == BUI_TYPE_BITMAP)    draw_bitmap(r, &o, &ov);
-    else if (o.type == BUI_TYPE_TEXT) draw_text(r, &o, &ov);
+    UIClipBox box;
+    bool      clip = poly_clip_box(r, ui, screen, &o, &box);
+    if (o.type == BUI_TYPE_BITMAP)
+        draw_bitmap_clipped(r, &o, &ov, clip ? &box : NULL);
+    else if (o.type == BUI_TYPE_TEXT)
+        draw_text_clipped(r, &o, &ov, clip ? &box : NULL);
 }
 
 // One screen's share of one layer, in file order.

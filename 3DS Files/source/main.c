@@ -99,6 +99,7 @@
 #include "lobby.h"
 #include "lockhash.h"
 #include "nameentry.h"
+#include "credits.h"
 #include "netrace.h"
 #include "netstep.h"
 #include "wireless.h"
@@ -368,8 +369,22 @@ static const BScreenConfig kScreens[] = {
       bgf_plain_screen_callback },
     { "NameEntry",               NAMEENTRY_SCREEN,   // NameEntry
       nameentry_callback },
-    { "Credits",                 0xfd8a3b6du,   // CreditsScreen
-      bgf_plain_screen_callback },
+    { "Credits",                 CREDITS_SCREEN,   // CreditsScreen
+      credits_screen_callback },
+    // Its two scrollers share one Flailer screen, and its four movies play
+    // on the title's; each callback picks what it is by the name.
+    { "EACredits",               CREDITS_SCROLLER_SCREEN,   // CreditsScroller
+      credits_scroller_callback },
+    { "BBGCredits",              CREDITS_SCROLLER_SCREEN,   // CreditsScroller
+      credits_scroller_callback },
+    { "Credits FE Movie",        BGF_SCREEN_TITLE,   // the movie player
+      credits_movie_callback },
+    { "Credits Reward movie",    BGF_SCREEN_TITLE,
+      credits_movie_callback },
+    { "BBG Credits movie",       BGF_SCREEN_TITLE,
+      credits_movie_callback },
+    { "BBG Creation movie",      BGF_SCREEN_TITLE,
+      credits_movie_callback },
     // Where You're The Cop and its Setup go. The two-player car select has
     // a screen per pad, and this is player one's -- the 3DS never gets
     // there, as it never has a second pad.
@@ -1981,9 +1996,12 @@ static void fredAudioDefaults(uint8_t* ao)
                                 sound_get_audio_mode(&gSoundModule));
 }
 
+// Retail's answer is the table's own string, whole. At 64 bytes the
+// Credits' lines lost their ends: their markup takes 39 of them
+// ("$RGB(134,96,48)$FONT(FONT_IMPACTNORMAL)Senior Development Direc").
 static const char* fredTranslate(int32_t id)
 {
-    static char text[64];
+    static char text[512];
     if (!g_boot.ui || !g_boot.ui->hasLang) return NULL;
     if (langtab_copy(&g_boot.ui->lang, id, text, sizeof(text)) == 0)
         return NULL;
@@ -1991,7 +2009,7 @@ static const char* fredTranslate(int32_t id)
 }
 
 // GetTranslatedString for the race-over overlay (raceovermsg.c), whose
-// strings run past fredTranslate's 64 bytes (German's 59017 is 73).
+// strings ran past fredTranslate's 64 bytes then (German's 59017 is 73).
 static const char* raceOverTranslate(int32_t id)
 {
     static char text[256];
@@ -8038,6 +8056,7 @@ int main(int argc, char** argv)
     animHooks.textMaxChars     = hookAnimTextMaxChars;
     animHooks.textScaledHeight = hookAnimTextScaledHeight;
     animHooks.getColor         = hookAnimGetColor;
+    animHooks.setScreenVisible = hookSetScreenVisible;
     bscr_set_anim_hooks(&g_uiScreens, &animHooks);
     // The title's bloom runs on the same kit, as tHighlightAnimation is one
     // class for every screen in the original.

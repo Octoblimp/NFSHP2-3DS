@@ -3842,11 +3842,23 @@ phases.
         2026-10-16 launch verdict. Each of these draws, but A does
         nothing on it (`bgf_plain_screen_callback`), or it is not
         registered at all:
-        - [ ] 71a: Credits (CreditsScreen 0x001f1f38): Electronic Arts
+        - [x] 71a: Credits (CreditsScreen 0x001f1f38): Electronic Arts
               and Black Box Games scroll the credits (CreditsScroller,
               screen 39c4c62c). View Intro Movie, The Making of HP2 and
               View Reward Movie play their movies. The reward movie is
               grayed until both Ultimates are won (0x002026f8).
+              - Done in Session 116 (`credits.c`, docs/formats/credits.md):
+                the menu sliding on over Options, both rolls with their
+                $RGB/$FONT markup over the CREDITS_BG slideshow, Y to
+                pause, Black Box's logo going on to its roll, and the
+                four movies. `tools/run_azahar_credits.ps1` passes.
+              - Fixed on the way: GetTranslatedString (`fredTranslate`)
+                held 64 bytes, and cut the headings ("Senior Development
+                Direc"); it holds 512 now. The text clip
+                (`poly_clip_box`) is what keeps the lines in the panel.
+              - The card needs REWARD_EN/FR.AVI and MAKEOF_EN.AVI (349
+                MB) from the disc for the last two rows. Without them the
+                rows go straight back to the menu.
         - [ ] 71b: Audio (AudioOptionsScreen): the seven volume
               sliders, Audio Mode, Jukebox, Default Volumes and Default
               Jukebox. Ask to save when it is left with changes.

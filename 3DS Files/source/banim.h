@@ -122,6 +122,11 @@ typedef struct BAnimHooks {
     // ChangeToScreen (0x0014a438), for tExitScreenAnimation.
     void (*changeToScreen)(void* user, const char* name, int pushCurrent);
 
+    // FlailerSetScreenVisibility (0x0016eb68), for tSlideOnScreen: 1 shows
+    // the screen and 0 hides it, the port's order -- FlailerScreenVisibility
+    // has VISIBLE at 0.
+    void (*setScreenVisible)(void* user, uint32_t screen, int visible);
+
     // Optional. Every state change the layer makes goes through here, which
     // is what the cross-check reads.
     void (*trace)(void* user, const char* line);
@@ -302,6 +307,36 @@ void banim_exit_init(BAnim* a, BExitAnim* e, uint32_t screen,
 // selection cannot move while the items are leaving.
 int banim_exit_message(BAnim* a, BExitAnim* e, int message,
                        int32_t* param, int32_t* noise);
+
+// --------------------------------------------------------- tSlideOnScreen
+
+// An Options page's sub-page (the Credits menu, the languages, Load/Save)
+// coming on over the Options page: the page's group slides in from x = 650
+// to where its master object was authored, on a tCubic1D of half a second,
+// and the screen behind -- Options -- is shown while it is up. 0x001ee918
+// .. 0x001eeb74, 48 + 24 bytes. The spline's flags are left at 1, so every
+// step rebuilds the curve from where it has got to (bspline_seek): the
+// page eases in rather than landing at half a second.
+typedef struct BSlideOnScreen {
+    uint32_t screen;     // +0
+    uint32_t other;      // +4, the screen shown behind this one
+    uint32_t object;     // +8, the group's master
+    uint32_t group;      // +12
+    float    x, y;       // +16, the master's authored top left
+    BSpline  spline;     // +24, x
+} BSlideOnScreen;
+
+// The constructor (0x001ee918): reads the authored position, then Appear.
+void banim_slide_on_init(BAnim* a, BSlideOnScreen* s, uint32_t screen,
+                         uint32_t object, uint32_t group, uint32_t other);
+// Appear (0x001eead8): from 650 again, the other screen shown, one Tick.
+void banim_slide_on_appear(BAnim* a, BSlideOnScreen* s);
+// Disappear (0x001eea80), all the destructor does: the group back where it
+// was authored, and the other screen hidden.
+void banim_slide_on_disappear(BAnim* a, BSlideOnScreen* s);
+// Tick (0x001ee9f8): the spline stepped by RealTimeElapsed, and the group
+// put at it while the master is on the screen.
+void banim_slide_on_tick(BAnim* a, BSlideOnScreen* s);
 
 // ---------------------------------------------------- tHighlightAnimation
 

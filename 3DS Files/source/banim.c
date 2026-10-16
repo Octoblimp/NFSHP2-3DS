@@ -483,6 +483,72 @@ int banim_exit_message(BAnim* a, BExitAnim* e, int message,
     return 1;
 }
 
+// ---------------------------------------------------------- tSlideOnScreen
+
+static void slideOnScreenVisible(BAnim* a, uint32_t screen, int visible)
+{
+    if (a->hooks.setScreenVisible)
+        a->hooks.setScreenVisible(a->hooks.user, screen, visible);
+}
+
+// FlailerSetGroupPosition(Ui, Ui, Ui, int, int) (0x001e4638): the float one
+// with both coordinates truncated first.
+static void slideOnPlace(BAnim* a, const BSlideOnScreen* s, float x, float y)
+{
+    if (a->hooks.setGroupPos)
+        a->hooks.setGroupPos(a->hooks.user, s->screen, s->group, s->object,
+                             (float)(int)x, (float)(int)y);
+}
+
+void banim_slide_on_init(BAnim* a, BSlideOnScreen* s, uint32_t screen,
+                         uint32_t object, uint32_t group, uint32_t other)
+{
+    memset(s, 0, sizeof(*s));
+    s->screen = screen;
+    s->other  = other;
+    s->object = object;
+    s->group  = group;
+    // tCubic1D's constructor: duration and threshold 1, flags 1.
+    s->spline.duration         = 1.0f;
+    s->spline.arrivalThreshold = 1.0f;
+    s->spline.flags            = 1;
+    // FlailerGetTopLeftX then FlailerGetTopLeftY.
+    hGetTopLeft(a, screen, object, &s->x, &s->y);
+    trace(a, "slide on init %08x %08x %08x %08x %.1f", (unsigned)screen,
+          (unsigned)object, (unsigned)group, (unsigned)other, s->x);
+    banim_slide_on_appear(a, s);
+}
+
+void banim_slide_on_appear(BAnim* a, BSlideOnScreen* s)
+{
+    BSpline* sp = &s->spline;
+
+    // SetValDesired(650), whose state 2 SetVal(650) clears straight away,
+    // then SetValDesired(x).
+    sp->valDesired = 650.0f;           // gp-27896
+    sp->duration   = 0.5f;
+    sp->state      = 0;
+    sp->val        = sp->valDesired;
+    sp->dval       = sp->dvalDesired;
+    sp->valDesired = s->x;
+    if (sp->valDesired != sp->val) sp->state = 2;
+    slideOnScreenVisible(a, s->other, 1);
+    banim_slide_on_tick(a, s);
+}
+
+void banim_slide_on_disappear(BAnim* a, BSlideOnScreen* s)
+{
+    slideOnPlace(a, s, s->x, s->y);
+    slideOnScreenVisible(a, s->other, 0);
+}
+
+void banim_slide_on_tick(BAnim* a, BSlideOnScreen* s)
+{
+    bspline_seek(&s->spline, a->elapsed);
+    if (!hObjectExists(a, s->screen, s->object, 0)) return;
+    slideOnPlace(a, s, s->spline.val, s->y);
+}
+
 // --------------------------------------------------- tHighlightAnimation
 
 void banim_highlight_init(BAnim* a, BHighlightAnim* h, uint32_t screen,
