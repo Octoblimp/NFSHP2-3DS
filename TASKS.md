@@ -3750,7 +3750,7 @@ phases.
         - [ ] 69g: the rest: the Ultimate event, the unlocks in Quick
           Race and Select Car, Hot Pursuit's Be A Cop events.
 
-70. [ ] **The bottom screen, reworked before the launch.** Asked for on
+70. [x] **The bottom screen, reworked before the launch.** Asked for on
         2026-10-16, after a look at the career's details page: "before
         I'll launch the game publicly, the bottom screen has to be
         reworked".
@@ -3761,6 +3761,10 @@ phases.
         - Drop the screen's name from the top left (for example "VIEW
           EVENT TREE"). The user said the current panel "looks like
           AI".
+        - Done in Session 114 (`main.c`, `drawBotDialog`). Played on
+          Azahar with `tools/run_azahar_career.ps1`: the language
+          screen, the main menu, the Mode Select, the tree, the details,
+          the reward and Select Car.
 
 ### The retail frontend
 

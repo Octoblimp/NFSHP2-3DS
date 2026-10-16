@@ -3727,29 +3727,25 @@ static void waitForExit(void)
 // top screen that line comes out about five pixels tall and is not reading
 // material, so the port takes it off the top screen altogether
 // (uirender_hide_object, below) and gives it this whole screen: wrapped,
-// and at a size meant for 320x240.
+// and at a size meant for 320x240, in a dialog made of the frontend's own
+// art (drawBotDialog). With no line to show it is the game's logo.
 //
 // None of this is a port of anything. The PS2 had one screen, so there is
-// no original here to be accurate to -- only the game's own font, its red,
+// no original here to be accurate to -- only the game's own art and fonts,
 // and the line it was trying to show the player.
 
 #define BOT_W     320.0f
 #define BOT_H     240.0f
 #define BOT_PAD    16.0f
-#define BOT_HDR    30.0f     // the header strip, and where the accent sits
-#define BOT_FOOT  204.0f     // the rule above the controls line
 
 // citro2d packs a colour r | g<<8 | b<<16 | a<<24, and C2D_Color32 is an
 // inline function rather than a macro, so a constant has to pack its own.
 #define RGBA8(r, g, b, a) \
     ((u32)(r) | ((u32)(g) << 8) | ((u32)(b) << 16) | ((u32)(a) << 24))
 
-#define BOT_BACK   RGBA8(0x0b, 0x0d, 0x12, 0xff)
-#define BOT_HEAD   RGBA8(0x16, 0x1a, 0x23, 0xff)
+#define BOT_BACK   RGBA8(0x00, 0x00, 0x00, 0xff)
 #define BOT_ACCENT RGBA8(0xc4, 0x1e, 0x24, 0xff)   // the frontend's own red
-#define BOT_RULE   RGBA8(0x2b, 0x33, 0x40, 0xff)
 #define BOT_TEXT   RGBA8(0xec, 0xef, 0xf4, 0xff)
-#define BOT_DIM    RGBA8(0x78, 0x85, 0x99, 0xff)
 
 static C3D_RenderTarget* g_bot;
 static uint32_t          g_botFont;   // FONT_A, 357 of the disc's text objects
@@ -5852,6 +5848,9 @@ static void devLog(int slot, const char* fmt, ...)
 #define BLURB_MAX 256
 static char  g_blurbShown[BLURB_MAX];
 static float g_blurbFade = 1.0f;
+// Whether the line before this one had any text: the popup fades in and
+// out with the line only when it comes up from the logo or goes back to it.
+static bool  g_blurbHad;
 
 // Every screen in FRONTB.BUN ships the same authoring placeholder in
 // SCROLLING_TEXT and a screen whose blurb has not been set yet still has
@@ -5859,12 +5858,10 @@ static float g_blurbFade = 1.0f;
 static const char kBlurbPlaceholder[] = "This text will scroll sideways";
 
 // A screen registered to bgf_plain_screen_callback draws and answers the
-// D-pad and nothing else, and it has no blurb object, so the panel would
-// sit empty under its name and look like a bug. It says what it is instead.
-// No apostrophe: FONT_A drops a glyph it has not got, silently.
+// D-pad and nothing else, and it has no blurb object, so the panel says
+// so. 0x87 is the B button's icon in the menus (helpglyph.h).
 static const char kPlainScreenNote[] =
-    "This screen is drawn from the disc. The class behind it is not ported "
-    "yet, so the highlight moves and B is the way out.";
+    "This screen is not available yet. Press \x87 to go back.";
 
 // The line the top screen would be drawing this frame. It is read out of
 // the object rather than remembered from the setBlurb hook because the hook
@@ -5907,6 +5904,7 @@ static void updateBlurb(Boot* b, float dt)
         g_blurbFade -= dt / 0.10f;
         if (g_blurbFade <= 0.0f) {
             g_blurbFade = 0.0f;
+            g_blurbHad  = g_blurbShown[0] != '\0';
             memcpy(g_blurbShown, live, sizeof g_blurbShown);
         }
     } else if (g_blurbFade < 1.0f) {
@@ -5915,50 +5913,126 @@ static void updateBlurb(Boot* b, float dt)
     }
 }
 
-// The flow's screen name, upper-cased for the header. The font has the
-// glyphs -- most of the frontend's own labels are upper case.
-static void botTitle(char* out, size_t cap, const char* s)
+// The bottom screen (TASKS 70, the user's of 2026-10-16). With nothing to
+// say it is the game's logo, centred on black. With a line it is the
+// frontend's popup (FRONTB's POPUP): the title plate, the red rule under
+// it, the grey panel fading to the right and the light rule closing it,
+// the line in the popup's italic. The buttons' help is under it, in the
+// main menu's "Help" font, and the logo beside it, small, where the main
+// menu has its own. The art is the disc's. A texture that is not loaded
+// is left out, and FONT_A stands in for a font that is not.
+#define BOT_TEX_PLATE  0xc5a905afu   // the title plate, 512 x 24
+#define BOT_TEX_RULE   0x9d8cef61u   // 8 x 8, the red in its middle rows
+#define BOT_TEX_LINE   0xe5f201a7u   // the light rule
+#define BOT_TEX_WHITE  0xe2a5c626u   // WHITE16X16
+#define BOT_TEX_LOGO   0xc9f75a5bu   // NFS_LOGO_ALPHA, GLOBALB's, 296 x 80
+#define BOT_FONT_ITAL  0xa2d444f6u   // the popup's
+#define BOT_FONT_HELP  0xa9bfda04u   // the main menu's "Help"
+
+#define BOT_BOX_TOP      6.0f
+#define BOT_PLATE_H     22.0f
+#define BOT_BOX_BOT    192.0f
+#define BOT_GS_FULL    0x80808080u   // GS white, r g b a low byte first
+#define BOT_GS_FADED   0x19808080u   // the rules' right end
+#define BOT_GS_PANEL_L 0x40808080u   // the panel, left and right
+#define BOT_GS_PANEL_R 0x20808080u
+
+// botStyle in font `font`, or in FONT_A when that one is not loaded.
+static UIWrapStyle botFontStyle(UIRenderer* ui, uint32_t font,
+                                uint32_t color, float px, bool center)
 {
-    size_t i = 0;
-    if (!s) s = "";
-    for (; s[i] && i + 1 < cap; i++)
-        out[i] = (s[i] >= 'a' && s[i] <= 'z') ? (char)(s[i] - 32) : s[i];
-    out[i] = '\0';
+    UIWrapStyle st = botStyle(ui, color, px, center);
+    UIWrapStyle f  = st;
+    float       h;
+
+    f.fontHash = font;
+    f.scale    = 1.0f;
+    h = uirender_line_height(ui, &f);
+    if (h <= 0.0f) return st;
+    f.scale = px / h;
+    return f;
 }
 
-// title along the top, `body` wrapped and centred in the middle, `hint`
-// along the bottom. The body is passed in rather than read from
-// g_blurbShown because the two bring-up modes have no blurb and something
-// has to fill the panel there.
+// The logo at `scale`, centred on (cx, cy), on whole pixels.
+static void drawBotLogo(UIRenderer* ui, float cx, float cy, float scale,
+                        float alpha)
+{
+    int32_t w = 0, h = 0;
+
+    if (alpha <= 0.0f || !uirender_texture_size(ui, BOT_TEX_LOGO, &w, &h))
+        return;
+    (void)uirender_draw_texture(ui, BOT_TEX_LOGO,
+                                floorf(cx - (float)w * scale * 0.5f),
+                                floorf(cy - (float)h * scale * 0.5f),
+                                (float)w * scale, (float)h * scale,
+                                BOT_GS_FULL, BOT_GS_FULL, alpha);
+}
+
+// `body` wrapped and centred in the popup, at `alpha`; the popup itself,
+// `title` on its plate, `hint` and the small logo at `frame`. An empty
+// body is the logo alone, at `alpha`.
+static void drawBotDialog(UIRenderer* ui, const char* title, const char* body,
+                          float alpha, float frame, const char* hint)
+{
+    static const float kPx[] = { 18.0f, 16.0f, 14.0f };
+    uint32_t    text  = C2D_Color32(0xe0, 0xe0, 0xe0, 0xff);
+    float       boxW  = BOT_W - BOT_PAD * 2.0f;
+    float       top   = BOT_BOX_TOP + BOT_PLATE_H + 6.0f;
+    float       bot   = BOT_BOX_BOT - 4.0f;
+    UIWrapStyle st;
+    float       h = 0.0f;
+
+    if (!body || !*body) {
+        drawBotLogo(ui, BOT_W * 0.5f, BOT_H * 0.5f, 1.0f, alpha);
+        return;
+    }
+    if (frame > 0.0f) {
+        (void)uirender_draw_texture(ui, BOT_TEX_WHITE, 0.0f,
+                                    BOT_BOX_TOP + BOT_PLATE_H, BOT_W,
+                                    BOT_BOX_BOT - BOT_BOX_TOP - BOT_PLATE_H,
+                                    BOT_GS_PANEL_L, BOT_GS_PANEL_R, frame);
+        (void)uirender_draw_texture(ui, BOT_TEX_PLATE, 0.0f, BOT_BOX_TOP,
+                                    BOT_W, BOT_PLATE_H, BOT_GS_FULL,
+                                    BOT_GS_FULL, frame);
+        (void)uirender_draw_texture(ui, BOT_TEX_RULE, 0.0f,
+                                    BOT_BOX_TOP + BOT_PLATE_H - 3.0f, BOT_W,
+                                    8.0f, BOT_GS_FULL, BOT_GS_FADED, frame);
+        (void)uirender_draw_texture(ui, BOT_TEX_LINE, 0.0f,
+                                    BOT_BOX_BOT - 2.0f, BOT_W, 4.0f,
+                                    BOT_GS_FULL, BOT_GS_FADED, frame);
+        if (title && *title) {
+            st = botFontStyle(ui, BOT_FONT_ITAL,
+                              C2D_Color32(0xc8, 0xc8, 0xc8, 0xff), 14.0f,
+                              false);
+            uirender_draw_wrapped(ui, title, 0, &st, 10.0f, BOT_BOX_TOP + 4.0f,
+                                  boxW, frame);
+        }
+        if (hint && *hint) {
+            st = botFontStyle(ui, BOT_FONT_HELP, BOT_TEXT, 14.0f, false);
+            uirender_draw_wrapped(ui, hint, 0, &st, 10.0f, BOT_H - 25.0f,
+                                  BOT_W - 170.0f, frame);
+        }
+        drawBotLogo(ui, BOT_W - 78.0f, BOT_H - 22.0f, 0.5f, frame);
+    }
+
+    // The biggest size the line fits at, centred as a block in the panel.
+    for (size_t i = 0; i < sizeof kPx / sizeof kPx[0]; i++) {
+        st = botFontStyle(ui, BOT_FONT_ITAL, text, kPx[i], true);
+        st.lineGap = 1.0f;
+        h = uirender_wrap_height(ui, body, 0, &st, boxW);
+        if (h <= bot - top) break;
+    }
+    uirender_draw_wrapped(ui, body, 0, &st, BOT_PAD,
+                          h < bot - top ? top + (bot - top - h) * 0.5f : top,
+                          boxW, alpha);
+}
+
+// The viewers' panel: `title` on the plate, `body` in the popup, `hint`
+// under it.
 static void drawBotPanel(UIRenderer* ui, const char* title, const char* body,
                          float alpha, const char* hint)
 {
-    UIWrapStyle text  = botStyle(ui, BOT_TEXT, 19.0f, true);
-    UIWrapStyle small = botStyle(ui, BOT_DIM, 12.0f, false);
-    float       boxW  = BOT_W - BOT_PAD * 2.0f;
-    float       h, y;
-
-    C2D_DrawRectSolid(0.0f, 0.0f, 0.0f, BOT_W, BOT_H, BOT_BACK);
-    C2D_DrawRectSolid(0.0f, 0.0f, 0.0f, BOT_W, BOT_HDR, BOT_HEAD);
-    C2D_DrawRectSolid(0.0f, BOT_HDR, 0.0f, BOT_W, 2.0f, BOT_ACCENT);
-    if (title && *title)
-        uirender_draw_wrapped(ui, title, 0, &small, BOT_PAD, 9.0f, boxW,
-                              1.0f);
-
-    // The line is centred as a block between the header and the footer
-    // rule rather than pinned under the header: one short sentence floating
-    // in the middle of the panel reads as deliberate, and a three-line one
-    // still has the room.
-    text.lineGap = 4.0f;
-    h = uirender_wrap_height(ui, body, 0, &text, boxW);
-    y = BOT_HDR + 2.0f + (BOT_FOOT - BOT_HDR - 2.0f - h) * 0.5f;
-    if (y < BOT_HDR + 12.0f) y = BOT_HDR + 12.0f;
-    uirender_draw_wrapped(ui, body, 0, &text, BOT_PAD, y, boxW, alpha);
-
-    C2D_DrawRectSolid(BOT_PAD, BOT_FOOT, 0.0f, boxW, 1.0f, BOT_RULE);
-    if (hint && *hint)
-        uirender_draw_wrapped(ui, hint, 0, &small, BOT_PAD, BOT_FOOT + 9.0f,
-                              boxW, 1.0f);
+    drawBotDialog(ui, title, body, alpha, 1.0f, hint);
 }
 
 // Over a wireless race held for a lost console (37g), a box across the top
@@ -6027,6 +6101,7 @@ static void lockCatchUpDraw(UIRenderer* ui)
     C2D_Flush();
     C2D_TargetClear(g_bot, BOT_BACK);
     C2D_SceneBegin(g_bot);
+    drawBotLogo(ui, BOT_W * 0.5f, BOT_H * 0.5f, 1.0f, 1.0f);
     C3D_FrameEnd(0);
 }
 
@@ -6043,6 +6118,8 @@ static void hookDisplayFrame(void* user)
     C2D_SceneBegin(g_top);
     uirender_draw_visible(b->ui, 1.0f);
     C2D_TargetClear(g_bot, BOT_BACK);
+    C2D_SceneBegin(g_bot);
+    drawBotLogo(b->ui, BOT_W * 0.5f, BOT_H * 0.5f, 1.0f, 1.0f);
     C3D_FrameEnd(0);
 }
 
@@ -8455,30 +8532,30 @@ int main(int argc, char** argv)
                 // The score's event lines, over the map.
                 uirender_draw_visible_bottom_over(&ui, BOT_W, BOT_H, 1.0f);
             } else {
-                char        title[48];
-                const char* body = g_blurbShown;
-                float       fade = g_blurbFade;
+                // 0x86 and 0x87 are the A and B buttons' icons in the
+                // menus (helpglyph.h).
+                const char* title = NULL;
+                const char* body  = g_blurbShown;
+                float       fade  = g_blurbFade;
+                float       frame = g_blurbHad ? 1.0f : g_blurbFade;
+                const char* hint  = "\x86 Select    \x87 Back";
 
-                botTitle(title, sizeof title,
-                         g_flow.screen ? g_flow.screen->name : "");
-                const char* hint =
-                    "A select   B back   START go   SELECT viewer";
                 if (g_flow.screen
                     && g_flow.screen->callback == bgf_plain_screen_callback) {
                     body = kPlainScreenNote;
-                    fade = 1.0f;
+                    fade = frame = 1.0f;
                 }
                 if (g_flow.screen
                     && g_flow.screen->callback == debugmenu_callback) {
-                    snprintf(title, sizeof title, "DEBUG MENU");
-                    hint = DEBUGMENU_HINT;
+                    title = "Debug Menu";
+                    hint  = DEBUGMENU_HINT;
                 }
                 if (g_flow.screen
                     && g_flow.screen->callback == debugmenu_race_callback) {
-                    snprintf(title, sizeof title, "DEBUG RACE");
-                    hint = DEBUGMENU_HINT;
+                    title = "Debug Race";
+                    hint  = DEBUGMENU_HINT;
                 }
-                drawBotPanel(&ui, title, body, fade, hint);
+                drawBotDialog(&ui, title, body, fade, frame, hint);
             }
             C2D_Flush();
             hangwatch_gpu_stage("the bottom screen");

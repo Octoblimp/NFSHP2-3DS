@@ -229,6 +229,7 @@ if ($booted) {
     Write-Host ("  language screen: {0}" -f $gotLang)
     if ($gotLang) {
         Start-Sleep -Milliseconds 1500
+        Shot "language"
         [void](Press-UntilCount $VK_A "flow leave Language Options Pre FE" 1 2 20)
     }
 
@@ -246,6 +247,8 @@ if ($booted) {
     $modeSelect = "Cops Off Mode Select"
     if ($CopsOn) { $modeSelect = "Cops On Mode Select" }
     if (Enter-Screen $VK_M "New Main Menu") {   # START
+        Start-Sleep -Milliseconds 1500
+        Shot "mainmenu"
         $atMode = $false
         if ($CopsOn) {
             $atMode = Enter-Screen $VK_A $modeSelect
@@ -258,6 +261,8 @@ if ($booted) {
             # (fourth)
             Press $VK_G; Press $VK_G
             if ($CopsOn) { Press $VK_G }
+            Start-Sleep -Milliseconds 900
+            Shot "modeselect"
             $n = LogCount "etv open tree"
             [Hp2Cap]::PressKey($hwnd, $VK_A)
             $atTree = Wait-ForLogCount "etv open tree" ($n + 1) 30

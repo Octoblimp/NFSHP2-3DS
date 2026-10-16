@@ -1520,6 +1520,35 @@ bool uirender_texture_size(UIRenderer* r, uint32_t hash, int32_t* w,
     return true;
 }
 
+bool uirender_draw_texture(UIRenderer* r, uint32_t hash, float x, float y,
+                           float w, float h, uint32_t left, uint32_t right,
+                           float alpha)
+{
+    if (!r || w <= 0.0f || h <= 0.0f) return false;
+    int idx = find_texture(r, hash);
+    if (idx < 0) return false;
+    UITexture* t = &r->textures[idx];
+    if (!t->valid) return false;
+
+    Tex3DS_SubTexture st;
+    subtex_from_pixels(&st, (float)t->tex.width, (float)t->tex.height, 0.0f,
+                       0.0f, (float)t->w, (float)t->h);
+    const uint32_t colors[4] = { left, right, right, left };
+    C2D_ImageTint  tint;
+    fill_tint(&tint, colors, alpha);
+
+    C2D_Image      img = { &t->tex, &st };
+    C2D_DrawParams p;
+    memset(&p, 0, sizeof(p));
+    p.pos.x = x;
+    p.pos.y = y;
+    p.pos.w = w;
+    p.pos.h = h;
+    draw_image(img, &p, &tint, true);
+    end_gs_scale();
+    return true;
+}
+
 int32_t uirender_object_width(UIRenderer* r, const BUI* ui, uint32_t index)
 {
     BUIObject o;

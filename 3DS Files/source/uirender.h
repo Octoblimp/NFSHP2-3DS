@@ -280,6 +280,14 @@ float uirender_text_scaled_width(UIRenderer* r, const BUI* ui,
 // size questions. False, with both 0, for a texture no bundle has.
 bool uirender_texture_size(UIRenderer* r, uint32_t hash, int32_t* w,
                            int32_t* h);
+// The port's own: the whole of texture `hash` drawn into the target's
+// rectangle (x, y, w, h), into whatever C2D_SceneBegin has bound. `left`
+// tints its left edge and `right` its right, in GS colours as a Flailer
+// bitmap's (r, g, b, a low byte first, 0x80 full), times `alpha`. False,
+// drawing nothing, for a texture no bundle has.
+bool uirender_draw_texture(UIRenderer* r, uint32_t hash, float x, float y,
+                           float w, float h, uint32_t left, uint32_t right,
+                           float alpha);
 // FlailerObjectChunk::GetHeightFloat (0x00140688): a text object's
 // GetScaledHeight (0x00140cd8), ScaleY * (float)(int)font height, and a
 // bitmap's CalculateHeightFloat (0x00141488), texture height * ScaleY with

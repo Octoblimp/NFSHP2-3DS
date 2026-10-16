@@ -24547,15 +24547,38 @@ port".
 Not ported: the reward's turning model (ModelViewer.obj), the help menu
 (tHelpMenu), and the parallaxer's use (it is ticked; nothing reads it).
 
+### TASKS 70: the bottom screen
+
+The user's of 2026-10-16, before the launch. The bottom screen is now
+built from the disc's own art (`main.c`, `drawBotDialog`):
+
+- **With no line to show** (the loading screen, the language screen,
+  Select Car, a race), it is GLOBALB's NFS_LOGO_ALPHA, centred on black.
+  The two catch-up draws (`hookDisplayFrame`, `lockCatchUpDraw`) draw it
+  too.
+- **With a line**, it is FRONTB's popup:
+  - the title plate, with the red rule under it;
+  - the grey panel, fading to the right;
+  - the light rule closing it.
+
+  The line is in the popup's italic, centred, at the biggest of 18, 16 or
+  14 px that fits. Under it are the A and B icons ("Select", "Back") in
+  the main menu's Help font, and the logo, small, bottom right.
+- **The screen's name is gone.** Only the debug menu and the viewers put
+  a title on the plate.
+- **The popup fades in and out with the line** only when it comes from
+  the logo or goes back to it (`g_blurbHad`). From one line to the next,
+  only the text fades.
+- **`uirender_draw_texture`** is new: a whole bundle texture drawn into a
+  rectangle with a GS tint. A texture that is not loaded is skipped.
+  FONT_A stands in for a font that is not loaded.
+
+The plain screens' note is now "This screen is not available yet. Press
+B to go back.", with the B icon. The career run takes two more shots, the
+main menu and the Mode Select.
+
 ### Next
 
-TASKS 70, the user's of 2026-10-16. The bottom screen must be reworked
-before the launch:
-
-- With no text, the NFSHP2 logo centred on black.
-- With text, an official-looking NFSHP2 dialog.
-- No screen name in the top left.
-
-Then 69f: an event's race and its way back to the tree. Then the launch
+TASKS 69f: an event's race and its way back to the tree. Then the launch
 verdict.
 
