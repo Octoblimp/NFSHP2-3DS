@@ -3956,6 +3956,21 @@ phases.
                 disc, but the name is in the ELF's strings; its
                 FlailerScreenConfig is one the tool does not parse.
 
+72. [ ] **Replays: the instant replay, the replay after a race, and
+        attract mode's.** The user asked on 2026-10-16 whether replays
+        work: they do not. main.c's `replayStandIn` is an empty
+        ReplayManager that records nothing, and `bRepeat` is not
+        ported. So the pause menu's View Replay is always grayed, and
+        RCSTATE_INSTANT_REPLAY, RCSTATE_AUTO_REPLAY and the replay demo
+        never have anything to play. Porting it means:
+        - retail's ReplayManager (its snapshots, interesting events and
+          GetData/AddData on bRepeat);
+        - the replay cameras;
+        - the pause pages' changes recorded as special events
+          (pauseoptions.c applies them at once today).
+        This is not on the 2026-10-16 launch list; ask the user where it
+        goes.
+
 ### The retail frontend
 
 Asked for on 2026-09-28. The user sent seven PCSX2 photos of the retail
