@@ -5557,6 +5557,25 @@ static void lockTestDrop(void)
                        ? (uint32_t)ConfigWirelessTestDropMs : 5000u);
 }
 
+// WirelessTestBlindFrame (configitems.h): this lockstep frame undrawn for
+// the test, and its first said.
+static bool lockTestBlind(void)
+{
+    static bool said;
+    uint32_t    f = netstep_frame();
+    bool        blind = ConfigWirelessTestBlindFrame > 0
+                        && f >= (uint32_t)ConfigWirelessTestBlindFrame
+                        && f - (uint32_t)ConfigWirelessTestBlindFrame
+                           < (uint32_t)ConfigWirelessTestBlindFrames;
+
+    if (blind && !said) {
+        said = true;
+        logLine("lockstep: frame %lu, undrawn for the test, %ld frames",
+                (unsigned long)f, (long)ConfigWirelessTestBlindFrames);
+    }
+    return blind;
+}
+
 // The race held for a lost console (37g) is muted, as the pause mutes it,
 // unless it was muted already; the hold's end, or lockstep's, unmutes it.
 // No lockstep frame runs in a hold, so the pause cannot change it under.
@@ -8133,6 +8152,16 @@ int main(int argc, char** argv)
             if (lockOn && lockCatchingUp()) {
                 frameMark("race: catching up");
                 lockCatchUpDraw(&ui);
+                (void)service_resource_loading();
+                bootServiceLoads(&g_boot);
+                continue;
+            }
+            // WirelessTestBlindFrame's frames (configitems.h): undrawn,
+            // two blanks each, as the race's pace.
+            if (lockOn && lockTestBlind()) {
+                frameMark("race: undrawn for the test");
+                C3D_FrameSync();
+                C3D_FrameSync();
                 (void)service_resource_loading();
                 bootServiceLoads(&g_boot);
                 continue;

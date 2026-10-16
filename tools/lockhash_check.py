@@ -12,7 +12,9 @@ tools/src/lockhash_test.c builds a World of its own with bmath.c's draws
 and checks (the harness's header has the list):
 
   - each part moves with every field it reads and with no other: no
-    pointer, padding or tail, and no RacingCar past NumRacingCars;
+    pointer, padding or tail, not the engine sound's RedLineSyncRPM in a
+    car's pieces or parts, nor its RelCoordMatrix while MatrixValid is 0,
+    and no RacingCar past NumRacingCars;
   - the fold moves with each part;
   - the frame lines every NETSTEP_LOG_EVERY frames and the window at a
     difference, once a race, each frame's parts as ran and its draws;
@@ -88,10 +90,31 @@ MUTATIONS = [
       "    for (i = 0; i + 8 <= n; i += 4) {\n"),
     M("lh-car-mode", "    h = mix(h, (uint32_t)c->TheControlMode);\n", ""),
     M("lh-car-move", "    h = mix(h, (uint32_t)c->TheMovementMode);\n", ""),
-    M("lh-car-span", "SPAN(CarState, GeometryPosition, DistanceMoved)",
-      "SPAN(CarState, GeometryPosition, MatrixValid)"),
-    M("lh-car-from", "    return mixBytes(h, &c->State.GeometryPosition,\n",
-      "    return mixBytes(h, &c->State._hole8,\n"),
+    M("lh-car-span", "offsetof(CarState, DistanceMoved) + sizeof(float));",
+      "offsetof(CarState, DistanceMoved));"),
+    M("lh-car-from",
+      "    return mixState(h, &c->State, offsetof(CarState, GeometryPosition),\n",
+      "    return mixState(h, &c->State, offsetof(CarState, _hole8),\n"),
+    M("lh-sound-none",
+      "    if (from <= CAR_SOUND_RPM && CAR_SOUND_RPM < to) {\n",
+      "    if (0) {\n"),
+    M("lh-sound-word", "#define CAR_SOUND_RPM offsetof(CarState, RedLineSyncRPM)",
+      "#define CAR_SOUND_RPM offsetof(CarState, RPM)"),
+    M("lh-sound-before",
+      "        h = mixBytes(h, b + from, CAR_SOUND_RPM - from);\n", ""),
+    M("lh-sound-after", "        from = CAR_SOUND_RPM + sizeof(float);\n",
+      "        from = CAR_SOUND_RPM + 2 * sizeof(float);\n"),
+    M("lh-rel-always",
+      "    if (!s->MatrixValid && from <= CAR_REL && CAR_REL < to) {\n",
+      "    if (0) {\n"),
+    M("lh-rel-never",
+      "    if (!s->MatrixValid && from <= CAR_REL && CAR_REL < to) {\n",
+      "    if (from <= CAR_REL && CAR_REL < to) {\n"),
+    M("lh-rel-before", "        h = mixBytes(h, b + from, CAR_REL - from);\n", ""),
+    M("lh-rel-short", "        from = CAR_REL + sizeof(bMatrix4);\n",
+      "        from = CAR_REL + sizeof(bVector4);\n"),
+    M("lh-rel-long", "        from = CAR_REL + sizeof(bMatrix4);\n",
+      "        from = CAR_REL + sizeof(bMatrix4) + 2 * sizeof(int32_t);\n"),
     M("lh-cars-first", "    if (first < 0) first = 0;\n", ""),
     M("lh-cars-last", "    if (last > w->TotalNumCars) last = w->TotalNumCars;\n",
       ""),

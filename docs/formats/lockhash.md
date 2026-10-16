@@ -21,10 +21,60 @@ first part that went, and what drew from the seed before it.
 | race | the coordinator's state, executing message, countdown and state before pause; the Race's stage to `DetectedOneCarRemaining`, its laps and forced finish; each RacingCar up to `NumRacingCars` from `CurrentBoundaryRegion` to `AverageSpeed` |
 
 A car is its slot, its control and movement modes, and its CarState from
-`GeometryPosition` to `DistanceMoved`, every float as its bits. None of
-these hold a pointer, and none of the padding, tails or pointers around
-them is read: a console's heap is its own. A range is clamped to the cars
-there are; a NULL slot still counts.
+`GeometryPosition` to `DistanceMoved`, every float as its bits, but
+`RedLineSyncRPM`, the engine sound's, and `RelCoordMatrix` while
+`MatrixValid` is 0 (both below). None of these hold a
+pointer, and none of the padding, tails or pointers around them is read:
+a console's heap is its own. A range is clamped to the cars there are; a
+NULL slot still counts.
+
+## The sound's word
+
+`RedLineSyncRPM` is in the CarState, but the world never reads it. A
+player's engine sound writes it (`playerenginesound_update_to_red_line_rpm`,
+`enginesound.c`): the car's RPM scaled to the red line, from its RPM and
+gear as they stand. `sound_update` runs the car sounds at the top of the
+main loop by the real clock, every 8 ms at most, whether a lockstep frame
+runs or not. At the race's pace each frame is a loop of 33 ms, so every
+console writes it from the last frame's state before the next. A console
+catching up (37g-3) runs about six frames in a pass of the gate, so its
+players' cars hold it from an older frame. Session 112's restarted copy
+differed from the host in the players part alone from frame 450 on, while
+its time part (each car's x + y), the racers, the seeds and the race
+matched to frame 900: the cars were where the host's were.
+
+Since Session 113 `mixState` hashes a CarState range without it, in the
+parts and in the drive piece. A run with one copy's race frames undrawn
+at the race's pace for 300 frames (`-Blind 1`) had kept every part the
+host's, so the draw was not the difference; the catch-up's pace was.
+
+## The relative matrix
+
+That alone did not do it: the next `-Rejoin 1` run's restarted copy still
+differed in the players part from frame 450. A test build logged the
+players' CarState bytes every 150 frames. The host and the copy's first
+run were the same byte for byte to frame 900; the restarted copy differed
+in `RedLineSyncRPM` (now out) and in the second player's
+`RelCoordMatrix`, by a few units in the last place, the same stale matrix
+from frame 450 to 1050 on each console, while `MatrixValid` was 0 on
+both at every frame logged.
+
+`RelCoordMatrix` is a cache. `carstate_get_transform_matrix` builds it
+from the car's velocity (its heading below walking pace) when
+`MatrixValid` is 0, and sets the bit; the car's mover clears the bit in
+its step (`physicscar_update_car` with the velocity it copies, and the
+belt, mellow, traffic and cop movers). Between a clear and the next
+build the matrix holds whatever its last build left, and no reader sees
+it. The car sound's `car_world_to_car` (`carsound.c`, a body within 9 m)
+builds it between the frames, on `sound_update`'s real-clock gate, so a
+console catching up built it on other frames than the host did, from
+another frame's velocity. Every update of the cache's inputs (velocity,
+forward speed, heading) is in the world's step and clears the bit with
+it, but the debug warp; so a matrix built between the frames is the one
+the next frame's first reader would build.
+
+Since Session 113 the matrix counts only while `MatrixValid` is set, in
+the players part and the rel piece alike. A `-Rejoin 1` run on the build (seed b2c97ed7) then passed on both: B closed at frame 1042, restarted, caught up to frame 1036 undrawn in 21 s, and every part was the host's at every frame logged, 0 to 1500, through the catch-up and after it; the host's checksum and B's first run's matched too.
 
 Each part is FNV-1a over 32-bit words with a final `h ^ (h >> 15)`. The
 fold is `s = s * 33 + part` over the seven, then `(s >> 16) + s` to 16
@@ -70,8 +120,8 @@ parts are:
 | spin | `AngularVelocity`, `AngularAcceleration` |
 | wheelmats | `WheelMatrix`, `BrakeMatrix` |
 | wheels | `WheelAngularVelocity` to `WheelTractionUsage` |
-| drive | `Angle` to `BurnOutAllow`: steering, odometer, gear, throttle, RPM |
-| rel | `RelCoordMatrix` to `DistanceMoved` |
+| drive | `Angle` to `BurnOutAllow`: steering, odometer, gear, throttle, RPM; not `RedLineSyncRPM` |
+| rel | `RelCoordMatrix` (while `MatrixValid` is set) to `DistanceMoved` |
 | driver | the `CarDriver`'s `Steering` to `NitroFlag`, and its `DriveTarget`'s `NumPoints` and each point's x, y, z and speed up to it |
 
 The eight CarState pieces together are the span the parts read, cut at
@@ -152,9 +202,16 @@ the driver's inputs, its points and speeds up to `NumPoints`, and
 the points past it, the fourth lanes and the target's route move none;
 the clocks are the frame's, and the window's cars lines (one a frame, a
 slot's word moving with its car alone) and the frame's fields lines,
-never a frame not run whose ring slot holds an older one. Faults 0.
-`--mutate`: 105 mutations, 101 caught, 4 equivalent
-(named in the check); Session 109's driver piece added 7, all caught.
+never a frame not run whose ring slot holds an older one. Since Session
+113, `RedLineSyncRPM` moves no part and no piece, and `RPM` before it and
+`ClutchEngaged` after it each move theirs; with every car's `MatrixValid`
+0, `RelCoordMatrix` (its first and last lanes) moves none, while
+`MatrixValid` itself, `BurnOutAllow` before the matrix and
+`DistanceMoved` after it move theirs; with it set, the matrix moves the
+players part and the rel piece. Faults 0. `--mutate`: 114 mutations,
+110 caught, 4 equivalent (named in the check); Session 109's driver
+piece added 7 and Session 113's sound word 4 and stale matrix 5, all
+caught.
 
 Moving the draws to `bViewSeed` changed no harness's model: with the
 pointer on `bDefaultSeed` each draw is the one it was, and copmanager,

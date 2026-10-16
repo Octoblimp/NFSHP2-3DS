@@ -24420,3 +24420,100 @@ Still to ask the user:
 - How the `-fno-strict-aliasing` build plays on the device.
 - Whether 37g-2 (out of range and back) and 37g-3 (a console restarted)
   work on real 3DSes.
+
+## Session 113 -- 37f-2: the rejoin's differences were the checksum's
+
+The user, 2026-10-15: "Continue where you left off (read prior .claude
+session file, Azahar run completed but hasn't been analyzed), finish
+the task then write up HANDOFF.MD etc. and stop". Then, mid-task: "When
+you're done with this task, work on career, get career 100%, and as long
+as everything's fully implemented, excepting little things like working
+on multiplayer, lmk if its good for a public launch and I'll launch it".
+
+The task was 37f-2's open difference: Session 112's `-Rejoin 1` run,
+where B (restarted and caught up) differed from the host from frame 450
+in the players part, and the host differed from B's first run at 917.
+
+**The draw ruled out.** `run_azahar_lobby.ps1 -Blind 1` is new
+(config `WirelessTestBlindFrame` and `WirelessTestBlindFrames`, main.c's
+`lockTestBlind`). It runs one copy's race frames undrawn at the race's
+pace. One run (seed 4b502558, B undrawn from frame 300 to 599) kept
+every part the host's. So the draw was not the difference; the
+catch-up's pace was.
+
+**The sound's word.** `sound_update` runs at the top of each main-loop
+pass, at most once per 8 ms of real time. During a catch-up, frames run
+back to back, so anything the sound writes into a world struct lands on
+other frames than on a console racing at the race's pace.
+`CarState.RedLineSyncRPM` is the engine sound's
+(`playerenginesound_update_to_red_line_rpm`, enginesound.c), and no
+world code reads it. lockhash's new `mixState` hashes a CarState range
+without it, in the parts and in the drive piece.
+
+**The relative matrix.** The next `-Rejoin 1` run still split: B's
+players part from frame 450, and the host against B's first run at
+890. A test build (not committed) logged the players' CarState bytes
+every 150 frames. The host and B's first run were the same byte for
+byte to frame 900. The restarted B differed in `RedLineSyncRPM` and in
+the second player's `RelCoordMatrix`, by a few units in the last place,
+the same stale matrix from frame 450 to 1050, while `MatrixValid` was
+0 on both consoles at every frame logged.
+
+`RelCoordMatrix` is a cache. `carstate_get_transform_matrix` builds it
+from the car's velocity (its heading below walking pace) when
+`MatrixValid` is 0, and sets the bit. The car's mover clears the bit in
+each step: `physicscar_update_car` with the velocity it copies, and the
+belt, mellow, traffic and cop movers. The car sound's
+`car_world_to_car` (carsound.c, for a body within 9 m) builds the
+matrix between the frames, on the sound's real-clock gate, so a console
+catching up built it on other frames than the host. While the bit is
+clear nothing reads the matrix. Every change to its inputs is in the
+world's step and clears the bit with it, but the debug warp. So a
+matrix built between the frames is the one the next frame's first
+reader would build: the checksum differed, the world did not. The
+matrix now counts only while `MatrixValid` is set
+(`docs/formats/lockhash.md`, "The relative matrix").
+
+**Checked:**
+
+- lockhash_check: faults 0. `--mutate`: 114 mutations, 110 caught,
+  4 equivalent. New cases: `RedLineSyncRPM` moves no part and no piece,
+  and the fields either side of it move theirs. With every car's
+  `MatrixValid` 0, the matrix's first and last lanes move nothing,
+  while `MatrixValid` itself, `BurnOutAllow` and `DistanceMoved` move
+  theirs. With it set, the matrix moves the players part and the rel
+  piece. The sound's word added 4 mutants and the stale matrix 5, all
+  caught.
+- `-Rejoin 1` on the build (seed b2c97ed7): PASS on both. B closed at
+  frame 1042, restarted, and caught up to frame 1036 undrawn in 21 s.
+  Every part was the host's at every frame logged, 0 to 1500, through
+  the catch-up and after it. netstep's checksums matched to 2100, and
+  the host's matched B's first run too.
+
+**Frame 1809, still open.** The split nine frames after the test's
+finish in Next Race (Sessions 108 and 109) is a real one, not the
+checksum's: a slot's CarState differed in every piece. The stale matrix
+cannot cause it, since nothing reads the matrix while it is stale. A
+`-NextRace -Drive 30` run on this build (seeds ca54f485 and f20ce80b)
+passed on both: every part the host's at all 27 frames logged, past the
+finish on frame 1800 to the stop on 3033, then race 2 in lockstep. It
+has now split 2 runs in 8. The driver piece will say which slot's
+choice went first when it splits again.
+
+### Next
+
+Career to 100% (the user's order of 2026-10-15), then a launch-
+readiness verdict for the user. Multiplayer's leftovers (37d-2, TASKS
+61) may wait. TASKS 67 (Select Car's icons off their boxes) is still
+open, and small.
+
+Still to ask the user:
+
+- TASKS 64: the road's blink.
+- TASKS 47: the bridge.
+- TASKS 52: the popups.
+- TASKS 65: the device log's `sends:` line.
+- How the `-fno-strict-aliasing` build plays on the device.
+- Whether 37g-2 (out of range and back) and 37g-3 (a console restarted)
+  work on real 3DSes.
+- Where TASKS 67 goes now.

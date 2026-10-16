@@ -110,6 +110,17 @@ on the 15.5 FPS of an earlier run: that was the fire on track 11, and
 TASKS 46 must reach a steady 30 there and in every place like it.
 Next: TASKS 37 (multi-card multiplayer).**
 
+**Now (Session 113, 2026-10-15): 37f-2's rejoin difference is
+fixed; it was the checksum's, not the world's. lockhash no longer
+hashes two things the sound writes between frames on the real clock:
+the engine sound's `RedLineSyncRPM`, and a car's `RelCoordMatrix` cache
+while `MatrixValid` is 0. `-Rejoin 1` then passed, every part the
+host's from 0 to 1500 (`docs/formats/lockhash.md`, "The relative
+matrix"). Frame 1809 (the split after Next Race's finish) is still open and did
+not come back in this session's run (2 in 8 now). The user's order: career to 100%, then a
+launch-readiness verdict; multiplayer's leftovers may wait. See
+HANDOFF.md's "Session 113".**
+
 **Now (Session 112, continued, 2026-10-15): TASKS 68 is done. The
 main menu reads Hot Pursuit, World Racing, Local Wireless, Options, and
 Debug Menu, once shown, is the only row under Options. Past five rows

@@ -138,6 +138,14 @@ extern int32_t ConfigWirelessHoldSeconds;   // 90
 extern int32_t ConfigWirelessTestDropFrame; // 0
 extern int32_t ConfigWirelessTestDropMs;    // 5000
 
+// The port's own: "WirelessTestBlindFrame n" has this console draw none of
+// a wireless race's frames for WirelessTestBlindFrames from its lockstep
+// frame n, still in step and at the race's pace, as a console catching up
+// runs them (37g-3): the Azahar runs' way to what an undrawn frame changes
+// in the world (TASKS 37f-2). Off by default (2026-10-15).
+extern int32_t ConfigWirelessTestBlindFrame;  // 0
+extern int32_t ConfigWirelessTestBlindFrames; // 300
+
 // SkipFE as the image reads it, `lw -23220(gp)`: gameflow's skipFE
 // through gPlayerCamSkipFE, 0 while that is unset.
 int32_t config_skip_fe(void);

@@ -128,6 +128,13 @@
 # None says a place gone, no car goes to the CPU, and every copy's parts
 # stay the host's to the end.
 #
+# With -Blind N (TASKS 37f-2; -Race) copy N's config has
+# "WirelessTestBlindFrame -BlindFrame" and "WirelessTestBlindFrames
+# -BlindFrames": that many of its race's frames from that lockstep frame
+# are undrawn, two blanks each, as the race's pace, while it stays in
+# step. Every copy's parts must still be the host's: what the draw does
+# is no part of the world (Session 113, the catch-up's undrawn frames).
+#
 # With -Rejoin N (TASKS 37g-3; -Race; a client, 1 B, ...) each card's
 # config has the hold (150 s unless -HoldSeconds says), and once the
 # driving is done copy N is closed, its logs kept as *.before, and started
@@ -164,6 +171,7 @@
 #   powershell -File tools/run_azahar_lobby.ps1 -Consoles 2 -Race -Lose 0
 #   powershell -File tools/run_azahar_lobby.ps1 -Consoles 2 -Race -Drop 1
 #   powershell -File tools/run_azahar_lobby.ps1 -Consoles 2 -Race -Rejoin 1
+#   powershell -File tools/run_azahar_lobby.ps1 -Consoles 2 -Race -Blind 1 -Drive 40
 #
 # Screenshots of each copy go to %TEMP%\nfshp2_lobby. Exit code 0 when
 # every copy reached Select Car from the lobby (with -Race: racing, every
@@ -197,6 +205,10 @@ param(
     [int]$DropFrame = 300,        # -Drop: the lockstep frame it goes deaf on
     [int]$DropMs = 5000,          # -Drop: for how long
     [ValidateRange(-1, 7)]
+    [int]$Blind = -1,             # -Race: the copy that draws none of -BlindFrames frames from -BlindFrame (37f-2)
+    [int]$BlindFrame = 300,       # -Blind: the lockstep frame its undrawn frames start on
+    [int]$BlindFrames = 300,      # -Blind: how many
+    [ValidateRange(-1, 7)]
     [int]$Rejoin = -1,            # -Race: the client closed once the driving is done, then started again (37g-3)
     [ValidateRange(-1, 7)]
     [int]$Cpu = 2,                # the host's CPU racers; -1 as shown
@@ -228,6 +240,8 @@ if ($Drop -ge 0 -and ($Quit -or $Restart -or $NextRace -or $Lose -ge 0)) {
 }
 if ($Drop -ge $Consoles) { throw "-Drop ${Drop}: there are only $Consoles copies" }
 if ($Drop -ge 0 -and -not $PSBoundParameters.ContainsKey("HoldSeconds")) { $HoldSeconds = 30 }
+if ($Blind -ge 0 -and -not $Race) { throw "-Blind leaves a copy's race frames undrawn: it needs -Race" }
+if ($Blind -ge $Consoles) { throw "-Blind ${Blind}: there are only $Consoles copies" }
 if ($Rejoin -ge 0 -and -not $Race) { throw "-Rejoin restarts a copy mid-race: it needs -Race" }
 if ($Rejoin -eq 0) { throw "-Rejoin 0: the host's race ends with the host; a client comes back" }
 if ($Rejoin -ge 0 -and ($Quit -or $Restart -or $NextRace -or $Lose -ge 0 -or $Drop -ge 0)) {
@@ -446,6 +460,10 @@ function Prepare([string]$name, [string]$nick, [bool]$isHost) {
     if ($Drop -ge 0 -and $name -eq $letters[$Drop]) {
         $lines += "WirelessTestDropFrame $DropFrame"
         $lines += "WirelessTestDropMs $DropMs"
+    }
+    if ($Blind -ge 0 -and $name -eq $letters[$Blind]) {
+        $lines += "WirelessTestBlindFrame $BlindFrame"
+        $lines += "WirelessTestBlindFrames $BlindFrames"
     }
     Set-Content -Path (Join-Path $user "sdmc\nfshp2_config.txt") -Encoding ASCII -Value $lines
     LinkData $user ($NoDsp -or ($SilentClients -and -not $isHost))

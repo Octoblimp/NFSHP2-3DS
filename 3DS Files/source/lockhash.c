@@ -86,16 +86,54 @@ static uint32_t mixBytes(uint32_t h, const void* p, size_t n)
 #define SPAN(type, first, last) \
     (offsetof(type, last) + sizeof(((type*)0)->last) - offsetof(type, first))
 
+// The engine sound's word, not the world's: a player's engine sound
+// writes State.RedLineSyncRPM in its update (enginesound.c), which
+// sound_update runs by the real clock, every 8 ms at most, and nothing
+// else reads it. A console catching up (37g-3) runs the race's frames
+// faster than that, so its players' cars held it from an older frame than
+// the host's, and the players part differed while every car was where the
+// host's was. It is in no part and no piece.
+#define CAR_SOUND_RPM offsetof(CarState, RedLineSyncRPM)
+
+// RelCoordMatrix is a cache: carstate_get_transform_matrix builds it from
+// the car's velocity (or heading) when MatrixValid is 0 and sets it, and
+// the car's mover clears it each step. While it is clear the matrix holds
+// whatever its last build left, and no reader sees that. The car sound's
+// car_world_to_car (carsound.c) builds it between the frames by the real
+// clock, so a console catching up left a player's car an older frame's
+// matrix than the host's, every car where the host's was (Session 113).
+// The matrix counts only while MatrixValid is set.
+#define CAR_REL offsetof(CarState, RelCoordMatrix)
+
+// The CarState's bytes from `from` to `to`, but the sound's word, and the
+// relative matrix while it is not valid.
+static uint32_t mixState(uint32_t h, const CarState* s, size_t from,
+                         size_t to)
+{
+    const uint8_t* b = (const uint8_t*)s;
+
+    if (from <= CAR_SOUND_RPM && CAR_SOUND_RPM < to) {
+        h = mixBytes(h, b + from, CAR_SOUND_RPM - from);
+        from = CAR_SOUND_RPM + sizeof(float);
+    }
+    if (!s->MatrixValid && from <= CAR_REL && CAR_REL < to) {
+        h = mixBytes(h, b + from, CAR_REL - from);
+        from = CAR_REL + sizeof(bMatrix4);
+    }
+    return mixBytes(h, b + from, to - from);
+}
+
 static uint32_t mixCar(uint32_t h, const Car* c)
 {
     h = mix(h, (uint32_t)c->TheControlMode);
     h = mix(h, (uint32_t)c->TheMovementMode);
-    return mixBytes(h, &c->State.GeometryPosition,
-                    SPAN(CarState, GeometryPosition, DistanceMoved));
+    return mixState(h, &c->State, offsetof(CarState, GeometryPosition),
+                    offsetof(CarState, DistanceMoved) + sizeof(float));
 }
 
 // The CarState's pieces after the modes, each from its first field to the
-// next piece's: together GeometryPosition to DistanceMoved, as mixCar.
+// next piece's: together GeometryPosition to DistanceMoved, as mixCar,
+// the sound's word left out of the drive and a stale matrix out of rel.
 static const uint16_t kCarCuts[LOCKHASH_DRIVER] = {
     offsetof(CarState, GeometryPosition),
     offsetof(CarState, Velocity),
@@ -133,14 +171,13 @@ static uint32_t driverHash(const CarDriver* d)
 
 static void carFields(const Car* c, uint32_t* f)
 {
-    const uint8_t* s = (const uint8_t*)&c->State;
-    int            i;
+    int i;
 
     f[LOCKHASH_MODES] = mix(mix(0x811c9dc5u, (uint32_t)c->TheControlMode),
                             (uint32_t)c->TheMovementMode);
     for (i = 1; i < LOCKHASH_DRIVER; i++)
-        f[i] = mixBytes(0x811c9dc5u, s + kCarCuts[i - 1],
-                        (size_t)(kCarCuts[i] - kCarCuts[i - 1]));
+        f[i] = mixState(0x811c9dc5u, &c->State, kCarCuts[i - 1],
+                        kCarCuts[i]);
     f[LOCKHASH_DRIVER] = driverHash(c->pCarDriver);
 }
 

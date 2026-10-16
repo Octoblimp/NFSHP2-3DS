@@ -2706,6 +2706,22 @@ phases.
                   the same build should not differ: find what a
                   player's car reads that is not in the record (the
                   draw, the vertical blank, a console's own state).
+                  Session 113: both were the checksum's, not the
+                  world's. The sound writes two things between the
+                  frames on the real clock, so a catch-up's run of
+                  frames left them on other frames: the engine
+                  sound's `RedLineSyncRPM`, and a car's
+                  `RelCoordMatrix` cache, built by the car sound
+                  while `MatrixValid` is 0 and read by nothing until
+                  it is set. lockhash leaves both out
+                  (`lockhash.md`, "The relative matrix"). A `-Blind
+                  1` run had ruled out the draw. `-Rejoin 1` on the
+                  fix (seed b2c97ed7): PASS, every part the host's
+                  from 0 to 1500.
+                  Frame 1809 is still open: a `-NextRace -Drive 30`
+                  run on the fix (seeds ca54f485, f20ce80b) passed,
+                  every part the host's at all 27 frames logged to the
+                  stop on 3033. Two splits in eight runs now.
                   - Session 109, the second race on two Azahars (the
                   user's screenshot of race 2 with the HUD and no
                   track): B's view found no 3.1 MB whole for its

@@ -6,8 +6,11 @@
 //
 //   - each part moves with every field it reads and with no other: a
 //     change to each is made, the parts taken again, and exactly the
-//     part's own must differ; the pointers, the tails and a RacingCar
-//     past NumRacingCars move none; a NULL slot is told from the car
+//     part's own must differ; the pointers, the tails, the engine
+//     sound's RedLineSyncRPM, RelCoordMatrix while MatrixValid is 0 and
+//     a RacingCar past NumRacingCars move none, the fields either side of
+//     RedLineSyncRPM and of a stale RelCoordMatrix their own; a NULL
+//     slot is told from the car
 //     beside it; a range starting below 0 or ending past TotalNumCars is
 //     the cars that are there; a NULL World is all 0;
 //   - the fold moves with every bit of every part;
@@ -18,7 +21,8 @@
 //     address each returned to; a frame not run, or not run since start,
 //     not logged; nothing before start or after stop;
 //   - each car's pieces: a change to a field moves its own slot's own
-//     piece and no other; a pointer, the tail or the hole none; a NULL
+//     piece and no other; a pointer, the tail, the hole, RedLineSyncRPM
+//     or RelCoordMatrix while MatrixValid is 0 none; a NULL
 //     slot or one past TotalNumCars all 0; the clocks WorldTimer and
 //     WorldLoopCounter; the window logs each frame's clocks and a word
 //     for each slot, and the frame's own cars in pieces;
@@ -110,6 +114,7 @@ static void build(void)
         g_world.CarTable[i] = &g_cars[i];
         g_race.RacingCarTable[i].pCar = &g_cars[i];
         g_cars[i].pCarDriver = &g_drivers[i];
+        g_cars[i].State.MatrixValid = 1;
         g_drivers[i].MyDriveTarget.NumPoints = 3;
     }
     g_cars[7].pCarDriver = NULL;
@@ -226,7 +231,22 @@ static void pRacerSpeed(void) { flip(&g_cars[2].State.ForwardSpeed); }
 static void pRacerGear(void) { g_cars[3].State.CurrentGear ^= 1; }
 static void pRacersFewer(void) { g_world.CopCarPos = 3; }
 static void pCopRpm(void) { flip(&g_cars[4].State.RPM); }
+static void pPlayerRedLine(void) { flip(&g_cars[1].State.RedLineSyncRPM); }
+static void pRacerRedLine(void) { flip(&g_cars[2].State.RedLineSyncRPM); }
+static void pPlayerClutch(void) { g_cars[0].State.ClutchEngaged ^= 1; }
 static void pCopMatrix(void) { flip(&g_cars[5].State.RelCoordMatrix.v0.x); }
+static void pPlayerMatrix(void) { flip(&g_cars[1].State.RelCoordMatrix.v0.x); }
+static void pPlayerMatrixEnd(void) { flip(&g_cars[0].State.RelCoordMatrix.v3.w); }
+static void pPlayerBurnOut(void) { flip(&g_cars[0].State.BurnOutAllow); }
+static void pPlayerMovedToo(void) { flip(&g_cars[1].State.DistanceMoved); }
+static void pPlayerValid(void) { g_cars[0].State.MatrixValid ^= 1; }
+// Every car's matrix stale, as after its mover's step.
+static void pStale(void)
+{
+    int i;
+
+    for (i = 0; i < 8; i++) g_cars[i].State.MatrixValid = 0;
+}
 static void pTrafficWheel(void) { flip(&g_cars[6].State.WheelAngle[3]); }
 static void pTrafficGone(void) { g_world.TotalNumCars = 7; }
 static void pTrafficNull(void) { g_world.CarTable[7] = NULL; }
@@ -307,7 +327,11 @@ static void qAngle(void) { g_cars[7].State.Angle ^= 1; }
 static void qSteer(void) { g_cars[7].State.SteeringAngle ^= 1; }
 static void qThrottle(void) { flip(&g_cars[0].State.Throttle); }
 static void qBurnOut(void) { flip(&g_cars[0].State.BurnOutAllow); }
+static void qRpm(void) { flip(&g_cars[3].State.RPM); }
+static void qRedLine(void) { flip(&g_cars[3].State.RedLineSyncRPM); }
+static void qClutch(void) { g_cars[3].State.ClutchEngaged ^= 1; }
 static void qRel(void) { flip(&g_cars[1].State.RelCoordMatrix.v0.x); }
+static void qRelEnd(void) { flip(&g_cars[1].State.RelCoordMatrix.v3.w); }
 static void qValid(void) { g_cars[1].State.MatrixValid ^= 1; }
 static void qMoved(void) { flip(&g_cars[2].State.DistanceMoved); }
 static void qControl(void) { g_cars[3].TheControlMode ^= 1; }
@@ -333,6 +357,7 @@ static void piece(const char* what, Poke poke, int slot, int pieceAt)
 
     g_what = what;
     build();
+    if (g_setup) g_setup();
     lockhash_world(&g_world, &a);
     poke();
     lockhash_world(&g_world, &b);
@@ -369,9 +394,20 @@ static void pieces(void)
     piece("SteeringAngle", qSteer, 7, DR);
     piece("Throttle", qThrottle, 0, DR);
     piece("BurnOutAllow", qBurnOut, 0, DR);
+    piece("RPM", qRpm, 3, DR);
+    piece("RedLineSyncRPM", qRedLine, 3, NONE);
+    piece("ClutchEngaged", qClutch, 3, DR);
     piece("RelCoordMatrix", qRel, 1, RL);
+    piece("RelCoordMatrix's last lane", qRelEnd, 1, RL);
     piece("MatrixValid", qValid, 1, RL);
     piece("DistanceMoved", qMoved, 2, RL);
+    g_setup = pStale;
+    piece("RelCoordMatrix, not valid", qRel, 1, NONE);
+    piece("RelCoordMatrix's last lane, not valid", qRelEnd, 1, NONE);
+    piece("MatrixValid, from 0", qValid, 1, RL);
+    piece("DistanceMoved, the matrix not valid", qMoved, 2, RL);
+    piece("BurnOutAllow, the matrix not valid", qBurnOut, 0, DR);
+    g_setup = NULL;
     piece("TheControlMode", qControl, 3, MO);
     piece("the driver's Steering", qDrvSteer, 5, DV);
     piece("the driver's Throttle", qDrvThrottle, 2, DV);
@@ -448,7 +484,23 @@ static void parts(void)
     expect("an AI racer's CurrentGear", pRacerGear, RC);
     expect("one racer fewer", pRacersFewer, RC | CP);
     expect("a cop's RPM", pCopRpm, CP);
+    expect("a player's RedLineSyncRPM", pPlayerRedLine, 0);
+    expect("an AI racer's RedLineSyncRPM", pRacerRedLine, 0);
+    expect("a player's ClutchEngaged", pPlayerClutch, PL);
     expect("a cop's RelCoordMatrix", pCopMatrix, CP);
+    expect("a player's RelCoordMatrix", pPlayerMatrix, PL);
+    expect("a player's MatrixValid", pPlayerValid, PL);
+    g_setup = pStale;
+    expect("a cop's RelCoordMatrix, not valid", pCopMatrix, 0);
+    expect("a player's RelCoordMatrix, not valid", pPlayerMatrix, 0);
+    expect("a player's RelCoordMatrix's last lane, not valid",
+           pPlayerMatrixEnd, 0);
+    expect("a player's MatrixValid, from 0", pPlayerValid, PL);
+    expect("a player's BurnOutAllow, the matrix not valid", pPlayerBurnOut,
+           PL);
+    expect("a player's DistanceMoved, the matrix not valid", pPlayerMovedToo,
+           PL);
+    g_setup = NULL;
     expect("a traffic car's WheelAngle", pTrafficWheel, TR);
     expect("one traffic car fewer", pTrafficGone, TR);
     expect("a traffic car NULL", pTrafficNull, TR);
