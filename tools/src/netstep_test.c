@@ -1,5 +1,5 @@
 // Host harness for a local wireless race in lockstep (netstep.c, TASKS 37d,
-// and its end, 37f).
+// its end, 37f, and a console lost, 37g).
 //
 // Builds "3DS Files/source/netstep.c" and runs up to eight consoles of it
 // in one process, each with its own NetStep (netstep_bind), on one clock
@@ -24,6 +24,15 @@
 // gone, in its first frame's drawing, in a stall after its stop (its
 // save, its unload), or while its loop is frozen (it comes back after to
 // its link lost).
+//
+// A scenario can restart a client (37g-3): its loop, its link and its
+// netstep gone at once, as a console turned off. From its menus it asks
+// back in each second (netrace's rejoin, netstep_rejoin on the host)
+// while the host holds for it; let in, on a link new, it loads the race,
+// its netrace saying so to the host's (a reliable message netstep leaves
+// for it, read after the host's poll), and then runs the race again from
+// frame 0 with a NetStep new, each frame undrawn and fast while it is
+// more than NETSTEP_BEHIND records behind.
 //
 // Each console does what main.c's frame does: at the frame's start it
 // puts its pad for the frame NETSTEP_DELAY ahead with the step it
@@ -65,6 +74,18 @@
 //     each end, by the host no later than the hold, by the client no
 //     later than NETSTEP_BACK_MS past it; neither end gone nor alone, and
 //     no record without the place; one re-peered too late never back;
+//   - a restart (37g-3): let back in only while the host holds for it,
+//     its hold begun again, and once for each restart; asking for any
+//     other place refused with nothing said; refused, said once, only
+//     past the records kept; caught up once, on the frame it was let in
+//     at, its own pad for that frame put; every record it runs again the
+//     one every other console ran; netstep_rejoining on the host the
+//     places let in and not yet caught up or gone, how far never back
+//     while they stay and 0 while one loads, and on a client what the
+//     host said, never itself, never alone; netstep_behind 0 but on a
+//     client of the host's race; nothing of netstep's to a console
+//     loading, NETSTEP_BURST messages a NETSTEP_RESEND_MS at most to
+//     one catching up, and no record past the ring of the frame it runs;
 //   - every message no longer than WL_MSG_MAX, to a peer there is and
 //     over a link not lost, a
 //     client's PADS and the host's FRAMES only; from a client alone only
@@ -94,15 +115,16 @@
 #include "netstep.h"
 
 #define MAXC      NETSTEP_MAX
-#define MAXFRAMES 1200
+#define MAXFRAMES 2000
 #define PIPE      512
 #define LINES     64
 #define LINK_MS   3000u
 #define PATIENCE  30000u
 #define MAX_RATE  120     // messages a second on a link
-#define HEADER    21      // netstep.c's
+#define HEADER    23      // netstep.c's
 #define HOLD_SLACK 3u     // ms a hold may run past its end: polls a ms
 #define MSG_BACK  0x18    // lobby.h's LOBBY_MSG_BACK
+#define MSG_NETRACE 0x14  // netrace.h's NETRACE_MSG_LOADED
 #define TAIL_MS   3000u   // run on once all is done, for what is in flight
 
 typedef struct {
@@ -160,6 +182,22 @@ typedef struct {
                                     // host's end alone: the host sees it,
                                     // and it hears nothing and sends no
                                     // pads (one restarted), a bit each
+    int         restartAt[MAXC];    // ms a client restarts: its loop, its
+                                    // link and its netstep gone at once
+                                    // (37g-3), 0: never
+    int         rejoinAt[MAXC];     // ms from which it asks back in, each
+                                    // second while the host holds for it
+    int         loadMs[MAXC];       // ms its race takes to load once let
+                                    // back in, 0: 1500
+    int         catchMs;            // ms a frame run undrawn takes, 0: 4
+    int         refused;            // clients the host does not let back
+                                    // in, its records from the start not
+                                    // all kept, a bit each
+    int         maxCatch;           // ms from a place's pads to its caught
+                                    // up, 0: no check
+    int         restartAgain[MAXC]; // ms it restarts again, once caught
+                                    // up, and asks back in as long after
+                                    // as the first time, 0: never
 } Scenario;
 
 static const Scenario kScenarios[] = {
@@ -263,6 +301,74 @@ static const Scenario kScenarios[] = {
       .consoles = 3, .frames = 500, .latency = 4, .jitter = 15,
       .lossPct = 15, .dupPct = 5, .dropAt = { 0, 0, 3000 },
       .repeerAt = { 0, 0, 7000 }, .hold = 10000 },
+    // -- a restart (37g-3): a client's console off mid-race and on again,
+    // back in from its menus. It runs the race again from frame 0 on the
+    // host's records, kept from GO, undrawn while they are well ahead;
+    // the race held until it has caught up.
+    { .name = "two, the client restarts, back in and caught up",
+      .consoles = 2, .frames = 600, .latency = 5, .restartAt = { 0, 8000 },
+      .rejoinAt = { 0, 11000 }, .hold = 20000 },
+    { .name = "three, place 2 restarts, a lossy link", .consoles = 3,
+      .frames = 600, .latency = 4, .jitter = 15, .lossPct = 15,
+      .dupPct = 5, .restartAt = { 0, 0, 6000 }, .rejoinAt = { 0, 0, 9000 },
+      .hold = 20000 },
+    // Place 2 caught up to the frame held on while the host still holds
+    // for place 1, loading, and both caught up as one. Place 1's pads from
+    // before its restart, for frames past the one held on, never in it.
+    { .name = "three, both clients restart, one after the other",
+      .consoles = 3, .frames = 600, .latency = 5,
+      .restartAt = { 0, 7000, 5000 }, .rejoinAt = { 0, 10000, 9000 },
+      .hold = 20000 },
+    // Back in, caught up, and off again: nothing of its first catching up
+    // left over.
+    { .name = "two, the client restarts twice", .consoles = 2,
+      .frames = 700, .latency = 5, .jitter = 10, .lossPct = 10,
+      .restartAt = { 0, 5000 }, .rejoinAt = { 0, 7000 },
+      .restartAgain = { 0, 14000 }, .hold = 20000 },
+    // The host gone while place 2 is still behind: each client holds for
+    // it, then races alone, the host's word of place 2 gone with it.
+    { .name = "three, place 2 restarts, the host gone as it catches up",
+      .consoles = 3, .frames = 600, .latency = 5,
+      .restartAt = { 0, 0, 9000 }, .rejoinAt = { 0, 0, 10000 },
+      .goneAt = { 12000 }, .hold = 6000 },
+    // Three records to a message: a frame undrawn as fast as the link
+    // brings them, NETSTEP_BURST at once.
+    { .name = "eight, place 5 restarts, a lossy link", .consoles = 8,
+      .frames = 400, .latency = 3, .jitter = 15, .lossPct = 15,
+      .dupPct = 5, .period = { 33, 30, 36, 33, 40, 28, 33, 35 },
+      .restartAt = { 0, 0, 0, 0, 0, 5000 },
+      .rejoinAt = { 0, 0, 0, 0, 0, 8000 }, .catchMs = 1, .hold = 20000 },
+    // The link slower than a burst's gap: each burst on from the last,
+    // which the client has not said it has, the link full all the way.
+    // Caught up in 1338 ms; 1540 rewinding while its need moves, 3299
+    // each burst from its need, 4937 a message a burst.
+    { .name = "eight, place 3 restarts late, a slow link", .consoles = 8,
+      .frames = 700, .latency = 40, .jitter = 5,
+      .restartAt = { 0, 0, 0, 15000 }, .rejoinAt = { 0, 0, 0, 17000 },
+      .catchMs = 1, .maxCatch = 1450, .hold = 20000 },
+    // The records it runs again with place 2 in them, and then out.
+    { .name = "three, place 2 gone, then place 1 restarts", .consoles = 3,
+      .frames = 600, .latency = 5, .goneAt = { 0, 0, 3000 },
+      .restartAt = { 0, 9000 }, .rejoinAt = { 0, 11000 }, .hold = 4000 },
+    // Its load most of the hold, begun again when it was let in, junk on
+    // the link all the while.
+    { .name = "two, the client restarts, a long load", .consoles = 2,
+      .frames = 400, .latency = 5, .restartAt = { 0, 4000 },
+      .rejoinAt = { 0, 5000 }, .loadMs = { 0, 7500 }, .hold = 8000,
+      .junk = 7 },
+    // Some 640 frames in, the records kept most of the 16 KB.
+    { .name = "two, the client restarts late in the race", .consoles = 2,
+      .frames = 900, .latency = 5, .jitter = 4, .restartAt = { 0, 22000 },
+      .rejoinAt = { 0, 24000 }, .hold = 6000 },
+    { .name = "two, the client restarts, back too late", .consoles = 2,
+      .frames = 400, .latency = 5, .restartAt = { 0, 4000 },
+      .rejoinAt = { 0, 12000 }, .hold = 6000 },
+    // Past the records kept (the harness's 16 KB: some 1090 of two
+    // places'), not let in, and gone after the hold.
+    { .name = "two, the client restarts past the records kept",
+      .consoles = 2, .frames = 1400, .latency = 5,
+      .restartAt = { 0, 40000 }, .rejoinAt = { 0, 42000 }, .refused = 0x02,
+      .hold = 6000 },
     { .name = "two, a checksum differs", .consoles = 2, .frames = 400,
       .latency = 5, .divergeAt = { 0, 200 } },
     // The client runs ahead, so each checksum comes to the host before
@@ -381,8 +487,7 @@ typedef struct {
     int          aloneFrom;      // the first record made alone, or -1
     uint8_t      liveSeen;       // the places live in its last record
     int          wasLive[MAXC];
-    int          sent;           // messages this tick
-    uint32_t     sends;          // and all of them
+    uint32_t     sends;          // messages, all of them
     uint32_t     pumped;         // ms its loop last pumped the link
     int          backSent;       // its lobby said it is back
     int          backTo;         // the lobby's messages sent to it
@@ -411,8 +516,28 @@ typedef struct {
     int          halfUp;         // and that only at its own end
     int          hostUp;         // or only at the host's
     int          frozen;         // its loop stopped, a scenario's freeze
+    // A restart (37g-3): on the host, each place's lines, by place, and
+    // when it asked back in; the places rejoining as the log said, and as
+    // netstep_rejoining said, now and ever, and how far.
+    int          restartSaid[MAXC], caughtSaid[MAXC], refusedSaid[MAXC];
+    int          keptEndSaid;
+    uint32_t     askedAt[MAXC], backAt[MAXC];
+    unsigned long heldOn[MAXC];  // the frame it was let in at
+    uint8_t      rejoinNow, rejoinSeen, lastRejoin, lastPct, mostPct;
+    uint32_t     catchTicks;     // the host's: ms each place caught up
+    uint32_t     catchMost;      // and the longest from its pads to then
+    // Its run again from frame 0: when it began, and its frames run
+    // undrawn; the host's messages to a place catching up.
+    uint32_t     runFrom;
+    uint32_t     fastFrames;
+    uint32_t     catchSends;
     uint8_t      q[MAXFRAMES + NETSTEP_DELAY + 2];   // its steps put
 } Console;
+
+// A client's restart (37g-3): out, its loop in the menus; loading, let
+// back in; on again, its race run from the first frame. Kept apart from
+// its Console, which its run again starts new.
+enum { R_NONE, R_OUT, R_LOADING, R_AGAIN };
 
 typedef struct {
     int          in;
@@ -431,6 +556,13 @@ static uint32_t        g_now;
 static uint32_t        g_firstStop;          // ms, 0: none yet
 static int             g_faults;
 static uint32_t        g_lcg;
+static int             g_restart[MAXC];      // R_NONE...
+static int             g_asked[MAXC];        // its asking back in answered
+static uint32_t        g_loadTo[MAXC];       // ms its load ends
+static uint32_t        g_againAt[MAXC];      // ms its run again began
+static uint32_t        g_rejoinedAt;         // ms the host last let one in
+static uint32_t        g_rejoinFrom[MAXC];   // ms it asks back in from
+static int             g_sentTo[MAXC][MAXC]; // messages this ms, by link
 
 static void fault(const char* fmt, ...)
 {
@@ -472,9 +604,17 @@ static int bitsOf(uint8_t v)
 
 // ------------------------------------------------------------ the pads
 
+// Place 0's (and 4's) new each frame; the others' held for 2, 4 or 8
+// frames, as a stick or a button is, and changing between the keys, for
+// the host's records kept, which keep a pad once until it changes and
+// each at a key (37g-3). Of every three, the second differs from the
+// first in its presses alone and the third from the second in its last
+// byte alone.
 static void padOf(int place, uint32_t n, NetStepPad* pad)
 {
-    uint32_t h = (uint32_t)place * 2654435761u ^ n * 40503u ^ 0x5bd1e995u;
+    uint32_t m = (n + (uint32_t)place * 3u) >> (place & 3);
+    uint32_t g = m / 3u;
+    uint32_t h = (uint32_t)place * 2654435761u ^ g * 40503u ^ 0x5bd1e995u;
     int      i;
 
     for (i = 0; i < NETSTEP_PAD_BYTES; i++) {
@@ -483,6 +623,9 @@ static void padOf(int place, uint32_t n, NetStepPad* pad)
     }
     h = h * 1103515245u + 12345u;
     pad->menu = (uint16_t)(h >> 12);
+    if (m % 3u >= 1u) pad->menu ^= (uint16_t)(1u + (g & 0x7fu));
+    if (m % 3u == 2u)
+        pad->ds2[NETSTEP_PAD_BYTES - 1] ^= (uint8_t)(1u + (g & 0x7fu));
 }
 
 static int samePad(const NetStepPad* a, const NetStepPad* b)
@@ -636,9 +779,27 @@ static int fSend(int i, uint8_t type, const void* data, size_t n)
         return 0;
     }
     checkSend(type, (const uint8_t*)data, n);
-    if (C[g_cur].sent >= WL_UNREL_MAX) return 0;   // the packet is full
-    C[g_cur].sent++;
-    C[g_cur].sends++;
+    // A console loading after its restart hears the race's netrace alone.
+    if (g_restart[t] == R_LOADING) fault("sent to console %d, loading", t);
+    // To a client, records no further than its ring holds past the frame
+    // it runs: one catching up is sent no more (37g-3).
+    if (g_cur == 0 && n >= HEADER && !C[t].gone) {
+        const uint8_t* d = (const uint8_t*)data;
+
+        if (d[8] && get32(d + 4) + d[8] > C[t].ns.frame + NETSTEP_RING)
+            fault("records to frame %lu sent to console %d, at frame %lu",
+                  (unsigned long)(get32(d + 4) + d[8] - 1u), t,
+                  (unsigned long)C[t].ns.frame);
+    }
+    // The link's packet is full (wlproto's unreliable messages, each
+    // link's own).
+    if (g_sentTo[g_cur][t] >= WL_UNREL_MAX) return 0;
+    if (++g_sentTo[g_cur][t] > NETSTEP_BURST)
+        fault("%d messages to console %d at once", g_sentTo[g_cur][t], t);
+    // To a place catching up after a restart, a few at once (37g-3): not
+    // the race's rate.
+    if (g_cur == 0 && C[0].ns.rejoin[t] == 2) C[0].catchSends++;
+    else C[g_cur].sends++;
     if (C[t].gone) return 1;
     if (cutOf(g_cur, t)) return 1;
     if (((S->deafAfterStop >> t) & 1) && C[t].stopped) return 1;
@@ -690,6 +851,8 @@ static int fRecv(int i, WlMsg* out)
     g_pipe[from][g_cur].q[k].used = 0;
     if (out->type == MSG_BACK && !g_lobby)
         fault("netstep read the lobby's message from peer %d", i);
+    if (out->type == MSG_NETRACE && !g_lobby)
+        fault("netstep read netrace's message from peer %d", i);
     return 1;
 }
 
@@ -704,14 +867,16 @@ static int fPeek(int i, WlMsg* out)
 
 // Junk of netstep's own types on the race's link, its length not what
 // its count says, which netstep drops whole: to the host a client's pads,
-// to a client the host's records.
+// to a client the host's records. From a console loading after a restart
+// too, which the host must not take for its pads (37g-3).
 static void junk(int from, int to)
 {
     uint8_t d[WL_MSG_MAX];
     size_t  len = HEADER;
     int     i, n;
 
-    if (C[from].gone || C[from].stopped) return;
+    if ((C[from].gone && g_restart[from] != R_LOADING) || C[from].stopped)
+        return;
     if (used(&g_pipe[from][to]) >= WL_INBOX) return;
     for (i = 0; i < WL_MSG_MAX; i++) d[i] = (uint8_t)lcg();
     n    = to == 0 ? (int)(lcg() % 4) : 1 + (int)(lcg() % 3);
@@ -750,6 +915,7 @@ static void backOf(Console* k, int p, unsigned long ms)
               (unsigned long)(g_now - k->lostAt[p]));
     if (ms > most) fault("place %d back %lu ms after it was lost", p, ms);
     k->lostNow &= (uint8_t)~(1u << p);
+    k->backAt[p] = g_now;
 }
 
 static void fLog(const char* line)
@@ -785,7 +951,51 @@ static void fLog(const char* line)
                 fault("place %d gone %lu ms after it was lost", p,
                       (unsigned long)(g_now - k->lostAt[p]));
             k->lostNow &= (uint8_t)~(1u << p);
+            k->rejoinNow &= (uint8_t)~(1u << p);
         }
+    }
+    // A restart (37g-3): let back in, its hold begun again; or not, its
+    // records not all kept.
+    if (sscanf(line, "netstep: place %d restarted and asks back in at frame "
+               "%lu; held", &p, &n) == 2 && p > 0 && p < MAXC) {
+        k->restartSaid[p]++;
+        if (!(k->lostNow & (1u << p))) fault("place %d back in, not lost", p);
+        if (k->rejoinNow & (1u << p))
+            fault("place %d back in, still rejoining", p);
+        k->lostAt[p]  = g_now;
+        k->askedAt[p] = g_now;
+        k->heldOn[p]  = n;
+        k->rejoinNow |= (uint8_t)(1u << p);
+    }
+    // Caught up on the record held on, none built since it was let in: its
+    // pad for it put.
+    if (sscanf(line, "netstep: place %d caught up at frame %lu, after %lu ms",
+               &p, &n, &ms) == 3 && p > 0 && p < MAXC) {
+        k->caughtSaid[p]++;
+        if (!(k->rejoinNow & (1u << p)))
+            fault("place %d caught up, not rejoining", p);
+        else if (ms != g_now - k->askedAt[p])
+            fault("place %d caught up after %lu ms, back in %lu ms ago", p,
+                  ms, (unsigned long)(g_now - k->askedAt[p]));
+        if (n != k->heldOn[p])
+            fault("place %d caught up at frame %lu, let in at %lu", p, n,
+                  k->heldOn[p]);
+        if (g_restart[p] != R_AGAIN || C[p].ns.put <= n)
+            fault("place %d caught up at frame %lu, its pads put to %lu", p,
+                  n, (unsigned long)C[p].ns.put);
+        if (k->lostNow & (1u << p)) fault("place %d caught up, lost", p);
+        else if (g_now - k->backAt[p] > k->catchMost)
+            k->catchMost = g_now - k->backAt[p];
+        k->rejoinNow &= (uint8_t)~(1u << p);
+    }
+    if (strstr(line, " asks back in, but the records from frame ")
+        && sscanf(line, "netstep: place %d", &p) == 1 && p > 0 && p < MAXC) {
+        k->refusedSaid[p]++;
+        if (!k->keptEndSaid) fault("place %d refused, its records kept", p);
+    }
+    if (!strncmp(line, "netstep: the records kept end at frame ", 39)) {
+        if (k->keptEndSaid) fault("said the records kept end twice");
+        k->keptEndSaid++;
     }
     if (sscanf(line, "netstep: place %d lost at frame %lu; held for", &p, &n)
             == 2 && p >= 0 && p < MAXC) {
@@ -952,6 +1162,12 @@ static int periodOf(int c)
     return S->period[c] ? S->period[c] : 33;
 }
 
+// Its first frame's drawing; none run again, which is not drawn.
+static int firstStallOf(int c)
+{
+    return g_restart[c] == R_AGAIN ? 0 : S->firstStall[c];
+}
+
 static uint8_t measure(int c)
 {
     uint32_t ms = g_now - C[c].lastStart;
@@ -1092,8 +1308,14 @@ static void runFrame(int c)
     k->ran++;
     if (k->ran == (uint32_t)S->frames) k->doneAt = g_now;
     k->waiting = 0;
-    k->startAt = g_now + (uint32_t)(k->ran == 1 && S->firstStall[c]
-                                        ? S->firstStall[c] : periodOf(c));
+    k->startAt = g_now + (uint32_t)(k->ran == 1 && firstStallOf(c)
+                                        ? firstStallOf(c) : periodOf(c));
+    // Run again after a restart (37g-3): undrawn, as main.c runs it, while
+    // the records in are well ahead.
+    if (g_restart[c] == R_AGAIN && netstep_behind() > NETSTEP_BEHIND) {
+        k->startAt = g_now + (uint32_t)(S->catchMs ? S->catchMs : 4);
+        k->fastFrames++;
+    }
     if (S->stopAt[c] && k->ran == (uint32_t)S->stopAt[c]) stop(c);
 }
 
@@ -1102,7 +1324,7 @@ static int drawingFirst(int c)
 {
     const Console* k = &C[c];
 
-    return k->ran == 1 && S->firstStall[c] && !k->waiting
+    return k->ran == 1 && firstStallOf(c) && !k->waiting
         && (int32_t)(g_now - k->startAt) < 0;
 }
 
@@ -1155,10 +1377,49 @@ static void checkHeld(int c)
               (unsigned long)left, (unsigned long)leftOf(1u, k->lostAt));
     if (c != 0 && !(k->lostNow & 1u) && (m & (uint8_t)~C[0].heldSeen))
         fault("held for %02x, which the host never held for", m);
+    // A place let back in after its restart has its hold begun again: the
+    // host's word of it comes a little later (37g-3).
     if (c != 0 && !(k->lostNow & 1u) && m && C[0].lostNow
-        && left < leftOf(C[0].lostNow, C[0].lostAt))
+        && left < leftOf(C[0].lostNow, C[0].lostAt)
+        && !(g_rejoinedAt && g_now - g_rejoinedAt < 500u))
         fault("held, %lu ms left, the host %lu", (unsigned long)left,
               (unsigned long)leftOf(C[0].lostNow, C[0].lostAt));
+}
+
+// What netstep_rejoining says (37g-3): on the host, the places the log
+// said restarted and not yet caught up or gone, how far never back while
+// they stay the same; on a client, places the host said.
+static void checkRejoining(int c)
+{
+    Console* k = &C[c];
+    uint8_t  pct, m = netstep_rejoining(&pct);
+
+    k->rejoinSeen |= m;
+    if (pct > k->mostPct) k->mostPct = pct;
+    if (m & (1u << c)) fault("rejoining itself");
+    if (!m && pct) fault("rejoining none, %d%% of the way", pct);
+    if (pct > 100) fault("rejoining, %d%% of the way", pct);
+    if (k->aloneFrom >= 0 && m) fault("rejoining %02x, alone", m);
+    // Behind only a client of the host's race: run again, catching up.
+    if ((c == 0 || k->aloneFrom >= 0) && netstep_behind())
+        fault("%lu records behind", (unsigned long)netstep_behind());
+    if (c == 0) {
+        int p;
+
+        if (m != k->rejoinNow)
+            fault("rejoining %02x, the log %02x", m, k->rejoinNow);
+        if (m && m == k->lastRejoin && pct < k->lastPct)
+            fault("rejoining, %d%% of the way after %d%%", pct, k->lastPct);
+        k->lastRejoin = m;
+        k->lastPct    = pct;
+        for (p = 1; p < MAXC; p++) {
+            if (((m >> p) & 1) && g_restart[p] == R_LOADING && pct)
+                fault("place %d loading, %d%% of the way", p, pct);
+            if (k->ns.rejoin[p] == 2) k->catchTicks++;
+        }
+    } else if (m & (uint8_t)~C[0].rejoinSeen) {
+        fault("rejoining %02x, which the host never said", m);
+    }
 }
 
 static void tick(int c)
@@ -1166,7 +1427,10 @@ static void tick(int c)
     Console* k = &C[c];
 
     if (k->gone || held(c)) return;
-    if (!k->stopped) checkHeld(c);
+    if (!k->stopped) {
+        checkHeld(c);
+        checkRejoining(c);
+    }
     // Drained each millisecond, ended or not: once it has, a drain does
     // nothing (main.c drains once at the stop, whatever is left to say).
     if (k->stopped) {
@@ -1195,13 +1459,35 @@ static int repeers(int p)
         && S->repeerAt[p] < S->dropAt[p] + (int)holdOf();
 }
 
+// A client restarted that asks back in while the host holds for it, and
+// is let in (37g-3).
+static int rejoins(int p)
+{
+    return S->restartAt[p] && S->rejoinAt[p]
+        && S->rejoinAt[p] < S->restartAt[p] + (int)holdOf()
+        && !((S->refused >> p) & 1);
+}
+
+// As often as it restarts.
+static int restarts(int p)
+{
+    return !!S->restartAt[p] + !!S->restartAgain[p];
+}
+
+static uint32_t loadOf(int p)
+{
+    return S->loadMs[p] ? (uint32_t)S->loadMs[p] : 1500u;
+}
+
 // A console lost for good: gone, its loop stopped past the link's
-// timeout, or its link cut and never re-peered.
+// timeout, its link cut and never re-peered, or restarted and never let
+// back in.
 static int goesAt(int p)
 {
     return S->goneAt[p]
         || (S->freezeAt[p] && (uint32_t)S->freezeFor[p] > LINK_MS)
-        || (S->dropAt[p] && !repeers(p));
+        || (S->dropAt[p] && !repeers(p))
+        || (S->restartAt[p] && !rejoins(p));
 }
 
 static int expectGone(int c, int p)
@@ -1216,8 +1502,10 @@ static int expectGone(int c, int p)
 static int hostSaw(int p)
 {
     if (!goesAt(0) && !(S->vanishAtStart & 1)) return 1;
-    return S->goneAt[0] && S->goneAt[p]
-        && S->goneAt[p] + (int)LINK_MS + 500 < S->goneAt[0];
+    if (!S->goneAt[0]) return 0;
+    // Restarted, its link lost at once.
+    if (S->restartAt[p]) return S->restartAt[p] + 500 < S->goneAt[0];
+    return S->goneAt[p] && S->goneAt[p] + (int)LINK_MS + 500 < S->goneAt[0];
 }
 
 // Client c with its host at some time while the host holds for place p:
@@ -1226,6 +1514,24 @@ static int heardHold(int c, int p)
 {
     if (!S->dropAt[c] || !S->dropAt[p]) return 1;
     return !repeers(p) || S->repeerAt[c] < S->repeerAt[p];
+}
+
+// Client c, restarted, run again while the host still holds for place p
+// (37g-3): one restarted too, held until its own race loaded again; one
+// gone, its link lost LINK_MS on and held for the hold.
+static int heardAgain(int c, int p)
+{
+    uint32_t until;
+
+    if (!S->restartAt[c]) return 1;
+    if (S->restartAt[p])
+        until = rejoins(p) ? (uint32_t)S->rejoinAt[p] + loadOf(p)
+                           : (uint32_t)S->restartAt[p] + holdOf();
+    else if (S->goneAt[p])
+        until = (uint32_t)S->goneAt[p] + LINK_MS + holdOf();
+    else
+        return 1;
+    return until > (uint32_t)S->rejoinAt[c] + loadOf(c) + 100u;
 }
 
 // The lines of the hold, and each console's netstep_held.
@@ -1238,21 +1544,25 @@ static void checkHold(int c, const Console* k)
         int start  = racing && ((S->vanishAtStart >> p) & 1);
         // The host holds for each client lost, a client for its host:
         // the other gone, or lost to it while its own loop stopped, or
-        // the link between them cut.
+        // the link between them cut, or the client restarted (a client
+        // run again never lost its host).
         int lost   = racing && !start && (c == 0 || p == 0)
                   && (goesAt(p) || goesAt(c) || (c == 0 && S->dropAt[p])
-                      || (p == 0 && S->dropAt[c]));
-        // Back, the link re-peered in the hold.
-        int back   = lost && ((c == 0 && repeers(p))
+                      || (p == 0 && S->dropAt[c])
+                      || (c == 0 && S->restartAt[p]));
+        // Back, the link re-peered in the hold, or let back in.
+        int back   = lost && ((c == 0 && (repeers(p) || rejoins(p)))
                               || (p == 0 && repeers(c)));
-        // As often as the link was cut.
-        int cuts   = 1 + !!((c == 0 && S->dropAgain[p])
+        // As often as the link was cut, or the client restarted.
+        int cuts   = 1 + !!((c == 0 && (S->dropAgain[p] || S->restartAgain[p]))
                             || (p == 0 && S->dropAgain[c]));
         // A client still with its host is held for each place the host
         // holds for.
         int seen   = lost || (c != 0 && p != 0 && racing && !start
-                              && (goesAt(p) || S->dropAt[p]) && hostSaw(p)
-                              && !goesAt(c) && heardHold(c, p));
+                              && (goesAt(p) || S->dropAt[p]
+                                  || S->restartAt[p])
+                              && hostSaw(p) && !goesAt(c) && heardHold(c, p)
+                              && heardAgain(c, p));
 
         if (k->lostSaid[p] != lost * cuts)
             fault("place %d said lost %d times", p, k->lostSaid[p]);
@@ -1384,8 +1694,53 @@ static void finish(void)
         if (S->maxRun && k->doneAt - 1000u > (uint32_t)S->maxRun)
             fault("its frames took %lu ms",
                   (unsigned long)(k->doneAt - 1000u));
+        // A restart (37g-3): on the host, each place let back in once and
+        // caught up once, or refused once; on every console still on but
+        // one run again, each place let in seen rejoining.
+        for (p = 1; c == 0 && p < S->consoles; p++) {
+            int in = rejoins(p) * restarts(p);
+            int no = S->restartAt[p] && ((S->refused >> p) & 1);
+
+            if (k->restartSaid[p] != in)
+                fault("place %d said back in %d times", p, k->restartSaid[p]);
+            if (k->caughtSaid[p] != in)
+                fault("place %d said caught up %d times", p,
+                      k->caughtSaid[p]);
+            if (k->refusedSaid[p] != no)
+                fault("place %d refused %d times", p, k->refusedSaid[p]);
+        }
+        for (p = 1; p < S->consoles; p++) {
+            if (p == c || g_restart[c] == R_AGAIN || goesAt(c) || goesAt(0))
+                continue;
+            if (!!(k->rejoinSeen & (1u << p)) != rejoins(p))
+                fault("place %d seen rejoining: %d", p,
+                      !!(k->rejoinSeen & (1u << p)));
+            // How far, through its catching up: most of the way.
+            if (rejoins(p) && k->mostPct < 50)
+                fault("place %d seen rejoining, %d%% of the way at most", p,
+                      k->mostPct);
+        }
+        if (k->rejoinNow) fault("still rejoining %02x", k->rejoinNow);
+        if (g_restart[c] == R_AGAIN && !k->fastFrames)
+            fault("run again, no frame undrawn");
+        // To each place catching up, NETSTEP_BURST messages each
+        // NETSTEP_RESEND_MS at most.
+        if (c == 0) {
+            uint32_t ins = 0, most;
+
+            for (p = 1; p < S->consoles; p++) ins += k->restartSaid[p];
+            most = k->catchTicks * NETSTEP_BURST / NETSTEP_RESEND_MS
+                 + NETSTEP_BURST * (ins + 1);
+            if (k->catchSends > most)
+                fault("%lu messages to places catching up, in %lu ms",
+                      (unsigned long)k->catchSends,
+                      (unsigned long)k->catchTicks);
+            if (S->maxCatch && k->catchMost > (uint32_t)S->maxCatch)
+                fault("a place caught up in %lu ms",
+                      (unsigned long)k->catchMost);
+        }
         {
-            uint32_t ms    = g_now - 1000u;
+            uint32_t ms    = g_now - k->runFrom;
             uint32_t links = c == 0 ? (uint32_t)S->consoles - 1u : 1u;
             uint32_t rate  = ms ? k->sends * 1000u / ms / links : 0;
 
@@ -1428,11 +1783,120 @@ static void repeer(int c)
     C[c].repeered = 1;
 }
 
+// A client's restart (37g-3): its loop, its link and its netstep gone at
+// once, as a console turned off or crashed; then its menus, until it asks
+// back in.
+static void restart(int c)
+{
+    C[c].gone    = 1;
+    g_restart[c] = R_OUT;
+    g_lost[0][c] = g_lost[c][0] = 1;
+    memset(&g_pipe[0][c], 0, sizeof g_pipe[0][c]);
+    memset(&g_pipe[c][0], 0, sizeof g_pipe[c][0]);
+}
+
+// Its netrace's word to the host's, reliable: on the link before any pad
+// of its, read by the host's netrace and never by netstep.
+static void sayNetrace(int c)
+{
+    static const uint8_t none = 0;
+
+    if (!C[0].gone && !g_lost[c][0]) put(c, 0, MSG_NETRACE, &none, 1);
+}
+
+// The host's netrace, after its netstep's poll: its own messages, at the
+// front of each client's.
+static void netraceRead(void)
+{
+    WlMsg m;
+    int   i;
+
+    if (C[0].gone || held(0)) return;
+    enter(0);
+    g_lobby = 1;
+    for (i = 0; i < S->consoles - 1; i++)
+        while (fPeek(i, &m) && m.type == MSG_NETRACE) fRecv(i, &m);
+    g_lobby = 0;
+}
+
+// Its asking back in, netrace's: on the host's link again, it is let
+// back into its place while the host holds for it, unless the records
+// from the start were not all kept, and then it is back in its menus for
+// good. Let in, on a link new with nothing of the old on it, it loads the
+// race, and its netrace says so: as it is let in, and as its load ends.
+static void rejoinTry(int c)
+{
+    uint8_t held0;
+    int     p;
+
+    if (C[0].gone || held(0) || C[0].stopped) return;
+    enter(0);
+    held0 = netstep_held(g_now, NULL);
+    // Asking for a place the host does not hold for, its own or another's,
+    // is refused, with nothing said.
+    for (p = 0; p < MAXC; p++) {
+        int lines = C[0].lineCount;
+
+        if ((held0 >> p) & 1) continue;
+        if (netstep_rejoin(p, g_now)) fault("place %d let back in, not held "
+                                            "for", p);
+        if (C[0].lineCount != lines)
+            fault("place %d asked back in, not held for: \"%s\"", p,
+                  C[0].numLines ? C[0].lines[C[0].numLines - 1] : "");
+    }
+    if (!((held0 >> c) & 1)) return;
+    g_asked[c] = 1;
+    if (!netstep_rejoin(c, g_now)) return;
+    g_rejoinedAt = g_now;
+    g_lost[0][c] = g_lost[c][0] = 0;
+    g_restart[c] = R_LOADING;
+    g_loadTo[c]  = g_now + loadOf(c);
+    C[c].pumped  = g_now;
+    sayNetrace(c);
+}
+
+// Its netstep started as at GO, as main.c starts it, the race's patience
+// on the link from the lobby's start.
+static void startConsole(int c)
+{
+    int peers[MAXC], p;
+
+    C[c].patience  = PATIENCE;
+    C[c].aloneFrom = -1;
+    // Past the consoles, anything: netstep reads none of them.
+    for (p = 0; p < MAXC; p++)
+        peers[p] = p >= S->consoles ? 77
+                 : c == 0 ? (p > 0 ? peerOf(p) : -1)
+                          : (p == 0 ? 0 : -1);
+    netstep_start(c, S->consoles, peers,
+                  (uint8_t)(((1u << S->consoles) - 1u) & ~S->notRacing));
+    if (!netstep_on()) fault("not on after netstep_start");
+    C[c].startAt = g_now + (uint32_t)(lcg() % 40);
+}
+
+// Its race loaded again: a console new, its netstep started as at GO,
+// which runs the race from its first frame.
+static void again(int c)
+{
+    memset(&C[c], 0, sizeof C[c]);
+    g_restart[c]   = R_AGAIN;
+    g_againAt[c]   = g_now;
+    C[c].runFrom   = g_now;
+    C[c].pumped    = g_now;
+    C[c].saidPlace = -1;
+    enter(c);
+    netstep_init(&kNet, fLog);
+    netstep_on_differ(fDiffer);
+    netstep_set_hold((uint32_t)S->hold);
+    startConsole(c);
+}
+
 // Still to come: a frame to run, a drain, a lobby to come back.
 static int busy(int c)
 {
     const Console* k = &C[c];
 
+    if (g_restart[c] == R_LOADING) return 1;
     if (k->gone) return 0;
     if (!k->stopped) return k->ran < (uint32_t)S->frames;
     return k->ns.ending || held(c) || (S->backAfter[c] && !k->backSent);
@@ -1440,7 +1904,6 @@ static int busy(int c)
 
 static void runScenario(const Scenario* s)
 {
-    int      peers[MAXC];
     int      c, p, stops = 0;
     uint32_t tail = 0;
 
@@ -1450,6 +1913,12 @@ static void runScenario(const Scenario* s)
     memset(g_lost, 0, sizeof g_lost);
     memset(g_cutAt, 0, sizeof g_cutAt);
     memset(g_truth, 0, sizeof g_truth);
+    memset(g_restart, 0, sizeof g_restart);
+    memset(g_asked, 0, sizeof g_asked);
+    memset(g_loadTo, 0, sizeof g_loadTo);
+    memset(g_againAt, 0, sizeof g_againAt);
+    for (c = 0; c < MAXC; c++) g_rejoinFrom[c] = (uint32_t)s->rejoinAt[c];
+    g_rejoinedAt = 0;
     g_lcg       = 12345u;
     g_now       = 1000;
     g_firstStop = 0;
@@ -1461,6 +1930,7 @@ static void runScenario(const Scenario* s)
         netstep_on_differ(fDiffer);
         netstep_set_hold((uint32_t)s->hold);
         C[c].saidPlace = -1;
+        C[c].runFrom   = g_now;
         if (s->stopAt[c]) stops = 1;
         if ((s->notRacing >> c) & 1) {
             C[c].gone = 1;
@@ -1470,18 +1940,8 @@ static void runScenario(const Scenario* s)
             C[c].gone = C[c].vanished = 1;
             continue;
         }
-        C[c].patience  = PATIENCE;   // netrace's, from the lobby's start
-        C[c].aloneFrom = -1;
-        // Past the consoles, anything: netstep reads none of them.
-        for (p = 0; p < MAXC; p++)
-            peers[p] = p >= s->consoles ? 77
-                     : c == 0 ? (p > 0 ? peerOf(p) : -1)
-                              : (p == 0 ? 0 : -1);
-        netstep_start(c, s->consoles, peers,
-                      (uint8_t)(((1u << s->consoles) - 1u) & ~s->notRacing));
-        if (!netstep_on()) fault("not on after netstep_start");
-        C[c].startAt = g_now + (uint32_t)(lcg() % 40)
-                     + (uint32_t)s->startLate[c];
+        startConsole(c);
+        C[c].startAt += (uint32_t)s->startLate[c];
     }
     for (; g_now < 1000u + 200000u; g_now++) {
         int more = 0;
@@ -1501,8 +1961,26 @@ static void runScenario(const Scenario* s)
                 C[c].frozen = g_now >= (uint32_t)s->freezeAt[c]
                            && g_now < (uint32_t)(s->freezeAt[c]
                                                  + s->freezeFor[c]);
-            C[c].sent = 0;
-            if (!C[c].gone && !drawingFirst(c) && !held(c))
+            if (c > 0 && s->restartAt[c] && g_now == (uint32_t)s->restartAt[c])
+                restart(c);
+            if (c > 0 && s->restartAgain[c]
+                && g_now == (uint32_t)s->restartAgain[c]) {
+                if (g_restart[c] != R_AGAIN || C[0].ns.rejoin[c])
+                    fault("restarted again, not caught up");
+                restart(c);
+                g_asked[c]      = 0;
+                g_rejoinFrom[c] = g_now + (uint32_t)(s->rejoinAt[c]
+                                                     - s->restartAt[c]);
+            }
+            // Its load's end said a little before its race starts again:
+            // the host's GO comes back to it first.
+            if (g_restart[c] == R_LOADING && g_now + 50u == g_loadTo[c])
+                sayNetrace(c);
+            if (g_restart[c] == R_LOADING && g_now == g_loadTo[c]) again(c);
+            memset(g_sentTo[c], 0, sizeof g_sentTo[c]);
+            // Loading, its netrace pumps the link.
+            if ((!C[c].gone || g_restart[c] == R_LOADING) && !drawingFirst(c)
+                && !held(c))
                 C[c].pumped = g_now;
             if (c > 0 && s->junk && g_now % (uint32_t)s->junk == 0) {
                 junk(0, c);
@@ -1516,11 +1994,19 @@ static void runScenario(const Scenario* s)
             if (((s->repeerLate >> c) & 1) || (g_now - from) % 1000u == 0)
                 repeer(c);
         }
+        for (c = 1; c < s->consoles; c++) {
+            uint32_t from = g_rejoinFrom[c];
+
+            if (g_restart[c] != R_OUT || g_asked[c] || !from || g_now < from)
+                continue;
+            if ((g_now - from) % 1000u == 0) rejoinTry(c);
+        }
         for (c = 0; c < s->consoles; c++) {
             enter(c);
             tick(c);
             more |= busy(c);
         }
+        netraceRead();
         // With a stop, on a little for what is still in flight.
         if (more) {
             tail = 0;
@@ -1533,11 +2019,16 @@ static void runScenario(const Scenario* s)
     finish();
     for (c = 0; c < s->consoles; c++)
         printf("  console %d: %lu frames in %lu ms, %d lines, waited %lu ms "
-               "most%s%s\n", c, (unsigned long)C[c].ran,
+               "most%s%s%s\n", c, (unsigned long)C[c].ran,
                (unsigned long)(C[c].doneAt ? C[c].doneAt - 1000u : 0),
                C[c].lineCount, (unsigned long)C[c].maxWaited,
                C[c].gone ? ", gone" : "",
-               C[c].stopped ? ", stopped" : "");
+               C[c].stopped ? ", stopped" : "",
+               g_restart[c] == R_AGAIN ? ", run again" : "");
+    if (C[0].catchMost)
+        printf("  caught up in %lu ms at most, %lu messages to catch up\n",
+               (unsigned long)C[0].catchMost,
+               (unsigned long)C[0].catchSends);
     for (c = 0; c < s->consoles; c++)
         for (p = 0; p < C[c].numLines && p < 6; p++)
             printf("  %d: %s\n", c, C[c].lines[p]);
@@ -1546,7 +2037,10 @@ static void runScenario(const Scenario* s)
         for (p = 6; p < C[c].numLines; p++)
             if (strstr(C[c].lines[p], "stop") || strstr(C[c].lines[p], "left")
                 || strstr(C[c].lines[p], "gone on")
-                || strstr(C[c].lines[p], "given up"))
+                || strstr(C[c].lines[p], "given up")
+                || strstr(C[c].lines[p], "restarted")
+                || strstr(C[c].lines[p], "caught up")
+                || strstr(C[c].lines[p], "kept"))
                 printf("  %d: %s\n", c, C[c].lines[p]);
 }
 

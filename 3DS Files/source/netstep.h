@@ -47,6 +47,17 @@
 // console on the link that sends no pads (one restarted, not in the race)
 // is gone once that is over.
 //
+// A console restarted (37g-3) asks back in through netrace while the race
+// holds for its place (netstep_rejoin): for it, the host keeps every
+// record from GO, a pad once until it changes. Its hold starts again, for
+// its load; once its pads come it is back, and the host sends it the
+// records from the first, NETSTEP_BURST messages at a time, no further
+// than its ring holds, and builds none until it has caught up and its pad
+// for the record held on is in. It runs them undrawn while it is well
+// behind (netstep_behind), and every console can say who is rejoining,
+// and how far (netstep_rejoining). A record not kept (the history's
+// memory not had) leaves the place out, gone once the hold is over.
+//
 // The end (37f). Each console stops where its race leaves lockstep
 // (netstep_stop: the race gone, or the end's save, main.c), all of them
 // on the same frame, as they run the same flow; every message then says
@@ -91,6 +102,13 @@
 #define NETSTEP_HOLD_MS    90000  // a lost console waited for (37g)
 #define NETSTEP_BACK_MS    3000   // a console back, its word waited for past
                                   // the hold (37g-2)
+#ifndef NETSTEP_HIST_BLOCK        // the harness's are smaller
+#define NETSTEP_HIST_BLOCK 32768  // the host's every record (37g-3): a block
+#define NETSTEP_HIST_MAX   128    // blocks at most, 4 MB
+#endif
+#define NETSTEP_HIST_KEY   64     // records between two whole ones
+#define NETSTEP_BURST      4      // messages a send to one catching up
+#define NETSTEP_BEHIND     6      // records ahead that a client runs undrawn
 #define NETSTEP_NONE       0xffffffffu
 
 // The race's unreliable messages, after netrace's.
@@ -136,6 +154,7 @@ typedef struct NetStep {
     int          peer[NETSTEP_MAX];          // by place, as the lobby's
     uint8_t      live;                       // the host's; a client's own
     int          alone;                      // a client without its host
+    uint32_t     aloneFrom;                  // its first record alone
     uint32_t     frame;                      // the next to run
     uint32_t     put;                        // the next of this console's
     uint32_t     built;                      // the next record not in
@@ -172,6 +191,36 @@ typedef struct NetStep {
     int          back[NETSTEP_MAX];
     uint8_t      held;
     uint8_t      heldLeft;
+    // A console restarted (37g-3). The host's, by place: asked back in,
+    // loading while it is lost still and catching up once its pads come,
+    // until the records are built with it again; and since when (ms); the
+    // frames it has run, by its checksum's; where the last burst to it
+    // ended, its need then, and the bursts since that need moved. A
+    // client's: the places the host said load or catch up, and how far
+    // the furthest behind has got, in percent.
+    int          rejoin[NETSTEP_MAX];
+    uint32_t     rejoinAt[NETSTEP_MAX];
+    uint32_t     ran[NETSTEP_MAX];
+    uint32_t     burstTo[NETSTEP_MAX];
+    uint32_t     burstNeed[NETSTEP_MAX];
+    int          burstStill[NETSTEP_MAX];
+    uint8_t      rejoining;
+    uint8_t      rejoinPct;
+    // The host's every record from GO (37g-3), for one catching up: each
+    // a step, its places, a bit for each pad not the last record's and
+    // those pads, every NETSTEP_HIST_KEY'th whole, in blocks. key[k] is
+    // where record k * NETSTEP_HIST_KEY starts. full: a block not had,
+    // and the records from there not kept. The last record put, and where
+    // the last read ended, to read the next from.
+    uint8_t*     hist[NETSTEP_HIST_MAX];
+    uint32_t     histLen;
+    uint32_t     histRecs;
+    uint32_t*    histKey;
+    uint32_t     histKeyCap;
+    int          histFull;
+    NetStepFrame histLast;
+    NetStepFrame histRead;
+    uint32_t     histReadAt;
     // The end. stopAt: the frames run when this console left lockstep,
     // by its stop or a client's going alone past the host's, which every
     // message says; NETSTEP_NONE before. The host's, by place: each that
@@ -235,5 +284,20 @@ void netstep_rest(NetStepPad* pad);
 // The places the race holds for, their links lost, a bit each (0: none),
 // and the ms left before it goes on without them.
 uint8_t netstep_held(uint32_t now, uint32_t* msLeft);
+
+// The host's: place `p`'s console restarted and asks back into the race
+// (37g-3). 1 when the race holds for it and the host has every record
+// from GO: its hold starts again, for the load, and the records go to it
+// from the first once its pads come.
+int netstep_rejoin(int p, uint32_t now);
+
+// The places loading or catching up after a restart, not this console's
+// own, a bit each (0: none), and in percent how far the furthest behind
+// has got through the records.
+uint8_t netstep_rejoining(uint8_t* pct);
+
+// A client's: the records it has yet to run to reach the host's last, as
+// the host last said it. Past NETSTEP_BEHIND, main.c runs them undrawn.
+uint32_t netstep_behind(void);
 
 #endif

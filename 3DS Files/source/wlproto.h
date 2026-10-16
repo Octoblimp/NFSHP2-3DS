@@ -34,7 +34,7 @@
 #include <stdint.h>
 
 #define WL_MAGIC        0x48u    // 'H'
-#define WL_VERSION      1u
+#define WL_VERSION      2u       // 2: a restart rejoins (37g-3)
 #define WL_PACKET_MAX   1024     // under UDS's 1478
 #define WL_HEADER       7        // magic, version, ack (2), count, crc (2)
 #define WL_MSG_HEADER   4        // seq (2), type, len
