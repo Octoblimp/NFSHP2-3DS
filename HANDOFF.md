@@ -24591,7 +24591,8 @@ Given to the user after TASKS 70. Before a public launch:
 2. Career end to end (69f, 69g): an event's race, its end screens, back
    to the tree, the result saved and the next event open; the
    tournaments' and knockouts' later races, the Ultimate event, the Be A
-   Cop events.
+   Cop events. **Half done:** a single-race event is played end to end
+   (below). The tournaments, the knockouts and 69g are still open.
 3. The four plain screens: Audio Options, Display Options, Joystick
    PreConfig, Credits.
 4. The Help mark does nothing (TASKS 48, tHelpMenu).
@@ -24603,7 +24604,81 @@ Known bugs to fix or list: 46, 64, 65, 47, 67, 60. The user's "little
 things" that can wait: multiplayer on hardware (37f, 61), the Jukebox,
 attract mode, the cheat codes.
 
-### Next
+The user answered: "start on the launch blockers in the order you
+suggested". Item 1 is b56e268. Item 6 came later the same day. The user
+said, "You want 3D just move the slider up, you don't, leave it off, its
+not something you configure in-game." TASKS 59 has the note, and the
+memory has it too.
 
-The user's answer to the verdict, then the list above in its order.
+### Career: an event raced end to end (446860c)
+
+- **"TestFinish n"** in sdmc:/nfshp2_config.txt (`configitems.h`, off by
+  default). It finishes a race on a lone console n seconds after GO
+  (`raceTestFinish` in `main.c`).
+  - The player's car crosses in place "TestFinishPlace p". Before it,
+    p - 1 of the other cars cross, in the leadership order. Then
+    `racecoordinator_the_race_has_finished` does the rest.
+  - It counts frames from `StartGoTimeFrames` (60 a second). The first
+    try counted from `StartTime`, which is set before the fly-by, so it
+    fired at GO.
+  - The race times are projected from a race of a few seconds, so the
+    records on Azahar's card after a run are not real ones.
+- **`run_azahar_career.ps1 -Race [-FinishSeconds 20] [-FinishPlace 1]`**
+  does the following:
+  - It writes the two lines for the run and takes them out after.
+  - A picks the car. A goes past the Pre Race Blurb and Pre Race Stats
+    until "race: rc N, stage 4".
+  - It holds the gas until the test's finish.
+  - It presses A every 9 s through the end screens.
+- **The End Game Menu needs the user's hand.** A alone stops there. A
+  single race's menu is Restart Event, View Lap Times, Return to
+  Championship, and each item's popup starts on No. Return is two rows
+  down, then Left for Yes, then A. The user played that part by hand and
+  said it "returns fine". The script does not do it yet.
+- **The log of the run:** Events Unlocked, the Reward menu, Race
+  Results, Best Lap Times, Best Total Times, the End Game Menu, the
+  Autosave, then View Event Tree. Events 2 and 3 were unlocked and the
+  autosave was written. That was Championship event 1.
+
+### The tournaments and knockouts: read, not played
+
+The code for a multi-race event's next race was read on 2026-10-16. Each
+link looks bound; none of it has been run.
+
+1. The End Game Menu shows Next Race when `fred_is_multi_track` and
+   `fred_is_there_another_race` both hold (`endgame.c`,
+   `has_next_race`).
+2. Its OK goes through the Autosave to `RC_NEXT_RACE` (`rcpost.c`,
+   `rcstates.c`).
+3. `raceevent_setup_next_race` (`raceevent.c`) takes the knockout's last
+   car out and sets the grid. It then sets the next track through
+   `gEventTrackSetRaceOnFn`, which `main.c` binds to
+   `event_track_set_race`.
+4. Tourney Standings is bound (`endevent.c`).
+
+To play one, the card needs a tournament or knockout open in a tree.
+Then use `-Race` with Next Race on the End Game Menu.
+
+### Next (2026-10-17)
+
+The user is asleep. They said: "We'll continue tomorrow."
+
+1. **69f, the rest.**
+   - Play a tournament's and a knockout's later races, as above.
+   - Teach `-Race` the End Game Menu: Down to the item, A, Left for Yes,
+     A.
+   - Check the tree after a reboot: is the result still saved?
+2. **69g:**
+   - the Ultimate event;
+   - the unlocks in Quick Race and Select Car;
+   - Hot Pursuit's Be A Cop events.
+3. **The verdict list's 3 to 6:**
+   - the four plain Options screens;
+   - Help (TASKS 48);
+   - the "Memory Card (PS2)" text;
+   - stereo 3D (TASKS 59).
+4. **Then the known bugs**, then the verdict again.
+
+The tree is clean apart from untracked crash dumps and captures in
+`3DS Files/`.
 
