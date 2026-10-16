@@ -657,7 +657,20 @@ void banim_blurb_new_text(BAnim* a, BBlurb* b, const char* s)
     if (!s) s = "";
     strncpy(b->latestText, s, BBLURB_MAX_TEXT - 1);
     b->latestText[BBLURB_MAX_TEXT - 1] = '\0';
+    // Retail's (0x00249518): a new line thaws a frozen blurb.
+    b->frozen = 0;
     trace(a, "blurb text \"%s\" state %d", b->latestText, b->state);
+}
+
+// Retail's Freeze (0x002492f0): the line emptied, both of the wipe's
+// objects faded out, and Animate stopped until the next NewText. The
+// career screen freezes its blurb under the Ultimate's popup.
+void banim_blurb_freeze(BAnim* a, BBlurb* b)
+{
+    banim_blurb_new_text(a, b, "");
+    banim_alpha_set_scale(a, &b->fadeoutText, 0.0f);
+    banim_alpha_set_scale(a, &b->whiteoutBar, 0.0f);
+    b->frozen = 1;
 }
 
 void banim_blurb_new_text_id(BAnim* a, BBlurb* b, int languageID)
@@ -673,6 +686,8 @@ void banim_blurb_animate(BAnim* a, BBlurb* b)
     float whiteout = sinceTicks(a->timer, b->newTextTimer);
     float idle     = sinceTicks(a->timer, b->idleTimer);
 
+    // Retail's Animate (0x00249348) does nothing while frozen.
+    if (b->frozen) return;
     if (state == BBLURB_WHITEOUT) {
         float f = 1.0f;
         if (whiteout < BBLURB_WHITEOUT_TIME)

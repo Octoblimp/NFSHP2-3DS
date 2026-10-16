@@ -35,8 +35,9 @@ The demo's object was 1456 bytes; retail's is 2144.
 
 ## Already ported
 
-- `FormatEventDescription` and its token (`0x001f5dd0`, `0x001f5f88`),
-  `FormatStatus` (`0x001f60e8`): `eventrace.c`.
+- `FormatEventDescription` and its token (`0x001f5dd0`, `0x001f5f88`):
+  `eventrace.c`. `FormatStatus` (`0x001f60e8`) and `FormatReward`
+  (`0x001f6220`) were not; they are in `eventtreeview.c`.
 - DataEventSelectScreen (`0x001f5ce8` .. `0x001f5d50`): `fred.h`,
   `fredevent.c`.
 - The events-opened list (`0x001f7280` .. `0x001f7458`): `fredevent.c`
@@ -676,3 +677,42 @@ FlailerScreenConfig for "View Event Tree" (callback `0x001fb218`, hash
 | `0xfd297fd4` | 4 | the help popup |
 | `0xf1eed4cd` | 2 | the reward view |
 | `0x492e86e9` | 26 | (a template; not used here) |
+
+## The port
+
+`eventtreeview.{c,h}` (TASKS 69b to 69e), wired in `main.c`. It was played
+on Azahar on both trees (`tools/run_azahar_career.ps1`, `-CopsOn` for Hot
+Pursuit, `-Back` for B from Select Car). Porting it showed these points
+the decode above leaves out or has wrong:
+
+- **The Mode Selects.** Their event tree rows (CopsOffModeSelect
+  `0x002045f8`, CopsOnModeSelect `0x00203f50`) write Fred's GameType,
+  NumPlayerCars and the selected event's tree type. `bscreens.c` kept these
+  in its own state, so `GetEventTree` found no tree. The `setEventTree`
+  hook writes them now.
+- **The group's members** are sorted by x, greatest first. bList::Sort
+  with `b.x <= a.x` is a stable bubble sort.
+- **The constructor's cubics.** Zoom, pan and alpha have flags 0.
+  `mBlurbyText.NewText` takes the event's title by its string ID, the int
+  form.
+- **The lines.** The line down to a parent starts 5 below the leaf's
+  centre (`y1 + 5`).
+- **The copies.** A copied text object gets MaxChars 4, as
+  `0x001410e8`'s text twin does. The clip window cuts the bitmaps as well
+  as the texts whose FormatOptions has `0x10`.
+- **The details' description.** RenderTextIntoRectangle's pen starts at the
+  text object `0x7a31036b` (TRACK_LINE_1, 147, 126, under the track's
+  name). The line breaks at the right edge of box `0x7ad2801e` (BLURB_BOX,
+  the whole panel from 140, 64). The port draws it after the layers, in
+  its own wrapped style, as it does car select's blurb.
+- **The parallaxer** is ticked and given a random desired position, but
+  nothing reads it.
+
+Not ported:
+
+- The reward's turning model (ModelViewer.obj). The reward page shows
+  its name and its Flailer objects.
+- The help menu (tHelpMenu). SetHelpOverride is logged.
+- The constructor's StillCameraMover.
+- The kept textures' hooks and the debug unlock. They are NULL, and the
+  unlock answers 0, as in retail.

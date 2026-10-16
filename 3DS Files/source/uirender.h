@@ -112,8 +112,26 @@ typedef struct {
     float      brx, bry;
     float      scale;          // the colour's, RenderCharacter's last float
     int32_t    helpLayout;     // the joyhid layout its button icons name
+    bool       direct;         // drawn whatever its screen's visibility
     char       text[UIR_STRIP_TEXT];
 } UITextStrip;
+
+// A copy of an object drawn this frame, the way RenderFlailerBitmap
+// (retail 0x00143078) and RenderFlailerText (0x00142260) draw one: in the
+// copy's layer after that layer's objects, whatever the visibility of the
+// object or its screen. See uirender_queue_copy().
+#define UIR_MAX_COPIES   256
+#define UIR_COPY_TEXT    32
+
+typedef struct {
+    const BUI* ui;
+    uint32_t   screen;         // its screen's index in ui->screens
+    BUIObject  o;              // the copy; a text's string is `text`
+    float      alpha;          // times the frame's
+    bool       clip;           // cut to the box below (MaybeClipPoly)
+    float      tlx, tly, brx, bry;
+    char       text[UIR_COPY_TEXT];
+} UICopy;
 
 // uirender_queue_text_rect's layout for the keys the live one has (the
 // race's while it runs, the menus' otherwise).
@@ -146,6 +164,10 @@ typedef struct {
     // uirender_queue_text_rect().
     UITextStrip strips[UIR_MAX_STRIPS];
     int         numStrips;
+
+    // This frame's object copies. See uirender_queue_copy().
+    UICopy      copies[UIR_MAX_COPIES];
+    int         numCopies;
 
     // The port's sheet of the 3DS's buttons (helpglyph.h), made from
     // data/buttons3ds.bin on first use: 0 not yet, 1 made, -1 failed.
@@ -337,7 +359,30 @@ bool uirender_queue_text_rect(UIRenderer* r, const BUI* ui, uint32_t index,
                               float tlx, float tly, float brx, float bry,
                               const char* text, float scale,
                               int32_t helpLayout);
-// Empties the queue: once a frame, before the current screen's RENDER.
+// The same, drawn whatever the visibility of the text's screen: the
+// event tree's details lay their text into a box on a screen that is
+// never shown, as retail's do.
+bool uirender_queue_text_rect_direct(UIRenderer* r, const BUI* ui,
+                                     uint32_t index, float tlx, float tly,
+                                     float brx, float bry, const char* text,
+                                     float scale, int32_t helpLayout);
+
+// RenderFlailerBitmap / RenderFlailerText for a copy `o` of object `index`
+// of `ui`: queued for this frame's draw in o->z's layer, after its objects,
+// at `alpha` times the frame's, whether the object or its screen is
+// visible or not, and moved by the object's placement. A text copy draws
+// `text` (at most UIR_COPY_TEXT - 1 characters) when it is not NULL, else
+// o's own string or LanguageID. `clip`, when not NULL, is a box (x0, y0,
+// x1, y1) in the screen's 640x480 space the copy is cut to, as
+// MaybeClipPoly (0x00141808) cuts it: a bitmap with no rotation, and the
+// glyphs of a text. False with nothing queued when the queue is full or no
+// screen of `ui` holds the object.
+bool uirender_queue_copy(UIRenderer* r, const BUI* ui, uint32_t index,
+                         const BUIObject* o, const char* text, float alpha,
+                         const float* clip);
+
+// Empties the queues, the strips and the copies: once a frame, before the
+// current screen's RENDER.
 void uirender_clear_strips(UIRenderer* r);
 
 // The table of where objects draw (UIPlacement): the first entry that

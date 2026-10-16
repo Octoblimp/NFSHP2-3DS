@@ -130,6 +130,7 @@
 #include "emodel.h"
 #include "esolid.h"
 #include "eventtree.h"
+#include "eventtreeview.h"
 #include "eview.h"
 #include "gamedata.h"
 #include "fesound.h"
@@ -357,7 +358,7 @@ static const BScreenConfig kScreens[] = {
     // hashes are the ELF's; `python tools/screen_registry.py --check-port`
     // checks every row of this table against it and lists what is left.
     { "View Event Tree",         0x147f8a59u,   // tEventTreeView
-      bgf_plain_screen_callback },
+      eventtreeview_screen_callback },
     { "Audio Options",           0xe116761cu,   // AudioOptionsScreen
       bgf_plain_screen_callback },
     { "Joystick PreConfig",      0x8bd5060bu,   // JoystickPreConfig
@@ -4501,6 +4502,161 @@ static void hookTrackSelHighlightAnimate(void* user, BHighlightAnim* hl)
     if (a) banim_highlight_animate(a, hl);
 }
 
+// ------------------------------------------------------------ the event tree
+//
+// EtvHooks, for eventtreeview.c: retail's tEventTreeView, the career's
+// "View Event Tree" (TASKS 69). The view copies Flailer objects each frame
+// and hands the copies over; they go to the renderer's copy queue, drawn in
+// their layers after the screens' own objects.
+
+// The renderer's object for `orig`, moved and scaled as `copy` is.
+static bool etvObject(struct FlailerObjectChunk* orig,
+                      const struct FlailerObjectChunk* copy, BUI** ui,
+                      uint32_t* idx, BUIObject* o)
+{
+    if (!flailer_object_index(orig, ui, idx) || !bui_object(*ui, *idx, o))
+        return false;
+    o->x        = copy->X;
+    o->y        = copy->Y;
+    o->scaleX   = copy->ScaleX;
+    o->scaleY   = copy->ScaleY;
+    o->z        = copy->Z;
+    o->rotation = copy->Rotation;
+    return true;
+}
+
+// RenderFlailerBitmap (0x00143078).
+static void hookEtvRenderBitmap(void* user, struct FlailerBitmapChunk* orig,
+                                const struct FlailerBitmapChunk* copy,
+                                float alpha, const float* clip)
+{
+    Boot*     b   = (Boot*)user;
+    BUI*      ui  = NULL;
+    uint32_t  idx = 0;
+    BUIObject o;
+
+    if (!etvObject(&orig->Object, &copy->Object, &ui, &idx, &o)) return;
+    o.textureHash = copy->TextureHash;
+    memcpy(o.colors, copy->Colors, sizeof o.colors);
+    memcpy(o.uv, copy->UV, sizeof o.uv);
+    (void)uirender_queue_copy(b->ui, ui, idx, &o, NULL, alpha, clip);
+}
+
+// RenderFlailerText (0x00142260). A copy's characters are its own; the
+// object drawn as it is keeps the chunk's.
+static void hookEtvRenderText(void* user, struct FlailerTextChunk* orig,
+                              const struct FlailerTextChunk* copy,
+                              float alpha, const float* clip)
+{
+    Boot*     b   = (Boot*)user;
+    BUI*      ui  = NULL;
+    uint32_t  idx = 0;
+    BUIObject o;
+    char      text[UIR_COPY_TEXT];
+    int32_t   n = 0;
+
+    if (!etvObject(&orig->Object, &copy->Object, &ui, &idx, &o)) return;
+    o.fontHash   = copy->FontHash;
+    o.format     = copy->FormatOptions;
+    o.color      = copy->Color;
+    o.languageID = copy->LanguageID;
+    if (copy == orig || copy->LanguageID) {
+        (void)uirender_queue_copy(b->ui, ui, idx, &o, NULL, alpha, clip);
+        return;
+    }
+    while (n < copy->MaxChars && n < UIR_COPY_TEXT - 1 && copy->String[n]) {
+        text[n] = copy->String[n];
+        n++;
+    }
+    text[n] = '\0';
+    (void)uirender_queue_copy(b->ui, ui, idx, &o, text, alpha, clip);
+}
+
+// RenderTextIntoRectangle (0x001451e0) for the details' description and
+// the popup's help: RENDER comes before the layers are drawn, so the text
+// waits for them, and is then wrapped into the box in the port's style, as
+// car select's blurb is. Retail's `scale` is the view's fade.
+static struct {
+    bool     queued;
+    uint32_t screen, object, rect;
+    float    alpha;
+    char     text[512];             // tTreeDetails' description
+} g_etvText;
+
+static void hookEtvRenderTextRect(void* user, uint32_t screen,
+                                  uint32_t object, uint32_t rect,
+                                  const char* text, float scale)
+{
+    (void)user;
+    if (!text) return;
+    g_etvText.queued = true;
+    g_etvText.screen = screen;
+    g_etvText.object = object;
+    g_etvText.rect   = rect;
+    g_etvText.alpha  = scale;
+    snprintf(g_etvText.text, sizeof g_etvText.text, "%s", text);
+}
+
+// After the top screen's layers. The inner (0x00144ed0) starts the pen at
+// the text object's top left and breaks a line at the box's right edge:
+// the box is the whole panel, the text object sits under the track's name.
+static void etvDrawText(UIRenderer* ui)
+{
+    float       x = 0.0f, y = 0.0f, bx = 0.0f, by = 0.0f, w;
+    float       sx = 400.0f / 640.0f, sy = 240.0f / 480.0f;
+    UIWrapStyle st;
+
+    if (!g_etvText.queued) return;
+    g_etvText.queued = false;
+    if (g_etvText.alpha <= 0.0f
+        || !flailer_find_object(g_etvText.screen, g_etvText.object,
+                                FLAILER_TYPE_TEXT)
+        || !flailer_find_object(g_etvText.screen, g_etvText.rect,
+                                FLAILER_TYPE_BITMAP))
+        return;
+    flailer_get_top_left_position(g_etvText.screen, g_etvText.object, &x, &y);
+    flailer_get_top_left_position(g_etvText.screen, g_etvText.rect, &bx, &by);
+    w = bx + (float)flailer_get_width(g_etvText.screen, g_etvText.rect) - x;
+    if (w <= 0.0f) return;
+    st = botStyle(ui, C2D_Color32(0xff, 0xff, 0xff, 0xff), 10.0f, false);
+    uirender_draw_wrapped(ui, g_etvText.text, 0, &st, x * sx, y * sy, w * sx,
+                          g_etvText.alpha > 1.0f ? 1.0f : g_etvText.alpha);
+}
+
+// The Mode Selects' event tree row (CopsOffModeSelect::HandleEvent
+// 0x002045f8, CopsOnModeSelect's 0x00203f50): the career's game type, one
+// player, and the tree the selected event is kept for.
+static void hookSetEventTree(void* user, int gameType, int numPlayerCars,
+                             int treeType)
+{
+    (void)user;
+    Fred.GameType      = gameType;
+    Fred.NumPlayerCars = numPlayerCars;
+    data_event_select_set_tree_type(Fred.SelectedEventData, treeType);
+    logLine("event tree game=%d players=%d tree=%d", gameType,
+            numPlayerCars, treeType);
+}
+
+static BAnim* hookEtvAnim(void* user)
+{
+    (void)user;
+    return trackSelKit();
+}
+
+// The help menu's hide (0x001e3dd0); tHelpMenu is not ported.
+static void hookEtvHideHelp(void* user)
+{
+    (void)user;
+    logLine("help hidden");
+}
+
+static void hookEtvJukebox(void* user)
+{
+    hookJukebox(user, 1);
+}
+
+static EtvHooks g_etvHooks;
+
 // BeginGameFlowUnloadingFrontEnd's resource loop: FRONTB goes, and the
 // frontend's view with it, when the next frame begins.
 static void hookUnloadFrontEnd(void* user)
@@ -5725,6 +5881,10 @@ static void liveBlurb(Boot* b, char* out, size_t cap)
     if (!b->screen || !b->project) return;
     idx = bui_find_object(b->project, b->screen, BSCR_OBJ_SCROLLING_TEXT,
                           BUI_TYPE_TEXT);
+    // The event tree's blurb has a name of its own.
+    if (idx < 0)
+        idx = bui_find_object(b->project, b->screen, ETV_OBJ_SCROLLING,
+                              BUI_TYPE_TEXT);
     if (idx < 0) return;
     s = uirender_object_string(b->ui, b->project, (uint32_t)idx, &len);
     if (!s || len == 0) return;
@@ -7583,6 +7743,7 @@ int main(int argc, char** argv)
     // skip, so nothing has to know.
     uirender_hide_object(&ui, BSCR_OBJ_SCROLLING_TEXT);
     uirender_hide_object(&ui, BSCR_OBJ_WHITEOUT_BAR);
+    uirender_hide_object(&ui, ETV_OBJ_SCROLLING);
 
     // The race HUD on two screens (hudsplit.h): what the player watches
     // stays on the top screen, and the lap block, the splits, the score
@@ -7632,6 +7793,7 @@ int main(int argc, char** argv)
     scrHooks.jukebox             = hookJukebox;
     scrHooks.displayOptionsStart = hookDisplayOptionsStart;
     scrHooks.startQuickRace      = hookStartQuickRace;
+    scrHooks.setEventTree        = hookSetEventTree;
     bscr_init(&g_uiScreens, &g_flow, &scrHooks);
 
     // And the animation layer the screens drive. bscr_set_anim_hooks keeps
@@ -7757,6 +7919,21 @@ int main(int argc, char** argv)
     trackselHooks.startRace         = hookCarSelStartRace;
     trackselHooks.trace             = hookTrace;
     btracksel_init(&g_tracksel, &trackselHooks);
+
+    g_etvHooks.user                    = &g_boot;
+    g_etvHooks.translate               = hookCarSelTranslate;
+    g_etvHooks.translateString         = hookCarSelTranslateString;
+    g_etvHooks.anim                    = hookEtvAnim;
+    g_etvHooks.renderBitmap            = hookEtvRenderBitmap;
+    g_etvHooks.renderText              = hookEtvRenderText;
+    g_etvHooks.renderTextIntoRectangle = hookEtvRenderTextRect;
+    g_etvHooks.setHelpOverride         = hookSetupHelpOverride;
+    g_etvHooks.hideHelp                = hookEtvHideHelp;
+    g_etvHooks.stopMovie               = hookCarSelStopMovie;
+    g_etvHooks.jukeboxStart            = hookEtvJukebox;
+    g_etvHooks.preloadCars             = hookSetupPreloadCars;
+    g_etvHooks.trace                   = hookTrace;
+    eventtreeview_init(&g_etvHooks);
 
     DebugMenuHooks debugHooks;
     memset(&debugHooks, 0, sizeof debugHooks);
@@ -8238,6 +8415,7 @@ int main(int argc, char** argv)
                 drawCarSelTop(&ui);
             else
                 uirender_draw_visible(&ui, 1.0f);
+            etvDrawText(&ui);
             if (g_track.attached && netstep_on()) drawLockHeld(&ui);
             C2D_Flush();
             hangwatch_gpu_stage("the top screen's HUD");

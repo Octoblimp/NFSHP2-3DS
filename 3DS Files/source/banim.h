@@ -392,6 +392,7 @@ typedef struct BBlurb {
     float      desiredX;
     int32_t    idleTimer;
     int        state;
+    int        frozen;        // retail's; see banim_blurb_freeze
 } BBlurb;
 
 // 0x00232c18. `fadeout` and `whiteout` are the two objects the wipe uses;
@@ -405,6 +406,9 @@ void banim_blurb_new_text(BAnim* a, BBlurb* b, const char* s);
 void banim_blurb_new_text_id(BAnim* a, BBlurb* b, int languageID);
 void banim_blurb_animate(BAnim* a, BBlurb* b);
 void banim_blurb_release(BAnim* a, BBlurb* b);
+// Freeze (retail 0x002492f0): the line emptied and faded, and Animate
+// stopped until the next NewText.
+void banim_blurb_freeze(BAnim* a, BBlurb* b);
 
 // ------------------------------------------------------------- SelectionSet
 

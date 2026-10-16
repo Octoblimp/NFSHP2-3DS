@@ -3729,24 +3729,38 @@ phases.
         - [x] 69a: the decode, `docs/formats/event-tree-view.md`: the
           retail layout, every function, the view states, the
           messages, and the Flailer objects, textures and models used.
-        - [ ] 69b: the leaves and groups (tEventLeaf, tEventGroup),
-          tEventBlurb and tParallaxer, with a checker against retail.
-        - [ ] 69c: the view's logic: the constructor and destructor,
-          finding leaves, moving the highlight, the zoom and the pan,
-          the move between the tree, the details and the reward, the
-          tick, the messages; with a checker.
-        - [ ] 69d: the panels: tTreeDetails (Render, Activate,
-          StartEvent, HandleMessages) and the reward view; with a
-          checker.
-        - [ ] 69e: the draw: the leaves, the connection bars, the
-          indicator, and the panels, on the port's Flailer and models.
+        - [x] 69b to 69e (Session 114): `eventtreeview.{c,h}`, the
+          whole of tEventTreeView, its leaves, groups, blurb,
+          parallaxer, details, reward, car logos, track logo and help
+          popup, drawn through the renderer's new copy queue
+          (`uirender_queue_copy`). No checker against retail yet: it
+          was ported by hand and played on Azahar
+          (`tools/run_azahar_career.ps1`). Both trees open, the D-pad
+          moves between events, A shows the details, Square shows the
+          reward, and A starts the event into Select Car with its cars.
+          B from Select Car comes back to the details. The Mode
+          Selects' rows now write Fred's game type (`setEventTree`).
+          Not ported: the reward's turning model (ModelViewer.obj) and
+          the help menu (tHelpMenu).
         - [ ] 69f: an event end to end on Azahar, in each tree: the
-          tree, the event's panel, Select Car with the event's cars,
-          the race, the end screens, back to the tree; a tournament's
-          and a knockout's later races; the result saved and the next
-          event open.
+          tree, the event's panel and Select Car are done. Still to
+          play: the race, the end screens, and back to the tree; a
+          tournament's and a knockout's later races; the result saved
+          and the next event open.
         - [ ] 69g: the rest: the Ultimate event, the unlocks in Quick
           Race and Select Car, Hot Pursuit's Be A Cop events.
+
+70. [ ] **The bottom screen, reworked before the launch.** Asked for on
+        2026-10-16, after a look at the career's details page: "before
+        I'll launch the game publicly, the bottom screen has to be
+        reworked".
+        - With no text to show (the loading screen, the language
+          screen, and so on): only the NFSHP2 logo, centred on black.
+        - With text to show: make it look nicer and official, like an
+          NFSHP2 dialog, reskinned in the retail frontend's art.
+        - Drop the screen's name from the top left (for example "VIEW
+          EVENT TREE"). The user said the current panel "looks like
+          AI".
 
 ### The retail frontend
 

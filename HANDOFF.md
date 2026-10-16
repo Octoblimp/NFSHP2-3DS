@@ -24517,3 +24517,45 @@ Still to ask the user:
 - Whether 37g-2 (out of range and back) and 37g-3 (a console restarted)
   work on real 3DSes.
 - Where TASKS 67 goes now.
+
+## Session 114 -- TASKS 69b to 69e: the career's "View Event Tree"
+
+The career's screen is ported: `eventtreeview.{c,h}`, retail's
+tEventTreeView (EventTreeView.obj) and its classes, with the corrections
+the port found written up in `docs/formats/event-tree-view.md`, "The
+port".
+
+- **The copies.** Retail draws the tree by copying Flailer objects and
+  handing the copies to RenderFlailerBitmap and RenderFlailerText each
+  frame. The view does the copying, and `main.c`'s hooks send each copy
+  to `uirender_queue_copy`. Up to 256 a frame are drawn in their layer
+  after the screens' own objects, with their alpha and their clip
+  window. `draw_bitmap` and `draw_text` are now `_clipped`: a clipped
+  bitmap has its quad and UVs cut.
+- **The details' description** is wrapped from the text object's top
+  left (TRACK_LINE_1) to the panel's right edge, in the port's style,
+  after the layers (`etvDrawText`). The first build started it at the
+  box's top and drew it over "Next track:"; the user caught it.
+- **The Mode Selects** never wrote Fred's game type, so the first run
+  logged "etv no tree". The `setEventTree` hook (`bscreens.h`) writes it,
+  with the player count and the tree type.
+- **`tools/run_azahar_career.ps1`** (`-CopsOn` for Hot Pursuit, `-Back`
+  for B from Select Car): PASS on both trees. It covers the tree, right,
+  down, up, the details, the reward, back twice, Select Car, and back to
+  the details. It ran at 59 to 60 FPS, with no unmapped accesses.
+
+Not ported: the reward's turning model (ModelViewer.obj), the help menu
+(tHelpMenu), and the parallaxer's use (it is ticked; nothing reads it).
+
+### Next
+
+TASKS 70, the user's of 2026-10-16. The bottom screen must be reworked
+before the launch:
+
+- With no text, the NFSHP2 logo centred on black.
+- With text, an official-looking NFSHP2 dialog.
+- No screen name in the top left.
+
+Then 69f: an event's race and its way back to the tree. Then the launch
+verdict.
+

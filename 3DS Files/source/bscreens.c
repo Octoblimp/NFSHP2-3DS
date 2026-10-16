@@ -405,6 +405,9 @@ static bool modeOnSelect(BScreens* s, BScreenInstance* inst,
             s->gameType      = item->gameType;
             s->numPlayerCars = 1;
             s->eventTreeType = item->treeType;
+            if (s->hooks.setEventTree)
+                s->hooks.setEventTree(s->hooks.user, s->gameType,
+                                      s->numPlayerCars, s->eventTreeType);
             break;
 
         case BMODE_PLAIN:

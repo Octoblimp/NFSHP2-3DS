@@ -560,7 +560,25 @@ static void draw_tach(UIRenderer* r, const BUIObject* o, const UIView* v,
     C3D_DepthTest(false, GPU_GREATER, GPU_WRITE_COLOR);
 }
 
+// The box a copy is cut to (MaybeClipPoly, 0x00141808), in the screen's
+// 640x480 space.
+typedef struct {
+    float tlx, tly, brx, bry;
+} UIClipBox;
+
+static void draw_bitmap_clipped(UIRenderer* r, const BUIObject* o,
+                                const UIView* v, const UIClipBox* clip);
+
 static void draw_bitmap(UIRenderer* r, const BUIObject* o, const UIView* v)
+{
+    draw_bitmap_clipped(r, o, v, NULL);
+}
+
+// `clip` NULL draws the whole quad. Otherwise a quad wholly outside the box
+// is dropped, and one across its edges is cut to them, its sheet rectangle
+// moving in step; a rotated one or a filling override is not cut.
+static void draw_bitmap_clipped(UIRenderer* r, const BUIObject* o,
+                                const UIView* v, const UIClipBox* clip)
 {
     int idx = find_texture(r, o->textureHash);
     if (idx < 0) return;
@@ -596,8 +614,43 @@ static void draw_bitmap(UIRenderer* r, const BUIObject* o, const UIView* v)
         if (o->uv[i * 2 + 1] > v1) v1 = o->uv[i * 2 + 1];
     }
 
-    float dx = v->originX + o->x * v->scaleX;
-    float dy = v->originY + o->y * v->scaleY;
+    float ox = o->x, oy = o->y;
+    if (clip && !(t->override && t->overrideFill)
+        && !(o->animation == BUI_ROTATE_CENTER && o->rotation)) {
+        float x0 = ox, x1 = ox + w, y0 = oy, y1 = oy + h;
+        float pu0 = u0, pu1 = u1, pv0 = v0, pv1 = v1;
+        if (x1 < clip->tlx || clip->brx <= x0 || y1 < clip->tly
+            || clip->bry <= y0)
+            return;
+        if (x0 < clip->tlx) {
+            pu0 += (clip->tlx - x0) / (x1 - x0) * (pu1 - pu0);
+            x0 = clip->tlx;
+        }
+        if (clip->brx < x1) {
+            pu1 -= (x1 - clip->brx) / (x1 - x0) * (pu1 - pu0);
+            x1 = clip->brx;
+        }
+        if (y0 < clip->tly) {
+            pv0 += (clip->tly - y0) / (y1 - y0) * (pv1 - pv0);
+            y0 = clip->tly;
+        }
+        if (clip->bry < y1) {
+            pv1 -= (y1 - clip->bry) / (y1 - y0) * (pv1 - pv0);
+            y1 = clip->bry;
+        }
+        if (x1 <= x0 || y1 <= y0) return;
+        ox = x0;
+        oy = y0;
+        w  = x1 - x0;
+        h  = y1 - y0;
+        u0 = pu0;
+        u1 = pu1;
+        v0 = pv0;
+        v1 = pv1;
+    }
+
+    float dx = v->originX + ox * v->scaleX;
+    float dy = v->originY + oy * v->scaleY;
     float dw = w * v->scaleX;
     float dh = h * v->scaleY;
     // A filling override covers the whole target. An object wider than the
@@ -778,8 +831,24 @@ static float draw_help_character(UIRenderer* r, unsigned char c, float x,
     return hg.advance;
 }
 
+static void draw_clipped_character(UIRenderer* r, UIFont* f, const BGlyph* g,
+                                   float x, float y, float w, float h,
+                                   uint32_t color, const UIView* v,
+                                   const UIClipBox* s);
+
+static void draw_text_clipped(UIRenderer* r, const BUIObject* o,
+                              const UIView* v, const UIClipBox* clip);
+
 // Render__16FlailerTextChunk (retail 0x001422f0).
 static void draw_text(UIRenderer* r, const BUIObject* o, const UIView* v)
+{
+    draw_text_clipped(r, o, v, NULL);
+}
+
+// `clip` NULL draws every glyph whole; otherwise each glyph is cut to the
+// box, as RenderCharacter's MaybeClipPoly cuts it.
+static void draw_text_clipped(UIRenderer* r, const BUIObject* o,
+                              const UIView* v, const UIClipBox* clip)
 {
     UIFont* f = find_font(r, o->fontHash);
     if (!f) return;
@@ -816,8 +885,13 @@ static void draw_text(UIRenderer* r, const BUIObject* o, const UIView* v)
             // characters.
             if (!bfont_glyph(&f->font, ch, &g)) continue;
             float inset = (f->fixedCell - g.advance) * 0.5f;
-            draw_character(font_tex(r, f), &g, penX + inset, o->y, o, color,
-                           v);
+            if (clip)
+                draw_clipped_character(r, f, &g, penX + inset, o->y,
+                                       g.width * o->scaleX * o->scaleX,
+                                       g.height * o->scaleY, color, v, clip);
+            else
+                draw_character(font_tex(r, f), &g, penX + inset, o->y, o,
+                               color, v);
             penX += f->fixedCell * o->scaleX;
             continue;
         }
@@ -843,9 +917,14 @@ static void draw_text(UIRenderer* r, const BUIObject* o, const UIView* v)
         }
 
         // The proportional path draws the glyph itself, at ScaleX once.
-        draw_glyph(font_tex(r, f), &g, penX + kern, o->y,
-                   g.width * o->scaleX, g.height * o->scaleY, color, v,
-                   true);
+        if (clip)
+            draw_clipped_character(r, f, &g, penX + kern, o->y,
+                                   g.width * o->scaleX, g.height * o->scaleY,
+                                   color, v, clip);
+        else
+            draw_glyph(font_tex(r, f), &g, penX + kern, o->y,
+                       g.width * o->scaleX, g.height * o->scaleY, color, v,
+                       true);
         penX += o->scaleX * (g.advance + kern);
     }
 }
@@ -885,7 +964,7 @@ static float rect_word_width(UIFont* f, const char* p, float scaleX)
 static void draw_clipped_character(UIRenderer* r, UIFont* f, const BGlyph* g,
                                    float x, float y, float w, float h,
                                    uint32_t color, const UIView* v,
-                                   const UITextStrip* s)
+                                   const UIClipBox* s)
 {
     UITexture* t = font_sheet(r, f);
     if (!t || w <= 0.0f || h <= 0.0f) return;
@@ -976,6 +1055,7 @@ static void draw_text_rect(UIRenderer* r, const UITextStrip* s,
     float       lineH = (float)(int)f->font.height;
     uint32_t    color = tint_color(scale_color(o->color, s->scale), v->alpha);
     unsigned char c   = (unsigned char)*p++;
+    UIClipBox   box   = { s->tlx, s->tly, s->brx, s->bry };
 
     while (c != 0) {
         if (is_help_char(c)) {
@@ -1010,7 +1090,7 @@ static void draw_text_rect(UIRenderer* r, const UITextStrip* s,
             if (!brk && has) {
                 draw_clipped_character(r, f, &g, px, py,
                                        g.width * sx * sx,
-                                       g.height * o->scaleY, color, v, s);
+                                       g.height * o->scaleY, color, v, &box);
             } else {
                 while (rect_space((unsigned char)*p)) p++;
             }
@@ -1044,6 +1124,7 @@ bool uirender_queue_text_rect(UIRenderer* r, const BUI* ui, uint32_t index,
     st->brx    = brx;
     st->bry    = bry;
     st->scale  = scale;
+    st->direct = false;
     st->helpLayout = helpLayout == UIR_HELP_LAYOUT_LIVE ? live_help_layout()
                                                         : helpLayout;
     snprintf(st->text, sizeof st->text, "%s", text);
@@ -1051,9 +1132,62 @@ bool uirender_queue_text_rect(UIRenderer* r, const BUI* ui, uint32_t index,
     return true;
 }
 
+bool uirender_queue_text_rect_direct(UIRenderer* r, const BUI* ui,
+                                     uint32_t index, float tlx, float tly,
+                                     float brx, float bry, const char* text,
+                                     float scale, int32_t helpLayout)
+{
+    if (!uirender_queue_text_rect(r, ui, index, tlx, tly, brx, bry, text,
+                                  scale, helpLayout))
+        return false;
+    r->strips[r->numStrips - 1].direct = true;
+    return true;
+}
+
+bool uirender_queue_copy(UIRenderer* r, const BUI* ui, uint32_t index,
+                         const BUIObject* o, const char* text, float alpha,
+                         const float* clip)
+{
+    uint32_t s;
+
+    if (!r || !ui || !o || r->numCopies >= UIR_MAX_COPIES) return false;
+    for (s = 0; s < ui->numScreens; s++) {
+        const BUIScreen* sc = &ui->screens[s];
+        if (index >= sc->first && index - sc->first < sc->count) break;
+    }
+    if (s == ui->numScreens) return false;
+
+    UICopy* c = &r->copies[r->numCopies++];
+    c->ui     = ui;
+    c->screen = s;
+    c->o      = *o;
+    c->alpha  = alpha;
+    c->clip   = clip != NULL;
+    if (clip) {
+        c->tlx = clip[0];
+        c->tly = clip[1];
+        c->brx = clip[2];
+        c->bry = clip[3];
+    }
+    if (text && o->type == BUI_TYPE_TEXT) {
+        size_t n = 0;
+        while (n < UIR_COPY_TEXT - 1 && text[n]) {
+            c->text[n] = text[n];
+            n++;
+        }
+        c->text[n]     = 0;
+        c->o.string     = c->text;
+        c->o.maxChars   = (uint32_t)n;
+        c->o.languageID = 0;
+    }
+    return true;
+}
+
 void uirender_clear_strips(UIRenderer* r)
 {
-    if (r) r->numStrips = 0;
+    if (!r) return;
+    r->numStrips = 0;
+    r->numCopies = 0;
 }
 
 // GetScaledWidth__16FlailerTextChunk (0x0013e8b0) and GetScaledHeight
@@ -1520,17 +1654,45 @@ static bool screen_drawn(const UIRenderer* r, const BUIScreen* screen,
            && (target == UIR_TARGET_TOP || screen_placed(r, screen));
 }
 
-// The strips queued for `layer`, after its objects: each where its screen
-// draws on `target`, moved by its text object's placement.
+// Whether a screen's objects can draw on `target` at all, shown or not.
+static bool screen_targets(const UIRenderer* r, const BUIScreen* screen,
+                           int target)
+{
+    return target == UIR_TARGET_TOP || screen_placed(r, screen);
+}
+
+// The copies and the strips queued for `layer`, after its objects: each
+// where its screen draws on `target`, moved by its object's placement.
 static void draw_strips(UIRenderer* r, int layer, float alpha, int target)
 {
+    for (int i = 0; i < r->numCopies; i++) {
+        const UICopy*    c      = &r->copies[i];
+        const BUIScreen* screen = &c->ui->screens[c->screen];
+
+        if (c->o.z != layer || !screen_targets(r, screen, target)) continue;
+        const UIPlacement* p =
+            screen_placed(r, screen) ? placement_of(r, screen, &c->o) : NULL;
+        if ((p ? p->target : UIR_TARGET_TOP) != target) continue;
+        UIView v = screen_view(r, screen, alpha * c->alpha);
+        if (p) {
+            v.originX += p->dx * v.scaleX;
+            v.originY += p->dy * v.scaleY;
+        }
+        UIClipBox box = { c->tlx, c->tly, c->brx, c->bry };
+        if (c->o.type == BUI_TYPE_BITMAP)
+            draw_bitmap_clipped(r, &c->o, &v, c->clip ? &box : NULL);
+        else if (c->o.type == BUI_TYPE_TEXT)
+            draw_text_clipped(r, &c->o, &v, c->clip ? &box : NULL);
+    }
     for (int i = 0; i < r->numStrips; i++) {
         const UITextStrip* s      = &r->strips[i];
         const BUIScreen*   screen = &s->ui->screens[s->screen];
         BUIObject          o;
 
         if (!bui_object(s->ui, s->index, &o) || o.z != layer) continue;
-        if (!screen_drawn(r, screen, target)) continue;
+        if (s->direct ? !screen_targets(r, screen, target)
+                      : !screen_drawn(r, screen, target))
+            continue;
         const UIPlacement* p =
             screen_placed(r, screen) ? placement_of(r, screen, &o) : NULL;
         if ((p ? p->target : UIR_TARGET_TOP) != target) continue;

@@ -139,6 +139,13 @@ typedef struct {
     // button's state the screen keeps. It stops the panel movie, fills
     // TheRaceParameters and starts the race.
     void (*startQuickRace)(void* user, int transmission);
+
+    // The event tree's row: Fred.GameType (8 or 9), Fred.NumPlayerCars (1)
+    // and SetTreeType(&Fred.SelectedEventData, treeType) (0x001f5d50), which
+    // HandleEvent writes into Fred before the exit animation starts. The
+    // values are also kept in BScreens.
+    void (*setEventTree)(void* user, int gameType, int numPlayerCars,
+                         int treeType);
 } BScreensHooks;
 
 // How long each screen takes to leave used to be a constant here, worked
