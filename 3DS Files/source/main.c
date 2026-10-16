@@ -3165,6 +3165,45 @@ static void lockTestFinish(void)
     racecoordinator_the_race_has_finished(pRaceCoordinator);
 }
 
+// TestFinish (configitems.h): a race on this console alone finished that
+// many seconds after its GO (StartGoTimeFrames), once. The player's car
+// crosses in place TestFinishPlace, behind the first cars of the
+// leadership order; the race finish does the rest. A race whose players have all finished is left
+// alone, so a tournament's next race gets its own.
+static void raceTestFinish(void)
+{
+    Race*   r = pCurrentRace;
+    int32_t place = ConfigTestFinishPlace > 0 ? ConfigTestFinishPlace : 1;
+    int32_t ahead = 0, i;
+
+    if (ConfigTestFinish <= 0 || r == NULL || pRaceCoordinator == NULL
+        || pRaceCoordinator->CurrentRCState != RCSTATE_RACE_IN_PROGRESS
+        || race_get_race_stage(r) != RACE_STAGE_RACING
+        || race_are_all_players_finished_racing(r)
+        || r->StartGoTimeFrames == 0
+        || WorldTimeFrames - r->StartGoTimeFrames < ConfigTestFinish * 60)
+        return;
+    for (i = 0; i < r->NumRacingCars && ahead < place - 1; i++) {
+        struct RacingCar* rc = r->pRacingCars[i];
+
+        if (rc->FinishReason != RACING_CAR_NOT_FINISHED
+            || racingcar_get_player(rc) != NULL)
+            continue;
+        race_finish_car(r, i, 0, 0, RACING_CAR_NORMAL_COMPLETION);
+        ahead++;
+    }
+    for (i = 0; i < r->NumRacingCars; i++) {
+        struct RacingCar* rc = r->pRacingCars[i];
+
+        if (rc->FinishReason == RACING_CAR_NOT_FINISHED
+            && racingcar_get_player(rc) != NULL)
+            race_finish_car(r, i, 0, 0, RACING_CAR_NORMAL_COMPLETION);
+    }
+    logLine("race: the test's finish, %ld s in, place %ld",
+            (long)ConfigTestFinish, (long)place);
+    racecoordinator_the_race_has_finished(pRaceCoordinator);
+}
+
 static const NetRaceGame kNetRaceGame = {
     .startRace     = netRaceStartRace,
     .selectedRide  = netRaceSelectedRide,
@@ -8305,6 +8344,7 @@ int main(int argc, char** argv)
             MainLoopTiming.UpdateCameraMovers = MainLoopTiming.ServiceGameFlow;
             if (raceUp && pRaceCoordinator != NULL) {
                 if (raceStep) raceFrame();
+                if (!lockOn && pRaceCoordinator != NULL) raceTestFinish();
                 // GenerateJoyEvents hands the Flailer and the players the
                 // same events, after ExecuteQueuedMessages: the START that
                 // resumes the race posts the unpause, and the players,

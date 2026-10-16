@@ -3,8 +3,13 @@
 # Hot Pursuit's Ultimate Road Racer, to "View Event Tree"; then right,
 # right, down, up and left twice on the tree, A for the details, SQUARE for
 # the reward, B twice back to the tree, and A twice, which starts the event
-# at car select. -Back goes back to the tree from car select. It captures
-# each step and reports the flow's and the view's lines. The capture and key
+# at car select. -Back goes back to the tree from car select. -Race
+# instead races the event from car select: A picks the car, the race is
+# finished -FinishSeconds after its start with the player in place
+# -FinishPlace ("TestFinish" in sdmc:/nfshp2_config.txt, written for the
+# run and taken out after it), and A goes through the end screens until
+# the tree is back (TASKS 69f). It captures each step and reports the
+# flow's and the view's lines. The capture and key
 # methods are run_azahar_test.ps1's; see its header for why each is the way
 # it is.
 #
@@ -13,13 +18,17 @@
 # Usage:
 #   powershell -File tools/run_azahar_career.ps1
 #   powershell -File tools/run_azahar_career.ps1 -CopsOn -Back
+#   powershell -File tools/run_azahar_career.ps1 -Race -FinishPlace 1
 
 param(
     [string]$AzaharExe = "C:\Program Files\Azahar\azahar.exe",
     [string]$Target3dsx = "",
     [string]$OutDir = "",
     [switch]$CopsOn,              # Ultimate Road Racer, not the Championship
-    [switch]$Back                 # B from car select, back to the tree
+    [switch]$Back,                # B from car select, back to the tree
+    [switch]$Race,                # race the event, then back to the tree
+    [int]$FinishSeconds = 20,     # -Race: the test's finish, after the start
+    [int]$FinishPlace = 1         # -Race: the player's place in it
 )
 
 $ErrorActionPreference = "Stop"
@@ -43,6 +52,20 @@ if ((Test-Path $config) -and (Select-String -Path $config -Pattern "^\s*SkipFE\s
 # is skipped.
 $debugMenuOn = (Test-Path $config) -and
     (Select-String -Path $config -Pattern "^\s*DebugMenu\s+[1-9]" -Quiet)
+
+# The config's lines without the test's finish, and with it for -Race.
+function Set-TestFinish([bool]$on) {
+    $lines = @()
+    if (Test-Path $config) {
+        $lines = @(Get-Content $config | Where-Object { $_ -notmatch "^\s*TestFinish" })
+    }
+    if ($on) {
+        $lines += @("TestFinish $FinishSeconds", "TestFinishPlace $FinishPlace")
+    }
+    New-Item -ItemType Directory -Force -Path (Split-Path $config) | Out-Null
+    Set-Content -Path $config -Value $lines -Encoding ASCII
+}
+Set-TestFinish $Race
 
 Add-Type @"
 using System;
@@ -181,6 +204,12 @@ function Shot([string]$tag) {
 # The boot as run_azahar_challenge.ps1 has it. The debug log lands up to
 # ~7 s late, so the steps on the tree are paced by time, and the verdict
 # reads the help override lines each view logs.
+
+# Whether a line of the app's log matches $pattern now.
+function Seen([string]$pattern) {
+    if (-not (Test-Path $debugLog)) { return $false }
+    return [bool](Select-String -Path $debugLog -Pattern $pattern -Quiet -ErrorAction SilentlyContinue)
+}
 
 # How many lines of the app's log match $pattern now.
 function LogCount([string]$pattern) {
@@ -321,9 +350,68 @@ if ($atTree) {
     }
 }
 
+# -Race: A picks the car, and the flow leaves the frontend for the track.
+# Once the track is attached, A goes past the event's Pre Race Blurb and
+# Pre Race Stats, and the gas is held from the race's stage 4 (the
+# countdown over) until the test's finish ends it, as run_azahar_coprace.ps1
+# does. A then goes through the end screens, one press each time the log
+# has had its ~7 s to catch up, until the tree is entered again. A alone
+# stops at the End Game Menu (Restart Event, then a No by default): on
+# 2026-10-16 the user took it from there by hand, down to Return to
+# Championship and Yes, and the tree came back.
+$left = $false; $racing = $false; $finished = $false; $treeAgain = $false
+$going = $false
+if ($atCarSel -and $Race) {
+    $wantRace = "flow want (?!LOADING_FRONTEND|IN_FRONTEND)"
+    $left = Press-UntilCount $VK_A $wantRace ((LogCount $wantRace) + 1) 3 9
+    Write-Host ("  left the frontend: {0}" -f $left)
+    if ($left) {
+        $racing = Wait-ForLog "flow state RACING" 150
+        Write-Host ("  RACING: {0}" -f $racing)
+    }
+    if ($racing -and (Wait-ForLog "^trackview: attached" 150)) {
+        Start-Sleep -Seconds 4
+        Shot "blurb"
+        # A on the event's Pre Race Blurb, then on its Pre Race Stats,
+        # until the countdown is over.
+        $going = Press-UntilCount $VK_A "^race: rc \d+, stage 4" 1 5 12
+        Write-Host ("  the race going: {0}" -f $going)
+    }
+    if ($going) {
+        $end = (Get-Date).AddSeconds($FinishSeconds + 40)
+        $shotAt = (Get-Date).AddSeconds(6)
+        while ((Get-Date) -lt $end -and (Alive)) {
+            [Hp2Cap]::KeyDown($hwnd, $VK_A)           # the gas, never the brake
+            if ($shotAt -and (Get-Date) -ge $shotAt) { Shot "racing"; $shotAt = $null }
+            if (Seen "race: the test's finish") { $finished = $true; break }
+            Start-Sleep -Milliseconds 150
+        }
+        [Hp2Cap]::KeyUp($hwnd, $VK_A)
+        Write-Host ("  the test's finish: {0}" -f $finished)
+    }
+    if ($finished) {
+        Start-Sleep -Seconds 3
+        Shot "finish"
+        $enter = "flow enter View Event Tree"
+        $n = LogCount $enter
+        for ($i = 1; $i -le 16 -and -not $treeAgain; $i++) {
+            if (-not (Alive)) { break }
+            [Hp2Cap]::PressKey($hwnd, $VK_A)
+            $treeAgain = Wait-ForLogCount $enter ($n + 1) 9
+            Shot ("end-{0}" -f $i)
+        }
+        Write-Host ("  back at the tree: {0}" -f $treeAgain)
+        if ($treeAgain) {
+            Start-Sleep -Seconds 2
+            Shot "tree-after-race"
+        }
+    }
+}
+
 $survived = Alive
 if ($survived) { $proc | Stop-Process -Force }
 Start-Sleep -Milliseconds 600
+if ($Race) { Set-TestFinish $false }
 
 # --- the verdict ------------------------------------------------------------
 
@@ -356,13 +444,19 @@ elseif (-not $atTree)    { $verdict = "PARTIAL (never reached the event tree)" }
 elseif (-not $atDetails) { $verdict = "PARTIAL (A on the tree did not open the details)" }
 elseif (-not $atReward)  { $verdict = "PARTIAL (SQUARE on the details did not open the reward)" }
 elseif (-not $atCarSel)  { $verdict = "PARTIAL (A on the details did not reach car select)" }
+elseif ($Race -and -not $left)      { $verdict = "PARTIAL (A on car select did not leave the frontend)" }
+elseif ($Race -and -not $racing)    { $verdict = "PARTIAL (left the frontend, never reached RACING)" }
+elseif ($Race -and -not $finished)  { $verdict = "PARTIAL (RACING, but the test's finish never came)" }
+elseif ($Race -and -not $treeAgain) { $verdict = "PARTIAL (the race finished; the end screens never reached the tree)" }
+elseif ($Race -and -not $survived)  { $verdict = "FAIL (back at the tree, then died)" }
+elseif ($Race)           { $verdict = "PASS (the event raced, its end screens, and back at the tree)" }
 elseif (-not $survived)  { $verdict = "FAIL (reached car select, then died)" }
 else                     { $verdict = "PASS (tree, details, reward, then car select)" }
 
 Write-Host ""
 Write-Host "=== flow ==="
-$dbg | Where-Object { $_ -match "flow (enter|leave|change|want|unregistered)|etv |help |fred race setup|not ported|abort|assert|fatal" } |
-    Select-Object -Last 80 | ForEach-Object { Write-Host $_ }
+$dbg | Where-Object { $_ -match "flow (enter|leave|change|want|state RACING|unregistered)|etv |help |fred race setup|race: the test|event|save|not ported|abort|assert|fatal" } |
+    Select-Object -Last 120 | ForEach-Object { Write-Host $_ }
 Write-Host ""
 Write-Host "=== nfshp2_debug.txt (last 20) ==="
 $dbg | Select-Object -Last 20 | ForEach-Object { Write-Host $_ }

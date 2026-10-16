@@ -53,6 +53,8 @@ int32_t ConfigWirelessTestDropFrame;        // the port's own
 int32_t ConfigWirelessTestDropMs = 5000;    // the port's own
 int32_t ConfigWirelessTestBlindFrame;       // the port's own
 int32_t ConfigWirelessTestBlindFrames = 300; // the port's own
+int32_t ConfigTestFinish;                   // the port's own
+int32_t ConfigTestFinishPlace = 1;          // the port's own
 
 int32_t config_skip_fe(void)
 {
@@ -112,6 +114,8 @@ static const ConfigItem kConfigItems[] = {
     { "WirelessTestDropMs",         &ConfigWirelessTestDropMs,   0 },
     { "WirelessTestBlindFrame",     &ConfigWirelessTestBlindFrame, 0 },
     { "WirelessTestBlindFrames",    &ConfigWirelessTestBlindFrames, 0 },
+    { "TestFinish",                 &ConfigTestFinish,           0 },
+    { "TestFinishPlace",            &ConfigTestFinishPlace,      0 },
 };
 
 static void config_log(ConfigItemsLogFn log, const char *fmt,

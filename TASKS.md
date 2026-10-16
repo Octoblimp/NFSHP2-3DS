@@ -3460,6 +3460,10 @@ phases.
         "just a task", for later, when it matters less than what is in
         hand. Mind the frame time: two views of the race at 30 FPS on
         New 3DS.
+        - 2026-10-16, the user: it comes before the public launch. "You
+          want 3D just move the slider up, you don't, leave it off, its
+          not something you configure in-game." No option in any menu:
+          the slider alone turns it on and sets its depth.
 60. [ ] **The car's particle effects (Car::TriggerEffect).** Found on
         2026-10-13 with TASKS 51a. `gCarTriggerEffectFn` is never set, so
         `Car::TriggerEffect` (`0x0011e2b8`) is skipped: a broken light,
@@ -3747,6 +3751,15 @@ phases.
           play: the race, the end screens, and back to the tree; a
           tournament's and a knockout's later races; the result saved
           and the next event open.
+          - Done 2026-10-16: Championship event 1, a single race, from
+            the tree through Select Car, the race, Events Unlocked, the
+            reward, the results, the best times, the End Game Menu and
+            the autosave, back to the tree with events 2 and 3
+            unlocked. `run_azahar_career.ps1 -Race` drives it, with the
+            new off-by-default "TestFinish n" (configitems.h), which
+            finishes a lone console's race n seconds after GO. The user
+            played the End Game Menu by hand and said it returns fine.
+          - Still open: a tournament's and a knockout's later races.
         - [ ] 69g: the rest: the Ultimate event, the unlocks in Quick
           Race and Select Car, Hot Pursuit's Be A Cop events.
 

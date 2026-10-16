@@ -162,6 +162,15 @@ int32_t config_skip_fe(void);
 // boot, before InitFred; with no file nothing changes.
 #define CONFIG_ITEMS_FILE "sdmc:/nfshp2_config.txt"
 
+// The port's own: "TestFinish n" finishes a race on this console alone
+// (not a wireless one) n seconds after its GO: the player's car
+// crosses in place TestFinishPlace, the cars ahead of it first, and the
+// rest as SimulateRaceFinish has them (racecoordinator_the_race_has_
+// finished). The Azahar runs' way to an event's end screens and back to
+// the event tree (TASKS 69f). Off by default (2026-10-16).
+extern int32_t ConfigTestFinish;            // 0
+extern int32_t ConfigTestFinishPlace;       // 1
+
 typedef void (*ConfigItemsLogFn)(const char *line);
 
 // Applies `text` (NUL-terminated), each word as it is read; SkipFE goes

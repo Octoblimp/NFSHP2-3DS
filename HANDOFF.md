@@ -24596,10 +24596,12 @@ Given to the user after TASKS 70. Before a public launch:
    PreConfig, Credits.
 4. The Help mark does nothing (TASKS 48, tHelpMenu).
 5. The save popups still say "Memory Card (PS2)" (TASKS 52's open line).
+6. Stereoscopic 3D on the top screen (TASKS 59), added by the user on
+   2026-10-16: the 3D slider alone turns it on, with no in-game option.
 
 Known bugs to fix or list: 46, 64, 65, 47, 67, 60. The user's "little
-things" that can wait: multiplayer on hardware (37f, 61), stereo 3D
-(59), the Jukebox, attract mode, the cheat codes.
+things" that can wait: multiplayer on hardware (37f, 61), the Jukebox,
+attract mode, the cheat codes.
 
 ### Next
 
