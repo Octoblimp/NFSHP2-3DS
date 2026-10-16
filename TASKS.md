@@ -3875,9 +3875,18 @@ phases.
                 the 3DS's Surround output. Fixed on the way: Prologic
                 skipped `bsnd_set_voice_volume`, so every volume froze in
                 that mode.
-        - [ ] 71c: Display (tDisplayOptionsScreen): Track Map,
+        - [x] 71c: Display (tDisplayOptionsScreen): Track Map,
               Rearview Mirror, Units, Leaderboard, Jump Cams, Zone Cams
               and Player 1 Options. Player 2's row is hidden.
+              - Done in Session 116 (`displayoptions.c`,
+                docs/formats/display-options.md): the six settings, Player
+                1 Options opening Customize P1 HUD (lookback, camera
+                spring, gauges, position, lap info, split time, score),
+                and the save prompt over both pages (Yes to the Autosave
+                screen, No puts the display and HUD settings back, B
+                stays). Player 2 Options and Calibrate display offset are
+                hidden, so the list never scrolls.
+                `tools/run_azahar_display.ps1` passes.
         - [ ] 71d: Controller (JoystickPreConfig): Configuration
               (JoystickConfigScreen). Calibration and Vibration have
               nothing to work on with a 3DS, and Player 2 is hidden.

@@ -24830,10 +24830,29 @@ on their screen.
 - **`tools/run_azahar_audio.ps1`**: PASS (slider, mode, JukeBox genre,
   tune, status, L; the prompt's B, No and Yes; saved on Autosave).
 
+### 71c done
+
+- **`displayoptions.c`** ports tDisplayOptionsScreen and
+  tCustomizeHUDScreen's P1 page (0x001f33b8 .. 0x001f49c4), registered as
+  "Display Options" and "Customize P1 HUD". See
+  docs/formats/display-options.md.
+- **Hidden:** Player 2 Options and Calibrate display offset (GrayMenuItem
+  mode 2). With seven rows left the list never scrolls
+  (`numMenuItemsToScroll` 7), and Down stops on Player 1 Options.
+- **The save prompt:** `displayopts_start()` (Options' Start hook, retail's
+  tDisplayOptionsChangeManager::Start) snapshots the calibration, the
+  display settings and both players' settings. Display Options' B asks
+  when any differ: Yes goes to Autosave, No restores all four, B stays.
+- **Second bloom:** retail's HandleHighlight only sets the row's bloom; the
+  pages put `bloom2` on the value text after `bscr_optbase_highlight`, and
+  Left/Right ForceStart it.
+- **`tools/run_azahar_display.ps1`**: PASS (six rows, HUD seven rows, the
+  prompt's B, No with the settings put back, Yes saved on Autosave).
+
 ### Next
 
-1. 71c Display, 71d Controller, 71e the pause menu's screens (the pause
-   audio page shows Surround too).
+1. 71d Controller, 71e the pause menu's screens (the pause audio page
+   shows Surround too).
 2. Help (TASKS 48), the "Memory Card (PS2)" text, stereo 3D (TASKS 59).
 3. The known bugs, then the verdict again.
 

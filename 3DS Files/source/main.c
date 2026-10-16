@@ -100,6 +100,7 @@
 #include "lockhash.h"
 #include "nameentry.h"
 #include "audiooptions.h"
+#include "displayoptions.h"
 #include "credits.h"
 #include "netrace.h"
 #include "netstep.h"
@@ -368,8 +369,10 @@ static const BScreenConfig kScreens[] = {
       jukeboxscreen_callback },
     { "Joystick PreConfig",      0x8bd5060bu,   // JoystickPreConfig
       bgf_plain_screen_callback },
-    { "Display Options",         0x8bc68340u,   // tDisplayOptionsScreen
-      bgf_plain_screen_callback },
+    { "Display Options",         DISPLAYOPTS_SCREEN,   // tDisplayOptionsScreen
+      displayopts_callback },
+    { "Customize P1 HUD",        CUSTOMHUD_SCREEN,   // tCustomizeHUDScreen
+      customhud_callback },
     { "NameEntry",               NAMEENTRY_SCREEN,   // NameEntry
       nameentry_callback },
     { "Credits",                 CREDITS_SCREEN,   // CreditsScreen
@@ -3423,10 +3426,17 @@ static void hookEasterEggs(void* user, int start)
     logLine("easter eggs %s", start ? "start" : "stop");
 }
 
+// tDisplayOptionsChangeManager::Start: displayoptions.c keeps the snapshot.
 static void hookDisplayOptionsStart(void* user)
 {
     (void)user;
-    logLine("display options snapshot");
+    displayopts_start();
+}
+
+static void hookDisplayOptsLog(void* user, const char* line)
+{
+    (void)user;
+    logLine("%s", line);
 }
 
 // Quick Race: retail's StartQuickRace (quickrace.h) fills the race and
@@ -8203,6 +8213,11 @@ int main(int argc, char** argv)
     audioHooks.jukebox = &g_jukebox;
     audioHooks.sound   = &gSoundModule;
     audioopts_init(&audioHooks);
+
+    DisplayOptionsHooks displayHooks;
+    memset(&displayHooks, 0, sizeof displayHooks);
+    displayHooks.log = hookDisplayOptsLog;
+    displayopts_init(&displayHooks);
 
     // Retail's main (0x0012f000), after InitializeEverything: with SkipFE
     // set, StartSkipFEGame on Fred, whose StartRace asks for
