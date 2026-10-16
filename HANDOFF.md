@@ -24577,8 +24577,27 @@ The plain screens' note is now "This screen is not available yet. Press
 B to go back.", with the B icon. The career run takes two more shots, the
 main menu and the Mode Select.
 
+### The launch verdict (2026-10-16): not yet
+
+Given to the user after TASKS 70. Before a public launch:
+
+1. SELECT in the frontend cycles into the developer viewers (geometry,
+   track, screens) in every build (`main.c`, `KEY_SELECT`). Gate it
+   behind the debug menu.
+2. Career end to end (69f, 69g): an event's race, its end screens, back
+   to the tree, the result saved and the next event open; the
+   tournaments' and knockouts' later races, the Ultimate event, the Be A
+   Cop events.
+3. The four plain screens: Audio Options, Display Options, Joystick
+   PreConfig, Credits.
+4. The Help mark does nothing (TASKS 48, tHelpMenu).
+5. The save popups still say "Memory Card (PS2)" (TASKS 52's open line).
+
+Known bugs to fix or list: 46, 64, 65, 47, 67, 60. The user's "little
+things" that can wait: multiplayer on hardware (37f, 61), stereo 3D
+(59), the Jukebox, attract mode, the cheat codes.
+
 ### Next
 
-TASKS 69f: an event's race and its way back to the tree. Then the launch
-verdict.
+The user's answer to the verdict, then the list above in its order.
 
