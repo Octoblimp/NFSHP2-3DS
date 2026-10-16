@@ -2695,6 +2695,17 @@ phases.
                   points), and the script names the frame where the
                   slot's word first differed; the next split will say
                   which.
+                  Session 112 (the 37g-3 `-Rejoin 1` run, seed
+                  7dbec474): the host's checksum differed from B's at
+                  frame 917, with B's first run matching at every
+                  frame logged to 900. B, restarted and caught up on
+                  the host's records, differed first at frame 450, in
+                  the players part (the two players' cars, REAL
+                  control, racers and race the same), and netstep's
+                  checksum at 980. A replay of the same records on
+                  the same build should not differ: find what a
+                  player's car reads that is not in the record (the
+                  draw, the vertical blank, a console's own state).
                   - Session 109, the second race on two Azahars (the
                   user's screenshot of race 2 with the HUD and no
                   track): B's view found no 3.1 MB whole for its
@@ -2734,7 +2745,7 @@ phases.
                   presses (seed e5574ec8). Every logged frame's parts
                   were the host's. Leaving alone (the others racing
                   on, its car to the AI) is 37g's hand-over.
-          - [ ] 37g: a console lost mid-race. The user, 2026-10-14:
+          - [x] 37g: a console lost mid-race. The user, 2026-10-14:
                 when a console disconnects, the whole race pauses and
                 tries to reconnect it. The lost console rejoins the
                 way it joined before the race (Local Wireless, Join,
@@ -2819,9 +2830,62 @@ phases.
                         with B deaf; with the host deaf, once it hears
                         again). 18 and 17 logged frames the same. Not
                         yet run on real 3DSes.
-                - [ ] 37g-3: a restarted console rejoins through Local
+                - [x] 37g-3: a restarted console rejoins through Local
                       Wireless, then Join, known by its unique ID, and
-                      catches up.
+                      catches up. Done in Session 112, continued (2d84039
+                      netstep's half, b8bace6 the rest):
+                      - netstep.c: the host keeps every record from GO
+                        (delta-coded, a key every 64, 32 KB blocks up to
+                        4 MB). `netstep_rejoin` lets a held place back
+                        in; its hold starts again for the load; once its
+                        pads come the host sends it the records from
+                        frame 0, NETSTEP_BURST messages at a time, and
+                        builds none until it has caught up. The race
+                        stays held on every console meanwhile.
+                      - lobby.c: every joiner sends LOBBY_MSG_REJOIN; a
+                        racing host's netrace answers LOBBY_MSG_RESUME
+                        (place and mode) and the setup again. The
+                        console loads from the lobby, no car select;
+                        refused in an event's later race.
+                      - netrace.c: the host's racingRead peeks the
+                        held places' links for REJOIN and the load, then
+                        GO on the race's seed; one given up on as it
+                        loads is sent off the network (wireless_drop).
+                        From RESUME until the place is in step its link
+                        has netrace's patience (30 s): the first frame
+                        after GO attaches the track for 4 s with no
+                        pump, and the host's 3 s timeout dropped it.
+                      - main.c: past NETSTEP_BEHIND records the console
+                        back runs the race undrawn, its progress every
+                        250 ms ("Catching up with the race... N%") over
+                        a black top screen, its sound at master volume
+                        0 until it is in step. The rest show "NAME is
+                        coming back into the race... N%" and mute. The
+                        user asked mid-session that it see no overview:
+                        from its GO (`g_lockBack`, past its own first
+                        NETSTEP_DELAY records) it shows no grid, fly-by
+                        or countdown, and is straight back in the race
+                        once caught up.
+                      - Checks: netstep 67 scenarios, 259 mutants, 253
+                        caught; netrace 48 scenarios, 252 mutants, 236
+                        caught, 16 equivalent; lobby 80 scenarios, 197
+                        mutants, 191 caught, 6 equivalent; faults 0
+                        everywhere.
+                      - `run_azahar_lobby.ps1 -Race -Rejoin 1` (seed
+                        7dbec474): B closed and started again, back in
+                        place 1 with the same friend code seed, caught
+                        up (frames 3 to 975 in about 6 s, the host's
+                        hold 22 s in all), and both raced on. Azahar's
+                        host never forgets a station (its EjectClient
+                        is a stub), so the restarted copy comes back on
+                        a new MAC (sysdata/mac.txt deleted); the game
+                        matches name and seed. The user watched it and
+                        called it working; the run was not repeated
+                        after the last fix (`g_lockBack` kept through
+                        frames 0 to 2, built only).
+                      - Not the same: B's world after the catch-up
+                        differed from the host's from frame 450 (the
+                        players part); see 37f-2's open difference.
 38. [x] **BUSTED! is flat and static.** The user's Azahar shot of
         2026-10-09: in the bust NIS, BUSTED! sits squashed, its top cut
         off, and never animates. Retail scales it from 5 down to ScaleX

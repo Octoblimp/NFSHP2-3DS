@@ -24149,3 +24149,194 @@ Still to ask the user:
 - TASKS 65: the device log's `sends:` line.
 - How the `-fno-strict-aliasing` build plays on the device.
 - Whether a console out of range and back rejoins on real 3DSes (37g-2).
+
+## Session 112, continued -- 37g-3 done: a restarted console back in the race
+
+37g-3 lets a console switched off or closed mid-race come back into its
+place. It boots, goes to Local Wireless, Join, and joins the racing
+host. The race stays held on every console while it loads and runs the
+race again from frame 0, undrawn, until it is in step. netstep's half
+is 2d84039; the rest (lobby, netrace, main.c, the harnesses and the
+Azahar option) is b8bace6. 37g is done with it.
+
+### netstep.c (2d84039)
+
+- The host keeps every record it builds from GO (`hist`), delta-coded:
+  the step, the places, a bit for each pad not the last record's and
+  those pads, every 64th record whole (a key). 32 KB blocks, up to 128
+  (4 MB). A block it cannot get stops the history, and a rejoin is then
+  refused.
+- `netstep_rejoin(p, now)` takes a place held for (lost, live, not
+  left) and starts its hold again for the load. Its first pads end the
+  load ("place p back"). The host then sends it the records from frame
+  0, NETSTEP_BURST (4) messages at a time, and builds none until it is
+  caught up ("place p caught up at frame n, after t ms").
+- The FRAMES header grew to 23 bytes: byte 21 is the places loading or
+  catching up, byte 22 the furthest behind's percent
+  (`netstep_rejoining`). `netstep_behind()` is how far this console is
+  behind. WL_VERSION is 2.
+
+### lobby.c
+
+- Every joiner sends `LOBBY_MSG_REJOIN` (0x19) once joined. A host in
+  its lobby ignores it, but takes it as BACK from a client it awaits
+  after a race (one that restarted as the race ended).
+- A racing host's netrace answers `LOBBY_MSG_RESUME` (0x1a): 4 bytes
+  (consoles, place, game type, cops), or 1 byte for refused. The
+  joiner's lobby goes to `LS_RESUMING`, `LobbyRace.resume` set, the
+  wait still up, and the race starts from the lobby with no car select.
+- Refused: "Could not join the race.", OK, the question, the link down.
+  `lobby_resume_failed` does the same for a setup the race cannot take.
+
+### netrace.c
+
+- The host's `racingRead` (NR_RACING) peeks each place's link. A REJOIN
+  in the event's first race that netstep lets in gets RESUME, then the
+  setup again ("place p back after a restart; the setup again"). A
+  later race, or one heard while the next race is set up or loads, is
+  refused.
+- LOADED from a place resuming gets GO to it alone on the race's seed
+  ("place p loaded again; go, seed s").
+- A place resuming that netstep gave up on as it loaded is sent off the
+  network (`wireless_drop`), its car the CPU's.
+- The console back: `netrace_begin` goes straight to NR_WAIT ("back in
+  the race, place p of n; the setup next"), takes the setup with the
+  lobby up, and pushes the lobby back under the load.
+- From RESUME the place's link has netrace's patience (30 s,
+  `setPeerPatience`), until netstep no longer has it loading or catching
+  up ("place p in step; its link's own patience"). The third Azahar run
+  showed why: B's first frame after GO attaches the track for 4 s with
+  no pump, and the host's 3 s link timeout dropped it. A race's start
+  has netrace's patience on every link for the same reason.
+- `netrace_back_in()`: 1 on a console back after a restart, in the race
+  it came back into.
+
+### wireless.c
+
+- `wireless_drop(i)` ejects a client, its place kept as a lost one's.
+- `wireless_set_peer_patience(i, ms)` sets one link's timeout.
+- The seed is logged at each join and each take-back: "node n (NAME)
+  joined, seed s" and "node n (NAME) back in place i, seed s".
+
+### main.c
+
+- Past NETSTEP_BEHIND (6) records the console back runs frames undrawn
+  and draws only its progress every 250 ms: "Catching up with the
+  race... N%" over a black top screen. It does so from its GO too,
+  until the host's first record is in (`g_lockBack`): the first
+  NETSTEP_DELAY records are its own, made at GO, and say nothing of how
+  far behind it is. The user asked mid-session that a console back see
+  no overview before it is in the race: the grid, fly-by and countdown
+  are the race's past, run on the records' presses undrawn, and it is
+  straight back in the race once caught up. Its master volume is 0 until
+  it is in step, then fades back in as after an applet. The log says
+  "lockstep: frame n, catching up begins" and "... is over".
+- Every other console shows "NAME is coming back into the race... N%"
+  in the hold's box and mutes the race.
+- The texts are in the six languages (`portlang.c`).
+
+### The checks
+
+- netstep_check: 67 scenarios, faults 0; `--mutate` 259 mutants, 253
+  caught, 6 equivalent (2d84039).
+- netrace_check: 48 scenarios, faults 0; `--mutate` 252 mutants, 236
+  caught, 16 equivalent. Twelve new scenarios, a console restarted
+  mid-race (listed in netrace.md). The fake link checks the patience:
+  netrace's on the place's link from the answer while netstep has it,
+  its own back within two frames of netstep letting it go.
+- lobby_check: 80 scenarios, faults 0; `--mutate` 196 mutants of
+  lobby.c and one of gameflow.c, 191 caught, 6 equivalent. Nine new
+  scenarios (listed in lobby.md).
+- The build passed.
+
+### Two Azahars: `run_azahar_lobby.ps1 -Race -Rejoin N`
+
+`-Rejoin N` puts `WirelessHoldSeconds 150` on every card. After 30 s of
+driving it kills copy N, deletes its `user/sysdata/mac.txt`, launches it
+again and walks it through Local Wireless, Join, the race found and
+joined, back in, the setup, GO, and the catch-up, with a shot of the
+others every 10 s. Every copy then drives 30 s more. The verdict:
+
+- The host says each of these once: place N lost; back after a restart,
+  the setup again; restarted and asks back in; loaded again, go; caught
+  up; and the node back in place N with its seed.
+- The copy back says once: back in hp2host's race; back in the race;
+  catching up begins; catching up is over.
+- No copy says a place or the host gone, or gives a car to the CPU, and
+  only the copy back catches up.
+- Every copy's parts match the host's, the copy back's first run
+  included.
+
+**Azahar's MAC.** The first run failed: B's udsConnectNetwork returned
+c92113fe, and Azahar's log said "Connection sequence aborted, because
+there is already a connected client with that MAC-Adress". Azahar's NWM
+EjectClient is a stub, so the host keeps a killed copy's station.
+Each copy's MAC is in `user/sysdata/mac.txt` (CFG GetConsoleMacAddress);
+with the file gone Azahar makes a new random one. The script deletes it
+before the relaunch. The game matches by name and seed, not MAC, and a
+real host's UDS drops the station when it goes.
+
+The runs, all on two Azahars:
+
+1. Failed: the MAC above.
+2. Failed: the user closed B by accident ("Restart emulator my bad").
+3. Failed: B's first frame after GO attaches the track for 4 s with no
+   pump, and the host's 3 s link timeout dropped it (node 3 timed out
+   after "loaded again; go"). Fixed with netrace's patience on that
+   link from RESUME until in step (`wireless_set_peer_patience`).
+4. Seed 7dbec474, track 11. The host lost B at frame 981 and held. B
+   came back with MAC 40:F4:07:37:D6:C1 (68:BD:13:01:3D:13 before) as
+   node 3, with the same friend code seed, cf4c0002eb6d5d11. It had the
+   setup again (1988 bytes) and its GO 7 s after its join, and ran
+   frames 3 to 975 undrawn in about 6 s. The host logged "place 1 back
+   ... after 16036 ms", "caught up ... after 22153 ms", the patience at
+   30000 ms and then 3000 ms, and "place 1 in step". Both raced on 30 s
+   more. The user watched it and said there was no need to run it
+   again: it works.
+
+The fourth run's verdict still failed on two counts:
+
+- The host's "node n (hp2join1) back in place 1": the number is
+  wireless's peer slot (0 here), not the place. The check now takes
+  any. A script error, not the game's.
+- **B's world differed from the host's.** Its parts first differed at
+  frame 450, in the players part alone (the two players' cars); frames
+  0, 150 and 300 matched. Netstep's checksums differed at 980, the
+  first B compared. B's first run had matched at every frame logged up
+  to 900, but the host's checksum differed from it at frame 917, before
+  B was closed. A replay of the same records on the same build should
+  not differ, so something a player's car reads is not in the record.
+  Some candidates, none checked: the catch-up's frames skip the draw;
+  the vertical-blank count (`FrameCounter`, used by joyevent's repeats,
+  menu events only as far as the table shows); a console's own state
+  that the setup does not carry. This joins 37f-2's open difference
+  (frame 1809), next.
+
+One change after run 4, built, not run: B's catching up began at frame
+3, not 0, because frames 0 to 2 are its own records made at GO and
+`g_lockBack` was cleared on the first of them. It is now cleared only
+from frame NETSTEP_DELAY on, so no frame of the race's start can be
+drawn.
+
+**Not yet handled:** a restarted console whose link drops between its
+GO and its first pads. The host sends nothing to a place at rejoin 1,
+and the client sends no pads while lost, so the place waits out its
+hold and its car goes to the CPU.
+
+### Next
+
+37f-2's open difference: frame 1809 before, and now the rejoined copy's
+frame 450 and the host's 917 against B's first run. Then 37d-2, then
+TASKS 61, 46, 60 and 59. TASKS 67 (Select Car's icons off their boxes)
+has no place in the order yet.
+
+Still to ask the user:
+
+- TASKS 64: the road's blink.
+- TASKS 47: the bridge.
+- TASKS 52: the popups.
+- TASKS 65: the device log's `sends:` line.
+- How the `-fno-strict-aliasing` build plays on the device.
+- Whether 37g-2 (out of range and back) and 37g-3 (a console restarted)
+  work on real 3DSes.
+- Where TASKS 67 (Select Car's icons) goes in the order.

@@ -110,6 +110,21 @@ on the 15.5 FPS of an earlier run: that was the fire on track 11, and
 TASKS 46 must reach a steady 30 there and in every place like it.
 Next: TASKS 37 (multi-card multiplayer).**
 
+**Now (Session 112, continued, 2026-10-15): 37g-3 is done (2d84039,
+b8bace6), and with it 37g. A console closed or switched off mid-race
+comes back through Local Wireless, Join. The racing host lets it back
+into its held place, sends the setup again, and gives it GO on the
+race's seed. It then runs the race from frame 0 on the host's records,
+undrawn, under "Catching up with the race... N%", while every other
+console holds. On the user's ask it shows no grid, fly-by or countdown,
+and is straight back in the race once caught up. `run_azahar_lobby.ps1
+-Race -Rejoin 1` brought B back and caught up, and the user watched it
+work. But B's world differed from the host's from frame 450 (the players
+part), and the host's checksum differed from B's first run at frame 917.
+Both are now 37f-2's open difference, which is next, then 37d-2, then
+TASKS 61, 46, 60 and 59. See HANDOFF.md's "Session 112, continued --
+37g-3 done".**
+
 **Now (Session 112, continued, 2026-10-15): 37g-2 is done (de5218a). A
 console whose link alone dropped, out of range and back, rejoins the
 race during the hold. The host opens its network to a lost console it
