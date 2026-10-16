@@ -24922,9 +24922,54 @@ save prompt.
   log until the second table line is whole (a run read it cut short).
 - docs/formats/controller-config.md.
 
+### 71e done: the pause menu's pages
+
+- **`pauseoptions.c`** ports the rest of PAUSE_MAIN (0x001710f8 ..
+  0x00173e30). `kScreens[]` now registers "Pause Options", "Pause audio",
+  "Pause display", "Race Objective" and "Pause BAC controls". See
+  docs/formats/pause-options.md.
+- **The pages share one base:** the bloom, the value's bloom
+  (`0x1042eac3`) and the arrows. B goes back one page. START resumes
+  through `pause_menu_maybe_resume` (on every page but the cop's
+  controls).
+- **Options:** Damage, Handling, Transmission, Jump Cams and Zone Cams.
+  Retail records each change as a replay special event.
+  `pause_options_apply_special_event` applies events 1 to 5 at once.
+  Vibration is hidden, and the rows under it move up. The background
+  strips share one unnamed hash and cannot move, so two empty strips
+  end the panel where retail has one.
+- **Audio:** the five sliders work on a copy of the seven volumes. The
+  copy goes into bSound and `SaveVolumesForSpeech` when the page closes,
+  as in retail. The mode changes at once: Mono, Stereo or Surround.
+- **Display:** all twelve rows and retail's grays.
+  - `player_cycle_hud` is `Player::CycleHud`, set as
+    `gPlayerCycleHudFn`, so the HUD hotkey works now too.
+  - `player_set_camera_spring` sets the drive camera's DisableLag.
+  - The track map cycles through the race's list.
+- **Objective and Cop Controls** are on the blurb screen. The text comes
+  from `pre_race_blurb_text(0)` and the cop's 2000xx ids, with the horn's
+  button. "previous" and "next" are hidden as the page goes (a port
+  fix).
+- **Bottom screen while paused:** it was black. The pause takes the HUD
+  down but leaves its screen up, so `uirender_draw_visible_bottom` said
+  "drawn". With `RCSTATE_PAUSE`, the race frame now takes the panel path,
+  which shows the logo.
+- **Azahar** (`run_azahar_race.ps1 -PressAfter 14 -Presses ...`; START at
+  -PressAfter 6 lands in the countdown and does not pause):
+  - Every Options row changed (events 1 to 5 logged), and START resumed
+    from the page.
+  - Audio stepped Racing Music to 0.95.
+  - Display cycled the HUD 0 → 1 → 3 with the grays.
+  - The objective and Cop Controls were tested in a SkipFE Be A Cop race
+    (`SkipFEBeACop 1`, `SkipFENumAICars 2`, added to Azahar's
+    nfshp2_config.txt and taken out again). Cop Controls paged 1, 2, 1,
+    2 and back to the menu.
+- `screen_registry.py --check-port` passes four of the five. It reports
+  "Pause BAC controls" as unregistered on the disc, though the name is
+  in the ELF.
+
 ### Next
 
-1. 71e the pause menu's screens (the pause audio page shows Surround too).
-2. Help (TASKS 48) on Y, the "Memory Card (PS2)" text, stereo 3D (TASKS
-   59).
-3. The known bugs, then the verdict again.
+1. Help (TASKS 48) on Y, then the "Memory Card (PS2)" text, then stereo
+   3D (TASKS 59).
+2. The known bugs, then the verdict again.

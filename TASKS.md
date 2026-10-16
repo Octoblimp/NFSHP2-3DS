@@ -3842,7 +3842,7 @@ phases.
           screen, the main menu, the Mode Select, the tree, the details,
           the reward and Select Car.
 
-71. [ ] **The plain Options screens, before the launch.** Item 3 of the
+71. [x] **The plain Options screens, before the launch.** Item 3 of the
         2026-10-16 launch verdict. Each of these draws, but A does
         nothing on it (`bgf_plain_screen_callback`), or it is not
         registered at all:
@@ -3928,12 +3928,33 @@ phases.
                   2026-10-16: one line was cut off). `joyhid_check`,
                   `helpglyph_check` and `tools/run_azahar_controller.ps1`
                   pass.
-        - [ ] 71e: the pause menu's Options ("Pause Options", "Pause
+        - [x] 71e: the pause menu's Options ("Pause Options", "Pause
               audio", "Pause display"), View Objective ("Race
               Objective") and View Cop Controls ("Pause BAC controls").
               None of them is in `kScreens[]`, so ChangeToScreen finds no
               screen for them. `screen_registry.py --check-port` missed
               them: pausemenu.c names them through constants.
+              - Done in Session 116 (`pauseoptions.c`,
+                docs/formats/pause-options.md): the five pages on one
+                shared base (the bloom, the value's bloom, the arrows).
+                Options changes Damage, Handling, Transmission, Jump and
+                Zone Cams at once, through the replay's special events 1
+                to 5 applied directly. Audio has the five sliders, put
+                into bSound when the page closes, and the mode at once.
+                Display has all twelve rows with retail's grays, and
+                `Player::CycleHud`, which the HUD hotkey now uses too.
+                The objective and the cop's two pages of controls are
+                on the blurb screen. START resumes from every page but
+                the cop's.
+              - Vibration is hidden on Options and the rows under it
+                move up. While paused, the bottom screen shows the logo
+                instead of black.
+              - Tested in Azahar, in a quick race and a SkipFE Be A Cop
+                race: every row, every page, B back and START resuming.
+                `screen_registry.py --check-port` passes the four
+                others. It calls "Pause BAC controls" unregistered on the
+                disc, but the name is in the ELF's strings; its
+                FlailerScreenConfig is one the tool does not parse.
 
 ### The retail frontend
 

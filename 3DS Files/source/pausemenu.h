@@ -40,10 +40,11 @@
 // and retail's new tHighlightAnimation::HandleMessage (0x00248ae0), which
 // the pause screens share.
 //
-// HandlePauseMenuReplaySpecialEvents (0x001703e0) is the replay's and is
-// not ported. Nor are the screens the menu leads to, yet: Pause Options
-// and its two pages (0x00171180 to 0x00173e30), the objective and the cop
-// controls (0x00171a28 to 0x00172068) and the debug menu.
+// The screens the menu leads to are pauseoptions.c's: Pause Options and
+// its two pages, the objective and the cop controls (0x001710f8 to
+// 0x00173e30). It applies HandlePauseMenuReplaySpecialEvents' (0x001703e0)
+// changes there and then, since the port has no replay. The debug menu
+// (PauseDebugMenu, 0x00173e30) is not: retail never shows its row.
 //
 // docs/formats/pause-menu.md has the decode.
 

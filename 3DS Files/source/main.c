@@ -187,6 +187,7 @@
 #include "mellowmover.h"
 #include "munition.h"
 #include "pausemenu.h"
+#include "pauseoptions.h"
 #include "endevent.h"
 #include "endgame.h"
 #include "endresults.h"
@@ -425,10 +426,21 @@ static const BScreenConfig kScreens[] = {
       pre_race_stats_callback },
     { "Pre Race Letterbox",      STARTRACE_SCREEN_LETTERBOX,
       pre_race_letterbox_callback },
-    // RCSTATE_PAUSE's (pausemenu.c). Options, the objective, the cop
-    // controls and the debug menu it leads to are not ported yet.
+    // RCSTATE_PAUSE's (pausemenu.c), and the pages it leads to
+    // (pauseoptions.c). Its "Debug Menu" row never shows on the retail
+    // disc, so that screen is not registered.
     { "Pause Menu",              PAUSE_MENU_SCREEN,
       pause_menu_callback },
+    { "Pause Options",           PAUSE_OPTIONS_SCREEN,
+      pause_options_callback },
+    { "Pause audio",             PAUSE_AUDIO_SCREEN,
+      pause_audio_callback },
+    { "Pause display",           PAUSE_DISPLAY_SCREEN,
+      pause_display_callback },
+    { "Race Objective",          STARTRACE_SCREEN_BLURB,
+      pause_race_objective_callback },
+    { "Pause BAC controls",      STARTRACE_SCREEN_BLURB,
+      pause_view_controls_callback },
     // The end of the race (endgame.c): EndGameScreens' list, each on the
     // one callback that makes its class by name. The four reward screens
     // share one Flailer screen. The classes not ported yet are the bare
@@ -7196,6 +7208,8 @@ int main(int argc, char** argv)
     gFlailerCurrentScreenFn = flowCurrentScreen;
     gPauseTranslateFn = startRaceTranslate;
     gPauseMenuAnimFn = pauseMenuAnim;
+    // Display's HUD row and the HUD hotkey (Player::CycleHud).
+    gPlayerCycleHudFn = player_cycle_hud;
     // The end of the race (endgame.c): TheRaceHasFinished makes the
     // screens' list, POSTRACE puts them up and takes them down, and the
     // End Game Menu's popups and bloom are the pause menu's. Its OK posts
@@ -8289,6 +8303,14 @@ int main(int argc, char** argv)
     audioHooks.sound   = &gSoundModule;
     audioopts_init(&audioHooks);
 
+    // The pause menu's pages (71e) set bSound's volumes and the mode.
+    PauseOptionsHooks pauseHooks;
+    memset(&pauseHooks, 0, sizeof pauseHooks);
+    pauseHooks.log     = hookAudioOptsLog;
+    pauseHooks.jukebox = &g_jukebox;
+    pauseHooks.sound   = &gSoundModule;
+    pause_options_init(&pauseHooks);
+
     DisplayOptionsHooks displayHooks;
     memset(&displayHooks, 0, sizeof displayHooks);
     displayHooks.log = hookDisplayOptsLog;
@@ -8796,7 +8818,13 @@ int main(int argc, char** argv)
             // (hudsplit.h), and the frontend's panel when the HUD is down.
             if (PLAYER_NUM_SHOWN() == 1 && player_shown(0) != NULL)
                 hudsplit_set_features(player_shown(0)->CurrentHudFeatures);
-            if (uirender_draw_visible_bottom(&ui, BOT_W, BOT_H, 1.0f)) {
+            // The pause takes the HUD down, its bottom half with it, and
+            // leaves its screen up: the panel then, so the logo shows on
+            // the pause and its pages and not a black screen.
+            bool racePaused = pRaceCoordinator != NULL
+                && pRaceCoordinator->CurrentRCState == RCSTATE_PAUSE;
+            if (!racePaused
+                && uirender_draw_visible_bottom(&ui, BOT_W, BOT_H, 1.0f)) {
                 // eDisplayFrame's RenderTrackMap for each player, after
                 // the Flailer layers: the minimap, made bigger under the
                 // bottom screen's top band (hudsplit_map_place).
