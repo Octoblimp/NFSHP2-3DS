@@ -104,4 +104,12 @@ void copmanager_monitor_spike_belts(tCopManager *m);
 // The two tables, 0x002be688 and 0x002be698, registered with vtable.c.
 void spikestrip_install_vtables(void);
 
+struct ReplaySnapshot;
+
+// tSpikeStrip::DoSnapshot, 0x00241898 (copsnap.c), a section named
+// "tSpikeStrip": the two ends, the roadblock (4 bytes) and the lifetime; a
+// restore lays the strip again with Init; then bIsBlinking (a bool) and
+// fBlinkTimer.
+void tspikestrip_do_snapshot(tSpikeStrip *t, struct ReplaySnapshot *s);
+
 #endif

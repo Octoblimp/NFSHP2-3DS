@@ -3633,8 +3633,11 @@ and so replaced every boot.
      72d-2 (Session 123, continued), in `worldsnap.c`, with the
      smokeables' (`smokesnap.c`) and the bodies' SnapshotEverythings
      (`bodysnap.c`). `worldsnap_check` runs them against retail. The
-     cops' and the chopper's are seams (`gCopManagerDoSnapshotFn`,
-     `gChopperDoSnapshotFn`) until 72e.
+     cops' are a seam (`gCopManagerDoSnapshotFn`) until 72e-3.
+   - DroppedSpikes', Rocket's, tSpikeStrip's and the Chopper's
+     DoSnapshots are retail's since TASKS 72e-1 (Session 123,
+     continued), in `copsnap.c`; main.c binds `gChopperDoSnapshotFn`.
+     `copsnap_check` runs them against retail.
 
    **7b, DriveCameraMover::Update, is done** (HANDOFF.md, Session 31,
    continued: the drive camera's Update). `docs/formats/camera.md`,

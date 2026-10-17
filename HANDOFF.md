@@ -25804,3 +25804,65 @@ gained stand-ins that print "reached" and exit; all three are 0 differ.
 2. Then 72f to 72h, one at a time.
 3. When 72h is committed, the launch checklist the user asked for,
    published, before TASKS 73.
+
+## Session 123, continued -- TASKS 72e-1: the munitions', the strip's and the chopper's snapshots
+
+72e is the cops' part of the replay's snapshot, in three slices. 72e-1
+is the four DoSnapshots that need no other cop class: the two munitions
+with their own, the spike strip and the chopper. 72e-2 is the pursuit
+and the cops; 72e-3 the cop manager, which takes them all.
+
+### What is ported
+
+From retail, at retail's address, in the new `copsnap.c`:
+
+- DroppedSpikes::DoSnapshot (`0x001bef90`) and Rocket's (`0x001bf910`),
+  now in slot 16 of their tables in `munition.c` (NULL until now).
+- tSpikeStrip::DoSnapshot (`0x00241898`). A restore lays the strip again
+  with `tspikestrip_init` before the blink moves.
+- Chopper::DoSnapshot (`0x001e7d08`), which main.c binds to world.h's
+  `gChopperDoSnapshotFn`. A restore takes the chopper out of the world
+  first; eating donuts, only the plan moves and taking or restoring
+  clears the variables. The routes and points go through
+  `TheTrackRouteManager`'s pointer moves (72c).
+
+Prototypes are in munition.h, spikestrip.h and chopper.h.
+`docs/formats/replay.md` has every move, in a 72e-1 section; the
+munitions, chopper and cop-manager pages point to it.
+
+### The checker
+
+`tools/copsnap_check.py` with `tools/src/copsnap_test.c`, on
+carsnap_check's model like worldsnap_check. The four functions run real
+on both sides; everything else they reach prints a line on both sides.
+Those lines end with the snapshot's `DataPosition` as well as the
+section: without it, four mutations that swapped a move with a recorded
+call went unseen. `--stubs` writes `copsnap_stubdata.c` (4 data
+symbols); no functions need stubbing.
+
+- 1256 script lines, 4839 lines, 0 differ.
+- 76 mutations, 76 caught.
+- Source checks hold munition.c's two tables to the new snapshots and
+  main.c to binding the chopper's.
+
+It confirmed that the chopper's donut test reads the whole plan word,
+though only its low byte moves.
+
+### Checkers re-run
+
+The 21 other checkers that compile a changed file or header pass again.
+`munition_test.c` gained stand-ins for the two new DoSnapshots, and
+`smokeable_check.py` now compares retail's two against the port's names.
+
+### Next
+
+1. 72e-2: tPursuit::DoSnapshot (`0x0022a548`), with the roadblock's
+   state machine (`0x0022ce60`), tCop's (`0x0022d440`), tPlayerCop's
+   (`0x0022d7e8`) and tAICop's (`0x0022dd20`). tCop's calls two new
+   functions, `0x002245b8` and `0x0022c920`; tPursuit's calls
+   `0x0022d180` and `0x0024f358`. Then a checker.
+2. 72e-3: tCopManager::DoSnapshot (`0x00223b70`), bound to
+   `gCopManagerDoSnapshotFn`.
+3. Then 72f to 72h, one at a time.
+4. When 72h is committed, the launch checklist the user asked for,
+   published, before TASKS 73.

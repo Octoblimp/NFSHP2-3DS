@@ -8085,10 +8085,12 @@ int main(int argc, char** argv)
     // race, flown in World's step, asked for by each chase that may have
     // one and sent at its chased car (pursuitchopper.h), drawn with the
     // world objects. Be A Cop's requests ask for it and for a roadblock
-    // (playerinput.h). Its attacks fire the munitions above (12k-6).
+    // (playerinput.h). Its attacks fire the munitions above (12k-6), and
+    // World's replay snapshot takes and restores it (copsnap.c, 72e-1).
     gChopperCtorFn                      = chopper_construct;
     gChopperDestroyFn                   = chopper_destruct;
     gChopperFlyFn                       = chopper_fly;
+    gChopperDoSnapshotFn                = chopper_do_snapshot;
     gChopperNew960Fn                    = pursuitchopper_new960;
     gChopperFollowThisCarFn             = pursuitchopper_follow_this_car;
     gPursuitUpdateChopperFn             = tpursuit_update_chopper;

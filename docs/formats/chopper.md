@@ -585,6 +585,9 @@ TriggerDustEmitter(dt)                  0x001ea5c0
 - **A NULL ChopperPoint is on neither side** in MoveChopper, so a miss
   turns right. The image reads its position at address 0.
 - **The munitions' step is a seam** (see Moving) until 12k-6.
+- **The replay's snapshot** (`0x001e7d08`) is in copsnap.c, World's
+  through `gChopperDoSnapshotFn`; [replay.md](replay.md) lists its moves
+  (TASKS 72e-1), and `tools/copsnap_check.py` checks it.
 
 ## The cross-check
 

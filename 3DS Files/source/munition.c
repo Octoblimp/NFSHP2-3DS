@@ -800,7 +800,7 @@ static void rocket_vt_destroy(void *self, int32_t flags)
 // Smokeable's table with Munition::Backup at 72 and the class's own
 // destructor, DoSnapshot, Move, ConsiderImpulse, ApplyImpulse, GetSmokeType
 // and OnLifetimeEnd. DoSnapshot is Smokeable's (smokesnap.c) but for
-// DroppedSpikes' and Rocket's own, which are not ported yet (NULL).
+// DroppedSpikes' and Rocket's own (copsnap.c).
 #define MUNITION_VT(dtor, snap, move, consider, apply, smoke, life) {       \
     PURE,                                                                   \
     E(dtor),                                                                \
@@ -853,15 +853,16 @@ static const VtEntry smokebomb_vt[SMOKEABLE_VT_ENTRIES] =
 
 // _vt$13DroppedSpikes (0x002b6e20).
 static const VtEntry droppedspikes_vt[SMOKEABLE_VT_ENTRIES] =
-    MUNITION_VT(droppedspikes_vt_destroy, NULL, droppedspikes_move,
+    MUNITION_VT(droppedspikes_vt_destroy, droppedspikes_do_snapshot,
+                droppedspikes_move,
                 droppedspikes_consider_impulse, droppedspikes_apply_impulse,
                 droppedspikes_get_smoke_type, droppedspikes_on_lifetime_end);
 
 // _vt$6Rocket (0x002b6d20).
 static const VtEntry rocket_vt[SMOKEABLE_VT_ENTRIES] =
-    MUNITION_VT(rocket_vt_destroy, NULL, rocket_move, rocket_consider_impulse,
-                rocket_apply_impulse, rocket_get_smoke_type,
-                rocket_on_lifetime_end);
+    MUNITION_VT(rocket_vt_destroy, rocket_do_snapshot, rocket_move,
+                rocket_consider_impulse, rocket_apply_impulse,
+                rocket_get_smoke_type, rocket_on_lifetime_end);
 
 // The PhysicsSystem tables (each 0x20 below its main one): Smokeable's,
 // with the class's destructor.

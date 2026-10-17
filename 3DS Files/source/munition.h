@@ -209,6 +209,11 @@ void droppedspikes_apply_impulse(CollisionBody *b, bVector3 *j,
                                  bVector3 *at);       // 0x001bf178
 int32_t droppedspikes_get_smoke_type(CollisionBody *b); // 0x001bfd90
 
+// DroppedSpikes::DoSnapshot, 0x001bef90, slot 16 (copsnap.c): a section
+// "DroppedSpikes" with the object, DeploySpikes in a bool, then
+// Smokeable's.
+void droppedspikes_do_snapshot(CollisionBody *b, struct ReplaySnapshot *s);
+
 // MakeSpikeBelt, 0x001bf188: on the ground (within 1 of it) and on a
 // racing route's road, a strip four wide across the route, cut short
 // where the road's edge is nearer than 2.
@@ -232,6 +237,11 @@ float rocket_consider_impulse(CollisionBody *b, bVector3 *j,
 void rocket_apply_impulse(CollisionBody *b, bVector3 *j,
                           bVector3 *at);              // 0x001bf908
 int32_t rocket_get_smoke_type(CollisionBody *b);      // 0x001bfd10
+
+// Rocket::DoSnapshot, 0x001bf910, slot 16 (copsnap.c): a section "Rocket"
+// with the object, the yaw, the target through World's car pointer, then
+// Smokeable's.
+void rocket_do_snapshot(CollisionBody *b, struct ReplaySnapshot *s);
 
 // --------------------------------------------- MunitionEffectsHandler
 

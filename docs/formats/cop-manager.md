@@ -400,8 +400,9 @@ side of p's line q and q + e lie; if their product is above 0 (or NaN),
 the answer is 0. Then the same for p and p + d against q's line. So
 segments on one line count as crossing even when apart, as retail's do.
 
-The default constructor (`0x00241308`) and DoSnapshot (`0x00241898`)
-are the replay's.
+The default constructor (`0x00241308`) is the replay's. DoSnapshot
+(`0x00241898`) is in copsnap.c (TASKS 72e-1): [replay.md](replay.md)
+lists its moves, and `tools/copsnap_check.py` checks it.
 
 ## Drawing the strips (12j-2b)
 

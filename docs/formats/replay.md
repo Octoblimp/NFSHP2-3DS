@@ -18,7 +18,8 @@ order. One call serves all four modes, by the flags at +60 .. +63 of
 The drivers and the AI are 72c's (each class's page,
 `tools/aisnap_check.py`). This page lists 72d's: the race's own
 classes (72d-1), then World's and RaceCoordinator's, which take all of
-them, with the smokeables and the collision bodies (72d-2).
+them, with the smokeables and the collision bodies (72d-2). Then 72e's,
+the cops: the munitions, the spike strip and the chopper (72e-1).
 
 ## How the lists read
 
@@ -225,11 +226,11 @@ itself moves nothing.
 10. `SnapshotAllSmokeables`, then TrackPolygonCollisionBody's,
     CollisionBody's and CollisionBodyWitness's SnapshotEverything.
 
-The port has no clans, no fern shakers, and no cop manager's or chopper's
-snapshot yet: those four are calls through `gFlushClansFn`,
-`gFlushFernShakersFn`, `gCopManagerDoSnapshotFn` and
-`gChopperDoSnapshotFn` (world.h), skipped while NULL. 72e binds the cops'
-and the chopper's.
+The port has no clans, no fern shakers, and no cop manager's snapshot
+yet: those three are calls through `gFlushClansFn`,
+`gFlushFernShakersFn` and `gCopManagerDoSnapshotFn` (world.h), skipped
+while NULL. The chopper's is `gChopperDoSnapshotFn`, bound in 72e-1; 72e
+binds the cops'.
 
 ### SnapshotCops, 0x00227cd8
 
@@ -275,8 +276,8 @@ StaticCollisionBody's (72b).
 10. `BBoxMin` and `BBoxMax` verify data 8.
 
 Munition, DroppedBomb and SmokeBomb have Smokeable's in their tables;
-DroppedSpikes (0x001bef90) and Rocket (0x001bf910) have their own, which
-are 72e's.
+DroppedSpikes (0x001bef90) and Rocket (0x001bf910) have their own
+(72e-1, below).
 
 ### TrackPolygonCollisionBody::SnapshotEverything, 0x001d8980, section "AllTrackPolygonCollisionBodies"
 
@@ -302,6 +303,66 @@ the list.
 3. Restoring: for each, the two IDs, the bodies found by them
    (`FindCollisionBody`), a witness made again from
    `CollisionBodyWitnessSlotPool` on them, then its own snapshot.
+
+## 72e-1: the munitions, the spike strip and the chopper
+
+`copsnap.c` holds them, a file of its own as worldsnap.c is: each reaches
+its class's own functions and the other classes' snapshots, which a
+checker records rather than runs.
+
+### DroppedSpikes, 0x001bef90, section "DroppedSpikes", with the object
+
+1. `DeploySpikes` bool.
+2. Smokeable's (72d-2).
+
+Slot 16 of its table.
+
+### Rocket, 0x001bf910, section "Rocket", with the object
+
+1. `Yaw` float.
+2. `Target`, through World's car pointer (`DoCarPointerSnapshot`,
+   0x00130910, on `pCurrentWorld`).
+3. Smokeable's.
+
+Slot 16 of its table.
+
+### tSpikeStrip, 0x00241898, section "tSpikeStrip"
+
+1. `v2Start` and `v2End` data 8.
+2. `nRoadBlockID` int 4.
+3. `fLifetime` float.
+4. A restore lays the strip again: `Init` (0x002414e8) with the two ends,
+   the roadblock and the lifetime just read. Init leaves the blink alone.
+5. `bIsBlinking` bool, `fBlinkTimer` float.
+
+The cop manager's snapshot (72e-3) calls it for each strip.
+
+### Chopper, 0x001e7d08, section "Chopper"
+
+World's calls it through `gChopperDoSnapshotFn`, which main.c now binds.
+
+1. A restore takes the chopper out of the world first
+   (`RemoveChopperFromWorld`).
+2. `Plan` data 1.
+3. If the plan is `CHOPPLAN_EATING_DONUTS` (6), nothing more moves; taking
+   or restoring clears the variables (`ClearVariables`). The test reads
+   the whole word, so a restore into a plan whose upper bytes are set
+   does not see 6 and goes on.
+4. Otherwise: `TimeUntilThink` float; `CurrentCar` through World's car
+   pointer; `MoveMode` data 1.
+5. `ChopperRoute`, `TargetRoute` and `OldCarRoute`, each through
+   `TheTrackRouteManager`'s route pointer (0x001c2b30), followed by its
+   point (`ChopperPoint`, `TargetPoint`, `OldCarPoint`) through the point
+   pointer within that route (0x001c2bc8).
+6. `TP`, TrackPathCoordinate's (72b).
+7. `CurrentPos` data 12, `Matrix` as a matrix, `Speed` float,
+   `Acceleration` data 8.
+8. `Roll`, `DesiredRoll`, `Yaw`, `Pitch`, `DesiredPitch`, `RotRate`,
+   `ZVelocity` and `GroundZ` float.
+9. `EmitDust` bool, then `TargetDistance` float.
+10. The bombing run: `BombRunType` data 1, `NumSalvosReleased` int 4,
+    `TimeUntilNextSalvo` float, `NextLauncher` int 4, `Timeout` and
+    `StuckTime` float, `TotalSalvos` int 4.
 
 ## The checker for 72d-1
 
@@ -396,10 +457,47 @@ to the new snapshots in slot 16.
     python tools/worldsnap_check.py --stubs
     python tools/worldsnap_check.py --mutate [--only a,b]
 
+## The checker for 72e-1
+
+`tools/copsnap_check.py` runs retail's code beside the port's, on
+`tools/src/copsnap_test.c`, with the five passes and a sixth with no
+flags set.
+
+These run real on both sides: ReplaySnapshot and the four functions
+above. These are recorded, each as a line both sides print: Smokeable's
+snapshot, World's car pointer, the route manager's route and point
+pointers, TrackPathCoordinate's snapshot, the strip's `Init` and the
+chopper's `RemoveChopperFromWorld` and `ClearVariables`. Each line ends
+with the section and where the data stands (`DataPosition`), so a move
+swapped with a recorded call shows.
+
+The scenarios cover these cases:
+
+- spikes deploying and not, restored over a word of 0x101 or 0x100;
+- rockets with a target, with none, and restored onto none; one with no
+  world;
+- strips blinking and not, restored over a word of 0x10001 or 0x10000;
+- choppers in pursuit, starting a chase and ending one, and eating
+  donuts twice; restores into plans of 0x302, 0x206 and 0x100, whose low
+  byte alone is replaced; matrices of all three codes; each route and
+  point pointer set, NULL, and changed by the restore.
+
+The run is 1256 script lines and 4839 output lines; none differ. All 76
+of 76 mutations are caught. Source checks hold munition.c's DroppedSpikes
+and Rocket tables to the new snapshots in slot 16, and main.c to binding
+the chopper's.
+
+    python tools/copsnap_check.py
+    python tools/copsnap_check.py --stubs
+    python tools/copsnap_check.py --mutate [--only a,b]
+
 ## Not yet
 
-- 72e: tCopManager's (0x00223b70) and the chopper's (0x001e7d08)
-  snapshots, and DroppedSpikes' and Rocket's.
+- 72e-2: tPursuit's (0x0022a548) with the roadblock's state machine
+  (0x0022ce60), and the cops' (tCop's 0x0022d440, tPlayerCop's
+  0x0022d7e8, tAICop's 0x0022dd20).
+- 72e-3: tCopManager's (0x00223b70), which takes the pursuits, the
+  strips and the cops, bound to `gCopManagerDoSnapshotFn`.
 - `FlushClans` (0x001ab650) and `FlushFernShakers` (0x001da1b0): the port
   has neither the clans nor the fern shakers yet.
 - `AnimatedDriver::DoSnapshot` (0x001a9770): AnimatedDriver is not

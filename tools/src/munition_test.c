@@ -282,6 +282,14 @@ static void stub_spikes(tCopManager *m, const bVector2 *a, const bVector2 *b,
     printf(" %d %08x\n", (int)id, fb(t));
 }
 
+// DroppedSpikes' and Rocket's DoSnapshots, slot 16 of their tables
+// (copsnap.c, TASKS 72e-1, checked by tools/copsnap_check.py): named in the
+// tables' dumps, never called here.
+void droppedspikes_do_snapshot(CollisionBody *b, struct ReplaySnapshot *s)
+{ (void)b; (void)s; snapshot_unreached("droppedspikes_do_snapshot"); }
+void rocket_do_snapshot(CollisionBody *b, struct ReplaySnapshot *s)
+{ (void)b; (void)s; snapshot_unreached("rocket_do_snapshot"); }
+
 // The cars' bodies' table: SetToPhysicsMode (112) and ApplyImpulse (128).
 static void stub_physmode(void *self, CollisionBody *other)
 {
@@ -371,6 +379,7 @@ static const struct {
     FN(droppedspikes_on_lifetime_end),
     FN(rocket_move), FN(rocket_consider_impulse), FN(rocket_apply_impulse),
     FN(rocket_get_smoke_type), FN(rocket_on_lifetime_end),
+    FN(droppedspikes_do_snapshot), FN(rocket_do_snapshot),
 #undef FN
 };
 

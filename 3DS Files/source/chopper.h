@@ -529,4 +529,16 @@ void chopper_fly(struct Chopper *h, float dt);
 // 0x001ea8c0, in chopperfire.c. One salvo of the run's munitions: 12k-6's.
 void chopper_fire_salvo(struct Chopper *h);
 
+struct ReplaySnapshot;
+
+// Chopper::DoSnapshot, 0x001e7d08 (copsnap.c), World's through
+// gChopperDoSnapshotFn: a section named "Chopper". A restore takes it out
+// of the world first; the plan moves in a byte, and eating donuts nothing
+// more moves (taking or restoring clears the variables). Otherwise
+// TimeUntilThink, the car, the move mode (a byte), the three routes and
+// their points through TheTrackRouteManager, TP, the position, matrix,
+// speed and the attitude, EmitDust, TargetDistance and the bombing run's
+// fields.
+void chopper_do_snapshot(struct Chopper *h, struct ReplaySnapshot *s);
+
 #endif
