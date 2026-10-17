@@ -1,8 +1,8 @@
 # TrafficTeleporter
 
 `TrafficTeleporter.obj` (0x002226f8 .. 0x002232c0; the demo's 0x0020e610 ..
-0x0020f0f0), all of it but `DoSnapshot` (0x00222780), which waits on the
-replay with every other class's. This is step 11h-3, the last of the
+0x0020f0f0), all of it. `DoSnapshot` (0x00222780) came with the replay
+([replay.md](replay.md), TASKS 72d). This is step 11h-3, the last of the
 traffic: TrafficCar (11h-1, [traffic-car.md](traffic-car.md)) moves a
 traffic car, TrafficDriver (11h-2, [traffic-driver.md](traffic-driver.md))
 drives it, and the teleporter places it.
@@ -203,7 +203,8 @@ of the run.
 
 **As shipped:**
 
-- every TrafficTeleporter function but DoSnapshot, called directly;
+- every TrafficTeleporter function but DoSnapshot, called directly
+  (`racesnap_check` has DoSnapshot);
 - GuessTargetDestinations, both under TryToTeleportCar and alone over
   route networks with signposts;
 - under them: `CompareDistances`, `bATan`, `TrackRoutePoint::GetSignpost`,

@@ -16,7 +16,8 @@
 // one. At 17 steps over the duration, it is on for nine of them.
 //
 // The rumble half (tRumbler, PortRumble and its seven envelopes) drives the
-// pad's motors and is not ported. Nor is the replay's SnapshotCameraShakers.
+// pad's motors and is not ported. The replay's SnapshotCameraShakers is
+// (TASKS 72d), though nothing in retail calls it.
 //
 // Retail's only changes here are ApplyCameraShake's slow-motion test,
 // MaybeCameraShake's Player offsets, and a reset and a tShaker constructor
@@ -107,6 +108,12 @@ void tshaker_update(tShaker *s, float dt);
 // odd one or while still. All four lanes are written.
 void tshaker_get_value(const tShaker *s, bVector3 *out);
 
+// 0x00156220, no section: whether it shakes (a bool of one byte; a restore
+// gives it ShakeAmplitudeEnvelope or NULL), then vShake's 12 bytes, fTime,
+// fDuration and fFrequency.
+struct ReplaySnapshot;
+void tshaker_do_snapshot(tShaker *sh, struct ReplaySnapshot *s);
+
 // ------------------------------------------------------------ the globals
 
 // The two players' shakers, 0x002fa820 (the demo's CameraShakers,
@@ -145,6 +152,12 @@ void shake_static_init(void);
 // Retail's 0x00156480, which the World constructor and its DoSnapshot call:
 // both shakers still, as tshaker_init leaves them. Retail inlines the stores.
 void reset_camera_shakers(void);
+
+// SnapshotCameraShakers, 0x001564d0: both shakers' DoSnapshot, in no
+// section. Retail has no call to it (no jal, no pointer): World's
+// DoSnapshot resets the shakers on a restore instead. It is ported for the
+// snapshot it takes, as Spline's is.
+void snapshot_camera_shakers(struct ReplaySnapshot *s);
 
 // 0x00156400. MainLoop calls it once a frame. The debug shake first, then
 // both clocks, by WorldTimeElapsed.

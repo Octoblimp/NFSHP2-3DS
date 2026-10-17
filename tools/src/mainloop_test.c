@@ -14,6 +14,7 @@
 #include "edisplay.h"
 #include "mainloop.h"
 #include "realtime.h"
+#include "replay.h"
 
 enum {
     OP_TAG = 1, OP_SET_TICK, OP_SET_WAIT, OP_SET_VIF, OP_SET_FRAMES,
@@ -117,4 +118,41 @@ int main(int argc, char **argv)
         }
     }
     return 0;
+}
+
+// ----------------------------------------------- the snapshots, unreached
+// The replay snapshot code in realtime.c (TASKS 72d) calls these;
+// nothing here takes a snapshot.
+
+static void snapshot_unreached_72d(const char *f)
+{
+    fprintf(stderr, "%s reached\n", f);
+    exit(3);
+}
+
+void ReplaySnapshot_MoveData(ReplaySnapshot *s, void *p, int32_t stored,
+                             int32_t size, int32_t is_signed)
+{
+    (void)s; (void)p; (void)stored; (void)size; (void)is_signed;
+    snapshot_unreached_72d("ReplaySnapshot_MoveData");
+}
+
+void ReplaySnapshot_BeginSection(ReplaySnapshot *s, void *object,
+                                 const char *name)
+{
+    (void)s; (void)object; (void)name;
+    snapshot_unreached_72d("ReplaySnapshot_BeginSection");
+}
+
+void ReplaySnapshot_EndSection(ReplaySnapshot *s)
+{
+    (void)s;
+    snapshot_unreached_72d("ReplaySnapshot_EndSection");
+}
+
+void ReplaySnapshot_VerifyData(ReplaySnapshot *s, void *p, int32_t stored,
+                               int32_t size, int32_t is_signed)
+{
+    (void)s; (void)p; (void)stored; (void)size; (void)is_signed;
+    snapshot_unreached_72d("ReplaySnapshot_VerifyData");
 }

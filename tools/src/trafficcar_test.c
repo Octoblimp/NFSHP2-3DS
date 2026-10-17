@@ -16,6 +16,8 @@
 #include "carmodes.h"
 #include "carstate.h"
 #include "cartypeinfo.h"
+#include "physicscar.h"
+#include "replay.h"
 #include "table.h"
 #include "trafficcar.h"
 #include "vtable.h"
@@ -446,4 +448,40 @@ int main(int argc, char **argv)
         }
     }
     return 0;
+}
+
+// ----------------------------------------------- the snapshots, unreached
+// The replay snapshot code in trafficcar.c (TASKS 72d) calls these;
+// nothing here takes a snapshot.
+
+static void snapshot_unreached_72d(const char *f)
+{
+    fprintf(stderr, "%s reached\n", f);
+    exit(3);
+}
+
+void ReplaySnapshot_MoveData(ReplaySnapshot *s, void *p, int32_t stored,
+                             int32_t size, int32_t is_signed)
+{
+    (void)s; (void)p; (void)stored; (void)size; (void)is_signed;
+    snapshot_unreached_72d("ReplaySnapshot_MoveData");
+}
+
+void ReplaySnapshot_BeginSection(ReplaySnapshot *s, void *object,
+                                 const char *name)
+{
+    (void)s; (void)object; (void)name;
+    snapshot_unreached_72d("ReplaySnapshot_BeginSection");
+}
+
+void ReplaySnapshot_EndSection(ReplaySnapshot *s)
+{
+    (void)s;
+    snapshot_unreached_72d("ReplaySnapshot_EndSection");
+}
+
+void carmover_do_snapshot(CarMover *m, void *snap)
+{
+    (void)m; (void)snap;
+    snapshot_unreached_72d("carmover_do_snapshot");
 }

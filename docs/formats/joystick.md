@@ -416,9 +416,11 @@ menus that use it. So for now it runs the type monitor, and logs
 Options' Controller, where the tables are picked and saved in
 controls.bin, is controller-config.md.
 
+`JoystickDoSnapshot` (retail 0x001544f8, the demo's 0x001514b0) is the
+replay's ([replay.md](replay.md), TASKS 72d).
+
 ## Not ported
 
-* `JoystickDoSnapshot` (0x001514b0), which needs `ReplaySnapshot`.
 * `PrintAllRegisteredJoyHandlers` (0x00151538), which prints nothing on the
   retail build.
 * The Logitech wheel layer (`UpdateLogitechWheels`, `GetWheelDevice`,

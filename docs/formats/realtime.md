@@ -1,7 +1,7 @@
 # The clock object -- the video mode, the real clock and the world clock
 
     0x001992a0 .. 0x001995d8    nine functions, 824 bytes
-    0x001995d8                  WorldTimeDoSnapshot (not ported)
+    0x001995d8                  WorldTimeDoSnapshot (retail 0x001a36c0)
     0x00323cc8 .. 0x00323d0c    eighteen globals in .sdata, gp-20264 up
 
 These are free functions and plain globals, with no class. In the image
@@ -11,9 +11,9 @@ both clocks.
 
 The port is `3DS Files/source/realtime.{c,h}`. It is cross-checked by
 `tools/realtime_check.py` against `tools/src/realtime_test.c`, with the
-image running in mipsemu as the oracle. Everything is ported except
-`WorldTimeDoSnapshot`, which waits on ReplaySnapshot like every
-`DoSnapshot`.
+image running in mipsemu as the oracle. Everything is ported.
+`WorldTimeDoSnapshot` is the replay's ([replay.md](replay.md), TASKS
+72d), checked by `tools/racesnap_check.py`.
 
 The addresses here are the demo's. Retail has the same nine at
 0x001a3390 .. 0x001a36c0 and the globals at 0x00330c50 (gp-19616 up), and

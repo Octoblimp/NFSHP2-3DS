@@ -162,4 +162,13 @@ extern void (*gNisRestoreCarsAfterNisFn)(NisManager *m);
 extern void (*gNisUnloadResourceFileFn)(struct ResourceFile *rf);
 extern int32_t (*gNisServiceResourceLoadingFn)(void);
 
+// NisManager::DoSnapshot, 0x001b11f8, section "NisManager" (TASKS 72d).
+// A restore stops the animation first. StartTime, EndTime and NisNumber
+// go in four bytes, both cars as their driver numbers, Playing and
+// CamNumber in one, and the two movement modes as their first byte. A
+// restore that left it Playing loads the NIS if it is not the loaded one
+// (0x001b16e0, as Start does) and starts the animation again.
+struct ReplaySnapshot;
+void nismanager_do_snapshot(NisManager *m, struct ReplaySnapshot *s);
+
 #endif

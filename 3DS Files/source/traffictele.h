@@ -8,7 +8,7 @@
 // 0x0020e610 .. 0x0020f0f0). The layout is the demo's .mdebug type#1882,
 // 88 bytes, and retail's constructor stores the same fields.
 //
-// What is here, all of it but DoSnapshot:
+// What is here, all of it:
 //   0x002226f8  the constructor: both totals, SetThinkTime, the first
 //               think held to 20 s, and the first car
 //   0x00222760  the destructor: nothing but the delete, on flags & 1
@@ -27,10 +27,7 @@
 //   0x002231f0  RandomPlayerCar
 //   0x00223228  PickRandomSkin
 //   0x00223278  SwitchSkin
-//
-// DoSnapshot (0x00222780: TimeUntilTeleport and LastCar into the
-// "TrafficTeleporter" section) waits on ReplaySnapshot, as every
-// DoSnapshot does.
+//   0x00222780  DoSnapshot (TASKS 72d)
 //
 // Written up in docs/formats/traffic-teleporter.md.
 
@@ -171,5 +168,11 @@ int32_t traffic_teleporter_pick_random_skin(TrafficTeleporter *t,
 
 // 0x00223278. A random skin for `c`, put on when it is not the one it has.
 void traffic_teleporter_switch_skin(TrafficTeleporter *t, struct Car *c);
+
+// DoSnapshot, 0x00222780, section "TrafficTeleporter": TimeUntilTeleport,
+// then LastCar in four bytes, unsigned.
+struct ReplaySnapshot;
+void traffic_teleporter_do_snapshot(TrafficTeleporter *t,
+                                    struct ReplaySnapshot *s);
 
 #endif

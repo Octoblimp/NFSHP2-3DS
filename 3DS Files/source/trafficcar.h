@@ -18,10 +18,6 @@
 // Car::SetMovementMode's TRAFFIC_MOVEMENT arm builds one through
 // carmodes.h's gTrafficCarCtorFn; main.c points it here.
 //
-// Everything is here but DoSnapshot (0x00167a60), which waits on
-// ReplaySnapshot with every other class's: a NULL entry in the table,
-// which vt_slot aborts on.
-//
 // See docs/formats/traffic-car.md.
 
 #ifndef TRAFFICCAR_H
@@ -60,8 +56,7 @@ typedef char trafficcar_layout_check[
 #endif
 
 // _vt$10TrafficCar, 0x002b2190, CarMover's layout: the destructor
-// (0x00168088), Move (0x00167af8) and DoSnapshot (0x00167a60, not ported:
-// a NULL entry).
+// (0x00168088), Move (0x00167af8) and DoSnapshot (0x00167a60).
 #define TRAFFICCAR_VTABLE     0x002b2190u
 #define TRAFFICCAR_VT_ENTRIES 4
 
@@ -89,6 +84,12 @@ void trafficcar_destroy(TrafficCar *m, int32_t flags);
 
 // 0x00167af8. One frame; see docs/formats/traffic-car.md. Returns dt.
 float trafficcar_move(TrafficCar *m, float dt);
+
+// DoSnapshot, 0x00167a60, section "TrafficCar" (TASKS 72d): Position's
+// eight bytes as they are, Angle, Speed, Pitch and Roll, then CarMover's,
+// which does nothing.
+struct ReplaySnapshot;
+void trafficcar_do_snapshot(TrafficCar *m, struct ReplaySnapshot *s);
 
 // 0x00167fb8. The stopping distance at `speed` from StoppingDistanceTable;
 // the first float is not read. Retail has no call to it (no jal, no

@@ -3623,6 +3623,12 @@ and so replaced every boot.
      the controllers, the movers, the splines, Average and PidError,
      DriveTarget and the route and car pointers. `aisnap_check` runs
      them against retail. RealDriver's Port comes back unsigned.
+   - The race's own DoSnapshots are retail's since TASKS 72d-1
+     (Session 123): RaceParameters and its drivers, the clock, the
+     joystick, the shakers, NisManager, TrafficCar, TrafficTeleporter,
+     tTrackGraph, Race, RacingCar and Player (`playersnap.c`).
+     `racesnap_check` runs them against retail.
+     `docs/formats/replay.md` lists every move.
 
    **7b, DriveCameraMover::Update, is done** (HANDOFF.md, Session 31,
    continued: the drive camera's Update). `docs/formats/camera.md`,

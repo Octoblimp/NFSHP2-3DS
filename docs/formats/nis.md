@@ -28,6 +28,7 @@ the overlay (see "What the port shows" below).
 | GetNisInfo(int, NisType) | `0x001b3638` | `get_nis_info_by_type` |
 | NisManager::NisManager | `0x001b0fe0` | `nismanager_construct` |
 | NisManager::~NisManager | `0x001b1110` | `nismanager_destruct` |
+| NisManager::DoSnapshot | `0x001b11f8` | `nismanager_do_snapshot` ([replay](replay.md)) |
 | NisManager::Start | `0x001b1318` | `nismanager_start` |
 | NisManager::Stop | `0x001b1388` | `nismanager_stop` |
 | NisManager::AllowDebugLooping | `0x001b13e8` | `nismanager_allow_debug_looping` |

@@ -23,12 +23,14 @@ asserts every field the transcript names at its retail offset.
 |--------|------|
 | `0x001751d8` | `Player::Player(JoystickPort, int)`, 2580 bytes |
 | `0x00175bf0` | `Player::~Player` |
+| `0x00175db0` | `Player::DoSnapshot`, in `playersnap.c` (72d, [replay](replay.md)) |
 | `0x00176ab0` | `Player::CleanUpJumpCam` |
 | `0x00181920` | `Player::InitForRace(Car *)`, 80 bytes |
 | `0x00181970` | `Player::CleanupAfterRace`, 112 bytes |
 | `0x001819e0` | `Player::PredetermineNisNumbers` |
 | `0x00181a28` | `Player::CreateRandomNisArray`, a seam |
 | `0x001edf90` | `cPlayerSettings::ResetToDefaults` |
+| `0x001ee030` | `cPlayerSettings::DoSnapshot` (72d) |
 | `0x001ee2d8` | `cPlayerSettings::ToggleLookback` |
 | `0x00182350` | `NISOverlayManager::NISOverlayManager`, 220 bytes |
 | `0x00182430` | `NISOverlayManager::~NISOverlayManager` |

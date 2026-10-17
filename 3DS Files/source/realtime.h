@@ -43,8 +43,8 @@
 // waits at a frame's end until it has moved. On the 3DS it is the top
 // screen's count, citro3d's C3D_FrameCounter(0) at its default rate of 60.
 //
-// WorldTimeDoSnapshot (0x001995d8) is not ported: it waits on
-// ReplaySnapshot, like every DoSnapshot.
+// WorldTimeDoSnapshot (retail 0x001a36c0, the demo's 0x001995d8) is the
+// replay's, TASKS 72d.
 //
 // Cross-check: tools/realtime_check.py. Write-up: docs/formats/realtime.md.
 
@@ -109,5 +109,12 @@ void PrepareWorldTimestep(float seconds);
 
 // 0x00199508. The world clock forward by the prepared step, unless it is 0.
 void AdvanceWorldTime(void);
+
+// WorldTimeDoSnapshot, retail 0x001a36c0, section "WorldTime" (TASKS 72d):
+// WorldTimer as four bytes, WorldTimeSeconds, WorldLoopCounter,
+// WorldTimeFrames and WorldTime as ints, WorldTimeElapsed verified only,
+// and WorldTimeElapsedFrame.
+struct ReplaySnapshot;
+void WorldTimeDoSnapshot(struct ReplaySnapshot *s);
 
 #endif

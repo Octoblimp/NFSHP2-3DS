@@ -444,6 +444,13 @@ void CloseJoystickTypeMonitoring(void)
     }
 }
 
+void JoystickDoSnapshot(ReplaySnapshot *s)
+{
+    ReplaySnapshot_BeginNamedSection(s, "Joystick");
+    ReplaySnapshot_MoveData(s, CurrentJoystickTypes, 2, -1, 0);
+    ReplaySnapshot_EndSection(s);
+}
+
 void TestJoyHandler(JoystickPort port, JoyEvent ev, uint8_t value, void *obj)
 {
     (void)port;

@@ -11,6 +11,7 @@
 #include "eview.h"
 #include "player.h"
 #include "realtime.h"
+#include "replay.h"
 #include "world.h"
 
 // ---------------------------------------------------------------- tEnvelope
@@ -148,6 +149,21 @@ void tshaker_get_value(const tShaker *s, bVector3 *out)
     out->pad = s->vShake.pad * a;
 }
 
+// Whether it shakes goes as a word of the stack; the envelope is always
+// ShakeAmplitudeEnvelope, so a restore needs no more than that.
+void tshaker_do_snapshot(tShaker *sh, ReplaySnapshot *s)
+{
+    int32_t shaking = sh->pAmplitude != NULL;
+
+    ReplaySnapshot_MoveBool(s, &shaking, 1);
+    if (s->RestoringSnapshotFlag)
+        sh->pAmplitude = shaking != 0 ? &ShakeAmplitudeEnvelope : NULL;
+    ReplaySnapshot_MoveVector3(s, &sh->vShake);
+    ReplaySnapshot_MoveFloat(s, &sh->fTime);
+    ReplaySnapshot_MoveFloat(s, &sh->fDuration);
+    ReplaySnapshot_MoveFloat(s, &sh->fFrequency);
+}
+
 // ------------------------------------------------------------ the globals
 
 tShaker  CameraShakers[2];                  // 0x002fa820
@@ -200,6 +216,14 @@ void reset_camera_shakers(void)
 
     for (i = 0; i < 2; i++)
         tshaker_init(&CameraShakers[i]);
+}
+
+void snapshot_camera_shakers(ReplaySnapshot *s)
+{
+    int32_t i;
+
+    for (i = 0; i < 2; i++)
+        tshaker_do_snapshot(&CameraShakers[i], s);
 }
 
 void update_camera_shakers(void)

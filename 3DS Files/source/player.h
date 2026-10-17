@@ -349,4 +349,14 @@ static inline int player_catchup_allowed(const struct Player *p, float f)
     return a->nSlots == a->nSamples && f < p->fMaxSpeedRatio;
 }
 
+// Player::DoSnapshot, 0x00175db0, in playersnap.c (TASKS 72d). Section
+// "Player": the finish time and animation length, the zone, its credits
+// and timers, the glue count, the speed average and its watch, the
+// trouble watch, the driving controls, the NIS indices, callback and
+// parameter, the NIS manager's section, the wrong-way, look-back and
+// muffle flags, and fFreezeZoneDelayTimer. A restore puts the input mode
+// back to 0 (SetInputMode) before the last.
+struct ReplaySnapshot;
+void player_do_snapshot(struct Player *p, struct ReplaySnapshot *s);
+
 #endif

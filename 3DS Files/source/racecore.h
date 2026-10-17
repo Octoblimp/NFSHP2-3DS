@@ -132,6 +132,28 @@ extern float TimeBetweenCarsForGracePeriodExit;
 // and AICarController::SignPostDecision.
 int race_grace_period_is_active(const Race *r, const struct Car *car);
 
+// ------------------------------------------------------------ the replay's
+//
+// TASKS 72d. RaceCoordinator::DoSnapshot takes pCurrentRace's.
+
+struct ReplaySnapshot;
+
+// RacingCar::DoSnapshot, 0x00146c90, section "RacingCar": the two
+// boundary regions, the seven lap and place bytes, NumLapsLed and
+// FinishReason, the four floats; and in a time trial the first boundary
+// crossing, then the crossing and the running time at pCurrentRace's
+// finish line, its number unchecked. The car, CrossedNewBoundary and
+// the rest of the Timers are not saved.
+void racing_car_do_snapshot(struct RacingCar *rc, struct ReplaySnapshot *s);
+
+// Race::DoSnapshot, 0x001477d0, section "Race": RaceStage's first byte,
+// the two frame counts, StartTime and RaceTime, NumRacingCars checked,
+// the finished count and DetectedOneCarRemaining in a byte; then for each
+// racing car its RacingCar and, in a signed byte, which table entry its
+// place in pRacingCars points at, which is pointed at again in every
+// mode. NumLapsInRace is checked last.
+void race_do_snapshot(Race *r, struct ReplaySnapshot *s);
+
 // -------------------------------------------------------------- the seam
 //
 // The WorldObject destructor (0x001cd828, flags 3) is worldobject.h's

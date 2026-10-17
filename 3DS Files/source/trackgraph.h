@@ -7,6 +7,7 @@
 //
 //   tTrackGraph::tTrackGraph             0x0024dd58  1004
 //   tTrackGraph::~tTrackGraph            0x0024e148   464
+//   tTrackGraph::DoSnapshot              0x0024e318   160  (TASKS 72d)
 //   tTrackGraph::UncloakAllEdges         0x0024e3b8   100
 //   tTrackGraph::AddVertex               0x0024e420   176
 //   tTrackGraph::GetVertexNumber         0x0024e4d0   144
@@ -18,9 +19,8 @@
 //   CleanupTrackGraph                    0x0024ec70    56
 //   HasCloakedEdges, GetVertex, GetEdge  0x0024ecb8 .. 0x0024ecec
 //
-// Not ported: DoSnapshot (0x0024e318), which waits on ReplaySnapshot like
-// every other DoSnapshot, and DebugDump (0x0024e810), whose two loops per
-// vertex only count down: its prints are compiled out.
+// Not ported: DebugDump (0x0024e810), whose two loops per vertex only
+// count down: its prints are compiled out.
 
 #ifndef TRACKGRAPH_H
 #define TRACKGRAPH_H
@@ -175,5 +175,10 @@ void trackgraph_init(void);
 void trackgraph_cleanup(void);
 
 void trackgraph_install_vtables(void);
+
+// DoSnapshot, 0x0024e318, with no section of its own: bHasCloakedEdge in
+// one byte, then bIsCloaked in one byte for each edge that is bCloakable.
+struct ReplaySnapshot;
+void trackgraph_do_snapshot(tTrackGraph *g, struct ReplaySnapshot *s);
 
 #endif

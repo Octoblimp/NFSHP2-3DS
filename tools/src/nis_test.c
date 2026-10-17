@@ -21,6 +21,8 @@
 #include "nisinfo.h"
 #include "nismanager.h"
 #include "realtime.h"
+#include "replay.h"
+#include "world.h"
 
 #define NM    2
 #define MAXT  64
@@ -464,4 +466,43 @@ int main(int argc, char **argv)
     }
     fclose(f);
     return 0;
+}
+
+// ----------------------------------------------- the snapshots, unreached
+// The replay snapshot code in nismanager.c (TASKS 72d) calls these;
+// nothing here takes a snapshot.
+
+World *pCurrentWorld;
+
+static void snapshot_unreached_72d(const char *f)
+{
+    fprintf(stderr, "%s reached\n", f);
+    exit(3);
+}
+
+void ReplaySnapshot_MoveData(ReplaySnapshot *s, void *p, int32_t stored,
+                             int32_t size, int32_t is_signed)
+{
+    (void)s; (void)p; (void)stored; (void)size; (void)is_signed;
+    snapshot_unreached_72d("ReplaySnapshot_MoveData");
+}
+
+void ReplaySnapshot_BeginSection(ReplaySnapshot *s, void *object,
+                                 const char *name)
+{
+    (void)s; (void)object; (void)name;
+    snapshot_unreached_72d("ReplaySnapshot_BeginSection");
+}
+
+void ReplaySnapshot_EndSection(ReplaySnapshot *s)
+{
+    (void)s;
+    snapshot_unreached_72d("ReplaySnapshot_EndSection");
+}
+
+void world_do_pointer_snapshot(const World *w, struct ReplaySnapshot *s,
+                               struct Car **pp)
+{
+    (void)w; (void)s; (void)pp;
+    snapshot_unreached_72d("world_do_pointer_snapshot");
 }

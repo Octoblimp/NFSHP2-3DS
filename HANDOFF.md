@@ -25659,3 +25659,70 @@ left from 72b are fixed too. The CIA builds.
 2. Then 72e to 72h, one at a time.
 3. When 72h is committed, the launch checklist the user asked for,
    published, before TASKS 73.
+
+## Session 123 -- TASKS 72d-1: the race's own snapshots
+
+72d is split in two. 72d-1 is every DoSnapshot that World's and
+RaceCoordinator's call, apart from the cars (72b), the drivers (72c) and
+the cops (72e). 72d-2 is World's and RaceCoordinator's own. Nothing calls
+these in a race yet; 72f's ReplayManager will.
+
+### What is ported
+
+Each is beside its class, from retail, at retail's address:
+
+- RideInfo (`0x00188518`), DriverInfo (`0x00188690`) and
+  RaceParameters (`0x001ed6f8`) in `raceparams.c`; cPlayerSettings
+  (`0x001ee030`) in `playersettings.c`.
+- WorldTimeDoSnapshot (`0x001a36c0`) in `realtime.c`, and
+  JoystickDoSnapshot (`0x001544f8`) in `joyevent.c`.
+- SnapshotCameraShakers (`0x001564d0`) and tShaker's (`0x00156220`) in
+  `shake.c`.
+- NisManager (`0x001b11f8`) in `nismanager.c`. A restore that leaves a
+  NIS playing loads and starts it through the NIS player's seams, which
+  the game does not set yet.
+- TrafficCar (`0x00167a60`, its table's slot 24), TrafficTeleporter
+  (`0x00222780`) and tTrackGraph (`0x0024e318`).
+- RacingCar (`0x00146c90`) and Race (`0x001477d0`) in `racecore.c`.
+- Player (`0x00175db0`) in the new `playersnap.c`, apart from player.c
+  as carsnap.c is from car.c.
+
+Not ported: AnimatedDriver (`0x001a9770`), whose class has no port.
+
+`docs/formats/replay.md` is new: every 72d-1 snapshot's moves in order,
+and the checker. The class pages point to it.
+
+### The checker
+
+`tools/racesnap_check.py` with `tools/src/racesnap_test.c`, on
+carsnap_check's model like aisnap_check. Retail's code runs in
+RetailEmu beside the port's; both take, restore over other values,
+checksum, verify, and verify again after a change.
+GetCharacterInfo, the NIS player's four calls and SetInputMode print a
+line on both sides. `--stubs` regenerates `racesnap_stubs.c` (72
+functions) and `racesnap_stubdata.c` (25 data symbols).
+
+- 5785 script lines, 21743 lines, 0 differ.
+- 87 mutations, 87 caught. Player's are whole statements, since
+  playersnap.c's lines end in offset comments.
+
+### Checkers re-run
+
+The 23 checkers that link a changed file pass again: 0 differ, and
+joyhid's key check passes.
+Twelve harnesses gained stand-ins that print "reached" and exit, for
+the snapshot calls their files now make: eventrace, fredevent,
+raceevent, hudanim, hudfeatures, hudrender, player, realtime, mainloop,
+shake, nis and trafficcar.
+
+### Next
+
+1. 72d-2: World::DoSnapshot (`0x0014a910`) and
+   RaceCoordinator::DoSnapshot (`0x001498f0`). Between them they call
+   72d-1's snapshots, the cars', Smokeable's and VirginSmokeable's, and
+   the cops' and the chopper's, which are 72e's (seams until then). A
+   restore resets the shakers. Then a checker, racesnap_check being
+   the model.
+2. Then 72e to 72h, one at a time.
+3. When 72h is committed, the launch checklist the user asked for,
+   published, before TASKS 73.

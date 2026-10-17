@@ -43,12 +43,14 @@ run it compiles `racerun.h` with devkitARM and asserts
 | `0x00146b90` | `TimeAroundTrackTable::GetTimeAroundTrack(float)`, 32 bytes |
 | `0x00146bb0` | `RacingCar::Init(Car *)`, 212 bytes (8d) |
 | `0x00146c88` | `RacingCar::UnInit`, `jr ra` |
+| `0x00146c90` | `RacingCar::DoSnapshot` (72d, [replay](replay.md)) |
 | `0x00146e08` | `RacingCar::FakeStartlineCrossing`, 76 bytes (8d) |
 | `0x00146e58` | `RacingCar::CheckBoundaryCrossing(BoundaryCrossingInfo *, float, float)`, 372 bytes (8d) |
 | `0x00146fd0` | `RacingCar::UpdateLapCounts`, 1064 bytes (8d) |
 | `0x001475b8` | `RacingCar::GetPlayer`, 24 bytes (8d) |
 | `0x001475e8` | `Race::Race`, 244 bytes |
 | `0x001476e0` | `Race::~Race`, 236 bytes |
+| `0x001477d0` | `Race::DoSnapshot` (72d, [replay](replay.md)) |
 | `0x00147960` | `Race::Init(eRaceStage)`, 148 bytes (8d) |
 | `0x001479f8` | `Race::AddBoundaryPosition(char *, bVector2 *, float)`, 292 bytes |
 | `0x00147b20` | `Race::FigureOutBoundaries`, 568 bytes |

@@ -63,4 +63,11 @@ void player_settings_reset_to_defaults(cPlayerSettings *s);
 // The byte at gp-23172, 1 on the disc: ResetToDefaults' POV under SkipFE.
 extern uint8_t PlayerSkipFEPOVIndex;
 
+// cPlayerSettings::DoSnapshot, 0x001ee030, section "cPlayerSettings"
+// (TASKS 72d): DrivingStyle, TransmissionType and PreferredGender, each a
+// signed byte. RaceParameters' snapshot takes both players'.
+struct ReplaySnapshot;
+void player_settings_do_snapshot(cPlayerSettings *ps,
+                                 struct ReplaySnapshot *s);
+
 #endif

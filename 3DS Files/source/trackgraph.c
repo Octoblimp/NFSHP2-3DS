@@ -9,6 +9,7 @@
 #include "copmanager.h"
 #include "copmgr.h"
 #include "coputil.h"
+#include "replay.h"
 #include "trackpath.h"
 #include "vtable.h"
 
@@ -451,4 +452,13 @@ void trackgraph_install_vtables(void)
 {
     vt_install(TTRACKGRAPH_VTABLE, trackgraph_vt,
                (int)(sizeof trackgraph_vt / sizeof trackgraph_vt[0]));
+}
+
+void trackgraph_do_snapshot(tTrackGraph *g, ReplaySnapshot *s)
+{
+    int32_t i;
+    ReplaySnapshot_MoveBool(s, &g->bHasCloakedEdge, 1);
+    for (i = 0; i < g->nNumEdges; i++)
+        if (g->Edge[i].bCloakable != 0)
+            ReplaySnapshot_MoveBool(s, &g->Edge[i].bIsCloaked, 1);
 }

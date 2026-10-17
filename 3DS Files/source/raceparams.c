@@ -7,8 +7,10 @@
 
 #include "bmath.h"
 #include "cartypeinfo.h"
+#include "characterinfo.h"
 #include "configitems.h"
 #include "playersettings.h"
+#include "replay.h"
 
 DriverInfo DriverInfoTable[RACE_PARAMETERS_MAX_DRIVERS];   // retail 0x0031abb0
 
@@ -227,4 +229,87 @@ int32_t race_parameters_is_free_run(const RaceParameters *rp)
 {
     return rp->RaceType == RACE_TYPE_SINGLE_RACE && rp->NumLapsInRace == 0
         && rp->BeACop == 0;
+}
+
+// ------------------------------------------------------------ the replay's
+
+void ride_info_do_snapshot(RideInfo *r, ReplaySnapshot *s)
+{
+    ReplaySnapshot_BeginNamedSection(s, "RideInfo");
+    ReplaySnapshot_MoveData(s, &r->Type, 1, -1, 0);
+    ReplaySnapshot_MoveChar(s, &r->SkinNumber, 1);
+    ReplaySnapshot_MoveChar(s, &r->HasDash, 1);
+    ReplaySnapshot_EndSection(s);
+}
+
+void driver_info_do_snapshot(DriverInfo *d, ReplaySnapshot *s)
+{
+    // Retail's order, which is its offsets': the rank at 0, then the
+    // number, the skill and the start at 1, 3 and 4. The character's
+    // number (retail's 2) comes after the ride.
+    ReplaySnapshot_BeginNamedSection(s, "DriverInfo");
+    ReplaySnapshot_MoveChar(s, &d->EliminatedRank, 1);
+    ReplaySnapshot_MoveChar(s, &d->UniqueDriverNumber, 1);
+    ReplaySnapshot_MoveChar(s, &d->SkillLevel, 1);
+    ReplaySnapshot_MoveChar(s, &d->StartingPosition, 1);
+    ReplaySnapshot_MoveData(s, &d->TheDriverType, 1, -1, 0);
+    ride_info_do_snapshot(&d->CurrentRideInfo, s);
+    ReplaySnapshot_MoveChar(s, &d->CharacterNumber, 1);
+    if (d->CharacterNumber != -1 && s->RestoringSnapshotFlag)
+        d->pCharacterInfo = get_character_info(d->CharacterNumber);
+    ReplaySnapshot_EndSection(s);
+}
+
+void race_parameters_do_snapshot(RaceParameters *rp, ReplaySnapshot *s)
+{
+    int32_t i;
+
+    ReplaySnapshot_BeginNamedSection(s, "RaceParameters");
+    ReplaySnapshot_MoveInt(s, &rp->TrackNumber, 1);
+    ReplaySnapshot_MoveData(s, &rp->TrackWeather, 1, -1, 0);
+    ReplaySnapshot_MoveData(s, &rp->TrackTimeOfDay, 1, -1, 0);
+    ReplaySnapshot_MoveData(s, &rp->TrackDirection, 1, -1, 0);
+    ReplaySnapshot_MoveFloat(s, &rp->TrafficDensity);
+    ReplaySnapshot_MoveFloat(s, &rp->TrafficOncoming);
+    ReplaySnapshot_MoveData(s, &rp->RaceType, 1, -1, 0);
+    ReplaySnapshot_MoveTimer(s, (int32_t *)&rp->TimeTrialTime.PackedTime);
+    ReplaySnapshot_MoveInt(s, &rp->Point2Point, 1);
+    ReplaySnapshot_MoveInt(s, &rp->NumLapsInRace, 1);
+    ReplaySnapshot_MoveInt(s, &rp->NumPlayerCars, 1);
+    ReplaySnapshot_MoveInt(s, &rp->NumAICars, 1);
+    ReplaySnapshot_MoveData(s, &rp->OpponentSelect, 1, -1, 0);
+    ReplaySnapshot_MoveChar(s, &rp->PlayerStartPosition[0], 1);
+    ReplaySnapshot_MoveChar(s, &rp->PlayerStartPosition[1], 1);
+    ReplaySnapshot_MoveBool(s, &rp->DamageEnabled, 1);
+    // The demo moved JumpCamsEnabled and ZoneCamsEnabled here, as bools;
+    // retail moves the display settings' two bytes in their place.
+    ReplaySnapshot_MoveChar(s, &rp->GlobalDisplaySettings.JumpCams, 1);
+    ReplaySnapshot_MoveChar(s, &rp->GlobalDisplaySettings.ZoneCams, 1);
+    ReplaySnapshot_MoveBool(s, &rp->TrainingLinesEnabled, 1);
+    // TrafficOncoming's first byte again, as the demo's does too.
+    ReplaySnapshot_MoveData(s, &rp->TrafficOncoming, 1, -1, 0);
+    ReplaySnapshot_MoveBool(s, &rp->HasObjective, 1);
+    ReplaySnapshot_MoveData(s, &rp->NFSRaceMode, 1, -1, 0);
+    ReplaySnapshot_MoveInt(s, &rp->nMaxCops, 1);
+    ReplaySnapshot_MoveInt(s, &rp->bTickets, 1);
+    ReplaySnapshot_MoveInt(s, &rp->bRoadBlocks, 1);
+    ReplaySnapshot_MoveInt(s, &rp->bSpikeStrips, 1);
+    ReplaySnapshot_MoveInt(s, &rp->bHelicopter, 1);
+    ReplaySnapshot_MoveInt(s, &rp->New624, 1);
+    ReplaySnapshot_MoveInt(s, &rp->BeACop, 1);
+    ReplaySnapshot_MoveInt(s, &rp->BeACopResetTimerAfterArrest, 1);
+    ReplaySnapshot_MoveInt(s, &rp->nNumTicketsBeforeArrest, 1);
+    ReplaySnapshot_MoveInt(s, &rp->nNumBeACopRoadBlocks, 1);
+    ReplaySnapshot_MoveInt(s, &rp->nNumBeACopChoppers, 1);
+    ReplaySnapshot_MoveData(s, &rp->CopStrength, 1, -1, 0);
+    player_settings_do_snapshot(&rp->PlayerSettings[0], s);
+    player_settings_do_snapshot(&rp->PlayerSettings[1], s);
+    ReplaySnapshot_MoveData(s, &rp->OpponentStrength, 1, -1, 0);
+    ReplaySnapshot_MoveInt(s, &rp->Boost, 1);
+    ReplaySnapshot_MoveFloat(s, &rp->BoostScale[0]);
+    ReplaySnapshot_MoveFloat(s, &rp->BoostScale[1]);
+    ReplaySnapshot_MoveInt(s, &rp->NumDriverInfo, 4);
+    for (i = 0; i < rp->NumDriverInfo; i++)
+        driver_info_do_snapshot(&rp->pDriverInfoTable[i], s);
+    ReplaySnapshot_EndSection(s);
 }

@@ -26,8 +26,8 @@
 //     AddJoyHandler(int, JoyEvent, ...)      -> (0x00151230, a bare `j` to
 //                                                the other; not ported)
 //
-// Not ported: JoystickDoSnapshot (0x001514b0), which needs ReplaySnapshot,
-// and PrintAllRegisteredJoyHandlers (0x00151538), which walks both lists
+// JoystickDoSnapshot (the demo's 0x001514b0) is the replay's, TASKS 72d.
+// Not ported: PrintAllRegisteredJoyHandlers (0x00151538), which walks both lists
 // and prints nothing on the retail build.
 //
 // See docs/formats/joystick.md. Cross-checked by tools/joystick_check.py.
@@ -311,6 +311,12 @@ void TestJoystick(void);
 // 0x00151418 / 0x00151480.
 void InitJoystick(void);
 void CloseJoystick(void);
+
+// JoystickDoSnapshot, retail 0x001544f8 (the demo's 0x001514b0), section
+// "Joystick": both ports' CurrentJoystickTypes, the two bytes as they
+// are. ReplayManager::HandleSnapshot takes it after bRepeat's.
+struct ReplaySnapshot;
+void JoystickDoSnapshot(struct ReplaySnapshot *s);
 
 // 0x001514f8. "JOY_EVENT_MISSING_NAME!" for an event the table does not
 // name: three, and the code reader's sixteen.

@@ -8,6 +8,8 @@
 #include "emodel.h"
 #include "nisinfo.h"
 #include "realtime.h"
+#include "replay.h"
+#include "world.h"
 
 bNode NisManagerList = { &NisManagerList, &NisManagerList };
 
@@ -107,6 +109,17 @@ void nismanager_delete(NisManager *m)
     nismanager_destruct(m, 3);
 }
 
+// 0x001b16e0: Load when the NIS is not the loaded one, then
+// EnsureNisIsLoaded. Start and a restored snapshot call it.
+static void nismanager_load_if_needed(NisManager *m)
+{
+    if (m->LoadedNisNumber != m->NisNumber) {
+        if (gNisManagerLoadFn != NULL)
+            gNisManagerLoadFn(m, m->NisNumber);
+        nismanager_ensure_nis_is_loaded(m);
+    }
+}
+
 void nismanager_start(NisManager *m, int32_t nis, int32_t camera,
                       struct Car *player, struct Car *other)
 {
@@ -123,12 +136,7 @@ void nismanager_start(NisManager *m, int32_t nis, int32_t camera,
     m->EndTime = (int32_t)((uint32_t)WorldTimeFrames
                            + ((uint32_t)frames << 1));
 
-    // 0x001b16e0.
-    if (m->LoadedNisNumber != m->NisNumber) {
-        if (gNisManagerLoadFn != NULL)
-            gNisManagerLoadFn(m, m->NisNumber);
-        nismanager_ensure_nis_is_loaded(m);
-    }
+    nismanager_load_if_needed(m);
     if (gNisSetupCarsBeforeNisFn != NULL)
         gNisSetupCarsBeforeNisFn(m);
     if (gNisStartAnimatingFn != NULL)
@@ -184,4 +192,26 @@ void nismanager_ensure_nis_is_loaded(NisManager *m)
             break;
         gNisServiceResourceLoadingFn();
     }
+}
+
+void nismanager_do_snapshot(NisManager *m, ReplaySnapshot *s)
+{
+    ReplaySnapshot_BeginNamedSection(s, "NisManager");
+    if (s->RestoringSnapshotFlag && gNisStopAnimatingFn != NULL)
+        gNisStopAnimatingFn(m);
+    ReplaySnapshot_MoveInt(s, &m->StartTime, 4);
+    ReplaySnapshot_MoveInt(s, &m->EndTime, 4);
+    ReplaySnapshot_MoveInt(s, &m->NisNumber, 4);
+    world_do_pointer_snapshot(pCurrentWorld, s, &m->PlayerCar);
+    world_do_pointer_snapshot(pCurrentWorld, s, &m->OtherCar);
+    ReplaySnapshot_MoveInt(s, &m->Playing, 1);
+    ReplaySnapshot_MoveInt(s, &m->CamNumber, 1);
+    ReplaySnapshot_MoveData(s, &m->OtherCarMovementModeBeforeNIS, 1, -1, 0);
+    ReplaySnapshot_MoveData(s, &m->PlayerCarMovementModeBeforeNIS, 1, -1, 0);
+    if (s->RestoringSnapshotFlag && m->Playing != 0) {
+        nismanager_load_if_needed(m);
+        if (gNisStartAnimatingFn != NULL)
+            gNisStartAnimatingFn(m);
+    }
+    ReplaySnapshot_EndSection(s);
 }

@@ -1,7 +1,7 @@
 # TrafficCar
 
-`TrafficCar.obj` (0x00167a08 .. 0x00168098), all of it but `DoSnapshot`
-(0x00167a60), which waits on the replay with every other class's. This is
+`TrafficCar.obj` (0x00167a08 .. 0x00168098), all of it. `DoSnapshot`
+(0x00167a60) came with the replay ([replay.md](replay.md), TASKS 72d). This is
 step 11h-1, the first of the traffic: a traffic car's mover. TrafficDriver
 (11h-2) drives it, and TrafficTeleporter (11h-3) places it.
 
@@ -54,7 +54,7 @@ The mdebug record's names.
 |-----:|-------|
 | 8 | the destructor, 0x00168088 |
 | 16 | Move, 0x00167af8 |
-| 24 | DoSnapshot, 0x00167a60 (not ported: a NULL entry, which `vt_slot` aborts on) |
+| 24 | DoSnapshot, 0x00167a60 (`trafficcar_do_snapshot`) |
 
 ## The tuning
 

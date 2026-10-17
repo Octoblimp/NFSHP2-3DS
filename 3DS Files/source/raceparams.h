@@ -98,4 +98,31 @@ int32_t race_parameters_get_location_index(const RaceParameters *rp);
 // IsFreeRun, 0x001ee390: a single race of no laps, not Be A Cop.
 int32_t race_parameters_is_free_run(const RaceParameters *rp);
 
+// ------------------------------------------------------------ the replay's
+//
+// TASKS 72d. ReplayManager::HandleSnapshot takes the race's setup first,
+// and DemoModeReplay::RestoreRaceParametersSnapshot restores it alone.
+
+struct ReplaySnapshot;
+
+// RideInfo::DoSnapshot, 0x00188518, section "RideInfo": the type's first
+// byte, as it is, then the skin and HasDash as signed bytes.
+void ride_info_do_snapshot(RideInfo *r, struct ReplaySnapshot *s);
+
+// DriverInfo::DoSnapshot, 0x00188690, section "DriverInfo", in retail's
+// layout's order: the rank, the number, the skill and the start position
+// as signed bytes, the driver type's first byte, the ride, then the
+// character's number. A restore with a character (not -1) looks its
+// CharacterInfo up again.
+void driver_info_do_snapshot(DriverInfo *d, struct ReplaySnapshot *s);
+
+// RaceParameters::DoSnapshot, 0x001ed6f8, section "RaceParameters". Most
+// words go as one byte -- the ints signed, the enums and OpponentSelect,
+// CopStrength and OpponentStrength as their first byte -- the two floats
+// and the four player-settings bytes whole, then both player settings,
+// the catchup, NumDriverInfo in four bytes and that many drivers. See
+// docs/formats/replay.md for the list.
+void race_parameters_do_snapshot(RaceParameters *rp,
+                                 struct ReplaySnapshot *s);
+
 #endif

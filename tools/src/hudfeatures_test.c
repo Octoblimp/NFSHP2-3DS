@@ -33,6 +33,7 @@
 #include "camerainfo.h"
 #include "car.h"
 #include "cartypeinfo.h"
+#include "characterinfo.h"
 #include "configitems.h"
 #include "copmanager.h"
 #include "drivecam.h"
@@ -787,4 +788,28 @@ int main(int argc, char **argv)
     }
     fclose(f);
     return 0;
+}
+
+// ----------------------------------------------- the snapshots, unreached
+// raceparams.c's replay snapshots (TASKS 72d) call these; nothing here
+// takes a snapshot.
+
+static void snapshot_unreached_72d(const char *f)
+{
+    fprintf(stderr, "%s reached\n", f);
+    exit(3);
+}
+
+void player_settings_do_snapshot(cPlayerSettings *ps,
+                                 struct ReplaySnapshot *s)
+{
+    (void)ps; (void)s;
+    snapshot_unreached_72d("player_settings_do_snapshot");
+}
+
+CharacterInfo *get_character_info(int32_t i)
+{
+    (void)i;
+    snapshot_unreached_72d("get_character_info");
+    return NULL;
 }

@@ -10,6 +10,7 @@
 #include "car.h"
 #include "eefpu.h"
 #include "realtime.h"   // WorldTimer
+#include "replay.h"
 #include "track.h"
 #include "trackpath.h"
 #include "trackroute.h"
@@ -370,4 +371,69 @@ int race_grace_period_is_active(const Race *r, const struct Car *car)
     return (float)(int32_t)((uint32_t)WorldTimer - r->StartTime.PackedTime)
                * 0.000250000012f
            <= grace;
+}
+
+// ------------------------------------------------------------ the replay's
+
+// A Timer `i` slots on from `first`, as the image addresses it: the
+// finish line's number is not checked, so -1 or 5 lands on the field
+// before or after the array.
+static int32_t *timer_at(Timer *first, int i)
+{
+    return (int32_t *)((unsigned char *)first + 4 * i);
+}
+
+void racing_car_do_snapshot(struct RacingCar *rc, ReplaySnapshot *s)
+{
+    ReplaySnapshot_BeginNamedSection(s, "RacingCar");
+    ReplaySnapshot_MoveShort(s, &rc->CurrentBoundaryRegion, 2);
+    ReplaySnapshot_MoveShort(s, &rc->HighestBoundaryRegion, 2);
+    ReplaySnapshot_MoveChar(s, &rc->CurrentLapNumber, 1);
+    ReplaySnapshot_MoveChar(s, &rc->NumLapsCompleted, 1);
+    ReplaySnapshot_MoveChar(s, &rc->RacePosition, 1);
+    ReplaySnapshot_MoveChar(s, &rc->PreviousRacePosition, 1);
+    ReplaySnapshot_MoveChar(s, &rc->FinishingOrder, 1);
+    ReplaySnapshot_MoveChar(s, &rc->CrossedFinishLine, 1);
+    ReplaySnapshot_MoveChar(s, &rc->CompletedNewLap, 1);
+    ReplaySnapshot_MoveShort(s, &rc->NumLapsLed, 2);
+    ReplaySnapshot_MoveShort(s, &rc->FinishReason, 2);
+    ReplaySnapshot_MoveFloat(s, &rc->CurrentLapNumberExact);
+    ReplaySnapshot_MoveFloat(s, &rc->dCurrentLapNumberExact);
+    ReplaySnapshot_MoveFloat(s, &rc->PreviousDistanceAroundTrack);
+    ReplaySnapshot_MoveFloat(s, &rc->FinishedLapNumberExact);
+    if (TheRaceParameters.RaceType == RACE_TYPE_TIME_TRIAL) {
+        ReplaySnapshot_MoveTimer(s, timer_at(rc->BoundaryCrossingTimes, 0));
+        ReplaySnapshot_MoveTimer(s, timer_at(rc->BoundaryCrossingTimes,
+                                    pCurrentRace->FinishLineBoundaryNumber));
+        ReplaySnapshot_MoveTimer(s, timer_at(rc->RunningTimes,
+                                    pCurrentRace->FinishLineBoundaryNumber));
+    }
+    ReplaySnapshot_EndNamedSection(s);
+}
+
+void race_do_snapshot(Race *r, ReplaySnapshot *s)
+{
+    int32_t i;
+
+    ReplaySnapshot_BeginNamedSection(s, "Race");
+    ReplaySnapshot_MoveData(s, &r->RaceStage, 1, -1, 0);
+    ReplaySnapshot_MoveInt(s, &r->StartGoTimeFrames, 4);
+    ReplaySnapshot_MoveInt(s, &r->StartCountdownTimeFrames, 4);
+    ReplaySnapshot_MoveTimer(s, (int32_t *)&r->StartTime.PackedTime);
+    ReplaySnapshot_MoveTimer(s, (int32_t *)&r->RaceTime.PackedTime);
+    ReplaySnapshot_VerifyInt(s, &r->NumRacingCars, 1);
+    ReplaySnapshot_MoveInt(s, &r->NumRacingCarsFinished, 1);
+    ReplaySnapshot_MoveBool(s, &r->DetectedOneCarRemaining, 1);
+    for (i = 0; i < r->NumRacingCars; i++) {
+        int8_t index;
+
+        racing_car_do_snapshot(&r->RacingCarTable[i], s);
+        // The image divides the byte offset by 192 with a multiply; the
+        // record is wider on a 64-bit host, so this counts records.
+        index = (int8_t)(r->pRacingCars[i] - r->RacingCarTable);
+        ReplaySnapshot_MoveChar(s, &index, 1);
+        r->pRacingCars[i] = &r->RacingCarTable[index];
+    }
+    ReplaySnapshot_VerifyInt(s, &r->NumLapsInRace, 1);
+    ReplaySnapshot_EndSection(s);
 }

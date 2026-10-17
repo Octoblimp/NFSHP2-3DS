@@ -15,6 +15,7 @@
 #include "player.h"
 #include "race.h"
 #include "realtime.h"
+#include "replay.h"
 #include "trackpath.h"
 #include "trackroute.h"
 #include "vtable.h"
@@ -385,4 +386,12 @@ void traffic_teleporter_switch_skin(TrafficTeleporter *t, Car *c)
 
     if (skin != c->pRideInfo->SkinNumber)
         car_switch_skin(c, (uint32_t)skin);
+}
+
+void traffic_teleporter_do_snapshot(TrafficTeleporter *t, ReplaySnapshot *s)
+{
+    ReplaySnapshot_BeginNamedSection(s, "TrafficTeleporter");
+    ReplaySnapshot_MoveFloat(s, &t->TimeUntilTeleport);
+    ReplaySnapshot_MoveUInt(s, (uint32_t *)&t->LastCar, 4);
+    ReplaySnapshot_EndSection(s);
 }

@@ -20,16 +20,19 @@
 #include "bmem.h"
 #include "car.h"
 #include "cartypeinfo.h"
+#include "characterinfo.h"
 #include "configitems.h"
 #include "copmanager.h"
 #include "eventtree.h"
 #include "fred.h"
 #include "fredend.h"
 #include "fredrace.h"
+#include "playersettings.h"
 #include "raceevent.h"
 #include "raceinit.h"
 #include "raceparams.h"
 #include "racesplit.h"
+#include "replay.h"
 #include "timer.h"
 
 #define NCARS 4
@@ -506,4 +509,48 @@ int main(int argc, char **argv)
     }
     fclose(sc);
     return 0;
+}
+
+// ----------------------------------------------- the snapshots, unreached
+// raceparams.c's replay snapshots (TASKS 72d) call these; nothing here
+// takes a snapshot.
+
+static void snapshot_unreached_72d(const char *f)
+{
+    fprintf(stderr, "%s reached\n", f);
+    exit(3);
+}
+
+void ReplaySnapshot_MoveData(ReplaySnapshot *s, void *p, int32_t stored,
+                             int32_t size, int32_t is_signed)
+{
+    (void)s; (void)p; (void)stored; (void)size; (void)is_signed;
+    snapshot_unreached_72d("ReplaySnapshot_MoveData");
+}
+
+void ReplaySnapshot_BeginSection(ReplaySnapshot *s, void *object,
+                                 const char *name)
+{
+    (void)s; (void)object; (void)name;
+    snapshot_unreached_72d("ReplaySnapshot_BeginSection");
+}
+
+void ReplaySnapshot_EndSection(ReplaySnapshot *s)
+{
+    (void)s;
+    snapshot_unreached_72d("ReplaySnapshot_EndSection");
+}
+
+void player_settings_do_snapshot(cPlayerSettings *ps,
+                                 struct ReplaySnapshot *s)
+{
+    (void)ps; (void)s;
+    snapshot_unreached_72d("player_settings_do_snapshot");
+}
+
+CharacterInfo *get_character_info(int32_t i)
+{
+    (void)i;
+    snapshot_unreached_72d("get_character_info");
+    return NULL;
 }

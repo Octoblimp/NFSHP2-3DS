@@ -11,6 +11,7 @@
 #include "carstate.h"
 #include "cartypeinfo.h"
 #include "eefpu.h"
+#include "replay.h"
 #include "vtable.h"
 
 // ------------------------------------------------------------ the tuning
@@ -240,12 +241,23 @@ static float vt_TrafficCar_Move(void *self, float dt)
     return trafficcar_move((TrafficCar *)self, dt);
 }
 
-// DoSnapshot is not ported yet; see trafficcar.h.
+void trafficcar_do_snapshot(TrafficCar *m, ReplaySnapshot *s)
+{
+    ReplaySnapshot_BeginNamedSection(s, "TrafficCar");
+    ReplaySnapshot_MoveData(s, &m->Position, 8, -1, 0);
+    ReplaySnapshot_MoveFloat(s, &m->Angle);
+    ReplaySnapshot_MoveFloat(s, &m->Speed);
+    ReplaySnapshot_MoveFloat(s, &m->Pitch);
+    ReplaySnapshot_MoveFloat(s, &m->Roll);
+    carmover_do_snapshot(&m->Mover, s);
+    ReplaySnapshot_EndSection(s);
+}
+
 static const VtEntry trafficcar_vt[TRAFFICCAR_VT_ENTRIES] = {
     { 0, 0, NULL },
     { 0, 0, (VtFn)vt_TrafficCar_dtor },     //  8  0x00168088
     { 0, 0, (VtFn)vt_TrafficCar_Move },     // 16  0x00167af8
-    { 0, 0, NULL },                         // 24  0x00167a60
+    { 0, 0, (VtFn)trafficcar_do_snapshot }, // 24  0x00167a60
 };
 
 void trafficcar_install_vtables(void)

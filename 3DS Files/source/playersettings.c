@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "playercam.h"
+#include "replay.h"
 
 uint8_t PlayerSkipFEPOVIndex = 1;                  // gp-23172
 
@@ -28,4 +29,13 @@ void player_settings_reset_to_defaults(cPlayerSettings *s)
     s->New40 = 1;
     s->BestTotalTimeRecord.PackedTime = 0;
     s->BestLapTimeRecord.PackedTime = 0;
+}
+
+void player_settings_do_snapshot(cPlayerSettings *ps, ReplaySnapshot *s)
+{
+    ReplaySnapshot_BeginNamedSection(s, "cPlayerSettings");
+    ReplaySnapshot_MoveChar(s, &ps->DrivingStyle, 1);
+    ReplaySnapshot_MoveChar(s, &ps->TransmissionType, 1);
+    ReplaySnapshot_MoveChar(s, &ps->PreferredGender, 1);
+    ReplaySnapshot_EndSection(s);
 }

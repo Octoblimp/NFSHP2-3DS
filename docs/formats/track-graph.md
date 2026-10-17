@@ -14,10 +14,11 @@ Cross-checked by `tools/trackgraph_check.py` against
 `tools/src/trackgraph_test.c`, with the retail image (SLES_507.31) running
 in mipsemu as the oracle.
 
+DoSnapshot (0x0024e318) is the replay's ([replay.md](replay.md), TASKS
+72d), checked by `tools/racesnap_check.py`.
+
 Not ported:
 
-- DoSnapshot (0x0024e318), which waits on the replay with every other
-  class's.
 - DebugDump (0x0024e810). Its two loops per vertex only count down, because
   its prints are compiled out.
 

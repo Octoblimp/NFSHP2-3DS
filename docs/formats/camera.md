@@ -606,8 +606,9 @@ demo's are 180, 32 and 76), and the reset and the `tShaker` constructor
 made out of line. Nothing else changed.
 
 **Not ported**: the rumble (`tRumbler`, `PortRumble` and its seven
-envelopes), and the replay's `SnapshotCameraShakers` (`0x001564d0`) and
-`tShaker::DoSnapshot` (`0x00156220`). Two calls wait:
+envelopes). The replay's `SnapshotCameraShakers` (`0x001564d0`) and
+`tShaker::DoSnapshot` (`0x00156220`) are TASKS 72d's
+([replay.md](replay.md)). Two calls wait:
 
 - The World constructor's reset waits for World's retail pass.
   `world_init` is still the demo's (`world_check` runs the demo's image),

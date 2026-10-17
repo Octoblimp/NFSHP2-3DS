@@ -5,6 +5,7 @@
 #include "bticker.h"
 #include "eefpu.h"
 #include "joylog.h"
+#include "replay.h"
 #include "timer.h"
 
 int32_t FrameCounter;
@@ -195,4 +196,21 @@ void AdvanceWorldTime(void)
     WorldTimeElapsed = 0.0f;
     WorldLoopCounter = (int32_t)((uint32_t)WorldLoopCounter + 1u);
     WorldTimeSeconds = (float)WorldTimer * REALTIME_SECS_PER_TICK;
+}
+
+// The world clock's words in retail's order, which is not theirs in
+// memory: the ticks as they are, the seconds, the loop count, the frames,
+// then WorldTime. The step is only verified; what is left of a frame is
+// moved.
+void WorldTimeDoSnapshot(ReplaySnapshot *s)
+{
+    ReplaySnapshot_BeginNamedSection(s, "WorldTime");
+    ReplaySnapshot_MoveData(s, &WorldTimer, 4, -1, 0);
+    ReplaySnapshot_MoveFloat(s, &WorldTimeSeconds);
+    ReplaySnapshot_MoveInt(s, &WorldLoopCounter, 4);
+    ReplaySnapshot_MoveInt(s, &WorldTimeFrames, 4);
+    ReplaySnapshot_MoveInt(s, &WorldTime, 4);
+    ReplaySnapshot_VerifyFloat(s, &WorldTimeElapsed);
+    ReplaySnapshot_MoveFloat(s, &WorldTimeElapsedFrame);
+    ReplaySnapshot_EndNamedSection(s);
 }

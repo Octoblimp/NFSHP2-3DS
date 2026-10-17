@@ -4104,11 +4104,24 @@ phases.
           0 differ; 140 of 140 mutations caught. It found RealDriver's
           Port restored signed where retail's is unsigned. The 49
           checkers that link the changed files pass again.
-        - [ ] 72d. The world and the race: World, Race, RaceCoordinator,
-          RacingCar, Player, RaceParameters, cPlayerSettings, RideInfo,
-          DriverInfo, WorldTime, the joystick, the camera shakers,
-          NisManager, AnimatedDriver, TrafficCar, TrafficTeleporter,
-          Smokeable, VirginSmokeable and tTrackGraph.
+        - [ ] 72d. The world and the race, in two:
+          - [x] 72d-1. What World and RaceCoordinator call: Race,
+            RacingCar, Player, RaceParameters, cPlayerSettings, RideInfo,
+            DriverInfo, WorldTime, the joystick, the camera shakers,
+            NisManager, TrafficCar, TrafficTeleporter and tTrackGraph.
+            **Done in Session 123:** all of them from retail, beside each
+            class; Player's is the new `playersnap.c`. AnimatedDriver is
+            not ported, so its snapshot is not either. The NIS player's
+            seams are not set, so a restored NIS does not load or start.
+            `racesnap_check` runs retail's beside the port's: 21743
+            lines, 0 differ; 87 of 87 mutations caught. The 23 checkers
+            that link the changed files pass again.
+            docs/formats/replay.md lists every move.
+          - [ ] 72d-2. `World::DoSnapshot` (0x0014a910) and
+            `RaceCoordinator::DoSnapshot` (0x001498f0). Between them
+            they call the above, the cars', Smokeable's and
+            VirginSmokeable's. A restore resets the camera shakers. The
+            cops' and the chopper's are 72e's.
         - [ ] 72e. The cops: tCopManager, tPursuit, the roadblock's state
           machine, tPlayerCop, tAICop, the spike strips, DroppedSpikes,
           Rocket and Chopper.
