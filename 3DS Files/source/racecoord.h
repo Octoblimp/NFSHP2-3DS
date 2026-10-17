@@ -270,4 +270,12 @@ extern void (*gSound3dOneshotResetFn)(void);
 extern void (*gEndGameScreensDestroyFn)(struct EndGameScreens *s,
                                         int32_t flags);
 
+// RaceCoordinator::DoSnapshot, retail's 0x001498f0, in worldsnap.c (TASKS
+// 72d-2), section "RaceCoordinator": pCurrentWorld's snapshot,
+// pCurrentRace's, then each of PlayerPlayersByIndex's. The coordinator
+// itself has nothing in it.
+struct ReplaySnapshot;
+void racecoordinator_do_snapshot(RaceCoordinator *rc,
+                                 struct ReplaySnapshot *s);
+
 #endif

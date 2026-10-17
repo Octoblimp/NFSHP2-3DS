@@ -43,6 +43,7 @@
 #include "car.h"
 #include "carinit.h"
 #include "cartypeinfo.h"
+#include "characterinfo.h"
 #include "collision.h"
 #include "collisionbody.h"
 #include "copmanager.h"
@@ -339,6 +340,30 @@ static uint8_t        dummy[256];
 // The animators bMalloc handed out, in order.
 static void          *allocs[MAX_ALLOCS];
 static int            numAllocs;
+
+// ----------------------------------------------- the snapshots, unreached
+// raceparams.c's replay snapshots (TASKS 72d) call these; nothing here
+// takes a snapshot.
+
+static void snapshot_unreached_72d(const char *f)
+{
+    fprintf(stderr, "%s reached\n", f);
+    exit(3);
+}
+
+void player_settings_do_snapshot(cPlayerSettings *ps,
+                                 struct ReplaySnapshot *s)
+{
+    (void)ps; (void)s;
+    snapshot_unreached_72d("player_settings_do_snapshot");
+}
+
+CharacterInfo *get_character_info(int32_t i)
+{
+    (void)i;
+    snapshot_unreached_72d("get_character_info");
+    return NULL;
+}
 
 // --------------------------------------------------------- number parsing
 

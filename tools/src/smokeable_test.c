@@ -1016,6 +1016,20 @@ float staticcollisionbody_get_friction(CollisionBody *b)
 int32_t collisionbody_is_blinking(CollisionBody *b)
 { (void)b; DUMMY("cb is_blinking"); return 0; }
 
+// The replay's DoSnapshots, slot 16 of the two tables (smokesnap.c, TASKS
+// 72d-2, checked by tools/worldsnap_check.py): named in the tables' dumps,
+// never called here.
+static void snapshot_unreached(const char *f)
+{
+    fprintf(stderr, "%s reached\n", f);
+    exit(3);
+}
+
+void smokeable_do_snapshot(CollisionBody *b, struct ReplaySnapshot *s)
+{ (void)b; (void)s; snapshot_unreached("smokeable_do_snapshot"); }
+void virginsmokeable_do_snapshot(CollisionBody *b, struct ReplaySnapshot *s)
+{ (void)b; (void)s; snapshot_unreached("virginsmokeable_do_snapshot"); }
+
 // The tables' functions by the names the model gives retail's.
 static const struct {
     VtFn        fn;
@@ -1058,6 +1072,7 @@ static const struct {
     FN(staticcollisionbody_change_in_energy),
     FN(staticcollisionbody_get_bounciness),
     FN(staticcollisionbody_get_friction), FN(collisionbody_is_blinking),
+    FN(smokeable_do_snapshot), FN(virginsmokeable_do_snapshot),
 #undef FN
 };
 

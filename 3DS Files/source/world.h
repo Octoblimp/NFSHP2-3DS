@@ -236,6 +236,32 @@ void world_do_pointer_snapshot(const World *w, struct ReplaySnapshot *s,
 void world_do_car_pointer_snapshot(const World *w, struct Car **pp,
                                    struct ReplaySnapshot *s);
 
+// World::DoSnapshot, retail's 0x0014d148, in worldsnap.c (TASKS 72d-2),
+// section "World": the seed, the pause and the time scale (its callback
+// as four raw bytes), the players' positions and DATs, and the two IDs.
+// A restore then flushes the clans, kills WorldEffects' effects, flushes
+// the fern shakers, sets bResetGlare and resets the camera shakers. Then
+// the clock's snapshot, the teleporter's and the track graph's (each when
+// there is one), every car's, the cops' and the chopper's; on a restore
+// every witness eliminated; then the smokeables' and the three
+// SnapshotEverythings.
+void world_do_snapshot(World *w, struct ReplaySnapshot *s);
+
+// SnapshotCops, 0x00227cd8: the cop manager's snapshot when there is one.
+void snapshot_cops(struct ReplaySnapshot *s);
+
+// World's snapshot reaches these, which the port does not have yet; a
+// NULL one is skipped. FlushClans (0x001ab650) and FlushFernShakers
+// (0x001da1b0) on a restore; tCopManager::DoSnapshot (0x00223b70) and
+// Chopper::DoSnapshot (0x001e7d08), which are TASKS 72e.
+struct tCopManager;
+extern void (*gFlushClansFn)(void);
+extern void (*gFlushFernShakersFn)(void);
+extern void (*gCopManagerDoSnapshotFn)(struct tCopManager *m,
+                                       struct ReplaySnapshot *s);
+extern void (*gChopperDoSnapshotFn)(struct Chopper *h,
+                                    struct ReplaySnapshot *s);
+
 // 0x0014adc8, CarListCheckFlip: nonzero when a may stay in front of b on
 // CarList, which DoTimestep sorts by it -- a's x no greater than b's.
 int32_t world_car_list_check_flip(const struct Car *a, const struct Car *b);

@@ -25717,12 +25717,90 @@ shake, nis and trafficcar.
 
 ### Next
 
-1. 72d-2: World::DoSnapshot (`0x0014a910`) and
+1. 72d-2: World::DoSnapshot (`0x0014d148`) and
    RaceCoordinator::DoSnapshot (`0x001498f0`). Between them they call
    72d-1's snapshots, the cars', Smokeable's and VirginSmokeable's, and
    the cops' and the chopper's, which are 72e's (seams until then). A
    restore resets the shakers. Then a checker, racesnap_check being
    the model.
 2. Then 72e to 72h, one at a time.
+3. When 72h is committed, the launch checklist the user asked for,
+   published, before TASKS 73.
+
+## Session 123, continued -- TASKS 72d-2: the world's and the coordinator's snapshots
+
+72d-2 finishes 72d: World's and RaceCoordinator's DoSnapshots, and what
+they call that 72d-1 left, the smokeables and the collision bodies.
+Still nothing calls them in a race; 72f's ReplayManager will.
+
+### What is ported
+
+From retail, at retail's address:
+
+- `worldsnap.c` (new): RaceCoordinator::DoSnapshot (`0x001498f0`),
+  World::DoSnapshot (`0x0014d148`; the demo's is `0x0014a910`, which
+  the docs had named before) and SnapshotCops (`0x00227cd8`).
+- `smokesnap.c` (new): SnapshotAllSmokeables (`0x0021fb30`),
+  Smokeable::DoSnapshot (`0x002208a0`) and VirginSmokeable's
+  (`0x00220128`), now in slot 16 of both of smokeable.c's tables.
+- `bodysnap.c` (new): the three SnapshotEverythings, the track polygons'
+  bodies' (`0x001d8980`), every body's (`0x001d6e70`) and the
+  witnesses' (`0x001d6208`).
+- `munition.c`: Munition's, DroppedBomb's and SmokeBomb's tables hold
+  Smokeable's DoSnapshot in slot 16, as retail's do. DroppedSpikes' and
+  Rocket's have their own (`0x001bef90`, `0x001bf910`), 72e's, NULL
+  until then.
+
+Seams in world.h, skipped while NULL: `gFlushClansFn` and
+`gFlushFernShakersFn` (neither class is ported), and
+`gCopManagerDoSnapshotFn` and `gChopperDoSnapshotFn`, which 72e binds.
+
+`docs/formats/replay.md` has every move, in a 72d-2 section; the world,
+race-coordinator, smokeable, munitions and collision-body pages point to
+it. collision-body.md still said the bodies' DoSnapshots were empty,
+from before 72b; that is fixed.
+
+### The checker
+
+`tools/worldsnap_check.py` with `tools/src/worldsnap_test.c`, on
+carsnap_check's model like racesnap_check. The nine functions run real
+on both sides; everything else they reach prints a line on both sides
+(the other snapshots, the flushes, the pools, the constructors, the
+lookups, and the bodies' tables through a recording table whose slot
+208 answers GetSmokeType). `--stubs` regenerates `worldsnap_stubdata.c`
+(19 data symbols); no functions need stubbing, so `worldsnap_stubs.c` is
+only the typedef.
+
+- 1752 script lines, 5631 lines, 0 differ.
+- 88 mutations, 88 caught. One first try, a blinking word's width, was
+  equivalent (only the low byte is ever read) and became two real ones.
+- A source check holds smokeable.c's two tables to the new snapshots.
+
+It confirmed two things about retail: CreateSmokeable gets the ID
+zero-extended, and the witnesses' IDs come back sign-extended (int 2).
+
+### Checkers re-run
+
+The 121 checkers that link a changed file pass again: 0 differ.
+`smokeable_test.c` gained stand-ins for the two new DoSnapshots that
+print "reached" and exit, and `smokeable_check.py` now compares retail's
+two against the port's names. munition_check found that the munitions'
+tables hold Smokeable's DoSnapshot, which is how `munition.c` got it.
+
+Three of them had not linked since before this slice: hudcop and
+hudscore lacked stand-ins for raceparams.c's 72d-1 snapshot calls
+(`player_settings_do_snapshot`, `get_character_info`), hudcop also
+`PlayerNetLocal`, and raceover the text box's calls in flailerwrap.c
+(`flailer_find_object`, the object's width and height). Each harness
+gained stand-ins that print "reached" and exit; all three are 0 differ.
+
+### Next
+
+1. 72e: the cops. tCopManager::DoSnapshot (`0x00223b70`) and
+   Chopper::DoSnapshot (`0x001e7d08`), bound to world.h's seams in
+   main.c; tPursuit, the roadblock's state machine, tPlayerCop
+   (`0x0022d7e8`), tAICop and the spike strips; DroppedSpikes' and
+   Rocket's DoSnapshots in munition.c's NULL slots. Then a checker.
+2. Then 72f to 72h, one at a time.
 3. When 72h is committed, the launch checklist the user asked for,
    published, before TASKS 73.

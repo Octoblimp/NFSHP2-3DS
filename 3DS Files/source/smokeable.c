@@ -1287,11 +1287,11 @@ static void virginsmokeable_vt_destroy(void *self, int32_t flags)
 #define PURE { 0, 0, NULL }
 
 // _vt$9Smokeable (0x002bcb10). Every entry's delta is 0. DoSnapshot is
-// the replay's, which is not ported.
+// the replay's, in smokesnap.c.
 static const VtEntry smokeable_vt[SMOKEABLE_VT_ENTRIES] = {
     PURE,
     E(smokeable_vt_destroy),
-    PURE,                                           // DoSnapshot
+    E(smokeable_do_snapshot),
     E(smokeable_get_position),
     E(smokeable_get_velocity),
     E(smokeable_get_rotation),
@@ -1332,7 +1332,7 @@ static VtEntry smokeable_system_vt[SMOKEABLE_SYSTEM_VT_ENTRIES] = {
 static const VtEntry virginsmokeable_vt[COLLISIONBODY_VT_ENTRIES] = {
     PURE,
     E(virginsmokeable_vt_destroy),
-    PURE,                                           // DoSnapshot
+    E(virginsmokeable_do_snapshot),
     E(virginsmokeable_get_position),
     E(staticcollisionbody_get_velocity),
     E(staticcollisionbody_get_rotation),

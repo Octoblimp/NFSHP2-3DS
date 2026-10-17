@@ -12,7 +12,9 @@ states, `NONE` through `RACE_IN_PROGRESS`, with the countdown and the
 finish (see "The states up to the finish", below). Step 8g ports `PAUSE`
 and `POSTRACE` (see "The pause and the post-race"). The two replays and
 the two demos are later slices, and their table entries stay NULL until
-then.
+then. The coordinator's DoSnapshot (0x001498f0), which takes the world's,
+the race's and the players', came with TASKS 72d-2 in `worldsnap.c`; see
+[replay.md](replay.md).
 
 The port is `3DS Files/source/racecoord.c`/`racecoord.h`. Everything there
 is retail's. `race.c` adds `TheRaceParameters.NumAICars`.

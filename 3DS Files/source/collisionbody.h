@@ -28,8 +28,8 @@
 // in carcollisionbody.c because it needs car.h -- and the fourteenth and
 // fifteenth, in contact.c: the witness's TestForContact and its collision,
 // and Contact whole. The bodies' and the witness's DoSnapshots are
-// retail's (TASKS 72b); the witness's SnapshotEverything is the replay's
-// and not here yet.
+// retail's (TASKS 72b), and the three SnapshotEverythings are too, in
+// bodysnap.c (TASKS 72d-2).
 //
 // Every record is the image's layout on the handheld. On a 64-bit host the
 // pointers widen, and the asserts below allow for it: CB_AT(T, f, n, k) is
@@ -1115,6 +1115,26 @@ void cbwitness_begin_collision(CollisionBodyWitness *w, bVector3 *pt);
 // has a Collision; if so a restore begins one (at no point) and the
 // Collision's own snapshot follows.
 void cbwitness_do_snapshot(CollisionBodyWitness *w, struct ReplaySnapshot *s);
+
+// The three SnapshotEverythings World's DoSnapshot ends with, in bodysnap.c
+// (TASKS 72d-2).
+//
+// TrackPolygonCollisionBody's, 0x001d8980, section
+// "AllTrackPolygonCollisionBodies": the count checked, then each track
+// polygon's body as its polygon's index in TheTopologyTree's table and its
+// ID, both unsigned shorts, and its own snapshot; 0xffff ends the list. A
+// restore makes each body again from the pool.
+void trackpolygoncollisionbody_snapshot_everything(struct ReplaySnapshot *s);
+
+// CollisionBody's, 0x001d6e70, section "AllCollisionBodies": every body's
+// ID checked, in list order.
+void collisionbody_snapshot_everything(struct ReplaySnapshot *s);
+
+// CollisionBodyWitness's, 0x001d6208, section "AllCollisionBodyWitnesses":
+// the count, then each witness as its two bodies' IDs in two bytes each
+// and its own snapshot. A restore finds the bodies and makes each witness
+// again.
+void cbwitness_snapshot_everything(struct ReplaySnapshot *s);
 
 // 0x001cc058. VClip on the two bodies where they are now; PrintThisTime
 // cleared. Overlapping: two dynamic bodies one of which blinks only stamp

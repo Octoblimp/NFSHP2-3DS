@@ -4104,7 +4104,7 @@ phases.
           0 differ; 140 of 140 mutations caught. It found RealDriver's
           Port restored signed where retail's is unsigned. The 49
           checkers that link the changed files pass again.
-        - [ ] 72d. The world and the race, in two:
+        - [x] 72d. The world and the race, in two:
           - [x] 72d-1. What World and RaceCoordinator call: Race,
             RacingCar, Player, RaceParameters, cPlayerSettings, RideInfo,
             DriverInfo, WorldTime, the joystick, the camera shakers,
@@ -4117,11 +4117,22 @@ phases.
             lines, 0 differ; 87 of 87 mutations caught. The 23 checkers
             that link the changed files pass again.
             docs/formats/replay.md lists every move.
-          - [ ] 72d-2. `World::DoSnapshot` (0x0014a910) and
+          - [x] 72d-2. `World::DoSnapshot` (0x0014d148) and
             `RaceCoordinator::DoSnapshot` (0x001498f0). Between them
             they call the above, the cars', Smokeable's and
             VirginSmokeable's. A restore resets the camera shakers. The
             cops' and the chopper's are 72e's.
+            **Done in Session 123:** both from retail in `worldsnap.c`,
+            with SnapshotCops; SnapshotAllSmokeables and Smokeable's and
+            VirginSmokeable's DoSnapshots in `smokesnap.c`; the three
+            SnapshotEverythings (the track polygons' bodies, every body,
+            the witnesses) in `bodysnap.c`. The cops', the chopper's,
+            the clans' and the fern shakers' are seams until 72e or
+            their classes. Munition, DroppedBomb and SmokeBomb have
+            Smokeable's in slot 16. `worldsnap_check` runs retail's
+            beside the port's: 5631 lines, 0 differ; 88 of 88 mutations
+            caught. The 121 checkers that link the changed files pass
+            again.
         - [ ] 72e. The cops: tCopManager, tPursuit, the roadblock's state
           machine, tPlayerCop, tAICop, the spike strips, DroppedSpikes,
           Rocket and Chopper.

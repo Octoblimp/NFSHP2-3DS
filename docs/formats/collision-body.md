@@ -64,9 +64,13 @@ Contact and sorts it with E's code:
 0x001cb4f0 .. 0x001cb57c holds more copies of the inline destructor and
 delete, and three thunks, none of them named. The port has one of each.
 
-The DoSnapshot and SnapshotEverything methods belong to the replay, which
-the port does not have. Their table slots are left empty, Dynamic's
-DoSnapshot (0x001cc950) and the car's (0x001cd950) with them.
+The DoSnapshot and SnapshotEverything methods belong to the replay
+(TASKS 72): the bodies' DoSnapshots, Dynamic's (0x001cc950) and the
+car's (0x001cd950) among them, are in `collisionbody.c` and
+`carsnap.c` since 72b, and the three SnapshotEverythings (Track
+polygon bodies', 0x001d8980; every body's, 0x001d6e70; the witnesses',
+0x001d6208) in `bodysnap.c` since 72d-2. See
+[replay.md](replay.md).
 
 | Address | Function |
 |---|---|
@@ -1103,10 +1107,10 @@ Dynamic's table leaves these slots pure:
 - 168: IsMoveable;
 - 192, 200: GetBounciness, GetFriction.
 
-Its DoSnapshot is filled in the image and empty in the port.
+Its DoSnapshot is ported (TASKS 72b).
 
-The car's table fills its own slots at 8, 16 (DoSnapshot, empty in the
-port), 24 .. 40, 64, 112 .. 168 and 184 .. 200.
+The car's table fills its own slots at 8, 16 (DoSnapshot), 24 .. 40,
+64, 112 .. 168 and 184 .. 200.
 
 ## The static initialiser and destructor
 

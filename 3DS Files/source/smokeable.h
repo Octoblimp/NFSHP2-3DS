@@ -354,4 +354,27 @@ extern int32_t (*gSmokeableBreakFn)(Smokeable *s,
 // every 128 world steps. A NULL seam is skipped.
 extern void (*gDeleteFarAwaySmokeableCollisionBodiesFn)(void);
 
+// ------------------------------------------------------------ the replay's
+//
+// TASKS 72d-2, in smokesnap.c.
+
+struct ReplaySnapshot;
+
+// VirginSmokeable::DoSnapshot, 0x00220128, slot 16: a section named
+// "VirginSmokeable" around StaticCollisionBody's.
+void virginsmokeable_do_snapshot(CollisionBody *b, struct ReplaySnapshot *s);
+
+// Smokeable::DoSnapshot, 0x002208a0, slot 16, section "Smokeable":
+// DynamicCollisionBody's; Awake and Blinking in a byte each; the info's
+// NameHash checked; the two strengths, the three timers and GroundRaise;
+// the spawner as its index in a short; the rigid body's snapshot; the
+// position brought up to date when taking or restoring; the box checked.
+void smokeable_do_snapshot(CollisionBody *b, struct ReplaySnapshot *s);
+
+// SnapshotAllSmokeables, 0x0021fb30, section "AllSmokeables", which
+// World's calls: AwakeSmokeablesCount, then the virgins and the other
+// smokeables, each list ended by -1. A restore deletes every smokeable
+// body and makes each again before its own snapshot.
+void snapshot_all_smokeables(struct ReplaySnapshot *s);
+
 #endif

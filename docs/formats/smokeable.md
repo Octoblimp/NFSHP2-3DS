@@ -11,6 +11,7 @@ and the base class of the helicopter's munitions.
 | its PhysicsSystem's table, 4 slots | 0x002bcaf0 | the same |
 | VirginSmokeable's table | 0x002bcbf0 | the same |
 | `SmokeableCreators[4]` | 0x0031c1e0 | `smokeable.c` |
+| the replay's snapshots | 0x0021fb30, 0x00220128, 0x002208a0 | `smokesnap.c` |
 
 Before this the chunk slot that loads them (27, chunks 0x34026 and
 0x34027) was unported, so a race had no breakable objects. The scenery
@@ -100,6 +101,14 @@ are scaled by the barricade.
 - `gBarricadeDeleteBarrelFn` deletes a barrel by id (0x0021ef88). It
   deletes nothing if the id is no longer one of that info's.
 - `gBarricadeMarkBodyFadingFn` is SetBlinking.
+
+## The replay
+
+TASKS 72d-2 ported SnapshotAllSmokeables (0x0021fb30) and the two
+DoSnapshots in slot 16, Smokeable's (0x002208a0) and VirginSmokeable's
+(0x00220128), in `smokesnap.c`. What each moves is in
+[replay.md](replay.md); `tools/worldsnap_check.py` runs them against
+retail.
 
 ## Where the port differs from the image
 

@@ -30,7 +30,9 @@ oracle. `bslotpool_check` checks the bPNode pool and `track_check`
 GetVectorOnTrack. DoPointerSnapshot (the demo's 0x0014ad20, retail's
 0x0014d550) came with the replay, TASKS 72c: a car goes as its
 DriverNumber in one byte, -1 for none, and a restore looks it up again.
-DoSnapshot (0x0014a910) is TASKS 72d's.
+DoSnapshot (the demo's 0x0014a910, retail's 0x0014d148) came with TASKS
+72d-2, in `worldsnap.c`, with RaceCoordinator's; see
+[replay.md](replay.md).
 
 ## The record
 

@@ -798,12 +798,13 @@ static void rocket_vt_destroy(void *self, int32_t flags)
 #define PURE { 0, 0, NULL }
 
 // Smokeable's table with Munition::Backup at 72 and the class's own
-// destructor, Move, ConsiderImpulse, ApplyImpulse, GetSmokeType and
-// OnLifetimeEnd. DoSnapshot is the replay's, not ported.
-#define MUNITION_VT(dtor, move, consider, apply, smoke, life) {             \
+// destructor, DoSnapshot, Move, ConsiderImpulse, ApplyImpulse, GetSmokeType
+// and OnLifetimeEnd. DoSnapshot is Smokeable's (smokesnap.c) but for
+// DroppedSpikes' and Rocket's own, which are not ported yet (NULL).
+#define MUNITION_VT(dtor, snap, move, consider, apply, smoke, life) {       \
     PURE,                                                                   \
     E(dtor),                                                                \
-    PURE,                                                                   \
+    E(snap),                                                                \
     E(smokeable_get_position),                                              \
     E(smokeable_get_velocity),                                              \
     E(smokeable_get_rotation),                                              \
@@ -833,31 +834,32 @@ static void rocket_vt_destroy(void *self, int32_t flags)
 
 // _vt$8Munition (0x002b7120).
 static const VtEntry munition_vt[SMOKEABLE_VT_ENTRIES] =
-    MUNITION_VT(munition_vt_destroy, smokeable_move,
+    MUNITION_VT(munition_vt_destroy, smokeable_do_snapshot, smokeable_move,
                 smokeable_consider_impulse, smokeable_apply_impulse,
                 smokeable_get_smoke_type, smokeable_on_lifetime_end);
 
 // _vt$11DroppedBomb (0x002b7020).
 static const VtEntry droppedbomb_vt[SMOKEABLE_VT_ENTRIES] =
-    MUNITION_VT(droppedbomb_vt_destroy, droppedbomb_move,
+    MUNITION_VT(droppedbomb_vt_destroy, smokeable_do_snapshot,
+                droppedbomb_move,
                 smokeable_consider_impulse, smokeable_apply_impulse,
                 smokeable_get_smoke_type, smokeable_on_lifetime_end);
 
 // _vt$9SmokeBomb (0x002b6f20).
 static const VtEntry smokebomb_vt[SMOKEABLE_VT_ENTRIES] =
-    MUNITION_VT(smokebomb_vt_destroy, smokebomb_move,
+    MUNITION_VT(smokebomb_vt_destroy, smokeable_do_snapshot, smokebomb_move,
                 smokeable_consider_impulse, smokeable_apply_impulse,
                 smokebomb_get_smoke_type, smokebomb_on_lifetime_end);
 
 // _vt$13DroppedSpikes (0x002b6e20).
 static const VtEntry droppedspikes_vt[SMOKEABLE_VT_ENTRIES] =
-    MUNITION_VT(droppedspikes_vt_destroy, droppedspikes_move,
+    MUNITION_VT(droppedspikes_vt_destroy, NULL, droppedspikes_move,
                 droppedspikes_consider_impulse, droppedspikes_apply_impulse,
                 droppedspikes_get_smoke_type, droppedspikes_on_lifetime_end);
 
 // _vt$6Rocket (0x002b6d20).
 static const VtEntry rocket_vt[SMOKEABLE_VT_ENTRIES] =
-    MUNITION_VT(rocket_vt_destroy, rocket_move, rocket_consider_impulse,
+    MUNITION_VT(rocket_vt_destroy, NULL, rocket_move, rocket_consider_impulse,
                 rocket_apply_impulse, rocket_get_smoke_type,
                 rocket_on_lifetime_end);
 

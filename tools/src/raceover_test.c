@@ -175,6 +175,36 @@ struct FlailerObjectChunk *flailer_find_object_by_group(
     return NULL;
 }
 
+// RenderTextIntoRectangle's (flailerwrap.c, the Pre Race Blurb's text
+// box) reach these; nothing here calls it.
+static void textbox_unreached(const char *f)
+{
+    fprintf(stderr, "%s reached\n", f);
+    exit(3);
+}
+
+struct FlailerObjectChunk *flailer_find_object(uint32_t screen,
+                                               uint32_t object, int32_t type)
+{
+    (void)screen; (void)object; (void)type;
+    textbox_unreached("flailer_find_object");
+    return NULL;
+}
+
+int32_t flailerobject_get_width(struct FlailerObjectChunk *o)
+{
+    (void)o;
+    textbox_unreached("flailerobject_get_width");
+    return 0;
+}
+
+int32_t flailerobject_get_height(struct FlailerObjectChunk *o)
+{
+    (void)o;
+    textbox_unreached("flailerobject_get_height");
+    return 0;
+}
+
 void flailerobject_set_visibility(struct FlailerObjectChunk *o, int32_t v)
 {
     printf("  vis #%d %d\n", chunk_index(o), v);

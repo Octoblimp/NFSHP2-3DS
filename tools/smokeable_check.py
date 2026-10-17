@@ -248,7 +248,10 @@ def port_name(mangled):
     """`Method__<n>Class...` as the port names it: class_method."""
     if mangled is None or mangled.startswith("_$_"):
         return "local"
-    if mangled.startswith("DoSnapshot__"):
+    # The replay's: Smokeable's and VirginSmokeable's are ported (TASKS
+    # 72d-2), the munitions' not yet.
+    if mangled.startswith("DoSnapshot__") and not mangled.startswith(
+            ("DoSnapshot__9Smokeable", "DoSnapshot__15VirginSmokeable")):
         return "-"
     m = re.match(r"^(\w+?)__(\d+)(\w+)$", mangled)
     if m is None:

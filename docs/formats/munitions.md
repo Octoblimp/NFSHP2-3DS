@@ -171,6 +171,10 @@ chase above.
   - Player::RequestZone;
   - the cop manager's AddSpikeStrip;
   - the replay's interesting event.
+- Slot 16, DoSnapshot: Munition's, DroppedBomb's and SmokeBomb's tables
+  hold Smokeable's (TASKS 72d-2, [replay.md](replay.md)). DroppedSpikes'
+  (0x001bef90) and Rocket's (0x001bf910) own are TASKS 72e's and NULL
+  until then.
 - Retail's Fly calls the handler's DoTimestep unguarded. The port's
   `munition_effects_do_timestep` does nothing when there is no handler.
 - Rocket::Move passes the velocity it wrote through GetVelocity's pointer
