@@ -3511,8 +3511,12 @@ phases.
           The flicker the user saw (a stale LOADING left eye every other
           blank) was two top-screen swaps a frame, fixed in
           `__wrap_C3D_FrameEnd`.
-        - Left: 59b, the sun, flares, sprites and screen quads at their
-          depth; 59c, the movies; the cost and the look on a real 3DS.
+        - 59b done, 2026-10-16: the effects' sprites and the sun take the
+          eye's shift for their depth (georender's `screen_for_depth`).
+          In Azahar the chimney smoke sits at +10 like its chimney (0
+          before). The sun was behind trees or a hill in every test, so
+          its shift is not measured.
+        - Left: 59c, the movies; the cost and the look on a real 3DS.
 60. [ ] **The car's particle effects (Car::TriggerEffect).** Found on
         2026-10-13 with TASKS 51a. `gCarTriggerEffectFn` is never set, so
         `Car::TriggerEffect` (`0x0011e2b8`) is skipped: a broken light,

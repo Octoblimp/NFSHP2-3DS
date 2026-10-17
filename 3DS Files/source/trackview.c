@@ -2686,7 +2686,9 @@ static void render_epoly(ePoly* p, TextureInfo* info, int flags)
     }
     // Every fragment of a screen quad has the one depth, where its Z says.
     depth = depth_of_gs_z((float)ee_trunc_w(p->Vertices[0].z));
-    drawn = georender_draw_quad(q, &gt, blend, depth);
+    // In 3D the sun and its glare are at the far plane, the glare round the
+    // sun in both eyes.
+    drawn = georender_draw_quad(q, &gt, blend, depth, p->SunPoly != 0);
     if (!drawn) {
         v->sunQuadsFailed++;
         return;
@@ -3558,7 +3560,7 @@ static void display_rvms(TrackView* v)
         q[i].st[1]  = kT[i];
         memset(q[i].colour, 0x80, 4);
     }
-    georender_draw_quad(q, &gt, GEO_BLEND_ALPHA, -1.0f);
+    georender_draw_quad(q, &gt, GEO_BLEND_ALPHA, -1.0f, false);
 }
 
 void trackview_draw(TrackView* v)

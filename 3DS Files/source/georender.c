@@ -60,8 +60,9 @@ static C3D_Mtx s_modelView;
 // The stereo 3D copies of geosolid and geolit, DVLEs 2 and 3 (Makefile):
 // the same uniforms in the same registers, and the eye's term, `stereo`,
 // in two more that nothing else sets. While s_stereo the world's batches
-// and strips draw through them; the screen quads and the sprites never
-// do, so they stay on the screen's plane (stereo3d.h).
+// and strips draw through them, and so do the sprites and the sun's quads,
+// each at its view's depth (screen_for_depth). The other screen quads
+// never do, so they stay on the screen's plane (stereo3d.h).
 static shaderProgram_s s_stProgram;
 static shaderProgram_s s_stLitProgram;
 static int             s_uStereo = -1;
@@ -1424,15 +1425,45 @@ void georender_quads_rewind(void)
     s_numSprites    = 0;
 }
 
+// The view's depth at the PICA's depth z, as the perspective maps it:
+// d = near far / (near + z (far - near)), 1 at the near plane and 0 at
+// the far.
+static float view_depth_of(float z)
+{
+    return s_fogNear * s_fogFar / (s_fogNear + z * (s_fogFar - s_fogNear));
+}
+
+// A screen's mapping `m` made one for a position (x d, y d, d), d a view's
+// depth: its third column moved to the fourth's place and nothing left in
+// the fourth, as georender_draw_hud_quad_w has it. The position comes out
+// as d times what (x, y, 0, 1) gave, which the divide by d puts at (x, y),
+// and its w is d, so the stereo shaders' term shifts it by the eye's
+// amount for d (docs/formats/stereo-3d.md).
+static void screen_for_depth(C3D_Mtx* m)
+{
+    int i;
+
+    for (i = 0; i < 4; i++) {
+        m->r[i].z = m->r[i].w;
+        m->r[i].w = 0.0f;
+    }
+}
+
+// `eyeDepth`, with 3D on: the view's depth whose eye's shift the quad
+// takes; 0 for the screen's plane.
 static bool draw_screen_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
                              const C3D_Mtx* screen, uint8_t blend,
-                             bool alphaTest, float depth, bool sourceAlpha)
+                             bool alphaTest, float depth, bool sourceAlpha,
+                             float eyeDepth)
 {
     GeoRenderVertex* dst;
     C3D_BufInfo*     buf;
     C3D_TexEnv*      env;
+    C3D_Mtx          atDepth;
     // The fog's row: a constant, the near plane's unless `depth` says.
     float            fog[4] = { 0.0f, 0.0f, 0.0f, fog_s(1.0f) };
+    bool             stereo = s_stereo && eyeDepth > 0.0f;
+    int              i;
 
     if (!s_ready || !s_quads || s_numQuads >= GEO_QUAD_RING || !gt
         || !gt->tex) {
@@ -1443,8 +1474,18 @@ static bool draw_screen_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
     run_forget();
     dst = &s_quads[s_numQuads * 4];
     memcpy(dst, v, 4u * sizeof *dst);
+    if (stereo) {
+        for (i = 0; i < 4; i++) {
+            dst[i].pos[0] *= eyeDepth;
+            dst[i].pos[1] *= eyeDepth;
+            dst[i].pos[2]  = eyeDepth;
+        }
+        atDepth = *screen;
+        screen_for_depth(&atDepth);
+        screen = &atDepth;
+    }
 
-    C3D_BindProgram(&s_program);
+    C3D_BindProgram(stereo ? &s_stProgram : &s_program);
     C3D_SetAttrInfo(&s_attr);
     buf = C3D_GetBufInfo();
     BufInfo_Init(buf);
@@ -1503,10 +1544,10 @@ static bool draw_screen_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
 }
 
 bool georender_draw_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
-                         uint8_t blend, float depth)
+                         uint8_t blend, float depth, bool atHorizon)
 {
     return draw_screen_quad(v, gt, &s_screen, blend, !gt->pass.noAlphaTest,
-                            depth, false);
+                            depth, false, atHorizon ? s_fogFar : 0.0f);
 }
 
 bool georender_draw_hud_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
@@ -1523,7 +1564,7 @@ bool georender_draw_hud_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
     }
     Mtx_OrthoTilt(&screen, 0.0f, width, height, 0.0f, 1.0f, -1.0f, true);
     return draw_screen_quad(v, gt, &screen, GEO_BLEND_ALPHA, false, -1.0f,
-                            false);
+                            false, 0.0f);
 }
 
 bool georender_draw_hud_quad_w(const GeoRenderVertex v[4],
@@ -1546,7 +1587,8 @@ bool georender_draw_hud_quad_w(const GeoRenderVertex v[4],
         screen.r[i].z = screen.r[i].w;
         screen.r[i].w = 0.0f;
     }
-    return draw_screen_quad(v, gt, &screen, blend, alphaTest, -1.0f, false);
+    return draw_screen_quad(v, gt, &screen, blend, alphaTest, -1.0f, false,
+                            0.0f);
 }
 
 bool georender_draw_mirror_quad(const GeoRenderVertex v[4],
@@ -1561,7 +1603,8 @@ bool georender_draw_mirror_quad(const GeoRenderVertex v[4],
     // A texture's rows are its own, not a screen's turned on its side.
     Mtx_Ortho(&screen, 0.0f, (float)s_mirrorW, (float)s_mirrorH, 0.0f, 1.0f,
               -1.0f, false);
-    return draw_screen_quad(v, gt, &screen, blend, false, -1.0f, sourceAlpha);
+    return draw_screen_quad(v, gt, &screen, blend, false, -1.0f, sourceAlpha,
+                            0.0f);
 }
 
 // ------------------------------------------------------------- the strips
@@ -1650,6 +1693,8 @@ bool georender_draw_sprites(const GeoRenderVertex* v, int n,
     GeoRenderVertex* dst;
     C3D_BufInfo*     buf;
     C3D_TexEnv*      env;
+    C3D_Mtx          atDepth;
+    const C3D_Mtx*   screen = &s_spriteScreen;
     float            fog[4] = { 0.0f, 0.0f, 0.0f, fog_s(1.0f) };
     int              first = s_numSprites * 6;
     int              i;
@@ -1670,7 +1715,28 @@ bool georender_draw_sprites(const GeoRenderVertex* v, int n,
         dst[5] = v[3];
     }
 
-    C3D_BindProgram(&s_program);
+    // In 3D each corner is (x d, y d, d), d the view's depth at its z, so
+    // the eye's term shifts it for its depth (screen_for_depth). The z row
+    // gives the depth back: -z d = near (d - far) / (far - near).
+    if (s_stereo) {
+        dst = &s_sprites[first];
+        for (i = 0; i < n * 6; i++) {
+            float d = view_depth_of(dst[i].pos[2]);
+
+            dst[i].pos[0] *= d;
+            dst[i].pos[1] *= d;
+            dst[i].pos[2]  = d;
+        }
+        atDepth = s_screen;
+        screen_for_depth(&atDepth);
+        atDepth.r[2].x = 0.0f;
+        atDepth.r[2].y = 0.0f;
+        atDepth.r[2].z = s_fogNear / (s_fogFar - s_fogNear);
+        atDepth.r[2].w = -s_fogNear * s_fogFar / (s_fogFar - s_fogNear);
+        screen = &atDepth;
+    }
+
+    C3D_BindProgram(s_stereo ? &s_stProgram : &s_program);
     C3D_SetAttrInfo(&s_attr);
     buf = C3D_GetBufInfo();
     BufInfo_Init(buf);
@@ -1678,8 +1744,8 @@ bool georender_draw_sprites(const GeoRenderVertex* v, int n,
 
     // The vertex colour and nothing else, as the screen quads have it.
     set_unlit();
-    set_model(s_uMvp, s_uFogModel, s_uLightModel, &s_spriteScreen,
-              &s_identity, fog, NULL);
+    set_model(s_uMvp, s_uFogModel, s_uLightModel, screen, &s_identity, fog,
+              NULL);
     c3d_unif_set(s_uUvScale, gt->uvScale[0], gt->uvScale[1], 0.0f, 1.0f);
     // No fog: unit 1 keeps all of the colour for the draw.
     if (s_fog != NULL && s_noFogTex.data) {

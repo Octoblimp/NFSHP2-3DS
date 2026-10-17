@@ -14,8 +14,9 @@
 // room for the right eye's colour and no more. Each eye's lists start
 // with its target and its term, which the world's shaders add to each
 // vertex (georender_set_stereo): the eye's shift, the most at the horizon
-// and none at the convergence, where the player's car is. The HUD, the
-// mirror and the screen quads stay on the screen's plane.
+// and none at the convergence, where the player's car is. The effects'
+// sprites take it for their depth and the sun for the far plane; the HUD
+// and the mirror stay on the screen's plane.
 //
 // A frame is drawn for two eyes only when its lists are sent in parts
 // (hangwatch.h's sends: the clears have to go between them), so never in

@@ -25086,8 +25086,28 @@ anywhere else". See docs/formats/stereo-3d.md.
     No stale eye in seven shots, and the game logs 30 FPS.
   - The pause, slider 0 and the boot flow's 32 shots differ by 0.00.
 
+### 59b done
+
+- **The sprites and the sun** are in the screen's pixels, with a clip w
+  of 1, so the eye's term had no depth to work on. In 3D each vertex now
+  goes as (x d, y d, d), and `screen_for_depth` moves the mapping's third
+  column to the fourth, so the w is d.
+  - A sprite's d comes from its PICA depth, `view_depth_of`. Its z row
+    gives the same depth back, so the depth test is unchanged.
+  - The sun's quads take the far plane (`georender_draw_quad`'s new
+    `atHorizon`, `p->SunPoly` in `render_epoly`), so the glare stays
+    round the sun. The mirror's quad passes false.
+  - The light flares were strips already (`render_epoly_3d`).
+- **Checked in Azahar** (track 12, gas): the chimneys' smoke at +10,
+  like the chimneys and the roof; the song box at 0. The sun drew (4
+  quads, none failed) but was behind trees or a hill in every test
+  (track 12, then track 31 with gas and left, through a temporary
+  `TrackSelectedInConfigFile 31` on Azahar's card, restored). So its
+  shift is not measured.
+- `run_azahar_race.ps1 -HoldKeys 65,70` through `powershell -File`
+  reads one key, 6570. Call the script with `&` and `@(65,70)` instead.
+
 ### Next
 
-1. 59b: the sun, flares, sprites and screen quads at their depth.
-2. 59c: the movies in 3D.
-3. Replays (TASKS 72), then the known bugs and the verdict again.
+1. 59c: the movies in 3D.
+2. Replays (TASKS 72), then the known bugs and the verdict again.

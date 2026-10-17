@@ -293,12 +293,14 @@ void georender_set_fog(const GeoFog* fog, uint32_t colour);
 // unless `gt`'s pass has none, as a semitransparent texture's (the sun's)
 // does. With a `depth` of 0 or more, the Z-buffer's, the
 // quad draws where that is GEQUAL to the buffer's; with -1, everywhere.
-// It never writes the depth. The vertices go into a ring on
+// It never writes the depth. In 3D (georender_set_stereo) a quad
+// `atHorizon`, the sun's, takes the eyes' shift for the far plane; any
+// other stays on the screen's plane. The vertices go into a ring on
 // the linear heap, which georender_quads_rewind starts again once the GPU
 // is done with the last frame, and which C3D_FrameEnd(0) flushes with the
 // rest of the heap. False when the ring is full or there is no texture.
 bool georender_draw_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
-                         uint8_t blend, float depth);
+                         uint8_t blend, float depth, bool atHorizon);
 // The same for a Flailer poly over the HUD, on a screen `width` by
 // `height`, citro2d's mapping: blended as citro2d blends, with neither
 // the alpha test nor the depth test, as the rest of the HUD draws. The
@@ -344,7 +346,8 @@ bool georender_draw_strip(const GeoRenderVertex* v, int n,
 // draw in one call as two triangles each. The colour is the GS's, 0x80 for
 // 1.0, and the texture modulates it; the pass is the texture's, with the
 // main target's tests, as a strip's. PRIM 0x54 has no fog, so none is laid
-// on. False when the ring is full, or for no texture.
+// on. In 3D each corner takes the eyes' shift for the view's depth at its
+// z. False when the ring is full, or for no texture.
 bool georender_draw_sprites(const GeoRenderVertex* v, int n,
                             const GeoTexture* gt);
 

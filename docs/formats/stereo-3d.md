@@ -10,9 +10,10 @@ and so is the slider's light.
 What the slices cover:
 
 - **59a**, the race's world for two eyes. Done, and checked in Azahar.
-- **59b**, the screen-space effects at their depth: the sun, its flares,
-  the sprites and the screen quads. These stay on the screen's plane for
-  now.
+- **59b**, the screen-space effects at their depth: the effects' sprites
+  and the sun. Done; the sprites are checked in Azahar, the sun is not
+  (see below). The light flares were already strips, so 59a covered
+  them.
 - **59c**, the movies.
 
 ## What is in 3D
@@ -38,7 +39,9 @@ frame is flat:
 
 The HUD, the rear-view mirror, the bottom screen and the song box are
 drawn once. They sit on the screen's plane, and both eyes show them at
-the same place.
+the same place. The effects' sprites (smoke, dust, sparks) and the sun
+are in the screen's pixels too, but they take the eye's shift for their
+depth; see "The screen's own draws" below.
 
 ## The eye's term
 
@@ -59,8 +62,9 @@ the one new uniform, and it lands at c25–c26, which nothing else uses.
 against the plain program's. On any mismatch it frees the copies, and the
 game stays flat.
 
-Only the world binds the copies (`bind_mesh`, `bind_lit` and
-`bind_strips`, while `georender_set_stereo` is on). Screen quads, sprites
+While `georender_set_stereo` is on, the world binds the copies
+(`bind_mesh`, `bind_lit` and `bind_strips`), and so do the sprites and
+the sun's quads. The other screen quads (the mirror, the HUD's polys)
 and the sphere map's fold keep the plain programs. Flat frames never
 bind the copies, so they cost nothing.
 
@@ -96,6 +100,32 @@ Its values:
 - **`AXIS_SIGN`**: −1. The right eye's far things must sit right of the
   left eye's. Azahar's side by side showed +1 put the horizon 10 pixels
   the wrong way.
+
+## The screen's own draws
+
+The sprites and the sun's quads come in the top screen's pixels, with
+no view depth for the term to work on: their clip w is 1. In 3D each
+vertex is sent as (x d, y d, d) instead, d being a view depth, and the
+screen's mapping is changed to match (`screen_for_depth`):
+
+- its third column moves to the fourth's place, and the fourth is left
+  empty, so the position comes out as d times the flat one, and its w
+  is d;
+- the divide by d puts the vertex back where it was, and the term then
+  shifts it by `a * (1 - convergence / d)`, as it does the world.
+
+For each kind:
+
+- **A sprite's corner** has its PICA depth z, from the GS Z
+  (`sprite_depth`). Its d is the view's depth there, as the perspective
+  maps it: `d = near far / (near + z (far - near))`. The z row gives the
+  depth back from d: `-z d = near (d - far) / (far - near)`, so the depth
+  test is the flat one's.
+- **The sun's quads** (`render_epoly`, `SunPoly`) take d = the far
+  plane, so the glare stays round the sun in both eyes. Their depth is
+  `C3D_DepthMap`'s constant, as when flat.
+
+Flat, both draw as before: the plain program and the screen's mapping.
 
 ## The frame on the GPU
 
@@ -168,6 +198,16 @@ row band by row band: the right image's x minus the left image's.
 | Pause | 0 | 0 | 0 | 0 |
 | Slider at 0 | 0 | 0 | 0 | 0 |
 
+59b's shots (track 12, gas held): the chimneys' smoke, which is
+sprites, sits at +10 like the chimneys and the roof under it. Before
+59b it was at 0. The song box stays at 0.
+
+The sun was drawn in 3D (4 quads, none failed) but never seen: in every
+test it was behind the trees (track 12) or a hill (track 31), with at
+most 171 of its 1,024 test pixels sky and its alpha 6 of 128. Its path
+is the sprites' mapping with a fixed d, so it should sit with the
+horizon, at +11 or so.
+
 The boot flow's 32 shots differ by 0.00 between the eyes. These cover
 the loading screen, the language and autoload screens, the movies, the
 title, the main menu, Be A Cop's setup and the options. With the fix,
@@ -177,5 +217,6 @@ stale eye.
 
 Not checked yet:
 
+- the sun's shift, in a shot where it shows;
 - the cost on a real 3DS: the view's lists run twice on the GPU;
 - how deep it looks on a real 3DS.
