@@ -57,6 +57,16 @@ static int s_uUvScale    = -1;
 static C3D_Mtx s_projection;
 static C3D_Mtx s_modelView;
 
+// The stereo 3D copies of geosolid and geolit, DVLEs 2 and 3 (Makefile):
+// the same uniforms in the same registers, and the eye's term, `stereo`,
+// in two more that nothing else sets. While s_stereo the world's batches
+// and strips draw through them; the screen quads and the sprites never
+// do, so they stay on the screen's plane (stereo3d.h).
+static shaderProgram_s s_stProgram;
+static shaderProgram_s s_stLitProgram;
+static int             s_uStereo = -1;
+static bool            s_stereo;
+
 // What a run (georender_run_begin) has sent, which its next draw need not
 // send again. run_forget clears it all.
 static struct {
@@ -195,6 +205,71 @@ static float   s_lightVec[3] = { 0.0f, 0.0f, 1.0f };
 static float   s_lightClr[3] = { 1.0f, 1.0f, 1.0f };
 static float   s_ambient      = 0.35f;
 
+// The stereo copies, when the shbin has them and picasso put each uniform
+// they share with geosolid and geolit where those have it: a draw through
+// a copy sets its uniforms by the others' registers. s_uStereo stays -1
+// otherwise, and the race stays flat.
+static void init_stereo(void)
+{
+    static const char* const kSolid[] = {
+        "mvp", "fogModel", "lightModel", "lightClr", "ambientClr", "uvScale",
+    };
+    static const char* const kLit[] = {
+        "mvp", "fogModel", "uvScale", "lightDir", "difClr", "specClr",
+        "ambient", "eye", "powParams", "envCol", "fresnel", "envPass",
+        "glossEnv",
+    };
+    int  stereo;
+    bool same = true;
+    int  i;
+
+    if (s_dvlb->numDVLE < 4) {
+        return;
+    }
+    shaderProgramInit(&s_stProgram);
+    shaderProgramSetVsh(&s_stProgram, &s_dvlb->DVLE[2]);
+    shaderProgramInit(&s_stLitProgram);
+    shaderProgramSetVsh(&s_stLitProgram, &s_dvlb->DVLE[3]);
+    for (i = 0; i < (int)(sizeof kSolid / sizeof kSolid[0]); i++) {
+        same = same
+            && shaderInstanceGetUniformLocation(s_stProgram.vertexShader,
+                                                kSolid[i])
+               == shaderInstanceGetUniformLocation(s_program.vertexShader,
+                                                   kSolid[i]);
+    }
+    for (i = 0; i < (int)(sizeof kLit / sizeof kLit[0]); i++) {
+        same = same
+            && shaderInstanceGetUniformLocation(s_stLitProgram.vertexShader,
+                                                kLit[i])
+               == shaderInstanceGetUniformLocation(s_litProgram.vertexShader,
+                                                   kLit[i]);
+    }
+    stereo = shaderInstanceGetUniformLocation(s_stProgram.vertexShader,
+                                              "stereo");
+    if (!same || stereo < 0
+        || shaderInstanceGetUniformLocation(s_stLitProgram.vertexShader,
+                                            "stereo") != stereo) {
+        shaderProgramFree(&s_stLitProgram);
+        shaderProgramFree(&s_stProgram);
+        return;
+    }
+    s_uStereo = stereo;
+}
+
+int georender_stereo_uniform(void)
+{
+    return s_uStereo;
+}
+
+void georender_set_stereo(bool on)
+{
+    on = on && s_uStereo >= 0;
+    if (on != s_stereo) {
+        s_stereo = on;
+        run_forget();
+    }
+}
+
 bool georender_init(void)
 {
     if (s_ready) {
@@ -226,6 +301,7 @@ bool georender_init(void)
     s_lEnvPass    = LIT_UNIFORM("envPass");
     s_lGlossEnv   = LIT_UNIFORM("glossEnv");
 #undef LIT_UNIFORM
+    init_stereo();
 
     s_foldDvlb = DVLB_ParseFile((u32*)geofold_shbin, geofold_shbin_size);
     if (!s_foldDvlb) {
@@ -303,6 +379,11 @@ void georender_exit(void)
 {
     if (!s_ready) {
         return;
+    }
+    if (s_uStereo >= 0) {
+        shaderProgramFree(&s_stLitProgram);
+        shaderProgramFree(&s_stProgram);
+        s_uStereo = -1;
     }
     linearFree(s_quads);
     s_quads = NULL;
@@ -383,7 +464,7 @@ static void bind_mesh(const GeoMesh* mesh)
         || memcmp(&s_run.projection, &s_projection, sizeof s_projection)) {
         float lightClr[4], ambientClr[4];
 
-        C3D_BindProgram(&s_program);
+        C3D_BindProgram(s_stereo ? &s_stProgram : &s_program);
         C3D_SetAttrInfo(&s_attr);
         geosolid_colours(s_lightClr[0], s_lightClr[1], s_lightClr[2],
                          s_ambient, lightClr, ambientClr);
@@ -974,7 +1055,7 @@ static void bind_lit(const GeoMesh* mesh, const GeoLighting* L)
     s_run.uvSet = false;
     s_run.strip = false;
     if (!s_run.lit) {
-        C3D_BindProgram(&s_litProgram);
+        C3D_BindProgram(s_stereo ? &s_stLitProgram : &s_litProgram);
         C3D_SetAttrInfo(&s_attr);
         s_run.lit = s_run.on;
     }
@@ -1499,7 +1580,7 @@ static void bind_strips(void)
     s_run.mvSet    = false;
     s_run.uvSet    = false;
     s_run.combiner = -1;
-    C3D_BindProgram(&s_program);
+    C3D_BindProgram(s_stereo ? &s_stProgram : &s_program);
     C3D_SetAttrInfo(&s_attr);
     bind_buffer(s_strips);
 

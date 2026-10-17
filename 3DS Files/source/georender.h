@@ -125,6 +125,16 @@ void georender_run_end(void);
 // after each list it times (hangwatch.h).
 void georender_forget(void);
 
+// Stereo 3D (TASKS 59, stereo3d.h). While on, the world's batches, lit
+// batches and strips draw through geosolid's and geolit's stereo copies,
+// which move each vertex for the eye by the `stereo` uniform: clip +
+// stereo[0] * w + stereo[1]. The screen quads and the sprites stay on the
+// plain programs. georender_stereo_uniform is that uniform's first
+// register, which only the eye's own writes set, or -1 when the shbin has
+// no copies; then georender_set_stereo(true) does nothing.
+int  georender_stereo_uniform(void);
+void georender_set_stereo(bool on);
+
 // ---------------------------------------------------------- the lit strips
 
 // One lit batch's inputs to geolit.v.pica, from the model's eLightContext

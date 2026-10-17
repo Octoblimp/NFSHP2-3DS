@@ -25043,3 +25043,51 @@ run.
 1. Stereo 3D (TASKS 59): the slider alone, no option.
 2. Replays (TASKS 72), after 59.
 3. The known bugs, then the verdict again.
+
+## Session 118 -- TASKS 59a: the race in stereo 3D
+
+The user: "Continue where you left off", then set the scope: "I only want
+3D enabled on movies and in-game, not on menu navigation, title screen or
+anywhere else". See docs/formats/stereo-3d.md.
+
+### 59a done
+
+- **The shaders**: the Makefile's `%_st.v.pica` rule makes stereo copies
+  of geosolid and geolit, which add `stereo[0] * w + stereo[1]` to the
+  clip position. DVLEs 2 and 3 put `stereo` at c25-c26, and every shared
+  uniform keeps the plain programs' register. `georender.c`'s
+  `init_stereo` checks this, and `georender_set_stereo` switches the
+  world's binds (mesh, lit, strips).
+- **`stereo3d.c`**: the right eye's RGBA8 target is made at boot, over
+  the top screen's depth buffer. `stereo3d_race_begin` clears the right
+  eye and sends its target and term, then makes the left eye's.
+  `stereo3d_race_end` clears the left eye, sends its list, and resends
+  the view's lists that hangwatch kept (`hangwatch_gpu_keep`,
+  `hangwatch_gpu_resend`).
+  - The shift is 6 px at the horizon at the slider's top.
+  - The convergence is the player's car's depth, clamped to 2-12 m.
+  - `AXIS_SIGN` is -1: +1 put the horizon 10 px the wrong way in
+    Azahar.
+- **`main.c`**: `raceIn3D` keeps the pause, the results and RCSTATE_NONE
+  flat. The HUD goes on through `C2D_SceneTarget` with no
+  `C3D_FrameDrawOn`.
+- **The flicker** (the user saw it): the left eye flashed the LOADING
+  screen and the right eye went black. The race's sends leave citro3d's
+  queue running, so `C3D_FrameEnd`'s right-eye transfer finished and
+  swapped the top screen before the left eye's was queued. The left eye
+  then went into the other buffer and swapped again. That was two swaps
+  a frame: Azahar counted 59 while the game logged 30.
+  - `__wrap_C3D_FrameEnd` first sends anything left over.
+  - Then `hangwatch_gpu_queue_rest` lets the queue go, only when it's
+    idle: stopping a busy queue loses its interrupts.
+  - Then it queues the left eye's transfer itself.
+- **Checked in Azahar** (`render_3d=1`, `factor_3d=100`, restored after):
+  - Race shots: far trees +10-11 px, the car 0, near road down to -9.
+    No stale eye in seven shots, and the game logs 30 FPS.
+  - The pause, slider 0 and the boot flow's 32 shots differ by 0.00.
+
+### Next
+
+1. 59b: the sun, flares, sprites and screen quads at their depth.
+2. 59c: the movies in 3D.
+3. Replays (TASKS 72), then the known bugs and the verdict again.

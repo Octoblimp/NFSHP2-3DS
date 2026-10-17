@@ -179,6 +179,7 @@
 #include "speechconv.h"
 #include "spch.h"
 #include "speechnoise.h"
+#include "stereo3d.h"
 #include "selcam.h"
 #include "player.h"
 #include "playerfinish.h"
@@ -275,6 +276,42 @@ static const u32 kDisplayTransferFlags =
     | GX_TRANSFER_IN_FORMAT(GX_TRANSFER_FMT_RGBA8)
     | GX_TRANSFER_OUT_FORMAT(GX_TRANSFER_FMT_RGB8)
     | GX_TRANSFER_SCALING(GX_TRANSFER_SCALE_NO);
+
+// Stereo 3D (TASKS 59, stereo3d.h): the race is drawn for two eyes in
+// the flyby, before the start, racing, its replays and the demos; flat in
+// the pause and the results, as the menus are (the user, 2026-10-16).
+static bool raceIn3D(void)
+{
+    if (pRaceCoordinator == NULL)
+        return false;
+    switch (pRaceCoordinator->CurrentRCState) {
+    case RCSTATE_NONE:
+    case RCSTATE_PAUSE:
+    case RCSTATE_POSTRACE:
+        return false;
+    default:
+        return true;
+    }
+}
+
+// The depth on the screen's plane: the player's car's, in the player's
+// view (its last matrices, a frame old at most). The eyes clamp it.
+static float raceConvergence(void)
+{
+    const eView*   view = eGetView(EVIEW_ID_PLAYER1);
+    struct Player* p    = PLAYER_NUM_SHOWN() > 0 ? player_shown(0) : NULL;
+    bVector4       pos, eye;
+
+    if (view == NULL || view->WorldViewMatrix == NULL || p == NULL
+        || p->MyCar == NULL)
+        return 6.0f;
+    pos.x = p->MyCar->State.Position.x;
+    pos.y = p->MyCar->State.Position.y;
+    pos.z = p->MyCar->State.Position.z;
+    pos.w = 1.0f;
+    eMulVector4(&eye, view->WorldViewMatrix, &pos);
+    return eye.z;
+}
 
 #define BUNDLE_FRONTEND "FRONTEND/FRONTB.BUN"
 #define BUNDLE_GLOBAL   "GLOBAL/GLOBALB.BUN"
@@ -7779,6 +7816,10 @@ int main(int argc, char** argv)
     }
     C3D_RenderTargetSetOutput(top, GFX_TOP, GFX_LEFT,
                               kDisplayTransferFlags);
+    // The right eye's colour, over the top screen's depth (TASKS 59), made
+    // with the other targets, before any texture takes VRAM.
+    if (!stereo3d_init(top, kDisplayTransferFlags))
+        logLine("stereo 3D: no VRAM for the right eye's target; flat");
     // No depth buffer on this one: nothing 3D is ever drawn to it.
     g_bot = C2D_CreateScreenTarget(GFX_BOTTOM, GFX_LEFT);
     if (!g_bot) {
@@ -8877,12 +8918,14 @@ int main(int argc, char** argv)
             VifTime = (int32_t)bGetFixTickerDifference(
                 0, (uint32_t)(C3D_GetDrawingTime()
                               * (float)(BTICKER_RATE_HZ / 1000u)));
+            // The race's clear, and whether its view is drawn for two eyes.
+            const u32 sky = C2D_Color32(0x8c, 0xa8, 0xc8, 0xFF);
+            bool      stereo = false;
+
             if (g_track.attached) {
                 // eDisplayFrame: the race's view, then the Flailer screens
                 // over it. The sun's Z rects are read first, from the last
                 // frame's depth, as the track viewer reads them.
-                const u32 sky = C2D_Color32(0x8c, 0xa8, 0xc8, 0xFF);
-
                 frameMark("the sun's depth read");
                 if (capture_read(top))
                     trackview_capture_names(&g_track);
@@ -8895,16 +8938,32 @@ int main(int argc, char** argv)
                 trackview_draw_mirror(&g_track);
                 FRAMEPROF_STAMP(FRAMEPROF_MIRROR);
                 hangwatch_gpu_send();
-                C3D_RenderTargetClear(top, C3D_CLEAR_ALL,
-                                      __builtin_bswap32(sky), 0);
-                C3D_FrameDrawOn(top);
+                // For two eyes when the slider is up (stereo3d.h): the
+                // eyes' clears and targets are stereo3d's.
+                stereo = stereo3d_race_wanted(raceIn3D());
+                if (stereo) {
+                    stereo3d_race_begin(__builtin_bswap32(sky),
+                                        raceConvergence());
+                } else {
+                    C3D_RenderTargetClear(top, C3D_CLEAR_ALL,
+                                          __builtin_bswap32(sky), 0);
+                    C3D_FrameDrawOn(top);
+                }
                 trackview_draw(&g_track);
                 C2D_Prepare();
                 C3D_DepthTest(false, GPU_GREATER, GPU_WRITE_COLOR);
             } else {
                 C2D_TargetClear(top, clear);
             }
-            C2D_SceneBegin(top);
+            // The HUD over the view, on the screen's plane for both eyes:
+            // for two, citro2d's scene is the top screen's size without
+            // C3D_FrameDrawOn, so its lists set no target.
+            if (stereo) {
+                C2D_Flush();
+                C2D_SceneTarget(top);
+            } else {
+                C2D_SceneBegin(top);
+            }
             flowRender(&ui);
             if (!g_track.attached && (bcarsel_active() || btracksel_active()))
                 drawCarSelTop(&ui);
@@ -8916,8 +8975,11 @@ int main(int argc, char** argv)
             hangwatch_gpu_stage("the top screen's HUD");
             FRAMEPROF_STAMP(FRAMEPROF_HUD);
             // The top screen to the GPU, and nothing left for
-            // C2D_TargetClear's split, which flushes nothing.
+            // C2D_TargetClear's split, which flushes nothing. For two eyes
+            // that was the right eye's, and the left's follows it.
             hangwatch_gpu_send();
+            if (stereo)
+                stereo3d_race_end(__builtin_bswap32(sky));
             C2D_TargetClear(g_bot, BOT_BACK);
             C2D_SceneBegin(g_bot);
             // In a race the bottom screen is the HUD's other half

@@ -91,14 +91,16 @@ LDFLAGS	=	-specs=3dsx.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map) \
 			$(C3DWRAP)
 
 # citro3d's uniform upload, skipped when nothing changed, and its draws
-# written in one go: see c3dwrap.c.
+# written in one go: see c3dwrap.c. And its frame's end, which turns the
+# screen's 3D on for a frame drawn for two eyes: see stereo3d.c.
 C3DWRAP	:=	-Wl,--wrap=C3D_UpdateUniforms \
 			-Wl,--wrap=C3Di_LoadShaderUniforms \
 			-Wl,--wrap=C3Di_DirtyUniforms \
 			-Wl,--wrap=C3D_BindProgram \
 			-Wl,--wrap=C3D_DrawElements \
 			-Wl,--wrap=C3D_DrawArrays \
-			-Wl,--wrap=GPUCMD_Add
+			-Wl,--wrap=GPUCMD_Add \
+			-Wl,--wrap=C3D_FrameEnd
 
 LIBS	:= -lcitro2d -lcitro3d -lctru -lm
 
@@ -278,8 +280,23 @@ endef
 # geolit.v.pica links into geosolid's shbin, after it: one DVLP for both,
 # so citro3d sends no shader code when the race switches between them, and
 # picasso gives the uniforms they share the same registers (step 13b-5).
-# DVLE 0 is geosolid's, 1 geolit's.
-geosolid.shbin.o geosolid_shbin.h : geolit.v.pica
+# DVLE 0 is geosolid's, 1 geolit's, and 2 and 3 their stereo copies.
+geosolid.shbin.o geosolid_shbin.h : geolit.v.pica geosolid_st.v.pica \
+				    geolit_st.v.pica
+
+# The stereo 3D copies (TASKS 59, docs/formats/stereo-3d.md): the shader
+# as it is, with its position put in r1 and moved for the eye before it
+# goes out, clip + stereo[0] * w + stereo[1]. The race's world draws
+# through them when the slider is up, so the flat frames pay nothing for
+# the eye's two instructions. Made in the build directory from the shader itself, its
+# procedure renamed: picasso's names are the shbin's, not the file's.
+%_st.v.pica : %.v.pica
+	@echo $(notdir $@)
+	@sed -e 's/^\(\.entry\|\.proc\) \([A-Za-z0-9_]*\)/\1 \2_st/' \
+	     -e 's/^\([ ]*\)dp4 outpos\.\([xyzw]\), mvp/\1dp4 r1.\2, mvp/' \
+	     -e '/^[ ]*dp4 r1\.w, mvp/a\    mad r2, r1.wwww, stereo[0], r1' \
+	     -e '/^[ ]*dp4 r1\.w, mvp/a\    add outpos, stereo[1], r2' \
+	     -e '/^\.fvec mvp\[4\]/a\.fvec stereo[2]' $< > $@
 
 -include $(DEPSDIR)/*.d
 

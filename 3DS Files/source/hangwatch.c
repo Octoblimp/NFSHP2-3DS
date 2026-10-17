@@ -714,6 +714,15 @@ void hangwatch_gpu_sends_begin(bool on)
     s_sendsOn = on && !s_timing;
 }
 
+// The eyes' (hangwatch.h): the lists sent while s_keepOn, to send again.
+// The race's view is two, split at the models' send.
+#define KEPT_MAX 8
+
+static bool s_keepOn;
+static int  s_kept;                // KEPT_MAX + 1 once one did not fit
+static u32 *s_keptList[KEPT_MAX];
+static u32  s_keptWords[KEPT_MAX];
+
 void hangwatch_gpu_send(void)
 {
     u32     *list, words;
@@ -735,10 +744,79 @@ void hangwatch_gpu_send(void)
     FrameProfDraw.sendQueue += t2 - t1;
     if (t2 - t0 > FrameProfDraw.sendWorst)
         FrameProfDraw.sendWorst = t2 - t0;
+    if (s_keepOn) {
+        if (s_kept < KEPT_MAX) {
+            s_keptList[s_kept] = list;
+            s_keptWords[s_kept] = words;
+        }
+        if (s_kept <= KEPT_MAX) s_kept++;
+    }
 }
 
 void hangwatch_gpu_sends_end(void)
 {
     hangwatch_gpu_send();
     s_sendsOn = false;
+}
+
+// ------------------------------------------------------------ the eyes
+
+// citro3d's C3DiF_FrameBuf: the target's registers, which the eyes set
+// themselves before each eye's lists.
+#define C3D_FLAG_FRAMEBUF 0x20u
+
+bool hangwatch_gpu_sending(void)
+{
+    return s_sendsOn;
+}
+
+bool hangwatch_gpu_split(uint32_t **list, uint32_t *words)
+{
+    u32 *l, w;
+
+    if (!C3Di_SplitFrame(&l, &w)) return false;
+    *list = l;
+    *words = w;
+    return true;
+}
+
+void hangwatch_gpu_send_list(uint32_t *list, uint32_t words, bool flush)
+{
+    if (flush) flush_heap();
+    GX_ProcessCommandList(list, words * 4, 0);
+    gxCmdQueueRun(queue());
+}
+
+void hangwatch_gpu_state_again(void)
+{
+    *c3d_flags() |= C3D_FLAGS_ALL & ~C3D_FLAG_FRAMEBUF;
+    C3Di_DirtyUniforms(GPU_VERTEX_SHADER);
+    georender_forget();
+}
+
+int hangwatch_gpu_keep(bool on)
+{
+    s_keepOn = on;
+    if (on) s_kept = 0;
+    return s_kept > KEPT_MAX ? -1 : s_kept;
+}
+
+void hangwatch_gpu_resend(void)
+{
+    int i;
+
+    for (i = 0; i < s_kept && i < KEPT_MAX; i++)
+        GX_ProcessCommandList(s_keptList[i], s_keptWords[i] * 4, 0);
+    gxCmdQueueRun(queue());
+}
+
+void hangwatch_gpu_queue_rest(void)
+{
+    volatile gxCmdQueue_s *q = queue();
+
+    // Only when all it was given is done: libctru's gxCmdQueueStop lets an
+    // idle queue go, but on a running one it stops at the next interrupt
+    // and loses the interrupts of what it still has out, and the frame's
+    // wait never ends.
+    if (q->lastEntry >= q->numEntries) gxCmdQueueStop(queue());
 }

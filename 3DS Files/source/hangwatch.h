@@ -125,4 +125,42 @@ void hangwatch_gpu_send(void);
 // next hangwatch_gpu_sends_begin.
 void hangwatch_gpu_sends_end(void);
 
+// ------------------------------------------------------------ the eyes
+//
+// Stereo 3D (TASKS 59, stereo3d.h) draws the race's view once and sends
+// its lists twice, once for each eye. These are its pieces.
+
+// Whether this frame is sent in parts. The eyes need it: each eye's clear
+// goes between the lists.
+bool hangwatch_gpu_sending(void);
+
+// What was drawn since the last send split off and not sent: false when
+// nothing was. hangwatch_gpu_send_list runs it later.
+bool hangwatch_gpu_split(uint32_t **list, uint32_t *words);
+
+// A list split off before, run now: after the linear heap's flush when
+// `flush`, as hangwatch_gpu_send's are. A list made before a send's flush
+// needs none.
+void hangwatch_gpu_send_list(uint32_t *list, uint32_t words, bool flush);
+
+// citro3d's whole state but its framebuffer sent again with the next draw,
+// as a timing frame's lists have it, and georender's run forgotten: the
+// lists from here on read nothing the lists before them set but the
+// target, so they draw the same after any list.
+void hangwatch_gpu_state_again(void);
+
+// While on, the list of each send is kept as well. Turned off, it says
+// how many were, or -1 when more were sent than it keeps.
+// hangwatch_gpu_resend runs them all again, in order, with no flush: they
+// were flushed when first sent.
+int  hangwatch_gpu_keep(bool on);
+void hangwatch_gpu_resend(void);
+
+// Before C3D_FrameEnd: the sends leave citro3d's queue running, so what
+// is added to it starts at once, and an idle one ends (and swaps the
+// screens) between C3D_FrameEnd's transfers. Done with all it was given,
+// it is let go of, as C3D_FrameBegin leaves it: C3D_FrameEnd's transfers
+// wait for its run then. A busy one is left be.
+void hangwatch_gpu_queue_rest(void);
+
 #endif

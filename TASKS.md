@@ -3497,6 +3497,22 @@ phases.
           want 3D just move the slider up, you don't, leave it off, its
           not something you configure in-game." No option in any menu:
           the slider alone turns it on and sets its depth.
+        - 2026-10-16, the user, later: "I only want 3D enabled on movies
+          and in-game, not on menu navigation, title screen or anywhere
+          else." The race (its world, NIS and flybys) and the movies get
+          two eyes. Every menu, the title, the pause menu, the results
+          and the loading screens get one image for both.
+        - 59a done, 2026-10-16, checked in Azahar's side by side: the
+          race's world is drawn for two eyes (`stereo3d.c`, the shaders'
+          `_st` copies, docs/formats/stereo-3d.md). The right eye's far
+          trees sit 10-11 px right of the left eye's, the car is on the
+          screen's plane, and the HUD and mirror line up in both. The
+          pause, the boot flow's 32 screens and slider 0 stay flat.
+          The flicker the user saw (a stale LOADING left eye every other
+          blank) was two top-screen swaps a frame, fixed in
+          `__wrap_C3D_FrameEnd`.
+        - Left: 59b, the sun, flares, sprites and screen quads at their
+          depth; 59c, the movies; the cost and the look on a real 3DS.
 60. [ ] **The car's particle effects (Car::TriggerEffect).** Found on
         2026-10-13 with TASKS 51a. `gCarTriggerEffectFn` is never set, so
         `Car::TriggerEffect` (`0x0011e2b8`) is skipped: a broken light,
