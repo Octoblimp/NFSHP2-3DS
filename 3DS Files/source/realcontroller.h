@@ -14,8 +14,8 @@
 // The record is TrackedController's, in carcontroller.h, so car.c can
 // reach Acceleration; the methods are here.
 //
-// Not ported: the two DoSnapshots (0x00224458, 0x002248c8), which need
-// ReplaySnapshot, and so are NULL in both tables for vt_slot to abort on.
+// The two DoSnapshots (0x00224458, 0x002248c8; retail 0x0023a0f0 and
+// 0x0023a560) are the replay's, since TASKS 72c.
 //
 // See docs/formats/real-controller.md.
 #ifndef REALCONTROLLER_H
@@ -164,6 +164,18 @@ int32_t realcontroller_calculate_lateral(RealController *c, float *pos,
 // 0x00224db8. TrackedController's Think, a prediction, the driver's
 // SetTarget, and the renderer when the camera follows this car.
 void realcontroller_think(RealController *c, float dt);
+
+// The replay's, slot 24 of each table. Retail 0x0023a0f0, a
+// "TrackedController" section: the CarController (the driver's), the
+// route point by route and index, TimeBeforeUpdate, Acceleration and
+// PrevSpeed. Retail 0x0023a560, a "RealController" section: taking or
+// restoring sets the spline's control points to 0 first; then the lateral
+// offset, its Average, NumPreviousRoutePoints and that many points, and
+// the TrackedController.
+struct ReplaySnapshot;
+void trackedcontroller_do_snapshot(TrackedController *c,
+                                   struct ReplaySnapshot *s);
+void realcontroller_do_snapshot(RealController *c, struct ReplaySnapshot *s);
 
 // Installs _vt$17TrackedController (0x002a0960) and _vt$14RealController
 // (0x002a0b00). The game calls it once at boot; a harness calls it after

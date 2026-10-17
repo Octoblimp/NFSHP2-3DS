@@ -40,6 +40,35 @@
 #include "vtable.h"
 #include "world.h"
 
+// realtime.c's clock, which ReplaySnapshot_Init stamps; not linked here.
+int32_t WorldTimer;
+int32_t WorldLoopCounter;
+
+// The DoSnapshots (TASKS 72c) call these; nothing here takes a
+// snapshot.
+static void snapshot_unreached(const char *f)
+{
+    fprintf(stderr, "%s reached\n", f);
+    exit(3);
+}
+
+void trmgr_do_point_pointer_snapshot_in_route(TrackRouteManager *m,
+                                              struct ReplaySnapshot *s,
+                                              TrackRoutePoint **pp,
+                                              TrackRoute *route)
+{
+    (void)m; (void)s; (void)pp; (void)route;
+    snapshot_unreached("trmgr_do_point_pointer_snapshot_in_route");
+}
+
+void trmgr_do_route_pointer_snapshot(TrackRouteManager *m,
+                                     struct ReplaySnapshot *s,
+                                     TrackRoute **pp)
+{
+    (void)m; (void)s; (void)pp;
+    snapshot_unreached("trmgr_do_route_pointer_snapshot");
+}
+
 #define NOBJ 256                // a0 .. a255
 #define OBJ_BYTES 4096
 #define NNODE 256               // n0 .. n255

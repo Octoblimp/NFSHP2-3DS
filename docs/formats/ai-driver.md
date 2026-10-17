@@ -5,8 +5,10 @@ and `_vt$8AIDriver` (0x002ae328; the demo's 0x00291fa8). This is step
 11f-2. SetControlMode builds one for a car under `AI_CONTROL`, which is
 every AI racer AddRacingCar puts on the grid.
 
-Ported to `3DS Files/source/aidriver.{c,h}`, all but DoSnapshot
-(0x00130108), which waits on ReplaySnapshot. Cross-checked by
+Ported to `3DS Files/source/aidriver.{c,h}`; DoSnapshot (0x00130108)
+came with the replay, TASKS 72c: the AICarController's, the car not to
+avoid by its driver number, both timers and the stuck Average.
+`tools/aisnap_check.py` checks it. Cross-checked by
 `tools/aidriver_check.py` against `tools/src/aidriver_test.c`, with the
 image as the oracle.
 
@@ -53,7 +55,7 @@ own slots:
 | Slot | Address | Method |
 |-----:|---------|--------|
 | 8 | 0x00130090 | destructor |
-| 24 | 0x00130108 | DoSnapshot, NULL in the port |
+| 24 | 0x00130108 | DoSnapshot (TASKS 72c) |
 | 32 | 0x00130188 | Think |
 | 112 | 0x00130890 | GetRouteNumbersToUse |
 | 120 | 0x00130238 | ChooseNewAction |

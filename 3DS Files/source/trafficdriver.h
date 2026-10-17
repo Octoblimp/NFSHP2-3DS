@@ -15,7 +15,7 @@
 // nor over 10 m/s through a bend in its points of more than 50 degrees.
 // Which routes it may take, 50 to 59 or 60 to 69, is PickLowNumberedRoutes.
 //
-// Ported but for DoSnapshot (0x0018c478), which needs ReplaySnapshot.
+// DoSnapshot (0x0018c478) is the replay's, since TASKS 72c.
 // Written up in docs/formats/traffic-driver.md; checked against retail by
 // tools/trafficdriver_check.py.
 
@@ -48,8 +48,8 @@ typedef char trafficdriver_layout_check[
 #endif
 
 // _vt$13TrafficDriver, retail 0x002b4730: seventeen entries,
-// AICarController's but for the destructor (8), DoSnapshot (24, NULL until
-// ReplaySnapshot is ported), Think (32), JustReset (80) and
+// AICarController's but for the destructor (8), DoSnapshot (24), Think
+// (32), JustReset (80) and
 // GetRouteNumbersToUse (112). ChooseNewAction (120) is AICarController's,
 // which nothing calls for a traffic car: Think is TrafficDriver's own.
 #define TRAFFICDRIVER_VTABLE 0x002b4730u
@@ -108,6 +108,11 @@ void trafficdriver_calculate_desired_speed(TrafficDriver *d, float *speed,
 
 // 0x0018d030. PickLowNumberedRoutes. Nothing in retail calls it.
 void trafficdriver_set_direction(TrafficDriver *d, int32_t low);
+
+// 0x0018c478, slot 24, the replay's, a "TrafficDriver" section:
+// PickLowNumberedRoutes, then the AICarController.
+struct ReplaySnapshot;
+void trafficdriver_do_snapshot(TrafficDriver *d, struct ReplaySnapshot *s);
 
 void trafficdriver_install_vtables(void);
 

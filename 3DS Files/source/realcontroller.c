@@ -13,6 +13,7 @@
 #include "eefpu.h"
 #include "player.h"
 #include "realdriver.h"
+#include "replay.h"
 #include "vtable.h"
 
 int32_t DoSpeedDifferencePrinting;          // 0x00323ab0
@@ -526,17 +527,50 @@ void realcontroller_think(RealController *c, float dt)
     drivetarget_destroy(&t);
 }
 
+// ------------------------------------------------------------- the replay
+
+void trackedcontroller_do_snapshot(TrackedController *c, ReplaySnapshot *s)
+{
+    // Retail 0x0023a0f0. The point by its route and index together.
+    ReplaySnapshot_BeginNamedSection(s, "TrackedController");
+    carcontroller_do_snapshot(&c->Base, s);
+    trmgr_do_point_pointer_snapshot(&TheTrackRouteManager, s, &c->RoutePoint);
+    ReplaySnapshot_MoveFloat(s, &c->TimeBeforeUpdate);
+    ReplaySnapshot_MoveFloat(s, &c->Acceleration);
+    ReplaySnapshot_MoveFloat(s, &c->PrevSpeed);
+    ReplaySnapshot_EndNamedSection(s);
+}
+
+void realcontroller_do_snapshot(RealController *c, ReplaySnapshot *s)
+{
+    // Retail 0x0023a560. Taking or restoring empties the driving line's
+    // spline, for the next Think to build; the TrackedController goes
+    // last.
+    int32_t i;
+
+    ReplaySnapshot_BeginNamedSection(s, "RealController");
+    if (s->TakingSnapshotFlag || s->RestoringSnapshotFlag)
+        quickspline_set_num_control_points(c->DrivingLineSpline, 0);
+    ReplaySnapshot_MoveFloat(s, &c->PreviousLateralOffsetFromLine);
+    average_do_snapshot(c->LateralVelocityWRTLineAverage, s);
+    ReplaySnapshot_MoveInt(s, &c->NumPreviousRoutePoints, 4);
+    for (i = 0; i < c->NumPreviousRoutePoints; i++)
+        nrpi_do_snapshot(&c->PreviousRoutePoints[i], s);
+    trackedcontroller_do_snapshot(&c->Base, s);
+    ReplaySnapshot_EndNamedSection(s);
+}
+
 // ------------------------------------------------------------- the tables
 
 #define E(f) { 0, 0, (VtFn)(f) }
 
 // _vt$17TrackedController, 0x002a0960. DebugDisplay and the last three are
-// CarController's; DoSnapshot waits on ReplaySnapshot.
+// CarController's.
 static const VtEntry trackedcontroller_vt[CARCONTROLLER_VT_ENTRIES] = {
     { 0, 0, NULL },
     E(trackedcontroller_destroy),                   //   8  0x002243d8
     E(carcontroller_debug_display),                 //  16  0x001b6160
-    { 0, 0, NULL },                                 //  24  0x00224458
+    E(trackedcontroller_do_snapshot),               //  24  0x00224458
     E(trackedcontroller_think),                     //  32  0x002243f0
     E(trackedcontroller_set_current_route),         //  40  0x002244e0
     E(trackedcontroller_get_current_route),         //  48  0x00224500
@@ -555,7 +589,7 @@ static const VtEntry realcontroller_vt[CARCONTROLLER_VT_ENTRIES] = {
     { 0, 0, NULL },
     E(realcontroller_destroy),                      //   8  0x00224840
     E(carcontroller_debug_display),                 //  16  0x001b6160
-    { 0, 0, NULL },                                 //  24  0x002248c8
+    E(realcontroller_do_snapshot),                  //  24  0x002248c8
     E(realcontroller_think),                        //  32  0x00224db8
     E(trackedcontroller_set_current_route),         //  40  0x002244e0
     E(trackedcontroller_get_current_route),         //  48  0x00224500

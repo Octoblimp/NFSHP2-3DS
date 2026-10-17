@@ -162,8 +162,8 @@ loaded with `lwc1` and then `cvt.s.w`: it is an integer that gets
 converted, not reinterpreted. Its owning object is not ported yet, so the
 port keeps its own `WorldTimer` and the harness drives it.
 
-`DoSnapshot` (0x001824d8) is **not** ported -- it needs `ReplaySnapshot`,
-the same dependency that stopped `CarState::DoSnapshot`.
+`DoSnapshot` (0x001824d8) came with the replay, TASKS 72b;
+`tools/carsnap_check.py` checks it against retail.
 
 ## Cross-check
 

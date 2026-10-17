@@ -543,7 +543,8 @@ static const struct {
     const char *name;
 } fnames[] = {
 #define N(f) { (VtFn)(f), #f }
-    N(realdriver_destroy), N(realdriver_drive),
+    N(realdriver_destroy), N(realdriver_drive), N(realdriver_do_snapshot),
+    N(cardriver_do_snapshot),
     N(realdriver_add_joy_handlers), N(realdriver_remove_joy_handlers),
     N(realdriver_set_low_gear), N(realdriver_set_desired_speed),
     N(cardriver_set_target), N(cardriver_set_steer_to_point),

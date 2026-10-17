@@ -629,6 +629,14 @@ int32_t copmanager_get_num_active_road_blocks(tCopManager *m);
 // i-th pursuit in PursuitList that has one, counting from 0, or NULL.
 tRoadBlock *copmanager_get_active_road_block(tCopManager *m, int32_t i);
 
+// tCopManager::DoPointerSnapshot(tRoadBlock **), 0x00224358, the replay's
+// (TASKS 72c): a roadblock as its index in RoadBlocks in one byte, -1 for
+// NULL, made again on a restore.
+struct ReplaySnapshot;
+void copmanager_do_road_block_pointer_snapshot(tCopManager *m,
+                                               struct ReplaySnapshot *s,
+                                               tRoadBlock **pp);
+
 // tCopManager::GetCopByCar (0x00224f70), the cop driving `c`, and
 // GetCopByChase (0x00224fc8), the cop chasing it. Seams until task 26; a
 // NULL seam finds no cop.

@@ -990,6 +990,43 @@ int32_t realdriver_nitro_available(RealDriver *d)
     return NitrousActiveTime + NitrousRechargeTime <= nitro_age(d);
 }
 
+// ----------------------------------------------------------- the replay
+
+void realdriver_do_snapshot(RealDriver *d, ReplaySnapshot *s)
+{
+    // Retail 0x0013aeb8. ForcedEBrakeStop goes after ManualTransmission,
+    // not in its place between them. The port's low byte comes back
+    // unsigned (`move t0,zero`).
+    ReplaySnapshot_BeginNamedSection(s, "RealDriver");
+    ReplaySnapshot_MoveData(s, &d->Port, 1, 4, 0);
+    ReplaySnapshot_MoveInt(s, &d->StartLineState, 1);
+    ReplaySnapshot_MoveInt(s, &d->StopRightNow, 1);
+    ReplaySnapshot_MoveBool(s, &d->bPowerSlide, 1);
+    ReplaySnapshot_MoveInt(s, &d->ManualTransmission, 1);
+    ReplaySnapshot_MoveFloat(s, &d->ForcedEBrakeStop);
+    ReplaySnapshot_MoveUChar(s, &d->JoySteeringDigital, 1);
+    ReplaySnapshot_MoveUChar(s, &d->JoySteeringAnalog, 1);
+    ReplaySnapshot_MoveFloat(s, &d->SteeringInput);
+    ReplaySnapshot_MoveUChar(s, &d->JoyThrottleDigital, 1);
+    ReplaySnapshot_MoveUChar(s, &d->JoyThrottleAnalog, 1);
+    ReplaySnapshot_MoveUChar(s, &d->JoyThrottleAnalogAlternate, 1);
+    ReplaySnapshot_MoveFloat(s, &d->ThrottleInput);
+    ReplaySnapshot_MoveUChar(s, &d->JoyBrakeDigital, 1);
+    ReplaySnapshot_MoveUChar(s, &d->JoyBrakeAnalog, 1);
+    ReplaySnapshot_MoveUChar(s, &d->JoyBrakeAnalogAlternate, 1);
+    ReplaySnapshot_MoveFloat(s, &d->BrakeInput);
+    ReplaySnapshot_MoveUChar(s, &d->JoyReverseDigital, 1);
+    ReplaySnapshot_MoveUChar(s, &d->JoyReverseAnalog, 1);
+    ReplaySnapshot_MoveFloat(s, &d->ReverseInput);
+    ReplaySnapshot_MoveUChar(s, &d->JoyEBrakeDigital, 1);
+    ReplaySnapshot_MoveUChar(s, &d->JoyEBrakeAnalog, 1);
+    ReplaySnapshot_MoveFloat(s, &d->EBrakeInput);
+    ReplaySnapshot_MoveTimer(s, &d->LastNitroRequest);
+    ReplaySnapshot_MoveBool(s, &d->Reversing, 1);
+    cardriver_do_snapshot(&d->Base, s);
+    ReplaySnapshot_EndNamedSection(s);
+}
+
 // ------------------------------------------------------------ the table
 
 #define E(f) { 0, 0, (VtFn)(f) }
@@ -999,7 +1036,7 @@ static const VtEntry realdriver_vt[CARDRIVER_VT_ENTRIES] = {
     { 0, 0, NULL },
     E(realdriver_destroy),                  //   8  0x00139058
     E(realdriver_drive),                    //  16  0x00139600
-    { 0, 0, NULL },                         //  24  DoSnapshot, 0x001390b8
+    E(realdriver_do_snapshot),              //  24  0x001390b8, retail 0x0013aeb8
     E(realdriver_add_joy_handlers),         //  32  0x00139288
     E(realdriver_remove_joy_handlers),      //  40  0x00139458
     E(realdriver_set_low_gear),             //  48  0x001395d8

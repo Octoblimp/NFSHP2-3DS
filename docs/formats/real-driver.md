@@ -221,8 +221,7 @@ difference as signed:
 `_vt$10RealDriver` is CarDriver's twenty-one slots, with RealDriver's own
 entries for the destructor, Drive, both joy-handler calls, SetLowGear,
 SetDesiredSpeed (`jr ra`), GetDriverNumber (the car's `DriverNumber`, read
-with `lh`) and the two horn calls. DoSnapshot (24) is NULL until
-`ReplaySnapshot` is ported, and `vt_slot` aborts on it.
+with `lh`) and the two horn calls, and DoSnapshot (24, TASKS 72c).
 `realdriver_install_vtable()` runs at boot in `main.c`.
 
 ## The seams
@@ -250,8 +249,10 @@ in its debug mode, but it cancels the tuning flag on every route.
 
 ## Not ported
 
-`RealDriver::DoSnapshot` (0x001390b8) needs `ReplaySnapshot`, as CarDriver's
-does.
+`RealDriver::DoSnapshot` is retail's (0x0013aeb8, the demo's 0x001390b8),
+ported with the replay in TASKS 72c. The port comes back as one unsigned
+byte (`move t0,zero`); ForcedEBrakeStop goes after ManualTransmission;
+pCar and HandlersAdded are not saved.
 
 The image has one call to the constructor, from `RealController`'s
 constructor (0x00224788). `RealController` is the controller that

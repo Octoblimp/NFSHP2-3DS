@@ -8,7 +8,8 @@ first piece of task 27's debt to be paid, and it has to come before
 
 Ported to `3DS Files/source/quickspline.{c,h}`. Cross-checked by
 `tools/quickspline_check.py` against `tools/src/quickspline_test.c`. Every
-method but `DoSnapshot` runs as shipped in mipsemu, and so do the `bFMod`,
+method but `DoSnapshot` (which `tools/aisnap_check.py` checks) runs as
+shipped in mipsemu, and so do the `bFMod`,
 `bMulMatrix` and `bTransposeMatrix` beneath them.
 
 ## Who builds one
@@ -244,6 +245,10 @@ cast, which is undefined past 2^31 and gives 0x80000000 on x86. The EE's
 quotients and angles past 2^31, and its model's `trunc32` now saturates as
 the EE does.
 
-## Not ported
+## The replay
 
-`DoSnapshot` waits on ReplaySnapshot.
+`DoSnapshot` (retail 0x0023d208) came with the replay, TASKS 72c.
+NumControlPoints goes in two bytes; taking or restoring calls
+SetNumControlPoints with it, which marks the points dirty and sets the
+parameter range again; then the first n floats of each point. BeltMover's
+is its one caller, with n 3.

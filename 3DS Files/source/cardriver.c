@@ -3,6 +3,7 @@
 #include "cardriver.h"
 
 #include "bmem.h"
+#include "replay.h"
 #include "vtable.h"
 
 void cardriver_init(CarDriver *d)
@@ -139,6 +140,22 @@ void cardriver_start_honk_horn(CarDriver *d)  { (void)d; }
 void cardriver_add_joy_handlers(CarDriver *d) { (void)d; }
 void cardriver_remove_joy_handlers(CarDriver *d) { (void)d; }
 
+// ------------------------------------------------------------- the replay
+
+void cardriver_do_snapshot(CarDriver *d, ReplaySnapshot *s)
+{
+    // Retail 0x00130958. DesiredGear goes as one signed byte; SportGear and
+    // NitroFlag are not saved at all.
+    ReplaySnapshot_BeginNamedSection(s, "CarDriver");
+    ReplaySnapshot_MoveUShort(s, &d->Steering, 2);
+    ReplaySnapshot_MoveFloat(s, &d->Throttle);
+    ReplaySnapshot_MoveFloat(s, &d->Brake);
+    ReplaySnapshot_MoveFloat(s, &d->EBrake);
+    ReplaySnapshot_MoveData(s, &d->DesiredGear, 1, 4, 1);
+    drivetarget_do_snapshot(&d->MyDriveTarget, s);
+    ReplaySnapshot_EndNamedSection(s);
+}
+
 // ------------------------------------------------------------ NullDriver
 
 void nulldriver_destroy(NullDriver *d, int32_t flags)
@@ -172,15 +189,13 @@ int32_t nulldriver_get_driver_number(NullDriver *d)
 // ------------------------------------------------------------- the tables
 
 #define E(f) { 0, 0, (VtFn)(f) }
-#define PENDING { 0, 0, NULL }
 
-// _vt$9CarDriver, 0x002924a8. `__pure_virtual` at 16, 48, 56 and 80;
-// DoSnapshot (0x0012f150) at 24 waits on ReplaySnapshot.
+// _vt$9CarDriver, 0x002924a8. `__pure_virtual` at 16, 48, 56 and 80.
 static const VtEntry cardriver_vt[CARDRIVER_VT_ENTRIES] = {
     { 0, 0, NULL },
     E(cardriver_destroy),                   //   8  0x00134de0
     { 0, 0, NULL },                         //  16  Drive
-    PENDING,                                //  24  DoSnapshot
+    E(cardriver_do_snapshot),               //  24  retail 0x00130958
     E(cardriver_add_joy_handlers),          //  32  0x00134dd0
     E(cardriver_remove_joy_handlers),       //  40  0x00134dc8
     { 0, 0, NULL },                         //  48  SetLowGear
@@ -206,7 +221,7 @@ static const VtEntry nulldriver_vt[CARDRIVER_VT_ENTRIES] = {
     { 0, 0, NULL },
     E(nulldriver_destroy),                  //   8  0x00134cc8
     E(nulldriver_drive),                    //  16  0x00134cc0
-    PENDING,                                //  24  DoSnapshot
+    E(cardriver_do_snapshot),               //  24  retail 0x00130958
     E(cardriver_add_joy_handlers),          //  32  0x00134dd0
     E(cardriver_remove_joy_handlers),       //  40  0x00134dc8
     E(nulldriver_set_low_gear),             //  48  0x00134c98
@@ -226,7 +241,6 @@ static const VtEntry nulldriver_vt[CARDRIVER_VT_ENTRIES] = {
     E(cardriver_get_steer_to_point),        // 160  0x00134ce0
 };
 
-#undef PENDING
 #undef E
 
 void cardriver_install_vtables(void)

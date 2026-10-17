@@ -84,6 +84,7 @@ HARNESS = "tools/src/drivecam_test.c"
 DRVC = "3DS Files/source/drivecam.c"
 SOURCES = [HARNESS, DRVC] + ["3DS Files/source/" + f for f in (
     "camera.c", "cammover.c", "eview.c", "emath.c", "bmatrix.c", "bmath.c",
+    "replay.c", "p32.c",
     "bmathtab.c", "bvector.c", "copmanager.c", "terraintypetab.c")]
 
 HARNESS_TIMEOUT = 120

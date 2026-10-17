@@ -16,7 +16,7 @@
 // 640 bytes, type#2160: CarDriver's 560 and twenty-six fields after it.
 // The vptr is CarDriver's, at 556.
 //
-// Ported but for DoSnapshot (0x001390b8), which needs ReplaySnapshot. Its
+// DoSnapshot (0x001390b8) is the replay's, since TASKS 72c. Its
 // fourteen calls into classes other tasks own go through the seams at the
 // bottom of this header; see docs/formats/real-driver.md.
 
@@ -100,7 +100,7 @@ typedef char realdriver_layout_check[
 
 // _vt$10RealDriver, 0x00292a70: CarDriver's twenty-one slots with Drive,
 // the joy handlers, SetLowGear, SetDesiredSpeed, GetDriverNumber and the
-// horn its own. DoSnapshot, at 24, is NULL until ReplaySnapshot is ported.
+// horn its own, and DoSnapshot.
 #define REALDRIVER_VTABLE 0x00292a70u
 
 // ManualTransmission. 1 is the manual box, whose gear is DesiredGear; 2 is
@@ -208,6 +208,14 @@ void realdriver_set_predicted_target(RealDriver *d, DriveTarget *t); // 0x0013ac
 void realdriver_set_stop_right_now(RealDriver *d, int32_t on);     // 0x0013ac38
 void realdriver_set_joystick_port(RealDriver *d, JoystickPort p);  // 0x0013ac50
 struct Car *realdriver_get_car(RealDriver *d);            // 0x0013ac58
+
+// Retail 0x0013aeb8 (the demo's 0x001390b8), slot 24, a "RealDriver"
+// section: the port as one unsigned byte, the start-line state, the stop,
+// the power slide, the gearbox, the e-brake stop, every joystick byte and
+// input, the last nitro request and Reversing, then the CarDriver. pCar and
+// HandlersAdded are not saved.
+struct ReplaySnapshot;
+void realdriver_do_snapshot(RealDriver *d, struct ReplaySnapshot *s);
 
 // The eleven handlers. `obj` is the RealDriver; `value` a byte.
 void realdriver_joy_steer(JoystickPort port, JoyEvent ev, uint8_t value,

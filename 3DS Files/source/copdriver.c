@@ -19,6 +19,7 @@
 #include "eefpu.h"
 #include "emath.h"
 #include "realcontroller.h"
+#include "replay.h"
 #include "topology.h"
 #include "trackroute.h"
 #include "vtable.h"
@@ -1235,6 +1236,48 @@ void copdriver_set_cop_index(CopDriver *d, int32_t n)
     d->nCopIndex = n;
 }
 
+// ------------------------------------------------------------- the replay
+
+void copmover_do_snapshot(CopMover *m, ReplaySnapshot *s)
+{
+    // 0x001a0f20. State goes as its low byte; New68 and pCar are not
+    // saved.
+    ReplaySnapshot_BeginNamedSection(s, "CopMover");
+    carmover_do_snapshot(&m->Mover, s);
+    ReplaySnapshot_MoveVector3(s, &m->v3Velocity);
+    ReplaySnapshot_MoveUShort(s, &m->aFacingAngle, 2);
+    ReplaySnapshot_MoveUShort(s, &m->aDesiredFacingAngle, 2);
+    ReplaySnapshot_MoveFloat(s, &m->fSpeed);
+    ReplaySnapshot_MoveFloat(s, &m->fBaseMaxSpeed);
+    ReplaySnapshot_MoveFloat(s, &m->fDesiredSpeed);
+    ReplaySnapshot_MoveVector3(s, &m->v3DesiredVelocity);
+    ReplaySnapshot_MoveData(s, &m->State, 1, -1, 0);
+    ReplaySnapshot_MoveFloat(s, &m->fMaxBrakingAccel);
+    ReplaySnapshot_MoveFloat(s, &m->fMaxThrottleAccel);
+    ReplaySnapshot_MoveVector3(s, &m->v3GroundNormal);
+    ReplaySnapshot_MoveBool(s, &m->bIsAirborne, 1);
+    ReplaySnapshot_MoveVector2(s, &m->v2TransverseAccel);
+    ReplaySnapshot_MoveFloat(s, &m->New64);
+    ReplaySnapshot_EndNamedSection(s);
+}
+
+void copdriver_do_snapshot(CopDriver *c, ReplaySnapshot *s)
+{
+    // 0x001a2b58. The one section with its object: BeginSection(this).
+    // The states go as their low bytes; nCarClass is not saved.
+    ReplaySnapshot_BeginSection(s, c, "CopDriver");
+    trackedcontroller_do_snapshot(&c->Base, s);
+    ReplaySnapshot_MoveData(s, &c->State, 1, -1, 0);
+    ReplaySnapshot_MoveData(s, &c->StateBeforeGettingStuck, 1, -1, 0);
+    ReplaySnapshot_MoveData(s, &c->SubState, 1, -1, 0);
+    ReplaySnapshot_MoveFloat(s, &c->fStuckTimer);
+    ReplaySnapshot_MoveFloat(s, &c->fBackingUpTimer);
+    ReplaySnapshot_MoveFloat(s, &c->fPatrolSpeed);
+    ReplaySnapshot_MoveVector2(s, &c->v2SteerTarget);
+    ReplaySnapshot_MoveInt(s, &c->nCopIndex, 1);
+    ReplaySnapshot_EndSection(s);
+}
+
 // ------------------------------------------------------------ the entries
 
 static void vt_CopMover_dtor(void *self, int32_t flags)
@@ -1247,12 +1290,11 @@ static float vt_CopMover_Move(void *self, float dt)
     return copmover_move((CopMover *)self, dt);
 }
 
-// DoSnapshot is not ported yet; see copdriver.h.
 static const VtEntry copmover_vt[COPMOVER_VT_ENTRIES] = {
     { 0, 0, NULL },
     { 0, 0, (VtFn)vt_CopMover_dtor },      //  8  0x001a0e88
     { 0, 0, (VtFn)vt_CopMover_Move },      // 16  0x001a1030
-    { 0, 0, NULL },                        // 24  0x001a0f20
+    { 0, 0, (VtFn)copmover_do_snapshot },  // 24  0x001a0f20
 };
 
 void copmover_install_vtables(void)
@@ -1277,13 +1319,13 @@ static void vt_CopDriver_Think(void *self, float dt)
 
 #define E(f) { 0, 0, (VtFn)(f) }
 
-// _vt$9CopDriver, 0x002b5998. Its own destructor and Think, DoSnapshot not
-// ported yet, and the rest TrackedController's and CarController's.
+// _vt$9CopDriver, 0x002b5998. Its own destructor, DoSnapshot and Think,
+// and the rest TrackedController's and CarController's.
 static const VtEntry copdriver_vt[CARCONTROLLER_VT_ENTRIES] = {
     { 0, 0, NULL },
     E(vt_CopDriver_dtor),                           //   8  0x001a1e30
     E(carcontroller_debug_display),                 //  16  0x001c0198
-    { 0, 0, NULL },                                 //  24  0x001a2b58
+    E(copdriver_do_snapshot),                       //  24  0x001a2b58
     E(vt_CopDriver_Think),                          //  32  0x001a2110
     E(trackedcontroller_set_current_route),         //  40  0x0023a178
     E(trackedcontroller_get_current_route),         //  48  0x0023a198

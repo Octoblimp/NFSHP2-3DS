@@ -27,8 +27,10 @@ distance methods in `world.c`, the list sort in `blist.c`, the bPNode pool
 in `bplist.c` and OBB in `obb.c`. `tools/world_check.py` cross-checks them
 against `tools/src/world_test.c`, with the image running in mipsemu as the
 oracle. `bslotpool_check` checks the bPNode pool and `track_check`
-GetVectorOnTrack. Still to come are DoSnapshot (0x0014a910) and
-DoPointerSnapshot (0x0014ad20), which wait on ReplaySnapshot.
+GetVectorOnTrack. DoPointerSnapshot (the demo's 0x0014ad20, retail's
+0x0014d550) came with the replay, TASKS 72c: a car goes as its
+DriverNumber in one byte, -1 for none, and a restore looks it up again.
+DoSnapshot (0x0014a910) is TASKS 72d's.
 
 ## The record
 

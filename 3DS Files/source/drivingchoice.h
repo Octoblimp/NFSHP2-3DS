@@ -8,9 +8,9 @@
 // Here (steps 11b-2 to 11b-4b): the small methods, the room and the side
 // tests, FillUpDriveTarget with everything under it, BuildDriveTarget
 // with the way round a car under it, and the choosing: IsDriveable,
-// TryChoice, MakeNewChoice and TryToDriveAroundCar. Left out:
-// DoSnapshot (0x00241b88), the replay's, and GetTextDescription
-// (0x00241c38), a debug string.
+// TryChoice, MakeNewChoice and TryToDriveAroundCar; and DoSnapshot
+// (0x00241b88), the replay's, since TASKS 72c. Left out:
+// GetTextDescription (0x00241c38), a debug string.
 //
 // Checked against retail by tools/drivingchoice_check.py. Written up in
 // docs/formats/ai-driving-choice.md.
@@ -406,5 +406,10 @@ int drivingchoice_try_to_drive_around_car(DrivingChoice *d,
                                           struct NearbyCarList *list, float a,
                                           float maxTime, float unused,
                                           int tryCurrent);
+
+// 0x00241b88, the replay's (TASKS 72c), a "DrivingChoice" section: Type's
+// low byte, the car by its number and UseExtraLateralDistance.
+struct ReplaySnapshot;
+void drivingchoice_do_snapshot(DrivingChoice *d, struct ReplaySnapshot *s);
 
 #endif /* DRIVINGCHOICE_H */

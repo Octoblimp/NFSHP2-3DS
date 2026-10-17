@@ -14,6 +14,7 @@
 #include "collisionbody.h"
 #include "eefpu.h"
 #include "realdriver.h"   // gBaseCarSoundStartHonkHornFn, ...StopHonkHornFn
+#include "replay.h"
 #include "vtable.h"
 
 // ------------------------------------------------------------- the seams
@@ -689,6 +690,27 @@ void psychodriver_set_steer_to_point(PsychoDriver *d, bVector2 *p)
     d->SteerToPoint.x = p->x;
 }
 
+// ------------------------------------------------------------ the replay
+
+void psychodriver_do_snapshot(PsychoDriver *d, ReplaySnapshot *s)
+{
+    // 0x00139980.
+    ReplaySnapshot_BeginNamedSection(s, "PsychoDriver");
+    ReplaySnapshot_MoveFloat(s, &d->MaxThrottle);
+    ReplaySnapshot_MoveFloat(s, &d->DesiredSpeed);
+    ReplaySnapshot_MoveFloat(s, &d->TimeToGetToDesiredSpeed);
+    ReplaySnapshot_MoveFloat(s, &d->DesiredSpeedTolerance);
+    ReplaySnapshot_MoveData(s, &d->SteerToPoint, 8, -1, 0);
+    ReplaySnapshot_MoveBool(s, &d->AllowedToUseThrottleAndBrake, 1);
+    ReplaySnapshot_MoveFloat(s, &d->EBrakeTimer);
+    ReplaySnapshot_MoveBool(s, &d->DirectionLatch, 1);
+    pid_error_do_snapshot(d->pBodyError, s);
+    pid_error_do_snapshot(d->pHeadingError, s);
+    pid_error_do_snapshot(d->pVelocityError, s);
+    cardriver_do_snapshot(&d->Base, s);
+    ReplaySnapshot_EndNamedSection(s);
+}
+
 // ------------------------------------------------------------- the table
 
 #define E(f) { 0, 0, (VtFn)(f) }
@@ -698,7 +720,7 @@ static const VtEntry psychodriver_vt[CARDRIVER_VT_ENTRIES] = {
     { 0, 0, NULL },
     E(psychodriver_destroy),                   //   8  0x001398e8
     E(psychodriver_drive),                     //  16  0x00139c48
-    { 0, 0, NULL },                            //  24  DoSnapshot, 0x00139980
+    E(psychodriver_do_snapshot),               //  24  0x00139980
     E(cardriver_add_joy_handlers),             //  32  0x00136cf0
     E(cardriver_remove_joy_handlers),          //  40  0x00136ce8
     E(psychodriver_set_low_gear),              //  48  0x0013acd8

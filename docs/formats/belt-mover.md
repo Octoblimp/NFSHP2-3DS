@@ -1,7 +1,7 @@
 # BeltMover
 
-`BeltMover.obj` (0x00204098 .. 0x002056b4), all of it but `DoSnapshot`,
-which waits on the replay with every other class's. Step 11e-6 of the
+`BeltMover.obj` (0x00204098 .. 0x002056b4), all of it; `DoSnapshot` came
+with the replay, TASKS 72c. Step 11e-6 of the
 racer AI, after [AICarController](ai-car-controller.md), whose Think puts
 a car on the belt.
 
@@ -83,7 +83,7 @@ mover makes passes 0 for both, so neither clamp ever runs, and banim's
 |-----:|--------|---------|
 | 8 | destructor | 0x002043a0 |
 | 16 | Move | 0x00204d78 |
-| 24 | DoSnapshot | 0x00204468, not ported: a NULL entry, which `vt_slot` aborts on |
+| 24 | DoSnapshot | 0x00204468, TASKS 72c: v, dv, ddv, fTime, fScale, bSliding, the three cubics raw (48, 96, 96 bytes), the spline at three floats a point, the Average, the four Wheels |
 
 ClearCalculatedVariables (0x00204460) and DebugScreenPrint (0x002053a0)
 are `jr ra`. The port keeps the first, because the constructor calls it.

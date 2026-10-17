@@ -8,7 +8,8 @@
 // patrolling along the cop's own drive target, chasing (steering for a
 // point on the pursuit's targets, or translating alongside the chased car
 // when close and as fast), or backing up when stuck. Both are all here but
-// DoSnapshot and CopDriver's CollisionAvoidance, which nothing calls. See
+// CopDriver's CollisionAvoidance, which nothing calls; the DoSnapshots are
+// the replay's, since TASKS 72c. See
 // docs/formats/cop-mover.md and docs/formats/cop-driver.md.
 
 #ifndef COPDRIVER_H
@@ -55,9 +56,8 @@ typedef char copdriver_layout_check[
 #endif
 
 // _vt$9CopDriver, 0x002b5998, TrackedController's layout: its own
-// destructor (0x001a1e30) and Think (0x001a2110), DoSnapshot (0x001a2b58,
-// not ported: a NULL entry), and the rest TrackedController's and
-// CarController's.
+// destructor (0x001a1e30), DoSnapshot (0x001a2b58) and Think (0x001a2110),
+// and the rest TrackedController's and CarController's.
 #define COPDRIVER_VTABLE     0x002b5998u
 
 // A DLOffset: x along the drive target, y across it (to the right of the
@@ -168,8 +168,7 @@ typedef char copmover_layout_check[
 #endif
 
 // _vt$8CopMover, 0x002b5a08, CarMover's layout: the destructor (0x001a0e88),
-// Move (0x001a1030) and DoSnapshot (0x001a0f20, not ported: a NULL entry,
-// which vt_slot aborts on).
+// Move (0x001a1030) and DoSnapshot (0x001a0f20).
 #define COPMOVER_VTABLE     0x002b5a08u
 #define COPMOVER_VT_ENTRIES 4
 
@@ -212,6 +211,17 @@ void    copmover_set_desired_velocity(CopMover *m, const bVector3 *v);
 void    copmover_set_desired_speed(CopMover *m, float s);
 void    copmover_set_desired_angle(CopMover *m, uint16_t a);
 void    copmover_set_state(CopMover *m, eCopMoverState s);
+
+// The replay's (TASKS 72c), slot 24 of each table. 0x001a0f20, a
+// "CopMover" section: CarMover's (nothing), the velocity, both angles, the
+// speeds, the wanted velocity, State's low byte, both accelerations, the
+// ground normal, the airborne flag, the transverse acceleration and the
+// braking ramp. 0x001a2b58, a "CopDriver" section begun with the object:
+// the TrackedController, the three states' low bytes, the three timers and
+// speed, the steer target and the cop index as one signed byte.
+struct ReplaySnapshot;
+void copmover_do_snapshot(CopMover *m, struct ReplaySnapshot *s);
+void copdriver_do_snapshot(CopDriver *c, struct ReplaySnapshot *s);
 
 // Installs the table. The game calls it once at boot; a harness calls it
 // after vt_reset().

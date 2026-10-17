@@ -219,11 +219,22 @@ float world_get_dat_to_closest_player(const World *w, float dat);
 // counts and positions between them. Each car's CarIndex is its place.
 void world_build_car_table(World *w);
 
-// 0x0014acd8. The car in the table with DriverNumber n, or NULL.
+// 0x0014acd8 (retail's 0x0014d508). The car in the table with DriverNumber
+// n, or NULL. In world.c.
 struct Car *world_get_car_by_number(const World *w, int32_t n);
 
 // 0x0014ada0, GetCarByDriverNumber. The same on pCurrentWorld.
 struct Car *world_get_car_by_driver_number(int32_t n);
+
+// The replay's (TASKS 72c), in world.c: a pointer to a car as its
+// DriverNumber in one byte, -1 for NULL, found again on a restore.
+// Retail's 0x0014d550, and DoCarPointerSnapshot (0x00130910) with the
+// arguments the other way round.
+struct ReplaySnapshot;
+void world_do_pointer_snapshot(const World *w, struct ReplaySnapshot *s,
+                               struct Car **pp);
+void world_do_car_pointer_snapshot(const World *w, struct Car **pp,
+                                   struct ReplaySnapshot *s);
 
 // 0x0014adc8, CarListCheckFlip: nonzero when a may stay in front of b on
 // CarList, which DoTimestep sorts by it -- a's x no greater than b's.

@@ -30,7 +30,22 @@
 #include "trackpath.h"
 #include "vtable.h"
 
+// The DoSnapshots (TASKS 72c) call these; nothing here takes a
+// snapshot.
+static void snapshot_unreached(const char *f)
+{
+    fprintf(stderr, "%s reached\n", f);
+    exit(3);
+}
+
+void drivetarget_do_snapshot(DriveTarget *t, struct ReplaySnapshot *s)
+{
+    (void)t; (void)s;
+    snapshot_unreached("drivetarget_do_snapshot");
+}
+
 int32_t WorldTimer;
+int32_t WorldLoopCounter;   // realtime.c's too; ReplaySnapshot_Init reads it
 
 #define PATTERN 0xa5
 #define NHEAP   8

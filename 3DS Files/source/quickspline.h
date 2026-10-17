@@ -22,8 +22,9 @@
 // cp[-1] (and, for LOOP, cp[n] and cp[n+1]) around the caller's points.
 //
 // Nothing in the image calls the buffer-taking constructor; it is here
-// because it is in quickspline.cpp and costs five lines. DoSnapshot waits
-// on ReplaySnapshot.
+// because it is in quickspline.cpp and costs five lines. DoSnapshot (retail
+// 0x0023d208) is the replay's, since TASKS 72c; BeltMover's is its one
+// caller.
 //
 // See docs/formats/quickspline.md.
 
@@ -170,5 +171,12 @@ float quickspline_find_closest_param(QuickSpline *s, const bVector3 *p,
 // 0x00228cc8. Writes each control point's arc length into its w, summed
 // over `samples` chords per segment, and the total into Length.
 void quickspline_calibrate_length(QuickSpline *s, int32_t samples);
+
+// Retail 0x0023d208, a "QuickSpline" section: NumControlPoints in two
+// bytes; when taking or restoring, SetNumControlPoints with it; then the
+// first n floats of each control point (BeltMover passes 3).
+struct ReplaySnapshot;
+void quickspline_do_snapshot(QuickSpline *q, struct ReplaySnapshot *s,
+                             int32_t n);
 
 #endif

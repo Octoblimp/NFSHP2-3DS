@@ -14,6 +14,10 @@
 #include "average.h"
 #include "bmem.h"
 
+// realtime.c's clock, which ReplaySnapshot_Init stamps; not linked here.
+int32_t WorldTimer;
+int32_t WorldLoopCounter;
+
 enum {
     OP_TAG, OP_NEW, OP_DEL, OP_REC, OP_RESET, OP_FLUSH, OP_POKE, OP_DPOKE,
     OP_DUMP, OP_PNEW, OP_PDEL, OP_PREC, OP_PRESET, OP_PDUMP, OP_LINIT,

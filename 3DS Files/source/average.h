@@ -15,7 +15,7 @@
 // 24, with words. Every owner news its own (bMalloc(16, ...)), and
 // PsychoDriver news its PidErrors too (40 bytes).
 //
-// DoSnapshot (0x0018fe38, 0x0018ff98) waits on ReplaySnapshot.
+// DoSnapshot (0x0018fe38, 0x0018ff98) is the replay's, since TASKS 72c.
 //
 // Written up in docs/formats/average.md.
 #ifndef AVERAGE_H
@@ -74,6 +74,12 @@ float average_get_last_value(const Average *a);
 float average_get_value(const Average *a);
 float average_get_total(const Average *a);
 
+// 0x0018fe38, an "Average" section: the three counters as bytes, the
+// total, then nSlots floats of the ring. Taking or restoring sets the mean
+// to fTotal / nSamples, or 0 with no samples.
+struct ReplaySnapshot;
+void average_do_snapshot(Average *a, struct ReplaySnapshot *s);
+
 // 40 bytes on the disc.
 typedef struct PidError {
     Average aIntegral;     // 0
@@ -109,6 +115,9 @@ void pid_error_record(PidError *p, float err, float dt);
 // Both Averages are reset -- to the current error, which is now zero, not
 // to `err`.
 void pid_error_reset(PidError *p, float err);
+
+// 0x0018ff98, a "PidError" section: both Averages, then both errors.
+void pid_error_do_snapshot(PidError *p, struct ReplaySnapshot *s);
 
 // 8 bytes on the disc.
 typedef struct Linear {

@@ -488,9 +488,8 @@ argument is how a port quietly stops being a port.
 
 ## Not ported
 
-`DoSnapshot` (0x00182b00) needs `ReplaySnapshot` — the same dependency
-that has held up CarState, Engine, CarDriver, Steering, RigidBody,
-Suspension and Wheel. `operator new` and `operator delete` are the PS2
+`DoSnapshot` (0x00182b00) came with the replay, TASKS 72b;
+`tools/carsnap_check.py` checks it against retail. `operator new` and `operator delete` are the PS2
 slot allocator (`DriveTrainSlotPool` at 0x00323090). The destructor is
 `PhysicsComponent`'s plus that delete. `PrintCurrentState` (0x00183c28) is
 `jr ra` — the debug print compiled out, like Wheel's `SetSliderValue` —

@@ -11,9 +11,9 @@ AICarController's constructor. Average's buffer names
 
 The port is `3DS Files/source/average.{c,h}`. It is cross-checked by
 `tools/average_check.py` against `tools/src/average_test.c`, with the
-retail image itself running in mipsemu as the oracle. Everything is ported
-except the two `DoSnapshot`s (0x0018fe38, 0x0018ff98), which wait on
-ReplaySnapshot.
+retail image itself running in mipsemu as the oracle. Everything is ported.
+The two `DoSnapshot`s (0x0018fe38, 0x0018ff98) came with the replay, TASKS
+72c, and `tools/aisnap_check.py` checks them.
 
 Retail made the Average smaller: 16 bytes with its three counters as
 bytes, where the demo had 24 with words. PidError shrank with it, from 56

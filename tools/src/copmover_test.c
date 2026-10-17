@@ -29,6 +29,10 @@
 #include "trackroute.h"
 #include "vtable.h"
 
+// realtime.c's clock, which ReplaySnapshot_Init stamps; not linked here.
+int32_t WorldTimer;
+int32_t WorldLoopCounter;
+
 // ------------------------------------------------------------- the world
 
 static union {
@@ -190,6 +194,7 @@ UNREACHED(void, carcontroller_release_boost, (CarController *c))
 UNREACHED(void, carcontroller_set_to_physics_mode,
           (CarController *c, struct Car *k))
 UNREACHED(void, cardriver_init, (CarDriver *d))
+UNREACHED(void, carmover_do_snapshot, (CarMover *m, void *snap))
 UNREACHED(DriveTarget *, drivetarget_assign,
           (DriveTarget *dst, const DriveTarget *src))
 UNREACHED(void, taicop_initialize_drive_target, (tAICop *c))
@@ -200,6 +205,8 @@ UNREACHED(bVector2 *, tpursuithistory_velocity_at,
           (bVector2 *out, const tPursuitHistory *h, float t))
 UNREACHED(void, trackedcontroller_destroy,
           (TrackedController *c, int32_t flags))
+UNREACHED(void, trackedcontroller_do_snapshot,
+          (TrackedController *c, struct ReplaySnapshot *s))
 UNREACHED(void, trackedcontroller_find_where_i_am, (TrackedController *c))
 UNREACHED(float, trackedcontroller_get_amount_out_of_bounds,
           (TrackedController *c))

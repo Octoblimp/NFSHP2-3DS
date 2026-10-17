@@ -52,6 +52,10 @@
 #include "trackflow.h"
 #include "trackmap.h"
 
+// realtime.c's clock, which ReplaySnapshot_Init stamps; not linked here.
+int32_t WorldTimer;
+int32_t WorldLoopCounter;
+
 #define MAX_LOADS 4
 #define NUM_VIEWS 4
 

@@ -68,7 +68,7 @@ other three are never read or written.
 |-----:|-------|
 | 8 | the destructor, 0x001a0e88 |
 | 16 | Move, 0x001a1030 |
-| 24 | DoSnapshot, 0x001a0f20 (not ported: a NULL entry, which `vt_slot` aborts on) |
+| 24 | DoSnapshot, 0x001a0f20 (TASKS 72c); New68 and pCar are not saved |
 
 ## The tuning
 

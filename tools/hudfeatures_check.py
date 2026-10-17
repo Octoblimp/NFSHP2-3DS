@@ -67,6 +67,7 @@ HUD = "3DS Files/source/playerhud.c"
 SOURCES = [HARNESS, HUD, "3DS Files/source/flailer.c",
            "3DS Files/source/bprintf.c", "3DS Files/source/bui.c",
            "3DS Files/source/bchunk.c",
+           "3DS Files/source/replay.c", "3DS Files/source/p32.c",
            "3DS Files/source/copmanager.c", "3DS Files/source/raceparams.c"]
 
 GP = fc.GP

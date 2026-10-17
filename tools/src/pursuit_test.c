@@ -585,6 +585,16 @@ int32_t player_request_zone(struct Player *p, int32_t zone, int32_t force,
     return r;
 }
 
+// copmanager.c's roadblock pointer snapshot (TASKS 72c) calls this; nothing
+// here takes a snapshot, and replay.c is not linked because its
+// RegisterInterestingEvent is the stand-in below.
+void ReplaySnapshot_MoveData(ReplaySnapshot *s, void *p, int32_t stored,
+                             int32_t size, int32_t is_signed)
+{
+    (void)s; (void)p; (void)stored; (void)size; (void)is_signed;
+    unreached("ReplaySnapshot_MoveData");
+}
+
 void ReplayManager_RegisterInterestingEvent(ReplayManager *rm, float value,
                                             const char *description)
 {

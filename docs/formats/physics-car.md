@@ -72,8 +72,7 @@ pointers ahead of the field plus CarMover's tail padding.
 Every entry of the vehicle table carries a delta of -8, so the PhysicsVehicle
 pointer the integrator calls through arrives as the PhysicsCar. In the port
 the delta is `-offsetof(PhysicsCar, Vehicle)`: -8 on the 3DS, -16 on the
-64-bit host. DoSnapshot is a NULL entry until the replay is ported;
-`vt_slot` aborts on a NULL entry.
+64-bit host. DoSnapshot is PhysicsCar's own since TASKS 72b.
 
 ## The constructor
 

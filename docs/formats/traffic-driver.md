@@ -5,8 +5,9 @@
 SetControlMode builds one for a car under `TRAFFIC_CONTROL`, which is
 every car the traffic teleporter puts on the road.
 
-Ported to `3DS Files/source/trafficdriver.{c,h}`, all but DoSnapshot
-(0x0018c478), which waits on ReplaySnapshot. Cross-checked by
+Ported to `3DS Files/source/trafficdriver.{c,h}`; DoSnapshot (0x0018c478)
+came with the replay, TASKS 72c: PickLowNumberedRoutes, then the
+AICarController's. `tools/aisnap_check.py` checks it. Cross-checked by
 `tools/trafficdriver_check.py` against `tools/src/trafficdriver_test.c`,
 with the image as the oracle.
 
@@ -56,7 +57,7 @@ TrafficDriver's own slots:
 | Slot | Address | Method |
 |-----:|---------|--------|
 | 8 | 0x0018c418 | destructor |
-| 24 | 0x0018c478 | DoSnapshot, NULL in the port |
+| 24 | 0x0018c478 | DoSnapshot (TASKS 72c) |
 | 32 | 0x0018c4d8 | Think |
 | 80 | 0x0018cb10 | JustReset |
 | 112 | 0x0018cae8 | GetRouteNumbersToUse |

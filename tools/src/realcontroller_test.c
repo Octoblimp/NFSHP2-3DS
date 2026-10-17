@@ -553,7 +553,8 @@ static const char *portname(VtFn fn)
     if (fn == NULL) return "null";
 #define N(f) if (fn == (VtFn)(f)) return #f;
     N(trackedcontroller_destroy) N(realcontroller_destroy)
-    N(carcontroller_debug_display) N(trackedcontroller_think)
+    N(carcontroller_debug_display) N(trackedcontroller_do_snapshot)
+    N(realcontroller_do_snapshot) N(trackedcontroller_think)
     N(realcontroller_think) N(trackedcontroller_set_current_route)
     N(trackedcontroller_get_current_route)
     N(trackedcontroller_get_current_route_point)

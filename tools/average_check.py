@@ -63,7 +63,8 @@ NL = chr(10)
 HARNESS = "tools/src/average_test.c"
 AC = "3DS Files/source/average.c"
 AH = "3DS Files/source/average.h"
-SOURCES = [HARNESS, AC, "3DS Files/source/bmem.c"]
+SOURCES = [HARNESS, AC, "3DS Files/source/bmem.c",
+           "3DS Files/source/replay.c", "3DS Files/source/p32.c"]
 
 HARNESS_TIMEOUT = 60
 

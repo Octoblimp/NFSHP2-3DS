@@ -86,9 +86,10 @@ not to a derived class that is already gone -- runs
 `_$_11DriveTarget(this, 2)`, which with flag 2 does nothing, and then
 applies its own flags the same way. Nothing here owns memory.
 
-`CarDriver::DoSnapshot` (0x0012f150) is **not** ported: it needs
-`ReplaySnapshot`, the same dependency that stopped `CarState::DoSnapshot`
-and `Engine::DoSnapshot`.
+`CarDriver::DoSnapshot` is retail's (0x00130958, the demo's 0x0012f150),
+ported for the replay in TASKS 72c: Steering, Throttle, Brake, EBrake,
+DesiredGear as one signed byte, then the DriveTarget. SportGear and
+NitroFlag are not saved.
 
 ### The two tables, and NullDriver
 

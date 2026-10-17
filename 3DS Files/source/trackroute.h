@@ -417,6 +417,35 @@ static inline TrackRoute *trmgr_get_route(TrackRouteManager *m, int n)
     return m->pTrackRoutes[n];
 }
 
+// The replay's pointers into the routes (TASKS 72c), retail's
+// DoPointerSnapshots. Retail's inline DoSnapshot(TrackRoute **, ...) and
+// DoSnapshot(TrackRoutePoint **, TrackRoute *, ...) (0x001cd748 and
+// 0x001cd730, and their copies) only turn the arguments round; the callers
+// call these.
+//
+// 0x001c2b30. A route as its RouteNumber in one byte, -1 for NULL; a
+// restore takes the manager's route of that number.
+struct ReplaySnapshot;
+void trmgr_do_route_pointer_snapshot(TrackRouteManager *m,
+                                     struct ReplaySnapshot *s,
+                                     TrackRoute **pp);
+
+// 0x001c2bc8. A point of `route` as its index in two bytes, -1 for NULL or
+// no route. Taking or restoring a point with no route clears the pointer;
+// a restore makes the point of the index again, from `route` even when it
+// is NULL, as retail's does.
+void trmgr_do_point_pointer_snapshot_in_route(TrackRouteManager *m,
+                                              struct ReplaySnapshot *s,
+                                              TrackRoutePoint **pp,
+                                              TrackRoute *route);
+
+// 0x001c2ca0. A point of any route as its route's RouteNumber in the high
+// half of a word and its index in the low, -1 for NULL. The route is the
+// manager's, by the point's RouteNumber byte.
+void trmgr_do_point_pointer_snapshot(TrackRouteManager *m,
+                                     struct ReplaySnapshot *s,
+                                     TrackRoutePoint **pp);
+
 // ---------------------------------------------------------------- signposts
 
 // 0x001b6f60 / 0x001b6f88. The slot NewRoute names, and that route's point

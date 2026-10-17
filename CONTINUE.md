@@ -3618,6 +3618,11 @@ and so replaced every boot.
      (`gReplay*Fn`) are gone. PhysicsCar's new FlippedTimer sits after the
      demo's fields at 116 (retail's 108). Where retail's objects differ
      from the demo's is TASKS 73.
+   - The drivers' and the AI's DoSnapshots are retail's since TASKS
+     72c (Session 122): the drivers, AICarController and the actions,
+     the controllers, the movers, the splines, Average and PidError,
+     DriveTarget and the route and car pointers. `aisnap_check` runs
+     them against retail. RealDriver's Port comes back unsigned.
 
    **7b, DriveCameraMover::Update, is done** (HANDOFF.md, Session 31,
    continued: the drive camera's Update). `docs/formats/camera.md`,

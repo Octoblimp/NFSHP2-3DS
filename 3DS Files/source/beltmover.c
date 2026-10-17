@@ -17,6 +17,7 @@
 #include "nearbycar.h"         // ai_calculate_max_acceleration, the third
 #include "physcomp.h"          // wheel_new
 #include "physicssystem.h"     // PhysicsDtorFn
+#include "replay.h"
 #include "vtable.h"
 #include "world.h"
 
@@ -669,6 +670,35 @@ bVector3 *beltmover_get_second_derivative(BeltMover *m, bVector3 *out,
     return out;
 }
 
+// ------------------------------------------------------------- the replay
+
+void beltmover_do_snapshot(BeltMover *m, ReplaySnapshot *s)
+{
+    // 0x00204468. The three cubics go as their raw records, the spline as
+    // three floats a point, and ClearCalculatedVariables (`jr ra`) runs
+    // when taking or restoring.
+    int32_t i;
+
+    ReplaySnapshot_BeginNamedSection(s, "BeltMover");
+    carmover_do_snapshot(&m->Mover, s);
+    ReplaySnapshot_MoveFloat(s, &m->v);
+    ReplaySnapshot_MoveFloat(s, &m->dv);
+    ReplaySnapshot_MoveFloat(s, &m->ddv);
+    ReplaySnapshot_MoveFloat(s, &m->fTime);
+    ReplaySnapshot_MoveFloat(s, &m->fScale);
+    ReplaySnapshot_MoveBool(s, &m->bSliding, 1);
+    ReplaySnapshot_MoveData(s, m->pCubicU, 48, -1, 0);
+    ReplaySnapshot_MoveData(s, m->pCubicAng, 96, -1, 0);
+    ReplaySnapshot_MoveData(s, m->pCubicSlide, 96, -1, 0);
+    quickspline_do_snapshot(m->pSpline, s, 3);
+    average_do_snapshot(m->pAvgAccel, s);
+    for (i = 0; i < 4; i++)
+        wheel_do_snapshot(m->pWheels[i], s);
+    if (s->TakingSnapshotFlag || s->RestoringSnapshotFlag)
+        beltmover_clear_calculated_variables(m);
+    ReplaySnapshot_EndNamedSection(s);
+}
+
 // ------------------------------------------------------------ the entries
 
 static void vt_BeltMover_dtor(void *self, int32_t flags)
@@ -681,12 +711,11 @@ static float vt_BeltMover_Move(void *self, float dt)
     return beltmover_move((BeltMover *)self, dt);
 }
 
-// DoSnapshot is not ported yet; see beltmover.h.
 static const VtEntry beltmover_vt[BELTMOVER_VT_ENTRIES] = {
     { 0, 0, NULL },
     { 0, 0, (VtFn)vt_BeltMover_dtor },     //  8  0x002043a0
     { 0, 0, (VtFn)vt_BeltMover_Move },     // 16  0x00204d78
-    { 0, 0, NULL },                        // 24  0x00204468
+    { 0, 0, (VtFn)beltmover_do_snapshot }, // 24  0x00204468
 };
 
 void beltmover_install_vtables(void)

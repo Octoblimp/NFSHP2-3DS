@@ -1,8 +1,8 @@
 # MellowMover
 
 `MellowMover.obj` (0x00206448 .. 0x002086f8): MellowMover and the
-Mellovator it drives, minus the two `DoSnapshot`s, which wait on the
-replay. Part of task 25, after [PhysicsCar](physics-car.md), whose bases
+Mellovator it drives. The two `DoSnapshot`s came with the replay, TASKS
+72c. Part of task 25, after [PhysicsCar](physics-car.md), whose bases
 and table layout it shares.
 
 Ported to `3DS Files/source/mellowmover.{c,h}`. Cross-checked by
@@ -99,9 +99,13 @@ Each entry is eight bytes: a delta, an index and the function. The
 vehicle table's delta turns the PhysicsVehicle pointer back into the
 MellowMover. On the host it is `-offsetof(MellowMover, Vehicle)`.
 
-MellowMover's DoSnapshot is a NULL entry until the replay is ported, and
-`vt_slot` aborts on a NULL entry. The Mellovator's DoSnapshot (0x002071b8)
-is not in its table at all: the nine entries end at ComputeAuxiliaries.
+MellowMover's DoSnapshot (retail 0x002198c8, the demo's 0x002066e0) is
+slot 24 since TASKS 72c: a section begun with the object, then the
+RigidBody, the Mellovator, the Aerodynamics, the four Wheels and
+CarMover's (nothing). The Mellovator's DoSnapshot (retail 0x0021a3d8, the
+demo's 0x002071b8) is not in its table at all: the nine entries end at
+ComputeAuxiliaries, and MellowMover's calls it directly. Its gears and its
+grounded and locked flags go as signed low bytes.
 
 ## Mellovator
 

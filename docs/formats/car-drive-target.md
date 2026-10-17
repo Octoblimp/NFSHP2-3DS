@@ -520,9 +520,10 @@ function off in the shipped build: `CameraFollowDefaultCar` is 1.
 
 ## Not ported
 
-`DoSnapshot` (0x00208830) needs `ReplaySnapshot`, the same dependency
-`CarState`, `Engine`, `CarDriver`, `Steering`, `RigidBody`, `Suspension`,
-`Wheel` and `DriveTrain` are all still waiting on.
+`DoSnapshot` is ported now, from retail (0x0021ba50, the demo's
+0x00208830), for the replay (TASKS 72c): TType's low byte, NumPoints, the
+pick, its two timers, Length and LastPointToScore, then each point.
+`tools/aisnap_check.py` checks it.
 
 `operator new` and `operator delete` are the PS2 slot allocator.
 `DriveTarget`'s destructor is the GNU v2 deleting form — `if (flag & 1)

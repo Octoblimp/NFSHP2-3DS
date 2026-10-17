@@ -242,8 +242,6 @@ VT_CARMOVER = 0x002923e0
 TABLES = ["NullMover", "CarController", "NullController", "CarDriver",
           "NullDriver"]
 PURE = pcc.PURE
-# CarDriver::DoSnapshot waits on ReplaySnapshot; the port leaves it NULL.
-PENDING = {("CarDriver", 24), ("NullDriver", 24)}
 
 # Each port function a table holds, and the image's symbol for it.
 FNMAP = [
@@ -270,6 +268,7 @@ FNMAP = [
     ("nullcontroller_find_where_i_am", "FindWhereIAm__14NullController"),
     ("nullcontroller_just_reset", "JustReset__14NullController"),
     ("cardriver_destroy", "_$_9CarDriver"),
+    ("cardriver_do_snapshot", "DoSnapshot__9CarDriverP14ReplaySnapshot"),
     ("cardriver_add_joy_handlers", "AddJoyHandlers__9CarDriver"),
     ("cardriver_remove_joy_handlers", "RemoveJoyHandlers__9CarDriver"),
     ("cardriver_set_target", "SetTarget__9CarDriverP11DriveTarget"),
@@ -1647,7 +1646,7 @@ class Model(mmc.Model):
             for i in range(1, n):
                 delta = struct.unpack("<h", self.e.read(vt + 8 * i, 2))[0]
                 fn = self.w(vt + 8 * i + 4)
-                if fn == PURE or (t, 8 * i) in PENDING:
+                if fn == PURE:
                     fn = 0
                 cells.append("%d/%s" % (delta, "%08x" % fn if fn else "null"))
             self.say("vt %s %s" % (t, " ".join(cells)))

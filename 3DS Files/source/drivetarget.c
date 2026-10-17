@@ -44,6 +44,7 @@
 #include "bmath.h"
 #include "eefpu.h"
 #include "engine.h"   /* WorldTimer, gp-20224 */
+#include "replay.h"
 
 // ---------------------------------------------------------- the constants
 //
@@ -1326,4 +1327,30 @@ void drivetarget_dump(DriveTarget *t, Car *car, int checkCamera, int unused)
         }
     }
     (void)local;
+}
+
+// ------------------------------------------------------------- the replay
+
+void drivetarget_do_snapshot(DriveTarget *t, ReplaySnapshot *s)
+{
+    // 0x0021ba50. TType goes as its low byte; NumPoints comes back before
+    // the loop that reads it.
+    int i;
+
+    ReplaySnapshot_BeginNamedSection(s, "DriveTarget");
+    ReplaySnapshot_MoveData(s, &t->TType, 1, -1, 0);
+    ReplaySnapshot_MoveChar(s, &t->NumPoints, 1);
+    ReplaySnapshot_MoveChar(s, &t->WhichPointIPicked, 1);
+    ReplaySnapshot_MoveTimer(s, &t->WhichPointIPickedCalculationTime);
+    ReplaySnapshot_MoveTimer(s, &t->WhichPointIPickedTime);
+    ReplaySnapshot_MoveFloat(s, &t->Length);
+    ReplaySnapshot_MoveChar(s, &t->LastPointToScore, 1);
+    for (i = 0; i < t->NumPoints; i++) {
+        ReplaySnapshot_MoveVector3(s, &t->Points[i]);
+        ReplaySnapshot_MoveShort(s, &t->RoutePointNumber[i], 2);
+        ReplaySnapshot_MoveFloat(s, &t->CalculatedSpeed[i]);
+        ReplaySnapshot_MoveChar(s, &t->Route[i], 1);
+        ReplaySnapshot_MoveChar(s, &t->DrivingLine[i], 1);
+    }
+    ReplaySnapshot_EndNamedSection(s);
 }

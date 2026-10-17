@@ -257,9 +257,10 @@ FNMAP = {
     "_$_17TrackedController": "trackedcontroller_destroy",
     "_$_14RealController": "realcontroller_destroy",
     "DebugDisplay__13CarController": "carcontroller_debug_display",
-    # Both DoSnapshots wait on ReplaySnapshot; the port's slots are NULL.
-    "DoSnapshot__17TrackedControllerP14ReplaySnapshot": "null",
-    "DoSnapshot__14RealControllerP14ReplaySnapshot": "null",
+    "DoSnapshot__17TrackedControllerP14ReplaySnapshot":
+        "trackedcontroller_do_snapshot",
+    "DoSnapshot__14RealControllerP14ReplaySnapshot":
+        "realcontroller_do_snapshot",
     "Think__17TrackedControllerf": "trackedcontroller_think",
     "Think__14RealControllerf": "realcontroller_think",
     FN_SYM[F_SET_ROUTE]: "trackedcontroller_set_current_route",
@@ -1813,6 +1814,9 @@ MUTATIONS = [
     ("vt-rc-think-tracked", RCC,
      "    E(realcontroller_think),                        //  32  0x00224db8",
      "    E(trackedcontroller_think),                     //  32  0x00224db8"),
+    ("vt-rc-snapshot-tracked", RCC,
+     "    E(realcontroller_do_snapshot),                  //  24  0x002248c8",
+     "    E(trackedcontroller_do_snapshot),               //  24  0x002248c8"),
     ("vt-rc-dtor-tracked", RCC,
      "    E(realcontroller_destroy),                      //   8  0x00224840",
      "    E(trackedcontroller_destroy),                   //   8  0x00224840"),

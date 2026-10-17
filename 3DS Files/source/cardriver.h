@@ -190,9 +190,12 @@ void      cardriver_start_honk_horn(CarDriver *d);             // 0x00134d40
 void      cardriver_add_joy_handlers(CarDriver *d);            // 0x00134dd0
 void      cardriver_remove_joy_handlers(CarDriver *d);         // 0x00134dc8
 
-// CarDriver::DoSnapshot (0x0012f150) is **not** ported: it needs
-// ReplaySnapshot, the same dependency that stopped CarState::DoSnapshot
-// and Engine::DoSnapshot.
+// Retail's DoSnapshot (0x00130958, the demo's 0x0012f150), for the replay
+// (TASKS 72c). Steering, Throttle, Brake, EBrake, DesiredGear as one signed
+// byte, then the DriveTarget, in a "CarDriver" section. SportGear and
+// NitroFlag are not saved. NullDriver's table has this one too.
+struct ReplaySnapshot;
+void cardriver_do_snapshot(CarDriver *d, struct ReplaySnapshot *s);
 
 // ------------------------------------------------------------ NullDriver
 
@@ -220,9 +223,8 @@ int32_t nulldriver_get_driver_number(NullDriver *d);               // 0x00134ca0
 #define NULLDRIVER_DRIVER_NUMBER (-99999)
 
 // Installs _vt$9CarDriver (0x002924a8) and _vt$10NullDriver (0x00292400).
-// CarDriver's five pure entries are NULL, and so is DoSnapshot in both,
-// which vt_slot aborts on until ReplaySnapshot is ported. The game calls
-// it once at boot; a harness calls it after vt_reset().
+// CarDriver's four pure entries are NULL, which vt_slot aborts on. The game
+// calls it once at boot; a harness calls it after vt_reset().
 void cardriver_install_vtables(void);
 
 // RealDriver, the human's driver, is realdriver.h.

@@ -62,6 +62,7 @@ SPC = "3DS Files/source/spline.c"
 CMC = "3DS Files/source/cammover.c"
 SOURCES = [HARNESS, TCC, SPC, CMC] + ["3DS Files/source/" + f for f in (
     "race.c", "camera.c", "eview.c", "emath.c", "bmatrix.c", "bmath.c",
+    "replay.c", "p32.c",
     "bmathtab.c", "bvector.c", "banim.c")]
 
 HARNESS_TIMEOUT = 120

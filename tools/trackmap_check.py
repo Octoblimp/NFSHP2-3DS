@@ -92,6 +92,7 @@ HARNESS = "tools/src/trackmap_test.c"
 TRACKMAP = "3DS Files/source/trackmap.c"
 SOURCES = [HARNESS, TRACKMAP] + ["3DS Files/source/" + f for f in (
     "emath.c", "bmatrix.c", "bvector.c", "bmath.c", "bmathtab.c",
+    "replay.c", "p32.c",
     "bprintf.c", "bmem.c", "epoly.c", "copmanager.c")]
 
 F_INIT = 0x001bd1f8

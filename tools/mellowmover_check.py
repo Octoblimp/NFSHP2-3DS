@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Cross-check mellowmover -- MellowMover.obj minus its two DoSnapshots --
-against the image itself, run in mipsemu.
+"""Cross-check mellowmover -- MellowMover.obj but its two DoSnapshots,
+which aisnap_check checks -- against the image itself, run in mipsemu.
 
     3DS Files/source/mellowmover.{c,h}   Mellovator: the constructor and
                                          destructor, Calibrate, the state
@@ -475,8 +475,6 @@ TABLE_SYM = {
     VT_MELLOWMOVER: "_vt$11MellowMover",
     VT_MELLOWMOVER_VEHICLE: "_vt$11MellowMover$14PhysicsVehicle",
 }
-# The entry the port leaves NULL until DoSnapshot lands.
-PENDING = {(VT_MELLOWMOVER, 3): "DoSnapshot"}
 
 CAR_SIZE = pcc.CAR_SIZE
 DRIVER_SIZE = pcc.DRIVER_SIZE
@@ -710,8 +708,6 @@ class Model(pcc.Model):
             for i in range(n):
                 delta = struct.unpack("<h", self.e.read(vt + 8 * i, 2))[0]
                 fn = self.w(vt + 8 * i + 4)
-                if (vt, i) in PENDING:
-                    fn = 0
                 d = "mm" if delta == -vehicle and delta else str(delta)
                 cells.append("%s/%s" % (d, "fn" if fn else "null"))
             self.say("vt %s %s" % (nm, " ".join(cells)))

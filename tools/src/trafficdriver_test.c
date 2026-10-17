@@ -30,6 +30,20 @@
 #include "vtable.h"
 #include "world.h"
 
+// The DoSnapshots (TASKS 72c) call these; nothing here takes a
+// snapshot.
+static void snapshot_unreached(const char *f)
+{
+    fprintf(stderr, "%s reached\n", f);
+    exit(3);
+}
+
+void aicarcontroller_do_snapshot(AICarController *c, struct ReplaySnapshot *s)
+{
+    (void)c; (void)s;
+    snapshot_unreached("aicarcontroller_do_snapshot");
+}
+
 enum {
     OP_TAG, OP_JUNK, OP_NEW, OP_DEL, OP_NULL, OP_RAWDEL, OP_THINK, OP_ROUTES,
     OP_RESET, OP_EXEC, OP_SPEED, OP_DIR, OP_SET, OP_CUR, OP_POKE, OP_GLOBAL,
@@ -898,6 +912,7 @@ static uint32_t retail_addr(VtFn fn)
     } map[] = {
         { (VtFn)trafficdriver_destroy, 0x0018c418u },
         { (VtFn)aicarcontroller_debug_display, 0x00191138u },
+        { (VtFn)trafficdriver_do_snapshot, 0x0018c478u },
         { (VtFn)trafficdriver_think, 0x0018c4d8u },
         { (VtFn)aicarcontroller_set_current_route, 0x00190670u },
         { (VtFn)aicarcontroller_get_current_route, 0x00190708u },

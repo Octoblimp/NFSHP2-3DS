@@ -18,7 +18,7 @@
 // Not here, as nothing in retail calls them: NearbyCar's operator=
 // (0x001937b0; the copies are bMemCpy), and the free
 // GetLateralOffsetFromCarInDrivingLineSpace (0x001cd5c8). The DoSnapshots
-// (0x001937e0, 0x00193ea0) are the replay's.
+// (0x001937e0, 0x00193ea0) are the replay's, since TASKS 72c.
 //
 // Checked against retail by tools/nearbycar_check.py. Written up in
 // docs/formats/ai-driving-info.md.
@@ -131,6 +131,20 @@ NearbyCar *nearbycarlist_get_car_ahead(NearbyCarList *l, const Car *c);
 // 0x00193e68. The list's ClearArray, the location's Clear and the choice's
 // three words 0, inline.
 void drivinginformation_clear(DrivingInformation *d);
+
+// The replay's (TASKS 72c).
+//
+// 0x001937e0, a "NearbyCarList" section: NumCarsInArray as one signed
+// byte, MyHalfSizeD, MyHalfSizeL, then that many 28-byte records as they
+// are, TheCar's raw pointer and all. Nothing in retail calls it.
+//
+// 0x00193ea0, no section: taking or restoring zeroes the list's count and
+// half sizes first, then the location and the choice. The list itself is
+// not saved; the AI rebuilds it every Think.
+struct ReplaySnapshot;
+void nearbycarlist_do_snapshot(NearbyCarList *l, struct ReplaySnapshot *s);
+void drivinginformation_do_snapshot(DrivingInformation *d,
+                                    struct ReplaySnapshot *s);
 
 // ---------------------------------------------------- the free functions
 

@@ -16,6 +16,7 @@
 #include "nearbycar.h"
 #include "psychodriver.h"
 #include "realtime.h"   // WorldLoopCounter, WorldTimer
+#include "replay.h"
 #include "trackroute.h"
 #include "vtable.h"
 #include "world.h"
@@ -514,17 +515,27 @@ void trafficdriver_set_direction(TrafficDriver *d, int32_t low)
     d->PickLowNumberedRoutes = low;
 }
 
+// ------------------------------------------------------------ the replay
+
+void trafficdriver_do_snapshot(TrafficDriver *d, ReplaySnapshot *s)
+{
+    // 0x0018c478. Its own flag first, then the AICarController.
+    ReplaySnapshot_BeginNamedSection(s, "TrafficDriver");
+    ReplaySnapshot_MoveBool(s, &d->PickLowNumberedRoutes, 1);
+    aicarcontroller_do_snapshot(&d->Base, s);
+    ReplaySnapshot_EndNamedSection(s);
+}
+
 // ------------------------------------------------------------- the table
 
 #define E(f) { 0, 0, (VtFn)(f) }
 
-// _vt$13TrafficDriver, retail's 0x002b4730. DoSnapshot (0x0018c478) waits
-// on ReplaySnapshot.
+// _vt$13TrafficDriver, retail's 0x002b4730.
 static const VtEntry trafficdriver_vt[AICARCONTROLLER_VT_ENTRIES] = {
     { 0, 0, NULL },
     E(trafficdriver_destroy),                         //   8  0x0018c418
     E(aicarcontroller_debug_display),                 //  16  0x00191138
-    { 0, 0, NULL },                                   //  24  0x0018c478
+    E(trafficdriver_do_snapshot),                     //  24  0x0018c478
     E(trafficdriver_think),                           //  32  0x0018c4d8
     E(aicarcontroller_set_current_route),             //  40  0x00190670
     E(aicarcontroller_get_current_route),             //  48  0x00190708

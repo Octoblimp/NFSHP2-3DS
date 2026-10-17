@@ -58,6 +58,7 @@ HARNESS = "tools/src/trackflycam_test.c"
 TFC = "3DS Files/source/trackflycam.c"
 SOURCES = [HARNESS, TFC] + ["3DS Files/source/" + f for f in (
     "spline.c", "cammover.c", "race.c", "camera.c", "eview.c", "emath.c",
+    "replay.c", "p32.c",
     "bmatrix.c", "bmath.c", "bmathtab.c", "bvector.c", "banim.c")]
 
 HARNESS_TIMEOUT = 120

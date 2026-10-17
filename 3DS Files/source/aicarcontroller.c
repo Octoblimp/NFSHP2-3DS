@@ -25,6 +25,7 @@
 #include "racecore.h"
 #include "raceinit.h"
 #include "realtime.h"
+#include "replay.h"
 #include "table.h"
 #include "track.h"
 #include "trackpath.h"
@@ -1877,17 +1878,67 @@ DrivingLocation *aicarcontroller_get_current_driving_location(
     return c->CurrentDrivingLocation;
 }
 
+// ------------------------------------------------------------ the replay
+
+void aicarcontroller_do_snapshot(AICarController *c, ReplaySnapshot *s)
+{
+    // 0x00190438.
+    int8_t player;
+
+    ReplaySnapshot_BeginNamedSection(s, "AICarController");
+    carcontroller_do_snapshot(&c->Base, s);
+    drivinginformation_do_snapshot(&c->MyCurrentDrivingInformation, s);
+    ReplaySnapshot_MoveData(s, &c->ForceCurrentAction, 1, -1, 0);
+    ReplaySnapshot_MoveChar(s, &c->LastTrackRouteNumber, 1);
+    ReplaySnapshot_MoveFloat(s, &c->SecondsBeforeNextActionEvaluation);
+    aiaction_do_pointer_snapshot(&c->CurrentAction, s);
+    ReplaySnapshot_MoveData(s, &c->LastRoutePointLookaheadSwitch, 4, -1, 0);
+    ReplaySnapshot_MoveInt(s, &c->CurrentRoutePointLookahead, 4);
+    world_do_pointer_snapshot(pCurrentWorld, s,
+                              &c->CarToExcludeFromCollisionPrediction);
+    ReplaySnapshot_MoveTimer(s, (int32_t *)&c->LastBoostCalculationTime.PackedTime);
+    ReplaySnapshot_MoveTimer(s, (int32_t *)&c->OffBeltTimer.PackedTime);
+    ReplaySnapshot_MoveTimer(s, (int32_t *)&c->RealPhysicsTimer.PackedTime);
+    ReplaySnapshot_MoveTimer(s, (int32_t *)&c->ProgressTimer.PackedTime);
+    average_do_snapshot(c->pProgress, s);
+    average_do_snapshot(c->pDeltaLineSpeed, s);
+    ReplaySnapshot_MoveData(s, &c->vPreviousLinePoint, 16, -1, 0);
+    world_do_pointer_snapshot(pCurrentWorld, s, &c->pGlueCar);
+    ReplaySnapshot_MoveTimer(s, (int32_t *)&c->GlueOnTimer.PackedTime);
+    ReplaySnapshot_MoveTimer(s, (int32_t *)&c->GlueOffTimer.PackedTime);
+    ReplaySnapshot_MoveInt(s, &c->nGlueOffReason, 4);
+    ReplaySnapshot_MoveFloat(s, &c->fCurrentGlueTimeBias);
+    ReplaySnapshot_MoveFloat(s, &c->PullOverTimeout);
+
+    // The catch-up player by PlayerNumber's low byte, -1 for none.
+    player = -1;
+    if (c->pCatchupPlayer != NULL)
+        player = (int8_t)c->pCatchupPlayer->PlayerNumber;
+    ReplaySnapshot_MoveChar(s, &player, 1);
+    if (s->RestoringSnapshotFlag)
+        c->pCatchupPlayer = player < 0 ? NULL : PlayerPlayersByNumber[player];
+
+    ReplaySnapshot_MoveInt(s, &c->nSignpostIndex, 4);
+    ReplaySnapshot_MoveBool(s, &c->bBoostAllowed, 1);
+    ReplaySnapshot_MoveData(s, c->aStickyDecisions, 32, -1, 0);
+    ReplaySnapshot_MoveInt(s, &c->TakenSignpostIndex, 4);
+    ReplaySnapshot_MoveTimer(s, (int32_t *)&c->TakenSignpostTimer.PackedTime);
+    ReplaySnapshot_MoveTimer(
+        s, (int32_t *)&c->LastTimeNonGetUnstuckActionWasCalled.PackedTime);
+    ReplaySnapshot_EndNamedSection(s);
+}
+
 // ------------------------------------------------------------- the table
 
 #define E(f) { 0, 0, (VtFn)(f) }
 
-// _vt$15AICarController, retail's 0x002b4d90. DoSnapshot waits on
-// ReplaySnapshot, and GetRouteNumbersToUse is pure.
+// _vt$15AICarController, retail's 0x002b4d90. GetRouteNumbersToUse is
+// pure.
 static const VtEntry aicarcontroller_vt[AICARCONTROLLER_VT_ENTRIES] = {
     { 0, 0, NULL },
     E(aicarcontroller_destroy),                       //   8  0x001903a0
     E(aicarcontroller_debug_display),                 //  16  0x00191138
-    { 0, 0, NULL },                                   //  24  0x00190438
+    E(aicarcontroller_do_snapshot),                   //  24  0x00190438
     E(aicarcontroller_think),                         //  32  0x00191148
     E(aicarcontroller_set_current_route),             //  40  0x00190670
     E(aicarcontroller_get_current_route),             //  48  0x00190708

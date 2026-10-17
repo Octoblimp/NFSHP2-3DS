@@ -1,5 +1,5 @@
-// mellowmover -- MellowMover.obj (0x00206448 .. 0x002086f8), minus the two
-// DoSnapshots: MellowMover and the Mellovator it drives.
+// mellowmover -- MellowMover.obj (0x00206448 .. 0x002086f8): MellowMover
+// and the Mellovator it drives.
 //
 // A MellowMover is the cheap car. Where a PhysicsCar integrates four
 // Suspensions, four Wheels, an Engine and a DriveTrain, a MellowMover's
@@ -19,10 +19,9 @@
 // skid with: UpdateCar places them from the Mellovator's answers, and
 // nothing integrates them.
 //
-// Everything is here but the two DoSnapshots (0x002066e0 and 0x002071b8),
-// which wait for ReplaySnapshot with every other class's. MellowMover's is
-// a NULL entry in its table until then, and vt_slot aborts on a NULL
-// entry. The Mellovator's is in no table: MellowMover's calls it directly.
+// The two DoSnapshots (0x002066e0 and 0x002071b8; retail 0x002198c8 and
+// 0x0021a3d8) are the replay's, since TASKS 72c. The Mellovator's is in no
+// table: MellowMover's calls it directly.
 //
 // See docs/formats/mellow-mover.md.
 
@@ -324,6 +323,18 @@ void mellowmover_resolve_forces(MellowMover *mm);
 // and to its friction boost cut by 0.3 for a driver in mode 1 above 30
 // mph.
 void mellowmover_set_boost(MellowMover *mm, float f);
+
+// The replay's. Retail 0x0021a3d8, a "Mellovator" section: State's sixteen
+// bytes; for each wheel its suspension position, velocity and force,
+// TouchingGround's low byte, WheelForce, WheelSlip, bSlipping,
+// BrakeLocked's low byte, GroundPenetration and GroundNormal; then RPM,
+// CurrentGear's low byte, Throttle, Brake, Steering, DesiredGear's low
+// byte and the two boosts. Retail 0x002198c8, slot 24, a "MellowMover"
+// section begun with the object: the RigidBody, the Mellovator, the
+// Aerodynamics, the four Wheels and CarMover's (nothing).
+struct ReplaySnapshot;
+void mellovator_do_snapshot(Mellovator *m, struct ReplaySnapshot *s);
+void mellowmover_do_snapshot(MellowMover *mm, struct ReplaySnapshot *s);
 
 // 0x00206e20. With fewer than two wheels down, a moment against the spin
 // from MellowJumpStabilization. With none down and the car still the

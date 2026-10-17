@@ -22,11 +22,10 @@
 // CalculateMaxAcceleration asks the belt for its slope
 // (nearbycar.h's gBeltMoverGravityFn). main.c points the three at this.
 //
-// Everything is here but DoSnapshot (0x00204468), which waits on
-// ReplaySnapshot with every other class's: a NULL entry in the table, which
-// vt_slot aborts on. ClearCalculatedVariables (0x00204460) and
-// DebugScreenPrint (0x002053a0) are `jr ra`; the first is kept because the
-// constructor calls it.
+// Everything is here, DoSnapshot (0x00204468) the replay's since TASKS 72c.
+// ClearCalculatedVariables (0x00204460) and DebugScreenPrint (0x002053a0)
+// are `jr ra`; the first is kept because the constructor and DoSnapshot
+// call it.
 //
 // See docs/formats/belt-mover.md.
 
@@ -83,8 +82,7 @@ typedef char beltmover_cubic_check[
 #endif
 
 // _vt$9BeltMover, 0x002bb090, CarMover's layout: the destructor
-// (0x002043a0), Move (0x00204d78) and DoSnapshot (0x00204468, not ported:
-// a NULL entry).
+// (0x002043a0), Move (0x00204d78) and DoSnapshot (0x00204468).
 #define BELTMOVER_VTABLE     0x002bb090u
 #define BELTMOVER_VT_ENTRIES 4
 
@@ -171,6 +169,13 @@ bVector3 *beltmover_get_point(BeltMover *m, bVector3 *out, float t);
 bVector3 *beltmover_get_derivative(BeltMover *m, bVector3 *out, float t);
 bVector3 *beltmover_get_second_derivative(BeltMover *m, bVector3 *out,
                                           float t);
+
+// 0x00204468, slot 24, a "BeltMover" section: CarMover's (nothing), v, dv,
+// ddv, fTime, fScale, bSliding, the three cubics' raw 48, 96 and 96 bytes,
+// the spline at three floats a point, the Average and the four Wheels;
+// ClearCalculatedVariables when taking or restoring.
+struct ReplaySnapshot;
+void beltmover_do_snapshot(BeltMover *m, struct ReplaySnapshot *s);
 
 // Installs the table. The game calls it once at boot; a harness calls it
 // after vt_reset().

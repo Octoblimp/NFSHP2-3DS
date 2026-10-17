@@ -301,8 +301,7 @@ ALL_SEAMS = (1 << len(SEAMS)) - 1
 FNMAP = {
     "_$_10RealDriver": "realdriver_destroy",
     "Drive__10RealDriverf": "realdriver_drive",
-    # DoSnapshot waits on ReplaySnapshot; the port's slot is NULL.
-    "DoSnapshot__10RealDriverP14ReplaySnapshot": "null",
+    "DoSnapshot__10RealDriverP14ReplaySnapshot": "realdriver_do_snapshot",
     "AddJoyHandlers__10RealDriver": "realdriver_add_joy_handlers",
     "RemoveJoyHandlers__10RealDriver": "realdriver_remove_joy_handlers",
     "SetLowGear__10RealDriver": "realdriver_set_low_gear",
@@ -2013,6 +2012,9 @@ MUTATIONS = [
      "    E(cardriver_add_joy_handlers),          //  48"),
     ("vt-stophonk", RDC, "    E(realdriver_stop_honk_horn),           //  96",
      "    E(cardriver_stop_honk_horn),            //  96"),
+    ("vt-snapshot", RDC,
+     "    E(realdriver_do_snapshot),              //  24",
+     "    E(cardriver_do_snapshot),               //  24"),
 ]
 
 EQUIVALENT = {

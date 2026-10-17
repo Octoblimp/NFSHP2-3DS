@@ -42,6 +42,10 @@
 #include "sound3d.h"
 #include "vtable.h"
 
+// realtime.c's clock, which ReplaySnapshot_Init stamps; not linked here.
+int32_t WorldTimer;
+int32_t WorldLoopCounter;
+
 int32_t          SoundEnabled = 1;
 int32_t          CarSoundEnabled = 1;
 float            TestRPM = 100.0f;

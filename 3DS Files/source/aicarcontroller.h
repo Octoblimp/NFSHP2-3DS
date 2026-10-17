@@ -493,6 +493,19 @@ void aicarcontroller_set_car_to_exclude_from_collision_prediction(
 DrivingLocation *aicarcontroller_get_current_driving_location(
     AICarController *c);
 
+// 0x00190438, slot 24, the replay's (TASKS 72c), an "AICarController"
+// section: the CarController (the driver's), the driving information, the
+// forced action's low byte, the route number, the evaluation countdown,
+// the current action through its pointer snapshot, the lookahead, the car
+// to leave out by number, four timers, both Averages, the last line
+// point's 16 bytes, the glue car by number and the glue's state, the
+// pull-over timeout, the catch-up player by number (-1 none), the
+// signpost, the boost, the sticky decisions, the taken signpost and the
+// last non-GetUnstuck time. Not the three Current pointers, the brake
+// stand, fLastProgress or sGlueDebug.
+struct ReplaySnapshot;
+void aicarcontroller_do_snapshot(AICarController *c, struct ReplaySnapshot *s);
+
 void aicarcontroller_install_vtables(void);
 
 #endif /* AICARCONTROLLER_H */

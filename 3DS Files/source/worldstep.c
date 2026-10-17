@@ -260,20 +260,8 @@ void world_build_car_table(World *w)
     // it: a loop the compiler kept the shell of.
 }
 
-Car *world_get_car_by_number(const World *w, int32_t n)
-{
-    int32_t i;
-
-    for (i = 0; i < w->TotalNumCars; i++)
-        if (w->CarTable[i]->DriverNumber == n)
-            return w->CarTable[i];
-    return NULL;
-}
-
-Car *world_get_car_by_driver_number(int32_t n)
-{
-    return world_get_car_by_number(pCurrentWorld, n);
-}
+// GetCarByNumber and GetCarByDriverNumber are in world.c, beside the
+// replay's pointer snapshot that reads the first.
 
 int32_t world_car_list_check_flip(const Car *a, const Car *b)
 {

@@ -30,6 +30,27 @@
 #include "vtable.h"
 #include "world.h"
 
+// The DoSnapshots (TASKS 72c) call these; nothing here takes a
+// snapshot.
+static void snapshot_unreached(const char *f)
+{
+    fprintf(stderr, "%s reached\n", f);
+    exit(3);
+}
+
+void aicarcontroller_do_snapshot(AICarController *c, struct ReplaySnapshot *s)
+{
+    (void)c; (void)s;
+    snapshot_unreached("aicarcontroller_do_snapshot");
+}
+
+void world_do_car_pointer_snapshot(const World *w, struct Car **pp,
+                                   struct ReplaySnapshot *s)
+{
+    (void)w; (void)pp; (void)s;
+    snapshot_unreached("world_do_car_pointer_snapshot");
+}
+
 enum {
     OP_TAG, OP_JUNK, OP_NEW, OP_DEL, OP_NULL, OP_THINK, OP_ROUTES, OP_AVOID,
     OP_CHOOSE, OP_SET, OP_CUR, OP_POKE, OP_DIFF, OP_DUMP, OP_STATIC,
@@ -99,6 +120,7 @@ static int nslots;
 
 // What the linked files leave to the game.
 int32_t          WorldTimer;
+int32_t          WorldLoopCounter;   // realtime.c's too; ReplaySnapshot_Init reads it
 World           *pCurrentWorld;
 TrackPathManager TheTrackPathManager;
 int32_t          AIActionJustDriveScore;
@@ -730,6 +752,7 @@ static uint32_t retail_addr(VtFn fn)
     } map[] = {
         { (VtFn)aidriver_destroy, 0x00130090u },
         { (VtFn)aicarcontroller_debug_display, 0x00191138u },
+        { (VtFn)aidriver_do_snapshot, 0x00130108u },
         { (VtFn)aidriver_think, 0x00130188u },
         { (VtFn)aicarcontroller_set_current_route, 0x00190670u },
         { (VtFn)aicarcontroller_get_current_route, 0x00190708u },

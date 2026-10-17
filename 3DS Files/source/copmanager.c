@@ -6,6 +6,7 @@
 
 #include "car.h"
 #include "eefpu.h"
+#include "replay.h"
 
 tCopManager *pCopManager;       // 0x00331bec
 
@@ -78,6 +79,19 @@ tRoadBlock *copmanager_get_active_road_block(tCopManager *m, int32_t i)
         k++;
     }
     return NULL;
+}
+
+void copmanager_do_road_block_pointer_snapshot(tCopManager *m,
+                                               ReplaySnapshot *s,
+                                               tRoadBlock **pp)
+{
+    int32_t n = -1;
+
+    if (*pp != NULL)
+        n = (int32_t)(*pp - m->RoadBlocks);
+    ReplaySnapshot_MoveInt(s, &n, 1);
+    if (s->RestoringSnapshotFlag)
+        *pp = n < 0 ? NULL : &m->RoadBlocks[n];
 }
 
 bVector2 *tpursuithistory_velocity_at(bVector2 *out, const tPursuitHistory *h,

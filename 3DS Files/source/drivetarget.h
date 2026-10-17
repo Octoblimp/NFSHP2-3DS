@@ -186,10 +186,8 @@ void ai_straight_line_predict(Car *car, DriveTarget *t);
 // ------------------------------------------------------------- the methods
 //
 // In address order, which is also roughly the order they depend on each
-// other. `DoSnapshot` (0x00208830) is the one method not here: it needs
-// `ReplaySnapshot`, the same dependency CarState, Engine, CarDriver,
-// Steering, RigidBody, Suspension, Wheel and DriveTrain are all waiting
-// on.
+// other. `DoSnapshot` is retail's (0x0021ba50, the demo's 0x00208830), at
+// the bottom with the debug one.
 
 // 0x002086f8. bMemSet to zero and then Clear(NULL, 0.0f) -- which, on a
 // record the memset has just zeroed, takes its NumPoints == 0 early-out
@@ -277,6 +275,12 @@ void drivetarget_resample(DriveTarget *t, Car *car);
 // because the transform is the observable part of the guard, and because
 // leaving it out would make the method count wrong.
 void drivetarget_dump(DriveTarget *t, Car *car, int checkCamera, int unused);
+
+// 0x0021ba50, the replay's (TASKS 72c): TType's low byte, NumPoints, the
+// pick and its two timers, Length and LastPointToScore, then each point's
+// position, route point number, speed, route and driving line.
+struct ReplaySnapshot;
+void drivetarget_do_snapshot(DriveTarget *t, struct ReplaySnapshot *s);
 
 // 0x002096b0, retail 0x0021c920. The distance-weighted average speed the
 // car would hold along this target, or -1.0f if any segment needs more

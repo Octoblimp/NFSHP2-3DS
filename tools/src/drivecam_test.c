@@ -39,6 +39,10 @@
 #include "track.h"
 #include "world.h"
 
+// realtime.c's clock, which ReplaySnapshot_Init stamps; not linked here.
+int32_t WorldTimer;
+int32_t WorldLoopCounter;
+
 // realtime.c's, cartypeinfo.c's and drivetarget.c's, which the harness does
 // not link. reset() puts each back to retail's value.
 float RealTimeElapsed;

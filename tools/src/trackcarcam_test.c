@@ -28,6 +28,10 @@
 #include "spline.h"
 #include "trackcarcam.h"
 
+// realtime.c's clock, which ReplaySnapshot_Init stamps; not linked here.
+int32_t WorldTimer;
+int32_t WorldLoopCounter;
+
 #define NCAM 4
 #define NMOV 3
 #define NCAR 3

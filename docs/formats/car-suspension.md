@@ -371,9 +371,8 @@ both hosts now — see “The four bytes the ARM build found”.
 
 ## Not ported
 
-`Suspension::DoSnapshot` (0x0019bc88) needs `ReplaySnapshot`, the same
-dependency that has held up `CarState`, `Engine`, `CarDriver`, `Steering`
-and `RigidBody`. `operator new` and `operator delete` are the PS2 slot
+`Suspension::DoSnapshot` (0x0019bc88) came with the replay, TASKS 72b;
+`tools/carsnap_check.py` checks it against retail. `operator new` and `operator delete` are the PS2 slot
 allocator.
 
 ## Two globals that hide their own callers

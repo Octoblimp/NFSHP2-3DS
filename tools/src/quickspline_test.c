@@ -15,6 +15,10 @@
 #include "bmem.h"
 #include "quickspline.h"
 
+// realtime.c's clock, which ReplaySnapshot_Init stamps; not linked here.
+int32_t WorldTimer;
+int32_t WorldLoopCounter;
+
 enum {
     OP_TAG, OP_NEW, OP_NEWBUF, OP_DESTROY, OP_SETUP, OP_SETN, OP_POKE, OP_CP,
     OP_DUMP, OP_BASIS, OP_BASISFLAG, OP_BASISPOKE, OP_INITBASIS, OP_FIXUP,

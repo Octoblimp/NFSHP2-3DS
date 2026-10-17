@@ -16,6 +16,7 @@
 #include "drivetargetrenderer.h"
 #include "eefpu.h"
 #include "realtime.h"   // WorldTimer
+#include "replay.h"
 #include "vtable.h"
 
 // Retail's constants: AIAction.obj's .lit4 from gp-28764 to gp-28740, and
@@ -378,25 +379,54 @@ const char *aiaction_get_name(AIAction *a)
     return "";
 }
 
+// ------------------------------------------------------------- the replay
+
+void aiplan_do_snapshot(AIPlan *p, ReplaySnapshot *s)
+{
+    // 0x001c6088. Status goes as its low byte.
+    ReplaySnapshot_BeginNamedSection(s, "AIPlan");
+    ReplaySnapshot_MoveBool(s, &p->CanExpire, 1);
+    ReplaySnapshot_MoveData(s, &p->ExpiryTimer, 4, -1, 0);
+    ReplaySnapshot_MoveFloat(s, &p->DeltaTime);
+    ReplaySnapshot_MoveData(s, &p->Status, 1, -1, 0);
+    ReplaySnapshot_EndNamedSection(s);
+}
+
+void aiaction_do_snapshot(AIAction *a, ReplaySnapshot *s)
+{
+    // 0x001c6198. The tolerance before the time, and the permissions out
+    // of order; Type is the pointer's to save.
+    ReplaySnapshot_BeginNamedSection(s, "AIAction");
+    drivetarget_do_snapshot(&a->PointsToDrive, s);
+    ReplaySnapshot_MoveFloat(s, &a->DesiredSpeed);
+    ReplaySnapshot_MoveFloat(s, &a->DesiredSpeedTolerance);
+    ReplaySnapshot_MoveFloat(s, &a->TimeToGetToDesiredSpeed);
+    ReplaySnapshot_MoveBool(s, &a->UseDrivingLineSpeed, 1);
+    ReplaySnapshot_MoveBool(s, &a->AllowedToUseBoost, 1);
+    ReplaySnapshot_MoveBool(s, &a->PointsToDriveWillExecuteAction, 1);
+    ReplaySnapshot_MoveBool(s, &a->AllowedToUseThrottleAndBrake, 1);
+    ReplaySnapshot_MoveInt(s, &a->Score, 4);
+    aiplan_do_snapshot(&a->Base, s);
+    ReplaySnapshot_EndNamedSection(s);
+}
+
 // ------------------------------------------------------------- the tables
 
 #define E(f) { 0, 0, (VtFn)(f) }
-#define PENDING { 0, 0, NULL }
 
-// _vt$6AIPlan, retail 0x002b7cd0. DoSnapshot (0x001c6088) waits on
-// ReplaySnapshot.
+// _vt$6AIPlan, retail 0x002b7cd0.
 static const VtEntry aiplan_vt[AIPLAN_VT_ENTRIES] = {
     { 0, 0, NULL },
     E(aiplan_destroy),                      //   8  0x001cac48
-    PENDING,                                //  16  DoSnapshot
+    E(aiplan_do_snapshot),                  //  16  0x001c6088
 };
 
 // _vt$8AIAction, retail 0x002b7c90. `__pure_virtual` at 24, 40, 48 and
-// 56; DoSnapshot (0x001c6198) waits on ReplaySnapshot.
+// 56.
 static const VtEntry aiaction_vt[AIACTION_VT_ENTRIES] = {
     { 0, 0, NULL },
     E(aiaction_destroy),                    //   8  0x001c6b30
-    PENDING,                                //  16  DoSnapshot
+    E(aiaction_do_snapshot),                //  16  0x001c6198
     { 0, 0, NULL },                         //  24  CalculatePointsToDrive
     E(aiaction_get_name),                   //  32  0x001caae0
     { 0, 0, NULL },                         //  40  HasBeenAccomplished
@@ -404,7 +434,6 @@ static const VtEntry aiaction_vt[AIACTION_VT_ENTRIES] = {
     { 0, 0, NULL },                         //  56  HasExpired
 };
 
-#undef PENDING
 #undef E
 
 void aiaction_install_vtables(void)

@@ -77,6 +77,7 @@ COPMGR = "3DS Files/source/copmgr.c"
 SOURCES = [HARNESS, COPMGR, "3DS Files/source/cop.c",
            "3DS Files/source/copmanager.c", "3DS Files/source/timer.c",
            "3DS Files/source/vtable.c", "3DS Files/source/bmath.c",
+           "3DS Files/source/replay.c", "3DS Files/source/p32.c",
            "3DS Files/source/bmathtab.c"]
 HARNESS_TIMEOUT = 60
 

@@ -1,8 +1,8 @@
 # CopDriver
 
 The CopDriver half of retail's `copdriver.obj` (0x001a1ce8 .. 0x001a32e8).
-Only `DoSnapshot` (0x001a2b58) is left out; it waits on the replay with
-every other class's. This is step 12d: the controller an AI cop's car gets
+`DoSnapshot` (0x001a2b58) came later, with the replay (TASKS 72c). This
+is step 12d: the controller an AI cop's car gets
 under COP_CONTROL. It drives the car through CopMover
 ([cop-mover.md](cop-mover.md), 12c), the other half of the file.
 
@@ -44,7 +44,7 @@ The states: DISABLED 0, PARKED 1, PATROLLING 2, PURSUIT 3, BACKING_UP 4.
 |-----:|-------|
 | 8 | the destructor, 0x001a1e30 |
 | 16 | DebugDisplay, CarController's |
-| 24 | DoSnapshot, 0x001a2b58 (not ported: a NULL entry, which `vt_slot` aborts on) |
+| 24 | DoSnapshot, 0x001a2b58 (TASKS 72c): a section begun with the object; the TrackedController, the three states' low bytes, the timers and speed, the steer target and the cop index as one byte |
 | 32 | Think, 0x001a2110 |
 | 40 .. 80 | TrackedController's route entries |
 | 88 .. 104 | CarController's SetToPhysicsMode, ForceBoost and ReleaseBoost |

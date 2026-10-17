@@ -24,6 +24,7 @@
 #include "race.h"
 #include "racecore.h"
 #include "realtime.h"   // WorldTimer
+#include "replay.h"
 #include "topology.h"
 #include "trackpath.h"
 #include "trackroute.h"
@@ -1964,16 +1965,212 @@ const char *aiavoidroadblock_get_name(AIActionAvoidRoadBlock *a)
     return "Avoid Roadblock";
 }
 
+// ------------------------------------------------------------- the replay
+
+// The car pointers go by number, through the world.
+#define CAR_PTR(pp) world_do_car_pointer_snapshot(pCurrentWorld, (pp), s)
+#define TIMER(t) ReplaySnapshot_MoveTimer(s, (int32_t *)&(t).PackedTime)
+
+void aiavoidcars_do_snapshot(AIActionAvoidCars *a, ReplaySnapshot *s)
+{
+    // 0x001c6c48.
+    ReplaySnapshot_BeginNamedSection(s, "AIActionAvoidCars");
+    CAR_PTR(&a->CarToAvoid);
+    ReplaySnapshot_MoveFloat(s, &a->SecondsToImpact);
+    ReplaySnapshot_MoveBool(s, &a->IsMyDrivingChoiceOkay, 1);
+    ReplaySnapshot_MoveBool(s, &a->UsedPreferredSide, 1);
+    TIMER(a->LastDecisionReevaluationTime);
+    TIMER(a->MyCreationTime);
+    ReplaySnapshot_MoveFloat(s, &a->MinLifetime);
+    aiaction_do_snapshot(&a->Base, s);
+    ReplaySnapshot_EndNamedSection(s);
+}
+
+void aijustdrive_do_snapshot(AIActionJustDrive *a, ReplaySnapshot *s)
+{
+    // 0x001c7400.
+    ReplaySnapshot_BeginNamedSection(s, "AIActionJustDrive");
+    aiaction_do_snapshot(&a->Base, s);
+    TIMER(a->LastDecisionReevaluationTime);
+    ReplaySnapshot_EndNamedSection(s);
+}
+
+void aidraft_do_snapshot(AIActionDraft *a, ReplaySnapshot *s)
+{
+    // 0x001c76d0.
+    ReplaySnapshot_BeginNamedSection(s, "AIActionDraft");
+    aiaction_do_snapshot(&a->Base, s);
+    ReplaySnapshot_EndNamedSection(s);
+}
+
+void aipass_do_snapshot(AIActionPass *a, ReplaySnapshot *s)
+{
+    // 0x001c7960. Its own fields last to first.
+    ReplaySnapshot_BeginNamedSection(s, "AIActionPass");
+    TIMER(a->MyCreationTime);
+    ReplaySnapshot_MoveFloat(s, &a->AmountToProjectIntoFuture);
+    CAR_PTR(&a->CarToPass);
+    aiaction_do_snapshot(&a->Base, s);
+    ReplaySnapshot_EndNamedSection(s);
+}
+
+void ainudgecar_do_snapshot(AIActionNudgeCar *a, ReplaySnapshot *s)
+{
+    // 0x001c8078.
+    ReplaySnapshot_BeginNamedSection(s, "AIActionNudgeCar");
+    CAR_PTR(&a->CarToNudge);
+    aiaction_do_snapshot(&a->Base, s);
+    ReplaySnapshot_EndNamedSection(s);
+}
+
+void aiblock_do_snapshot(AIActionBlock *a, ReplaySnapshot *s)
+{
+    // 0x001c81b0.
+    ReplaySnapshot_BeginNamedSection(s, "AIActionBlock");
+    CAR_PTR(&a->CarToBlock);
+    aiaction_do_snapshot(&a->Base, s);
+    ReplaySnapshot_EndNamedSection(s);
+}
+
+void aipullover_do_snapshot(AIActionPullOver *a, ReplaySnapshot *s)
+{
+    // 0x001c8370.
+    ReplaySnapshot_BeginNamedSection(s, "AIActionPullOver");
+    aiaction_do_snapshot(&a->Base, s);
+    TIMER(a->MyCreationTime);
+    TIMER(a->LastDecisionReevaluationTime);
+    ReplaySnapshot_MoveBool(s, &a->IsMyDrivingChoiceOkay, 1);
+    ReplaySnapshot_MoveBool(s, &a->New620, 1);
+    ReplaySnapshot_MoveFloat(s, &a->PullOverTimeout);
+    ReplaySnapshot_EndNamedSection(s);
+}
+
+void aigetunstuck_do_snapshot(AIActionGetUnstuck *a, ReplaySnapshot *s)
+{
+    // 0x001c8bb8.
+    ReplaySnapshot_BeginNamedSection(s, "AIActionGetUnstuck");
+    TIMER(a->MyCreationTime);
+    ReplaySnapshot_MoveFloat(s, &a->MinimumLifetime);
+    ReplaySnapshot_MoveBool(s, &a->MinimumLifetimeInEffect, 1);
+    aiaction_do_snapshot(&a->Base, s);
+    ReplaySnapshot_EndNamedSection(s);
+}
+
+void aiavoidroadblock_do_snapshot(AIActionAvoidRoadBlock *a,
+                                  ReplaySnapshot *s)
+{
+    // 0x001c96b8. The roadblock by its index in the cop manager's.
+    ReplaySnapshot_BeginNamedSection(s, "AIActionAvoidRoadBlock");
+    aiaction_do_snapshot(&a->Base, s);
+    copmanager_do_road_block_pointer_snapshot(
+        pCopManager, s, (tRoadBlock **)&a->RoadBlockToAvoid);
+    ReplaySnapshot_EndNamedSection(s);
+}
+
+void aijustgothit_do_snapshot(AIActionIJustGotHit *a, ReplaySnapshot *s)
+{
+    // 0x001c9cb8.
+    ReplaySnapshot_BeginNamedSection(s, "AIActionIJustGotHit");
+    aiaction_do_snapshot(&a->Base, s);
+    CAR_PTR(&a->CarIHit);
+    TIMER(a->LastDecisionReevaluationTime);
+    ReplaySnapshot_EndNamedSection(s);
+}
+
+void aiaccidentrecovery_do_snapshot(AIActionAccidentRecovery *a,
+                                    ReplaySnapshot *s)
+{
+    // 0x001ca240. Retail names its section IJustGotHit's: the string at
+    // 0x002b7938 is passed by both.
+    ReplaySnapshot_BeginNamedSection(s, "AIActionIJustGotHit");
+    aiaction_do_snapshot(&a->Base, s);
+    TIMER(a->MyCreationTime);
+    ReplaySnapshot_MoveBool(s, &a->HaveResetYet, 1);
+    ReplaySnapshot_EndNamedSection(s);
+}
+
+#undef TIMER
+#undef CAR_PTR
+
+void aiaction_do_pointer_snapshot(AIAction **pp, ReplaySnapshot *s)
+{
+    // 0x001c6268, a static of AIAction's. Whether there is one, as a
+    // byte; with none, nothing else, and a restore leaves *pp alone.
+    // Then the type's low byte. A restore news a fresh action of that
+    // type from the pool -- the old one is not freed -- or, for a type of
+    // 11 or more, keeps the one there is. Then the action's own DoSnapshot.
+    AIAction *a = *pp;
+    int8_t    have = (int8_t)(a != NULL);
+    int32_t   type = 0;     // retail's stack word, only set from an action
+    typedef void (*SnapFn)(void *, ReplaySnapshot *);
+    const VtEntry *e;
+
+    ReplaySnapshot_BeginNamedSection(s, "AIActionPtr");
+    ReplaySnapshot_MoveChar(s, &have, 1);
+    if (have != 0) {
+        if (a != NULL)
+            type = a->Type;
+        ReplaySnapshot_MoveData(s, &type, 1, -1, 0);
+        if (s->RestoringSnapshotFlag) {
+            switch ((uint32_t)type) {
+            case AIACTION_PASS:
+                a = &aipass_init(aiaction_new(), 0, 0.0f, NULL, 0.0f)->Base;
+                break;
+            case AIACTION_AVOID_CARS:
+                a = &aiavoidcars_init(aiaction_new(), 0, 0.0f, NULL, 0.0f,
+                                      0, 0)->Base;
+                break;
+            case AIACTION_DRAFT:
+                a = &aidraft_init(aiaction_new(), 0, 0.0f)->Base;
+                break;
+            case AIACTION_BLOCK:
+                a = &aiblock_init(aiaction_new(), 0, 0.0f, NULL)->Base;
+                break;
+            case AIACTION_NUDGE_CAR:
+                a = &ainudgecar_init(aiaction_new(), 0, 0.0f, NULL)->Base;
+                break;
+            case AIACTION_JUST_DRIVE:
+                a = &aijustdrive_init(aiaction_new(), 0, 0.0f)->Base;
+                break;
+            case AIACTION_PULL_OVER:
+                a = &aipullover_init(aiaction_new(), 0, 0.0f, 0.0f, NULL,
+                                     NULL)->Base;
+                break;
+            case AIACTION_GET_UNSTUCK:
+                a = &aigetunstuck_init(aiaction_new(), 0, 0.0f, -1.0f)->Base;
+                break;
+            case AIACTION_AVOID_ROADBLOCK:
+                a = &aiavoidroadblock_init(aiaction_new(), 0, 0.0f,
+                                           NULL)->Base;
+                break;
+            case AIACTION_I_JUST_GOT_HIT:
+                a = &aijustgothit_init(aiaction_new(), 0, 0.0f, NULL)->Base;
+                break;
+            case AIACTION_ACCIDENT_RECOVERY:
+                a = &aiaccidentrecovery_init(aiaction_new(), 0, 0.0f)->Base;
+                break;
+            default:
+                break;
+            }
+            *pp = a;
+        }
+        if (a != NULL) {
+            e = vt_slot(a->Base._vtable, AIACTION_VT_DO_SNAPSHOT);
+            ((SnapFn)e->fn)(vt_this(a, e), s);
+        }
+    }
+    ReplaySnapshot_EndNamedSection(s);
+}
+
 // ------------------------------------------------------------- the tables
 
 #define E(f) { 0, 0, (VtFn)(f) }
-#define PENDING { 0, 0, NULL }
 
 // Retail 0x002b7b10.
 static const VtEntry aijustdrive_vt[AIACTION_VT_ENTRIES] = {
     { 0, 0, NULL },
     E(aijustdrive_destroy),                     //   8  0x001ca7f8
-    PENDING,                                    //  16  DoSnapshot 0x001c7400
+    E(aijustdrive_do_snapshot),              //  16  0x001c7400
     E(aijustdrive_calculate_points_to_drive),   //  24  0x001c74b8
     E(aijustdrive_get_name),                    //  32  0x001ca7e8
     E(aijustdrive_has_been_accomplished),       //  40  0x001c7460
@@ -1985,7 +2182,7 @@ static const VtEntry aijustdrive_vt[AIACTION_VT_ENTRIES] = {
 static const VtEntry aidraft_vt[AIACTION_VT_ENTRIES] = {
     { 0, 0, NULL },
     E(aidraft_destroy),                         //   8  0x001ca918
-    PENDING,                                    //  16  DoSnapshot 0x001c76d0
+    E(aidraft_do_snapshot),                  //  16  0x001c76d0
     E(aidraft_calculate_points_to_drive),       //  24  0x001c77a8
     E(aiaction_get_name),                       //  32  0x001caae0
     E(aidraft_has_been_accomplished),           //  40  0x001c7750
@@ -1997,7 +2194,7 @@ static const VtEntry aidraft_vt[AIACTION_VT_ENTRIES] = {
 static const VtEntry ainudgecar_vt[AIACTION_VT_ENTRIES] = {
     { 0, 0, NULL },
     E(ainudgecar_destroy),                      //   8  0x001ca8b8
-    PENDING,                                    //  16  DoSnapshot 0x001c8078
+    E(ainudgecar_do_snapshot),               //  16  0x001c8078
     E(ainudgecar_calculate_points_to_drive),    //  24  0x001c8150
     E(aiaction_get_name),                       //  32  0x001caae0
     E(ainudgecar_has_been_accomplished),        //  40  0x001c80e8
@@ -2009,7 +2206,7 @@ static const VtEntry ainudgecar_vt[AIACTION_VT_ENTRIES] = {
 static const VtEntry aiblock_vt[AIACTION_VT_ENTRIES] = {
     { 0, 0, NULL },
     E(aiblock_destroy),                         //   8  0x001ca858
-    PENDING,                                    //  16  DoSnapshot 0x001c81b0
+    E(aiblock_do_snapshot),                  //  16  0x001c81b0
     E(aiblock_calculate_points_to_drive),       //  24  0x001c8288
     E(aiaction_get_name),                       //  32  0x001caae0
     E(aiblock_has_been_accomplished),           //  40  0x001c8220
@@ -2021,7 +2218,7 @@ static const VtEntry aiblock_vt[AIACTION_VT_ENTRIES] = {
 static const VtEntry aiaccidentrecovery_vt[AIACTION_VT_ENTRIES] = {
     { 0, 0, NULL },
     E(aiaccidentrecovery_destroy),              //   8  0x001ca5c8
-    PENDING,                                    //  16  DoSnapshot 0x001ca240
+    E(aiaccidentrecovery_do_snapshot),       //  16  0x001ca240
     E(aiaccidentrecovery_calculate_points_to_drive), // 24  0x001ca438
     E(aiaccidentrecovery_get_name),             //  32  0x001ca5b8
     E(aiaccidentrecovery_has_been_accomplished), // 40  0x001ca398
@@ -2033,7 +2230,7 @@ static const VtEntry aiaccidentrecovery_vt[AIACTION_VT_ENTRIES] = {
 static const VtEntry aipass_vt[AIACTION_VT_ENTRIES] = {
     { 0, 0, NULL },
     E(aipass_destroy),                          //   8  0x001ca988
-    PENDING,                                    //  16  DoSnapshot 0x001c7960
+    E(aipass_do_snapshot),                   //  16  0x001c7960
     E(aipass_calculate_points_to_drive),        //  24  0x001c7ea8
     E(aipass_get_name),                         //  32  0x001ca978
     E(aipass_has_been_accomplished),            //  40  0x001c7b90
@@ -2045,7 +2242,7 @@ static const VtEntry aipass_vt[AIACTION_VT_ENTRIES] = {
 static const VtEntry aiavoidcars_vt[AIACTION_VT_ENTRIES] = {
     { 0, 0, NULL },
     E(aiavoidcars_destroy),                     //   8  0x001caa00
-    PENDING,                                    //  16  DoSnapshot 0x001c6c48
+    E(aiavoidcars_do_snapshot),              //  16  0x001c6c48
     E(aiavoidcars_calculate_points_to_drive),   //  24  0x001c6ef8
     E(aiavoidcars_get_name),                    //  32  0x001ca9f0
     E(aiavoidcars_has_been_accomplished),       //  40  0x001c6e78
@@ -2057,7 +2254,7 @@ static const VtEntry aiavoidcars_vt[AIACTION_VT_ENTRIES] = {
 static const VtEntry aipullover_vt[AIACTION_VT_ENTRIES] = {
     { 0, 0, NULL },
     E(aipullover_destroy),                      //   8  0x001ca788
-    PENDING,                                    //  16  DoSnapshot 0x001c8370
+    E(aipullover_do_snapshot),               //  16  0x001c8370
     E(aipullover_calculate_points_to_drive),    //  24  0x001c86a8
     E(aipullover_get_name),                     //  32  0x001ca778
     E(aipullover_has_been_accomplished),        //  40  0x001c8610
@@ -2069,7 +2266,7 @@ static const VtEntry aipullover_vt[AIACTION_VT_ENTRIES] = {
 static const VtEntry aijustgothit_vt[AIACTION_VT_ENTRIES] = {
     { 0, 0, NULL },
     E(aijustgothit_destroy),                    //   8  0x001ca638
-    PENDING,                                    //  16  DoSnapshot 0x001c9cb8
+    E(aijustgothit_do_snapshot),             //  16  0x001c9cb8
     E(aijustgothit_calculate_points_to_drive),  //  24  0x001c9f60
     E(aijustgothit_get_name),                   //  32  0x001ca628
     E(aijustgothit_has_been_accomplished),      //  40  0x001c9e90
@@ -2081,7 +2278,7 @@ static const VtEntry aijustgothit_vt[AIACTION_VT_ENTRIES] = {
 static const VtEntry aigetunstuck_vt[AIACTION_VT_ENTRIES] = {
     { 0, 0, NULL },
     E(aigetunstuck_destroy),                    //   8  0x001ca6a8
-    PENDING,                                    //  16  DoSnapshot 0x001c8bb8
+    E(aigetunstuck_do_snapshot),             //  16  0x001c8bb8
     E(aigetunstuck_calculate_points_to_drive),  //  24  0x001c9550
     E(aigetunstuck_get_name),                   //  32  0x001ca698
     E(aigetunstuck_has_been_accomplished),      //  40  0x001c9140
@@ -2093,7 +2290,7 @@ static const VtEntry aigetunstuck_vt[AIACTION_VT_ENTRIES] = {
 static const VtEntry aiavoidroadblock_vt[AIACTION_VT_ENTRIES] = {
     { 0, 0, NULL },
     E(aiavoidroadblock_destroy),                //   8  0x001ca718
-    PENDING,                                    //  16  DoSnapshot 0x001c96b8
+    E(aiavoidroadblock_do_snapshot),         //  16  0x001c96b8
     E(aiavoidroadblock_calculate_points_to_drive), // 24  0x001c98e0
     E(aiavoidroadblock_get_name),               //  32  0x001ca708
     E(aiavoidroadblock_has_been_accomplished),  //  40  0x001c9858
@@ -2101,7 +2298,6 @@ static const VtEntry aiavoidroadblock_vt[AIACTION_VT_ENTRIES] = {
     E(aiavoidroadblock_has_expired),            //  56  0x001c98d0
 };
 
-#undef PENDING
 #undef E
 
 void aiactions_install_vtables(void)

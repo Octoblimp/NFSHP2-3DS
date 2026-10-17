@@ -25578,3 +25578,84 @@ The CIA builds with no warnings from the changed files.
    recipe: each DoSnapshot beside its class, then a checker running
    retail's beside the port's in take, restore and checksum modes.
 2. Then 72d to 72h, one at a time. TASKS 73 after 72.
+
+## Session 122 -- TASKS 72c: the drivers' and the AI's snapshots
+
+The third slice of the replay is done: retail's DoSnapshot for every
+driver, controller, AI action and mover, checked against retail's own
+code. Nothing calls them in a race yet; 72f's ReplayManager will. The
+user asked to stop for the night once 72c was in, so 72d waits for the
+next session.
+
+### What is ported
+
+Each DoSnapshot is beside its class, at retail's address, and in its
+class's table where retail has it there:
+
+- CarDriver (`0x00130958`), RealDriver (`0x0013aeb8`), PsychoDriver
+  (`0x00139980`), AIDriver (`0x00130108`) and TrafficDriver
+  (`0x0018c478`). CarDriver's is in the CarDriver and NullDriver tables.
+- AICarController (`0x00190438`), DriveTarget (`0x0021ba50`),
+  NearbyCarList (`0x001937e0`), DrivingInformation (`0x00193ea0`),
+  DrivingLocation (`0x00239cf0`), DrivingChoice (`0x00241b88`) and
+  NearestRoutePointInfo (`0x001cd460`).
+- AIPlan (`0x001c6088`), AIAction (`0x001c6198`), each action's own
+  (AvoidCars `0x001c6c48` to AccidentRecovery `0x001ca240`), and the
+  pointer move (`0x001c6268`). The pointer move news an action of the
+  type it reads back. Type 11 comes back NULL, as in retail.
+- TrackedController (`0x0023a0f0`) and RealController (`0x0023a560`).
+- CopMover (`0x001a0f20`) and CopDriver (`0x001a2b58`).
+- BeltMover (`0x00204468`), MellowMover (`0x002198c8`) and the
+  Mellovator (`0x0021a3d8`), which MellowMover's calls directly.
+- Average (`0x0018fe38`), PidError (`0x0018ff98`), Spline (`0x001892d8`)
+  and QuickSpline (`0x0023d208`).
+- The pointer moves: TrackRouteManager's route (`0x001c2b30`), point in
+  a route (`0x001c2bc8`) and point (`0x001c2ca0`); World's car, by
+  DriverNumber in a byte; tCopManager's roadblock, by index.
+
+Not ported: DeliveryMover has no port, so its DoSnapshot has none.
+Spline's has no caller in retail; it is ported anyway. TrackPathCoordinate's came in 72b.
+
+### The checker
+
+`tools/aisnap_check.py` with `tools/src/aisnap_test.c`. It builds on
+carsnap_check: the model is retail's code in RetailEmu, the harness the
+port's, and both take, restore over other values, checksum and verify.
+Pointers print as object.field labels. `--stubs` regenerates
+`aisnap_stubs.c` (105 functions that print UNREACHED and exit) and
+`aisnap_stubdata.c` (26 data symbols) from the link errors.
+
+- 8296 script lines, 29602 lines, 0 differ, nothing unreached.
+- 140 mutations, 140 caught.
+
+It found one bug: RealDriver's Port is restored as one unsigned byte
+(`move t0,zero`), and the port restored it signed.
+
+### Checkers re-run
+
+The 49 checkers that link a changed file pass again, all 0 differ:
+
+- 18 gained replay.c and p32.c in their sources. 17 harnesses define
+  `WorldTimer` and `WorldLoopCounter`, or the one they lacked, where
+  realtime.c is not linked.
+- Nine harnesses stand in for another file's DoSnapshot, which prints
+  "reached" and exits: aidriver, beltmover, carinit, copdriver,
+  copmover, nearbycar, psychodriver, raceinit and trafficdriver.
+- pursuit keeps its own RegisterInterestingEvent, so it stands in for
+  `ReplaySnapshot_MoveData` instead of linking replay.c.
+- carmode, mellowmover, realcontroller, realdriver, aidriver and
+  trafficdriver expected the DoSnapshot slots NULL. They name the
+  port's functions now. aidriver, trafficdriver, realcontroller and
+  realdriver have a new slot mutation each, all caught.
+
+The formats docs say which DoSnapshots came in 72c, and the stale lines
+left from 72b are fixed too. The CIA builds.
+
+### Next
+
+1. 72d: the world and the race (TASKS 72 lists them). The same recipe:
+   each DoSnapshot beside its class, then a checker running retail's
+   beside the port's. `aisnap_check.py` is the newest model to copy.
+2. Then 72e to 72h, one at a time.
+3. When 72h is committed, the launch checklist the user asked for,
+   published, before TASKS 73.

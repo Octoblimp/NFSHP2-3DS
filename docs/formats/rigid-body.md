@@ -302,8 +302,7 @@ every store is dead. There is nothing observable left, and a port that
 recomputed the dead arithmetic would be inventing a side effect the image
 does not have.
 
-`DoSnapshot` needs `ReplaySnapshot`, the same dependency that has held up
-`CarState`, `Engine`, `CarDriver` and `Steering`.
+`DoSnapshot` came with the replay, TASKS 72b; `tools/carsnap_check.py` checks it against retail.
 
 `operator new` / `operator delete` are the PS2 slot allocator again, and
 are not ported for the same reason as everywhere else.

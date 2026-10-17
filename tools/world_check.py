@@ -116,6 +116,7 @@ SOURCES = [
 ]
 
 WS = "3DS Files/source/worldstep.c"
+WC = "3DS Files/source/world.c"         # GetCarByNumber, since 72c
 WI = "3DS Files/source/worldinit.c"
 OB = "3DS Files/source/obb.c"
 BL = "3DS Files/source/blist.c"
@@ -2348,17 +2349,19 @@ _m("table index short",
 _m("table total late", "    w->CarTable[w->TotalNumCars] = c;\n    w->TotalNumCars++;",
    "    w->CarTable[w->TotalNumCars] = c;\n    w->TotalNumCars += 2;")
 _m("bynum inverted", "if (w->CarTable[i]->DriverNumber == n)",
-   "if (w->CarTable[i]->DriverNumber != n)")
+   "if (w->CarTable[i]->DriverNumber != n)", WC)
 _m("bynum short",
    "for (i = 0; i < w->TotalNumCars; i++)\n        if (w->CarTable[i]->DriverNumber",
-   "for (i = 0; i < w->TotalNumCars - 1; i++)\n        if (w->CarTable[i]->DriverNumber")
+   "for (i = 0; i < w->TotalNumCars - 1; i++)\n        if (w->CarTable[i]->DriverNumber",
+   WC)
 _m("bynum last match",
    "    int32_t i;\n\n    for (i = 0; i < w->TotalNumCars; i++)\n"
    "        if (w->CarTable[i]->DriverNumber == n)\n            return w->CarTable[i];\n    return NULL;",
-   "    int32_t i;\n    Car *c = NULL;\n\n    for (i = 0; i < w->TotalNumCars; i++)\n"
-   "        if (w->CarTable[i]->DriverNumber == n)\n            c = w->CarTable[i];\n    return c;")
+   "    int32_t i;\n    struct Car *c = NULL;\n\n    for (i = 0; i < w->TotalNumCars; i++)\n"
+   "        if (w->CarTable[i]->DriverNumber == n)\n            c = w->CarTable[i];\n    return c;",
+   WC)
 _m("bydrv off by one", "world_get_car_by_number(pCurrentWorld, n)",
-   "world_get_car_by_number(pCurrentWorld, n + 1)")
+   "world_get_car_by_number(pCurrentWorld, n + 1)", WC)
 _m("flip strict", "return a->State.Position.x <= b->State.Position.x;",
    "return a->State.Position.x < b->State.Position.x;")
 _m("flip on z", "return a->State.Position.x <= b->State.Position.x;",

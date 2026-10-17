@@ -5,6 +5,7 @@
 
 #include "bmem.h"
 #include "eefpu.h"
+#include "replay.h"
 
 // ----------------------------------------------------------------- Average
 
@@ -110,6 +111,27 @@ float average_get_total(const Average *a)
     return a->fTotal;
 }
 
+// 0x0018fe38. The ring's floats follow the restored slot count, and the
+// mean is worked out again rather than saved.
+void average_do_snapshot(Average *a, ReplaySnapshot *s)
+{
+    int32_t i;
+
+    ReplaySnapshot_BeginNamedSection(s, "Average");
+    ReplaySnapshot_MoveUChar(s, &a->nSlots, 1);
+    ReplaySnapshot_MoveUChar(s, &a->nCurrentSlot, 1);
+    ReplaySnapshot_MoveUChar(s, &a->nSamples, 1);
+    ReplaySnapshot_MoveFloat(s, &a->fTotal);
+    for (i = 0; i < a->nSlots; i++)
+        ReplaySnapshot_MoveFloat(s, &a->pData[i]);
+    if (s->TakingSnapshotFlag || s->RestoringSnapshotFlag) {
+        a->fAverage = 0.0f;
+        if (a->nSamples != 0)
+            a->fAverage = ee_div(a->fTotal, (float)a->nSamples);
+    }
+    ReplaySnapshot_EndNamedSection(s);
+}
+
 // ---------------------------------------------------------------- PidError
 
 PidError *pid_error_init(PidError *p, int32_t integralSlots,
@@ -155,6 +177,17 @@ void pid_error_reset(PidError *p, float err)
     zero = p->fCurrentError;
     average_reset(&p->aIntegral, zero);
     average_reset(&p->aDerivative, zero);
+}
+
+// 0x0018ff98.
+void pid_error_do_snapshot(PidError *p, ReplaySnapshot *s)
+{
+    ReplaySnapshot_BeginNamedSection(s, "PidError");
+    average_do_snapshot(&p->aIntegral, s);
+    average_do_snapshot(&p->aDerivative, s);
+    ReplaySnapshot_MoveFloat(s, &p->fCurrentError);
+    ReplaySnapshot_MoveFloat(s, &p->fPreviousError);
+    ReplaySnapshot_EndNamedSection(s);
 }
 
 // ------------------------------------------------------------------ Linear

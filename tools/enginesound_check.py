@@ -87,6 +87,7 @@ HARNESS = "tools/src/enginesound_test.c"
 ESC = "3DS Files/source/enginesound.c"
 ESH = "3DS Files/source/enginesound.h"
 SOURCES = [HARNESS, ESC, "3DS Files/source/average.c",
+           "3DS Files/source/replay.c", "3DS Files/source/p32.c",
            "3DS Files/source/vtable.c"]
 RETAIL_VOICES = ["-DENGINESOUND_RETAIL_VOICES=1"]
 SOUND_DIR = ROOT / "extracted-retail" / "SOUND"

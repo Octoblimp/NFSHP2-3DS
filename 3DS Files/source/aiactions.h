@@ -42,7 +42,7 @@
 //   roadblock steers onto its escape lane, slowing behind a racer in the
 //   way.
 // Their GetNames and destructors are 0x001ca698 to 0x001ca774. The
-// DoSnapshots wait on ReplaySnapshot.
+// DoSnapshots are the replay's, since TASKS 72c.
 //
 // Checked against retail by tools/drivingchoice_check.py. Written up in
 // docs/formats/ai-action.md.
@@ -611,7 +611,38 @@ void aiavoidroadblock_calculate_points_to_drive(AIActionAvoidRoadBlock *a,
 // 0x001ca708. "Avoid Roadblock".
 const char *aiavoidroadblock_get_name(AIActionAvoidRoadBlock *a);
 
-// Installs the eleven tables. The DoSnapshots are NULL.
+// ------------------------------------------------------- the replay's
+
+// TASKS 72c. Each is slot 16 and its own section, named for its class but
+// AccidentRecovery's, which is retail's "AIActionIJustGotHit" again. The
+// cars go by number and the roadblock by its index; each calls
+// aiaction_do_snapshot, first, last or between, as retail does.
+struct ReplaySnapshot;
+void aiavoidcars_do_snapshot(AIActionAvoidCars *a, struct ReplaySnapshot *s);
+void aijustdrive_do_snapshot(AIActionJustDrive *a, struct ReplaySnapshot *s);
+void aidraft_do_snapshot(AIActionDraft *a, struct ReplaySnapshot *s);
+void aipass_do_snapshot(AIActionPass *a, struct ReplaySnapshot *s);
+void ainudgecar_do_snapshot(AIActionNudgeCar *a, struct ReplaySnapshot *s);
+void aiblock_do_snapshot(AIActionBlock *a, struct ReplaySnapshot *s);
+void aipullover_do_snapshot(AIActionPullOver *a, struct ReplaySnapshot *s);
+void aigetunstuck_do_snapshot(AIActionGetUnstuck *a,
+                              struct ReplaySnapshot *s);
+void aiavoidroadblock_do_snapshot(AIActionAvoidRoadBlock *a,
+                                  struct ReplaySnapshot *s);
+void aijustgothit_do_snapshot(AIActionIJustGotHit *a,
+                              struct ReplaySnapshot *s);
+void aiaccidentrecovery_do_snapshot(AIActionAccidentRecovery *a,
+                                    struct ReplaySnapshot *s);
+
+// 0x001c6268, AIAction::DoSnapshot(AIAction **, ReplaySnapshot *), an
+// "AIActionPtr" section. A byte for whether there is an action; with
+// none, that is all, and a restore leaves *pp as it was. Then the type's
+// low byte. A restore of a type below 11 news a fresh one of that type
+// with zeros (GetUnstuck's lifetime -1) and does not free the old; a
+// larger type keeps *pp. Then the action's own DoSnapshot.
+void aiaction_do_pointer_snapshot(AIAction **pp, struct ReplaySnapshot *s);
+
+// Installs the eleven tables.
 void aiactions_install_vtables(void);
 
 #endif

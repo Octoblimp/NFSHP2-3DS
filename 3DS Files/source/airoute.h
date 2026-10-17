@@ -50,6 +50,11 @@ typedef int32_t RoutesToSearch;
 // and the point's index into that route's table in [0, NumPoints).
 int nrpi_is_valid(const NearestRoutePointInfo *info);
 
+// 0x001cd460, the replay's (TASKS 72c), a "NearestRoutePointInfo"
+// section: the route by number, then the point by its index in it.
+struct ReplaySnapshot;
+void nrpi_do_snapshot(NearestRoutePointInfo *info, struct ReplaySnapshot *s);
+
 // 0x001c1660. The nearest point to `pos` over every route of the kind
 // `which` names. Each route's FindClosestPoint is handed `flags`, the
 // best distance so far as its radius, and `distanceAround`. With

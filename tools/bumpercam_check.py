@@ -71,6 +71,7 @@ HARNESS = "tools/src/bumpercam_test.c"
 BMC = "3DS Files/source/bumpercam.c"
 SOURCES = [HARNESS, BMC] + ["3DS Files/source/" + f for f in (
     "spline.c", "cammover.c", "race.c", "camera.c", "eview.c", "emath.c",
+    "replay.c", "p32.c",
     "bmatrix.c", "bmath.c", "bmathtab.c", "bvector.c", "banim.c")]
 
 HARNESS_TIMEOUT = 120

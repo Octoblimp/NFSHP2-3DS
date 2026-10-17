@@ -47,8 +47,7 @@ DrivingChoice::Clear is the harness's copy of drivingchoice.c's (which
 drivingchoice_check.py checks), as drivingchoice.c needs most of the AI.
 
 The record is dumped by field; the table slot by slot as retail's
-addresses (retail's DoSnapshot, 0x00130108, prints as 0, the port's NULL
-until ReplaySnapshot is ported); and the globals the image keeps by value.
+addresses; and the globals the image keeps by value.
 
     python tools/aidriver_check.py
     python tools/aidriver_check.py --mutate [--only a,b] [--jobs N]
@@ -81,6 +80,7 @@ SOURCES = [HARNESS, ADC,
            "3DS Files/source/timer.c",
            "3DS Files/source/difficultyinfo.c",
            "3DS Files/source/bmem.c",
+           "3DS Files/source/replay.c", "3DS Files/source/p32.c",
            "3DS Files/source/vtable.c"]
 
 HARNESS_TIMEOUT = 120
@@ -93,7 +93,6 @@ CTOR = 0x0012ffc8
 DTOR = 0x00130090
 SHOULD_AVOID = 0x001307b0
 AIDRIVER_VT = 0x002ae328
-DO_SNAPSHOT = 0x00130108
 
 AICC_CTOR = 0x00190140
 AICC_DTOR = 0x001903a0
@@ -991,9 +990,6 @@ class Model(object):
             fx(w(GP + FRICTION_GP))))
         for k in range(17):
             fn = w(AIDRIVER_VT + 8 * k + 4)
-            if fn == DO_SNAPSHOT:
-                fn = 0                  # the port's, until ReplaySnapshot
-
             self.emit("vt %d %d %08x" % (k, s32(self.e.u16(AIDRIVER_VT + 8 * k)
                                                << 16) >> 16, fn))
 
@@ -1589,6 +1585,8 @@ MUTATIONS = [
     # -- the table --------------------------------------------------------------
     M("vt-dtor", "E(aidriver_destroy),", "E(aicarcontroller_destroy),"),
     M("vt-debug", "E(aicarcontroller_debug_display),", "{ 0, 0, NULL },"),
+    M("vt-snap", "E(aidriver_do_snapshot),",
+      "E(aicarcontroller_do_snapshot),"),
     M("vt-think", "E(aidriver_think),", "E(aicarcontroller_think),"),
     M("vt-oob", "E(aicarcontroller_get_amount_out_of_bounds),",
       "E(aicarcontroller_find_where_i_am),"),

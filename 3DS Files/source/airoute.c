@@ -5,6 +5,7 @@
 #include <stddef.h>
 
 #include "race.h"
+#include "replay.h"
 
 // A point's index in `r`'s table, the way the image works it out: the byte
 // distance from the table, times the inverse of 7 mod 2^32 (0xb6db6db7),
@@ -41,6 +42,16 @@ int nrpi_is_valid(const NearestRoutePointInfo *info)
     if (idx < 0)
         return 0;
     return idx < r->NumPoints;
+}
+
+// 0x001cd460.
+void nrpi_do_snapshot(NearestRoutePointInfo *info, ReplaySnapshot *s)
+{
+    ReplaySnapshot_BeginNamedSection(s, "NearestRoutePointInfo");
+    trmgr_do_route_pointer_snapshot(&TheTrackRouteManager, s, &info->Route);
+    trmgr_do_point_pointer_snapshot_in_route(&TheTrackRouteManager, s,
+                                             &info->Point, info->Route);
+    ReplaySnapshot_EndNamedSection(s);
 }
 
 // 0x001c1660.

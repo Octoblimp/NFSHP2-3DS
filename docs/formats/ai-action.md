@@ -39,11 +39,11 @@ PullOver and IJustGotHit (11d-3a), and GetUnstuck and AvoidRoadBlock
 - the helpers the subclasses call.
 
 The port is `3DS Files/source/aiaction.{c,h}`. CalculateMaxDeceleration
-is in `nearbycar.c`, beside CalculateMaxAcceleration.
+is in `nearbycar.c`, beside CalculateMaxAcceleration. The three
+DoSnapshots (AIPlan's at 0x001c6088, AIAction's at 0x001c6198 and
+0x001c6268) came with the replay, TASKS 72c.
 
 Not ported:
-- the three DoSnapshots (AIPlan's at 0x001c6088, AIAction's at 0x001c6198
-  and 0x001c6268), which wait on ReplaySnapshot;
 - the out-of-line accessors (0x001caa98 to 0x001caaf4), which nothing
   calls. The subclasses read the fields, and so does the port. The five
   setters among them (0x001caa70 to 0x001caa90) are empty in both images;
@@ -367,7 +367,11 @@ The first mutation pass left nine alive, all gaps in the script:
 The first five of the eleven actions, in `3DS Files/source/aiactions.{c,h}`.
 AIDriver's ChooseNewAction (11f-2, [ai-driver](ai-driver.md)) scores the
 actions with their static CalculateScores, news the first worth having
-from the pool and makes it the controller's CurrentAction. The DoSnapshots wait on ReplaySnapshot.
+from the pool and makes it the controller's CurrentAction. The DoSnapshots
+are the replay's since TASKS 72c: AIPlan's (0x001c6088), AIAction's
+(0x001c6198), each action's at slot 16, and the pointer one (0x001c6268),
+which news an action of the type it reads back. `tools/aisnap_check.py`
+runs retail's beside the port's.
 
 `AIDriverAvoidCarsImpactTimeThreshold` (gp-18168, 2.0f, AIDriver.obj's
 `.sdata`) is defined here, since JustDrive is the first to read it. It is

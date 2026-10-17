@@ -12,6 +12,7 @@
 #include "bmem.h"
 #include "eefpu.h"
 #include "quickspline.h"
+#include "replay.h"
 
 bMatrix4 QuickSplineBasisMatricies[3];
 int32_t  QuickSplineBasisMatrixInitDone;
@@ -593,4 +594,22 @@ void quickspline_calibrate_length(QuickSpline *s, int32_t samples)
 
     s->Length = total;
     s->ControlPointsDirty = 1;
+}
+
+// ------------------------------------------------------------- the replay
+
+void quickspline_do_snapshot(QuickSpline *q, ReplaySnapshot *s, int32_t n)
+{
+    // Retail 0x0023d208. Taking or restoring sets the count to itself, which
+    // marks the points dirty and sets the parameter range; then the first n
+    // floats of each point.
+    int32_t i;
+
+    ReplaySnapshot_BeginNamedSection(s, "QuickSpline");
+    ReplaySnapshot_MoveUShort(s, &q->NumControlPoints, 2);
+    if (s->TakingSnapshotFlag || s->RestoringSnapshotFlag)
+        quickspline_set_num_control_points(q, q->NumControlPoints);
+    for (i = 0; i < q->NumControlPoints; i++)
+        ReplaySnapshot_MoveData(s, &q->pControlPoints[i], n * 4, -1, 0);
+    ReplaySnapshot_EndNamedSection(s);
 }

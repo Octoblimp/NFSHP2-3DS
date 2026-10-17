@@ -114,6 +114,7 @@
 #define NUM_TEX   7
 
 int32_t        WorldTimer;
+int32_t        WorldLoopCounter;   // realtime.c's too; ReplaySnapshot_Init reads it
 RaceParameters TheRaceParameters;
 Race          *pCurrentRace;
 World         *pCurrentWorld;

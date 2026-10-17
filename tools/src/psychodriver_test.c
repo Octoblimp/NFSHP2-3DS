@@ -25,6 +25,24 @@
 #include "table.h"
 #include "vtable.h"
 
+// realtime.c's clock, which ReplaySnapshot_Init stamps; not linked here.
+int32_t WorldTimer;
+int32_t WorldLoopCounter;
+
+// The DoSnapshots (TASKS 72c) call these; nothing here takes a
+// snapshot.
+static void snapshot_unreached(const char *f)
+{
+    fprintf(stderr, "%s reached\n", f);
+    exit(3);
+}
+
+void drivetarget_do_snapshot(DriveTarget *t, struct ReplaySnapshot *s)
+{
+    (void)t; (void)s;
+    snapshot_unreached("drivetarget_do_snapshot");
+}
+
 enum {
     OP_TAG, OP_JUNK, OP_FIELD, OP_CTI, OP_SET, OP_SRC, OP_NEW, OP_DEL,
     OP_DRIVE, OP_SDS, OP_TARGET, OP_SSTP, OP_DRVNUM, OP_HONK, OP_ZS, OP_CLS,

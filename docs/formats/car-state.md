@@ -181,8 +181,8 @@ forced to 1 by `bMulMatrixVec3` so the translation row applies.
 
 **PrintState** (0x001b6f10) is empty -- the retail build is NDEBUG.
 
-**DoSnapshot** (0x001b6230) is deliberately **not** ported: it needs
-`ReplaySnapshot`, which belongs to a later task.
+**DoSnapshot** (0x001b6230) came with the replay, TASKS 72b;
+`tools/carsnap_check.py` checks it against retail.
 
 ## Cross-check
 

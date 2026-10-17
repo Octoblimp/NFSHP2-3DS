@@ -258,8 +258,8 @@ six entries of its own:
   NullDriver's drops it.
 - **Its destructor.**
 
-DoSnapshot (slot 24) is CarDriver's in both tables. It waits on
-ReplaySnapshot, so the port leaves it NULL.
+DoSnapshot (slot 24) is CarDriver's in both tables, ported with the
+replay in TASKS 72c.
 
 ## CarController's base, 12 bytes
 

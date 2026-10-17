@@ -18,6 +18,7 @@
 #include "nearbycar.h"
 #include "race.h"
 #include "racecore.h"
+#include "replay.h"
 #include "trackroute.h"
 #include "world.h"
 
@@ -1320,4 +1321,16 @@ int drivingchoice_try_to_drive_around_car(DrivingChoice *d, DriveTarget *t,
     drivingchoice_fixup_car_to_exclude_from_collision_prediction(
         d, list->MyCar, *out, list);
     return done;
+}
+
+// ------------------------------------------------------------- the replay
+
+void drivingchoice_do_snapshot(DrivingChoice *d, ReplaySnapshot *s)
+{
+    // 0x00241b88. Type goes as its low byte, the car by its number.
+    ReplaySnapshot_BeginNamedSection(s, "DrivingChoice");
+    ReplaySnapshot_MoveData(s, &d->Type, 1, -1, 0);
+    world_do_car_pointer_snapshot(pCurrentWorld, &d->pCar, s);
+    ReplaySnapshot_MoveBool(s, &d->UseExtraLateralDistance, 1);
+    ReplaySnapshot_EndNamedSection(s);
 }

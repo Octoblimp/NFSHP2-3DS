@@ -4088,13 +4088,22 @@ phases.
           `carsnap_check` runs retail's beside the port's: 22867 lines,
           0 differ; 100 of 100 mutations caught. The 57 checkers that
           link the changed files pass again.
-        - [ ] 72c. The drivers and the AI: CarDriver, RealDriver,
+        - [x] 72c. The drivers and the AI: CarDriver, RealDriver,
           AIDriver, PsychoDriver, TrafficDriver, CopDriver,
           AICarController, the AI plan and its actions, Average and
           PidError, NearbyCarList, DrivingInformation, DrivingLocation,
           DrivingChoice, NearestRoutePointInfo, the route pointers,
           TrackPathCoordinate, Spline, QuickSpline, RealController,
           TrackedController, DriveTarget and the movers.
+          **Done in Session 122:** all of them from retail, beside
+          each class, in the tables where retail has them; World's and
+          tCopManager's pointer moves too. TrackPathCoordinate was
+          72b's. DeliveryMover is not ported, so its snapshot is not
+          either, and Spline's has no caller in retail.
+          `aisnap_check` runs retail's beside the port's: 29602 lines,
+          0 differ; 140 of 140 mutations caught. It found RealDriver's
+          Port restored signed where retail's is unsigned. The 49
+          checkers that link the changed files pass again.
         - [ ] 72d. The world and the race: World, Race, RaceCoordinator,
           RacingCar, Player, RaceParameters, cPlayerSettings, RideInfo,
           DriverInfo, WorldTime, the joystick, the camera shakers,

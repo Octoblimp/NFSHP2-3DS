@@ -8,8 +8,10 @@ CalcSteerToPoint calls them. This is step 11f-1. AIDriver's constructor
 and TrafficDriver's ([traffic-driver](traffic-driver.md)) each bMalloc one
 (624 bytes) and build it on their car.
 
-Ported to `3DS Files/source/psychodriver.{c,h}`, all but DoSnapshot
-(0x00139980), which waits on ReplaySnapshot. Cross-checked by
+Ported to `3DS Files/source/psychodriver.{c,h}`; DoSnapshot (0x00139980)
+came with the replay, TASKS 72c: the four speed floats, SteerToPoint raw,
+the flags and EBrakeTimer, the three PidErrors, then CarDriver's.
+`tools/aisnap_check.py` checks it against retail. Cross-checked by
 `tools/psychodriver_check.py` against `tools/src/psychodriver_test.c`, with
 the image as the oracle.
 
@@ -69,7 +71,7 @@ the slack.
 |-----:|----------|---------|
 | 8 | ~PsychoDriver | 0x001398e8 |
 | 16 | Drive | 0x00139c48 |
-| 24 | DoSnapshot | 0x00139980, NULL in the port |
+| 24 | DoSnapshot | 0x00139980 (TASKS 72c) |
 | 48 | SetLowGear | 0x0013acd8 |
 | 56 | SetDesiredSpeed | 0x00139968 |
 | 64 | SetTarget | 0x0013a3e0 |

@@ -34,8 +34,8 @@ Step 11e ports it in slices:
 | 11e-4 | the honking and ExecuteCurrentAction |
 | 11e-5 | Think, with Timer::CountDown and Race::CanAICarsStartDriving |
 
-This file has 11e-1 to 11e-5. One slot still waits: DoSnapshot, on
-ReplaySnapshot. Think calls BeltMover::SetBelt through carmodes.h's
+This file has 11e-1 to 11e-5. DoSnapshot (0x00190438) came with the
+replay, TASKS 72c, checked by `tools/aisnap_check.py`. Think calls BeltMover::SetBelt through carmodes.h's
 `gBeltMoverSetBeltFn`, which main.c points at beltmover.c's (11e-6,
 [belt-mover.md](belt-mover.md)); a harness that leaves it NULL makes Think
 abort rather than go on.

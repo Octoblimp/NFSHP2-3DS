@@ -2,6 +2,7 @@
 #include "drivinglocation.h"
 
 #include "realtime.h"   // WorldTimer
+#include "replay.h"
 
 // The tick, gp-26780 (0x0032f054): 0x3983126f.
 #define DRIVINGLOCATION_TICK 0.00025f
@@ -63,4 +64,17 @@ int drivinglocation_are_we_in_a_relaxed_switch(const DrivingLocation *d)
 {
     // 0x00239c48. `c.lt.s 0,left`.
     return 0.0f < drivinglocation_get_num_seconds_left_in_relaxed_switch(d);
+}
+
+void drivinglocation_do_snapshot(DrivingLocation *d, ReplaySnapshot *s)
+{
+    // 0x00239cf0. The point is found again in the route just restored.
+    ReplaySnapshot_BeginNamedSection(s, "DrivingLocation");
+    trmgr_do_route_pointer_snapshot(&TheTrackRouteManager, s, &d->pRoute);
+    trmgr_do_point_pointer_snapshot_in_route(&TheTrackRouteManager, s,
+                                             &d->pRoutePoint, d->pRoute);
+    ReplaySnapshot_MoveInt(s, &d->DrivingLine, 1);
+    ReplaySnapshot_MoveData(s, &d->LastRelaxedDrivingLineSwitchTime, 4, -1,
+                            0);
+    ReplaySnapshot_EndNamedSection(s);
 }

@@ -9,7 +9,7 @@
 // (0x00239e50) and the DoesThisRoutePointMatchThisRoute they share
 // (0x00239c90), IsDrivingLineOkay (0x00239cc0), operator= (0x00239cc8;
 // the copies are inline) and GetTextDescription (0x00239f28, a debug
-// string). DoSnapshot (0x00239cf0) is the replay's.
+// string). DoSnapshot (0x00239cf0) is the replay's, since TASKS 72c.
 //
 // Checked against retail by tools/nearbycar_check.py. Written up in
 // docs/formats/ai-driving-info.md.
@@ -78,5 +78,11 @@ float drivinglocation_get_num_seconds_left_in_relaxed_switch(
 
 // 0x00239c48. Whether the seconds left are above 0.
 int drivinglocation_are_we_in_a_relaxed_switch(const DrivingLocation *d);
+
+// 0x00239cf0, a "DrivingLocation" section: the route by number, the point
+// by its index in that route, the line as one signed byte and the switch
+// time.
+struct ReplaySnapshot;
+void drivinglocation_do_snapshot(DrivingLocation *d, struct ReplaySnapshot *s);
 
 #endif /* DRIVINGLOCATION_H */

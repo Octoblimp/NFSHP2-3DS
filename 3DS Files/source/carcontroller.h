@@ -124,10 +124,8 @@ void carcontroller_destroy(CarController *c, int32_t flags);
 // 0x001b6160. `jr ra`.
 void carcontroller_debug_display(CarController *c);
 
-// 0x001b60a8. The driver's DoSnapshot, through its vptr at 556, with the
-// snapshot passed on. The dispatch is ported; the entry it reaches in
-// every table but a harness's is CarDriver::DoSnapshot, which waits on
-// ReplaySnapshot, and vt_slot aborts on it.
+// 0x001b60a8 (retail 0x001c00d0). The driver's DoSnapshot, through its
+// vptr at 556, with the snapshot passed on.
 void carcontroller_do_snapshot(CarController *c, void *snap);
 
 // Retail's 0x001c0100 (the demo's 0x001b60d8). **The argument is not

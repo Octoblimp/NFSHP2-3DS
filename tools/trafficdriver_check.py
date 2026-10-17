@@ -61,8 +61,7 @@ aicarcontroller.c's (which their checkers check), as those need most of
 the AI to link.
 
 The record is dumped by field; the table slot by slot as retail's
-addresses (retail's DoSnapshot, 0x0018c478, prints as 0, the port's NULL
-until ReplaySnapshot is ported); and the globals the image keeps by value.
+addresses; and the globals the image keeps by value.
 
     python tools/trafficdriver_check.py
     python tools/trafficdriver_check.py --mutate [--only a,b] [--jobs N]
@@ -118,7 +117,6 @@ EXEC = 0x0018cb98
 SPEED = 0x0018cc78
 SET_DIRECTION = 0x0018d030
 TRAFFICDRIVER_VT = 0x002b4730
-DO_SNAPSHOT = 0x0018c478
 
 AICC_CTOR = 0x00190140
 AICC_DTOR = 0x001903a0
@@ -1487,8 +1485,6 @@ class Model(object):
             s32(w(GP + CAM_CAR_GP))))
         for k in range(17):
             fn = w(TRAFFICDRIVER_VT + 8 * k + 4)
-            if fn == DO_SNAPSHOT:
-                fn = 0                  # the port's, until ReplaySnapshot
             self.emit("vt %d %d %08x" % (
                 k, s16(self.e.u16(TRAFFICDRIVER_VT + 8 * k)), fn))
 
@@ -2228,8 +2224,8 @@ MUTATIONS = [
     M("vt-dtor", "E(trafficdriver_destroy),", "E(aicarcontroller_destroy),"),
     M("vt-debug", "E(aicarcontroller_debug_display),",
       "E(aicarcontroller_find_where_i_am),"),
-    M("vt-snap", "    { 0, 0, NULL },                                   //  24",
-      "    E(trafficdriver_think),                           //  24"),
+    M("vt-snap", "E(trafficdriver_do_snapshot),",
+      "E(aicarcontroller_do_snapshot),"),
     M("vt-think", "E(trafficdriver_think),", "E(aicarcontroller_debug_display),"),
     M("vt-reset", "E(trafficdriver_just_reset),",
       "E(aicarcontroller_set_to_physics_mode),"),

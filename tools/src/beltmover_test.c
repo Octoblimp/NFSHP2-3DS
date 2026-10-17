@@ -23,10 +23,35 @@
 #include "drivetarget.h"
 #include "nearbycar.h"
 #include "physcomp.h"
+#include "physicscar.h"
 #include "physicssystem.h"
 #include "vtable.h"
 #include "wheel.h"
 #include "world.h"
+
+// realtime.c's clock, which ReplaySnapshot_Init stamps; not linked here.
+int32_t WorldTimer;
+int32_t WorldLoopCounter;
+
+// The DoSnapshots (TASKS 72c) call these; nothing here takes a
+// snapshot.
+static void snapshot_unreached(const char *f)
+{
+    fprintf(stderr, "%s reached\n", f);
+    exit(3);
+}
+
+void carmover_do_snapshot(CarMover *m, void *snap)
+{
+    (void)m; (void)snap;
+    snapshot_unreached("carmover_do_snapshot");
+}
+
+void wheel_do_snapshot(Wheel *w, struct ReplaySnapshot *s)
+{
+    (void)w; (void)s;
+    snapshot_unreached("wheel_do_snapshot");
+}
 
 enum {
     OP_TAG, OP_JUNK, OP_CS, OP_CTI, OP_DTN, OP_DTP, OP_DTL, OP_STEER, OP_SET,

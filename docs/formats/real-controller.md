@@ -41,10 +41,13 @@ installs both tables at boot and sets `gRealControllerCtorFn`, and
 by `tools/realcontroller_check.py` against `tools/src/realcontroller_test.c`,
 with the image running in mipsemu as the oracle.
 
-Not ported: the two DoSnapshots (0x00224458 and 0x002248c8), which need
-ReplaySnapshot. Both are NULL in the port's tables, so `vt_slot` aborts on
-them. Also not ported: the renderer's flag-on path, which builds
-WorldObjects.
+The two DoSnapshots (the demo's 0x00224458 and 0x002248c8, retail's
+0x0023a0f0 and 0x0023a560) came with the replay, TASKS 72c. The tracked
+one moves the CarController, the route point by route and index, and
+three floats; RealController's empties the driving line's spline when
+taking or restoring, then moves the offset, its Average and the previous
+route points, and the TrackedController's goes last. Not ported: the renderer's flag-on path, which
+builds WorldObjects.
 
 ## The records
 

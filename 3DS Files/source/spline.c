@@ -7,6 +7,7 @@
 #include "bmath.h"
 #include "bmem.h"
 #include "eefpu.h"
+#include "replay.h"
 
 // GetControlPoint's answer past either end of an EXTRAPOLATE spline,
 // retail's 0x003341a0.
@@ -136,4 +137,32 @@ void spline_get_point(const Spline *s, bVector3 *o, float t)
     c1 = ((u3 * 3.0f - u2 * 5.0f) + 2.0f) * 0.5f;
     c2 = ((u2 * 4.0f - u3 * 3.0f) + u) * 0.5f;
     spline_evaluate(s, o, base, c0, c1, c2, c3);
+}
+
+// ------------------------------------------------------------- the replay
+
+void spline_do_snapshot(Spline *sp, ReplaySnapshot *s)
+{
+    // 0x001892d8, which nothing in retail calls. Type goes through a word
+    // of its own, an enum's width being the compiler's. The calibration
+    // table moves CalTableSize bytes, not floats, as on the disc.
+    int32_t i;
+    int32_t type = (int32_t)sp->Type;
+
+    ReplaySnapshot_BeginNamedSection(s, "Spline");
+    ReplaySnapshot_MoveInt(s, &sp->ControlPointBufferSize, 4);
+    ReplaySnapshot_MoveInt(s, &sp->NumControlPoints, 4);
+    ReplaySnapshot_MoveInt(s, &type, 4);
+    sp->Type = (SplineType)type;
+    for (i = 0; i < sp->NumControlPoints; i++)
+        ReplaySnapshot_MoveVector3(s, &sp->pControlPoints[i]);
+    ReplaySnapshot_MoveInt(s, &sp->Dirty, 4);
+    ReplaySnapshot_MoveInt(s, &sp->TableSize, 4);
+    ReplaySnapshot_MoveInt(s, &sp->CalLevel, 4);
+    ReplaySnapshot_MoveFloat(s, &sp->Length);
+    ReplaySnapshot_MoveFloat(s, &sp->CalTableStep);
+    ReplaySnapshot_MoveInt(s, &sp->CalTableSize, 4);
+    if (sp->pCalTable != NULL)
+        ReplaySnapshot_MoveData(s, sp->pCalTable, sp->CalTableSize, -1, 0);
+    ReplaySnapshot_EndNamedSection(s);
 }

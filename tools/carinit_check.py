@@ -73,7 +73,8 @@ CIH = "3DS Files/source/carinit.h"
 CCC = "3DS Files/source/carcontroller.c"
 CDC = "3DS Files/source/cardriver.c"
 ESC = "3DS Files/source/espresso.c"
-SOURCES = [HARNESS, CIC, CCC, CDC, ESC, "3DS Files/source/vtable.c"]
+SOURCES = [HARNESS, CIC, CCC, CDC, ESC, "3DS Files/source/vtable.c",
+           "3DS Files/source/replay.c", "3DS Files/source/p32.c"]
 
 HARNESS_TIMEOUT = 60
 

@@ -12,6 +12,7 @@
 #include "eefpu.h"
 #include "emath.h"
 #include "physcomp.h"
+#include "replay.h"
 #include "suspension.h"   // gUglyTimestepHack, gGroundPenaltyImpulse
 #include "vtable.h"
 
@@ -991,6 +992,57 @@ float mellowmover_move(MellowMover *mm, float dt)
     return dt;
 }
 
+// ------------------------------------------------------------- the replay
+
+void mellovator_do_snapshot(Mellovator *m, ReplaySnapshot *s)
+{
+    // Retail 0x0021a3d8 (the demo's 0x002071b8). The wheel speeds as one
+    // block, then wheel by wheel its ten fields, then the engine, the
+    // controls and the boosts. The gears and the grounded and locked flags
+    // go as signed low bytes.
+    int32_t i;
+
+    ReplaySnapshot_BeginNamedSection(s, "Mellovator");
+    ReplaySnapshot_MoveData(s, &m->State, 16, -1, 0);
+    for (i = 0; i < 4; i++) {
+        ReplaySnapshot_MoveFloat(s, &m->SuspensionPosition[i]);
+        ReplaySnapshot_MoveFloat(s, &m->SuspensionVelocity[i]);
+        ReplaySnapshot_MoveFloat(s, &m->SuspensionForce[i]);
+        ReplaySnapshot_MoveInt(s, &m->TouchingGround[i], 1);
+        ReplaySnapshot_MoveVector2(s, &m->WheelForce[i]);
+        ReplaySnapshot_MoveVector2(s, &m->WheelSlip[i]);
+        ReplaySnapshot_MoveBool(s, &m->bSlipping[i], 1);
+        ReplaySnapshot_MoveInt(s, &m->BrakeLocked[i], 1);
+        ReplaySnapshot_MoveFloat(s, &m->GroundPenetration[i]);
+        ReplaySnapshot_MoveVector3(s, &m->GroundNormal[i]);
+    }
+    ReplaySnapshot_MoveFloat(s, &m->RPM);
+    ReplaySnapshot_MoveData(s, &m->CurrentGear, 1, 4, 1);
+    ReplaySnapshot_MoveFloat(s, &m->Throttle);
+    ReplaySnapshot_MoveFloat(s, &m->Brake);
+    ReplaySnapshot_MoveUShort(s, &m->Steering, 2);
+    ReplaySnapshot_MoveData(s, &m->DesiredGear, 1, 4, 1);
+    ReplaySnapshot_MoveFloat(s, &m->CurrentBoost);
+    ReplaySnapshot_MoveFloat(s, &m->CurrentFrictionBoost);
+    ReplaySnapshot_EndNamedSection(s);
+}
+
+void mellowmover_do_snapshot(MellowMover *mm, ReplaySnapshot *s)
+{
+    // Retail 0x002198c8 (the demo's 0x002066e0), a section begun with the
+    // object. CarMover's (nothing) goes last.
+    int32_t i;
+
+    ReplaySnapshot_BeginSection(s, mm, "MellowMover");
+    rigidbody_do_snapshot(mm->pBody, s);
+    mellovator_do_snapshot(mm->pMellovator, s);
+    aerodynamics_do_snapshot(mm->pAerodynamics, s);
+    for (i = 0; i < 4; i++)
+        wheel_do_snapshot(mm->pWheels[i], s);
+    carmover_do_snapshot(&mm->Mover, s);
+    ReplaySnapshot_EndSection(s);
+}
+
 // ------------------------------------------------------------ the entries
 
 static void vt_Mellovator_dtor(void *self, int32_t flags)
@@ -1067,12 +1119,11 @@ static const VtEntry mellovator_vt[MELLOVATOR_VT_ENTRIES] = {
     { 0, 0, (VtFn)vt_Mellovator_ComputeAuxiliaries },
 };
 
-// DoSnapshot is not ported yet; see mellowmover.h.
 static const VtEntry mellowmover_vt[MELLOWMOVER_VT_ENTRIES] = {
     { 0, 0, NULL },
     { 0, 0, (VtFn)vt_MellowMover_dtor },
     { 0, 0, (VtFn)vt_MellowMover_Move },
-    { 0, 0, NULL },
+    { 0, 0, (VtFn)mellowmover_do_snapshot },
 };
 
 #define VEHICLE_DELTA ((int16_t)-(int)offsetof(MellowMover, Vehicle))

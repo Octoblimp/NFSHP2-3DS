@@ -13,9 +13,9 @@
 // Retail's code is AIPlan.obj and AIAction.obj: InitAIPlans (0x001c6028)
 // to AIAction's destructor (0x001c6b30), and the small methods from
 // ClearPointsToDrive (0x001caa60) to AIPlan's constructor (0x001cac70).
-// Not here:
-// - DoSnapshot, AIPlan's (0x001c6088) and AIAction's two (0x001c6198 and
-//   0x001c6268), which wait on ReplaySnapshot;
+// DoSnapshot, AIPlan's (0x001c6088) and AIAction's (0x001c6198), are the
+// replay's since TASKS 72c; the pointer one (0x001c6268) is in
+// aiactions.c, beside the constructors it calls. Not here:
 // - the out-of-line accessors (0x001caa98 to 0x001caaf4), which nothing
 //   calls: the subclasses read the fields, and so does the port. The five
 //   setters there (0x001caa70 to 0x001caa90) are empty in both images;
@@ -262,8 +262,16 @@ void aiaction_clear_points_to_drive(AIAction *a);
 // 0x001caae0. "", which every action overrides.
 const char *aiaction_get_name(AIAction *a);
 
-// Installs AIPlan's and AIAction's tables. The pure slots and the
-// DoSnapshots are NULL.
+// The replay's (TASKS 72c). 0x001c6088, an "AIPlan" section: CanExpire,
+// the timer, DeltaTime and Status's low byte. 0x001c6198, slot 16, an
+// "AIAction" section: PointsToDrive, the speed, the tolerance, the time,
+// four of the bools and Score, then the plan. Type is not saved here: the
+// pointer snapshot (aiactions.h) saves it to know what to new.
+struct ReplaySnapshot;
+void aiplan_do_snapshot(AIPlan *p, struct ReplaySnapshot *s);
+void aiaction_do_snapshot(AIAction *a, struct ReplaySnapshot *s);
+
+// Installs AIPlan's and AIAction's tables. The pure slots are NULL.
 void aiaction_install_vtables(void);
 
 #endif

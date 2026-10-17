@@ -13,7 +13,7 @@
 // and a five-sample average of its progress, every 1.5 s, keeps a car that
 // is stuck off the road in GetUnstuck for at least 1.6 s.
 //
-// Ported but for DoSnapshot (0x00130108), which needs ReplaySnapshot.
+// DoSnapshot (0x00130108) is the replay's, since TASKS 72c.
 // Written up in docs/formats/ai-driver.md; checked against retail by
 // tools/aidriver_check.py.
 
@@ -51,9 +51,8 @@ typedef char aidriver_layout_check[
 #endif
 
 // _vt$8AIDriver, retail 0x002ae328 (the demo's 0x00291fa8): seventeen
-// entries, AICarController's but for the destructor (8), DoSnapshot (24,
-// NULL until ReplaySnapshot is ported), Think (32), GetRouteNumbersToUse
-// (112) and ChooseNewAction (120).
+// entries, AICarController's but for the destructor (8), DoSnapshot (24),
+// Think (32), GetRouteNumbersToUse (112) and ChooseNewAction (120).
 #define AIDRIVER_VTABLE 0x002ae328u
 
 // --------------------------------------------------------- the globals
@@ -145,6 +144,12 @@ int aidriver_should_we_avoid_this_car(AIDriver *d, struct Car *car,
 // them. Into `*out`; nothing when even JustDrive scores below 0.
 void aidriver_choose_new_action(AIDriver *d, AIAction **out,
                                 AIActionType type);
+
+// 0x00130108, slot 24, the replay's, an "AIDriver" section: the
+// AICarController, the car not to avoid by number, both timers and the
+// stuck Average.
+struct ReplaySnapshot;
+void aidriver_do_snapshot(AIDriver *d, struct ReplaySnapshot *s);
 
 void aidriver_install_vtables(void);
 

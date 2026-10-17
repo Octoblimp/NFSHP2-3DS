@@ -16,7 +16,7 @@
 // and added a speed tolerance, an e-brake timer and a direction latch;
 // Drive's gear logic and CalcThrottleAndBrake are new.
 //
-// Ported but for DoSnapshot (0x00139980), which needs ReplaySnapshot.
+// DoSnapshot (0x00139980) is the replay's, since TASKS 72c.
 // Written up in docs/formats/psycho-driver.md; checked against retail by
 // tools/psychodriver_check.py.
 
@@ -74,8 +74,7 @@ typedef char psychodriver_layout_check[
 
 // _vt$12PsychoDriver, retail 0x002aec50 (the demo's 0x00292890):
 // CarDriver's twenty-one slots with everything but the joy handlers,
-// MaxSpeedToTarget and SetPhysicsMode its own. DoSnapshot, at 24, is NULL
-// until ReplaySnapshot is ported.
+// MaxSpeedToTarget and SetPhysicsMode its own.
 #define PSYCHODRIVER_VTABLE 0x002aec50u
 
 // GetMovementIndex's answers. 3 and 4 are the "fixed" indices: the PID
@@ -214,6 +213,12 @@ void      psychodriver_set_max_throttle(PsychoDriver *d, float f); // ..acf8
 bVector2 *psychodriver_get_steer_to_point(PsychoDriver *d);     // 0x0013ad00
 void      psychodriver_set_ebrake_timer(PsychoDriver *d, float f); // ..ad08
 void      psychodriver_set_steer_to_point(PsychoDriver *d, bVector2 *p); // ad10
+
+// 0x00139980, slot 24, a "PsychoDriver" section: the four speed floats,
+// SteerToPoint's 8 bytes, the throttle flag, the e-brake timer, the latch,
+// the three PidErrors and then the CarDriver.
+struct ReplaySnapshot;
+void psychodriver_do_snapshot(PsychoDriver *d, struct ReplaySnapshot *s);
 
 // Installs _vt$12PsychoDriver.
 void psychodriver_install_vtables(void);

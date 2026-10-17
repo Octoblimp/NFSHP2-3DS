@@ -63,6 +63,7 @@ RIN = "3DS Files/source/raceinit.c"
 RIH = "3DS Files/source/raceinit.h"
 RCE = "3DS Files/source/race.c"
 SOURCES = [HARNESS, RIN, RCE, "3DS Files/source/airoute.c",
+           "3DS Files/source/replay.c", "3DS Files/source/p32.c",
            "3DS Files/source/vtable.c"]
 
 HARNESS_TIMEOUT = 120

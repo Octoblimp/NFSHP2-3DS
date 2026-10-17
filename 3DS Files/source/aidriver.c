@@ -14,6 +14,7 @@
 #include "psychodriver.h"
 #include "race.h"
 #include "realtime.h"   // WorldTimer
+#include "replay.h"
 #include "trackpath.h"
 #include "vtable.h"
 #include "world.h"
@@ -401,17 +402,32 @@ void aidriver_choose_new_action(AIDriver *d, AIAction **out,
                                  AID_NO_LIFETIME)->Base;
 }
 
+// ------------------------------------------------------------ the replay
+
+void aidriver_do_snapshot(AIDriver *d, ReplaySnapshot *s)
+{
+    // 0x00130108. Every field: the car by its driver number, both timers
+    // and the Average.
+    ReplaySnapshot_BeginNamedSection(s, "AIDriver");
+    aicarcontroller_do_snapshot(&d->Base, s);
+    world_do_car_pointer_snapshot(pCurrentWorld, &d->CarToPurposefullyNotAvoid,
+                                  s);
+    ReplaySnapshot_MoveTimer(s, (int32_t *)&d->StartTimeForPurposefullyNotAvoidingCar.PackedTime);
+    ReplaySnapshot_MoveTimer(s, (int32_t *)&d->VeryStuckProgressTimer.PackedTime);
+    average_do_snapshot(d->pVeryStuckProgress, s);
+    ReplaySnapshot_EndNamedSection(s);
+}
+
 // ------------------------------------------------------------- the table
 
 #define E(f) { 0, 0, (VtFn)(f) }
 
-// _vt$8AIDriver, retail's 0x002ae328. DoSnapshot (0x00130108) waits on
-// ReplaySnapshot.
+// _vt$8AIDriver, retail's 0x002ae328.
 static const VtEntry aidriver_vt[AICARCONTROLLER_VT_ENTRIES] = {
     { 0, 0, NULL },
     E(aidriver_destroy),                              //   8  0x00130090
     E(aicarcontroller_debug_display),                 //  16  0x00191138
-    { 0, 0, NULL },                                   //  24  0x00130108
+    E(aidriver_do_snapshot),                          //  24  0x00130108
     E(aidriver_think),                                //  32  0x00130188
     E(aicarcontroller_set_current_route),             //  40  0x00190670
     E(aicarcontroller_get_current_route),             //  48  0x00190708

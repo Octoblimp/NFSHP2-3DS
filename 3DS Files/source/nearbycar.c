@@ -8,6 +8,7 @@
 #include "carinfo.h"
 #include "drivetarget.h"   // ai_calculate_look_ahead_distance, CameraFollow...
 #include "emath.h"
+#include "replay.h"
 #include "rigidbody.h"     // RIGIDBODY_GRAVITY
 #include "table.h"
 #include "trackpath.h"
@@ -204,6 +205,36 @@ void drivinginformation_clear(DrivingInformation *d)
     d->MyDrivingChoice.Type = CHOICE_NONE;
     d->MyDrivingChoice.pCar = NULL;
     d->MyDrivingChoice.UseExtraLateralDistance = 0;
+}
+
+// ------------------------------------------------------------- the replay
+
+void nearbycarlist_do_snapshot(NearbyCarList *l, ReplaySnapshot *s)
+{
+    // 0x001937e0. The count as one signed byte, the two half sizes the
+    // other way round, then the records whole, the car pointers raw.
+    int32_t i;
+
+    ReplaySnapshot_BeginNamedSection(s, "NearbyCarList");
+    ReplaySnapshot_MoveInt(s, &l->NumCarsInArray, 1);
+    ReplaySnapshot_MoveFloat(s, &l->MyHalfSizeD);
+    ReplaySnapshot_MoveFloat(s, &l->MyHalfSizeL);
+    for (i = 0; i < l->NumCarsInArray; i++)
+        ReplaySnapshot_MoveData(s, &l->Array[i], 28, -1, 0);
+    ReplaySnapshot_EndNamedSection(s);
+}
+
+void drivinginformation_do_snapshot(DrivingInformation *d, ReplaySnapshot *s)
+{
+    // 0x00193ea0. No section of its own, and not the list: taking or
+    // restoring empties it, for the next Think to build again.
+    if (s->TakingSnapshotFlag || s->RestoringSnapshotFlag) {
+        d->MyNearbyCarList.NumCarsInArray = 0;
+        d->MyNearbyCarList.MyHalfSizeL = 0.0f;
+        d->MyNearbyCarList.MyHalfSizeD = 0.0f;
+    }
+    drivinglocation_do_snapshot(&d->MyDrivingLocation, s);
+    drivingchoice_do_snapshot(&d->MyDrivingChoice, s);
 }
 
 // ---------------------------------------------------- the free functions

@@ -68,6 +68,7 @@ SOURCES = [HARNESS, QSC,
            "3DS Files/source/bmatrix.c",
            "3DS Files/source/bvector.c",
            "3DS Files/source/bmath.c",
+           "3DS Files/source/replay.c", "3DS Files/source/p32.c",
            "3DS Files/source/bmathtab.c"]
 
 HARNESS_TIMEOUT = 300

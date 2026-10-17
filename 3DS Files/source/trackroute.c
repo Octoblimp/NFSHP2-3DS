@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "bchunk.h"
+#include "replay.h"
 #include "trackpath.h"
 
 // .lit4 0x003219f8. The reciprocal of the nominal point spacing, used by
@@ -620,6 +621,76 @@ void trmgr_reverse_routes(TrackRouteManager *m)
         if (i >= 50) troute_reverse_traffic_route(r);
         else         troute_reverse_route(r);
     }
+}
+
+// ------------------------------------------------- the replay's pointers
+
+// A route's point by its index: retail's `route + 1064 + 112 * n`, which
+// it makes from a NULL route too.
+static TrackRoutePoint *route_point_at(TrackRoute *r, int32_t n)
+{
+    return (TrackRoutePoint *)((uintptr_t)r
+                               + offsetof(TrackRoute, TrackRoutePointTable)
+                               + (uintptr_t)n * sizeof(TrackRoutePoint));
+}
+
+// 0x001c2b30.
+void trmgr_do_route_pointer_snapshot(TrackRouteManager *m, ReplaySnapshot *s,
+                                     TrackRoute **pp)
+{
+    int32_t n = -1;
+
+    if (!s->RestoringSnapshotFlag && *pp != NULL)
+        n = (*pp)->RouteNumber;
+    ReplaySnapshot_MoveInt(s, &n, 1);
+    if (s->RestoringSnapshotFlag)
+        *pp = n < 0 ? NULL : m->pTrackRoutes[n];
+}
+
+// 0x001c2bc8.
+void trmgr_do_point_pointer_snapshot_in_route(TrackRouteManager *m,
+                                              ReplaySnapshot *s,
+                                              TrackRoutePoint **pp,
+                                              TrackRoute *route)
+{
+    int32_t n = -1;
+
+    (void)m;
+    if (*pp != NULL && route != NULL)
+        n = (int32_t)(*pp - route->TrackRoutePointTable);
+    ReplaySnapshot_MoveInt(s, &n, 2);
+    if ((s->TakingSnapshotFlag || s->RestoringSnapshotFlag) && *pp != NULL
+        && n == -1)
+        *pp = NULL;
+    if (s->RestoringSnapshotFlag)
+        *pp = n < 0 ? NULL : route_point_at(route, n);
+}
+
+// 0x001c2ca0.
+void trmgr_do_point_pointer_snapshot(TrackRouteManager *m, ReplaySnapshot *s,
+                                     TrackRoutePoint **pp)
+{
+    TrackRoute *r;
+    int32_t v;
+
+    if (s->RestoringSnapshotFlag) {
+        v = 0;
+        ReplaySnapshot_MoveInt(s, &v, 4);
+        if (v == -1) {
+            *pp = NULL;
+            return;
+        }
+        r = (v >> 16) < 0 ? NULL : m->pTrackRoutes[v >> 16];
+        *pp = route_point_at(r, v & 0xffff);
+        return;
+    }
+    v = -1;
+    if (*pp != NULL) {
+        r = m->pTrackRoutes[(*pp)->RouteNumber];
+        v = (int32_t)(*pp - r->TrackRoutePointTable)
+            + (int32_t)((uint32_t)(int32_t)r->RouteNumber << 16);
+    }
+    ReplaySnapshot_MoveInt(s, &v, 4);
 }
 
 // ---------------------------------------------------------------- signposts

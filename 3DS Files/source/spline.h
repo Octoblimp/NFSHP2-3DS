@@ -9,7 +9,8 @@
 // array (0x00189238), the destructor (0x00189268), GetControlPoint
 // (0x001895c8), Evaluate (0x00189810) and GetPoint (0x00189948).
 // Calibrate, the length and parameter searches, the allocating constructor
-// and AddControlPoint wait for a caller.
+// and AddControlPoint wait for a caller. DoSnapshot (0x001892d8) is here
+// with the replay's, since TASKS 72c, though nothing in retail calls it.
 //
 // The arithmetic is VU0's on all four lanes, so a control point's pad lane
 // is carried through to the result's, as it is on the disc.
@@ -73,5 +74,11 @@ void spline_evaluate(const Spline *s, bVector3 *o, float t, float c0,
 // 0x00189948. The Catmull-Rom weights for u = t - floor(t), then
 // Evaluate at floor(t).
 void spline_get_point(const Spline *s, bVector3 *o, float t);
+
+// 0x001892d8, a "Spline" section: the buffer size, the count and the type,
+// each control point, Dirty, TableSize, CalLevel, Length, CalTableStep,
+// CalTableSize, and that many bytes of the table when there is one.
+struct ReplaySnapshot;
+void spline_do_snapshot(Spline *sp, struct ReplaySnapshot *s);
 
 #endif

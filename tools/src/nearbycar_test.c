@@ -31,12 +31,27 @@
 #include "collisionbody.h"
 #include "drivetarget.h"
 #include "drivetargetrenderer.h"
+#include "drivingchoice.h"
 #include "drivinglocation.h"
 #include "nearbycar.h"
 #include "trackpath.h"
 #include "trackroute.h"
 #include "vtable.h"
 #include "world.h"
+
+// The DoSnapshots (TASKS 72c) call these; nothing here takes a
+// snapshot.
+static void snapshot_unreached(const char *f)
+{
+    fprintf(stderr, "%s reached\n", f);
+    exit(3);
+}
+
+void drivingchoice_do_snapshot(DrivingChoice *d, struct ReplaySnapshot *s)
+{
+    (void)d; (void)s;
+    snapshot_unreached("drivingchoice_do_snapshot");
+}
 
 #define NCARS   32
 #define NROUTES 4

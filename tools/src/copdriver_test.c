@@ -24,10 +24,38 @@
 #include "copdriver.h"
 #include "copmanager.h"
 #include "drivetarget.h"
+#include "physicscar.h"
 #include "realcontroller.h"
 #include "topology.h"
 #include "trackroute.h"
 #include "vtable.h"
+
+// The DoSnapshots (TASKS 72c) call these; nothing here takes a
+// snapshot.
+static void snapshot_unreached(const char *f)
+{
+    fprintf(stderr, "%s reached\n", f);
+    exit(3);
+}
+
+void carmover_do_snapshot(CarMover *m, void *snap)
+{
+    (void)m; (void)snap;
+    snapshot_unreached("carmover_do_snapshot");
+}
+
+void drivetarget_do_snapshot(DriveTarget *t, struct ReplaySnapshot *s)
+{
+    (void)t; (void)s;
+    snapshot_unreached("drivetarget_do_snapshot");
+}
+
+void trackedcontroller_do_snapshot(TrackedController *c,
+                                   struct ReplaySnapshot *s)
+{
+    (void)c; (void)s;
+    snapshot_unreached("trackedcontroller_do_snapshot");
+}
 
 // realtime.c's clock, which ReplaySnapshot_Init stamps; not linked here.
 int32_t WorldTimer;

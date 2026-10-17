@@ -21,8 +21,8 @@ collision whether it is still live (Update). It ends the ones that are not
 The port is `3DS Files/source/collision.{c,h}`, and the two World methods
 are in `world.c`. `tools/collision_check.py` cross-checks them against
 `tools/src/collision_test.c`, with the image running in mipsemu as the
-oracle. Everything is ported except DoSnapshot. That one is the replay's,
-and waits on ReplaySnapshot like every other DoSnapshot.
+oracle. Everything is ported. DoSnapshot came with the replay, TASKS 72b;
+`tools/carsnap_check.py` checks it against retail.
 
 The port follows retail (step 8m-4b). Retail made the record 112 bytes:
 its last sixteen hold the direction of the last impulse AddImpulse took
