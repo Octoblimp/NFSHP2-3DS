@@ -4050,6 +4050,62 @@ phases.
         task 72". So this starts after their report.
         **2026-10-16, later still:** the report came, and 3D is out
         (TASKS 59). So this is next.
+        **How retail's replay works** (the survey, 2026-10-16): it plays
+        nothing back from a recording of the cars. It runs the race
+        again.
+        - From GO, `MarkTheBeginningOfTime` takes a 200 KB `bRepeat` (the
+          stream of every frame's pad events and timestep) and 17
+          snapshots of 38232 bytes, if 835 KB is free.
+        - A snapshot is a memory image of every simulated object. 99
+          `DoSnapshot` functions move each one's fields in and out
+          (`ReplaySnapshot::MoveData`).
+        - A replay restores a snapshot and runs the world again on the
+          recorded stream. When it catches up with the race, capture
+          goes on.
+        - So the port's simulation has to be deterministic. Wireless
+          lockstep already needs that.
+        - The attract mode's replays are such files from the PS2:
+          `REPLAY\JUL23\T11BlueElise.bin` and four more, on the retail
+          disc.
+        The slices, one at a time:
+        - [ ] 72a. `ReplaySnapshot` and `bRepeat`: the snapshot's image
+          (Init, the MoveData family with its sections, the checksums,
+          WriteData, ReadData, VerifyData), and the stream's channels
+          (PrepareToAddData, AddData, PrepareToRemoveData, RemoveData,
+          the locations, its DoSnapshot). The Codeine calls are the PS2
+          dev kit's host link, so they do nothing.
+        - [ ] 72b. The snapshots of the cars and their physics: Car,
+          PhysicsCar, RigidBody, Wheel, Suspension, the steering,
+          Aerodynamics, Engine, DriveTrain, CarState, CarController,
+          CarDamage, BodyDamage, the collision bodies and witnesses, OBB,
+          Collision and VCWitness.
+        - [ ] 72c. The drivers and the AI: CarDriver, RealDriver,
+          AIDriver, PsychoDriver, TrafficDriver, CopDriver,
+          AICarController, the AI plan and its actions, Average and
+          PidError, NearbyCarList, DrivingInformation, DrivingLocation,
+          DrivingChoice, NearestRoutePointInfo, the route pointers,
+          TrackPathCoordinate, Spline, QuickSpline, RealController,
+          TrackedController, DriveTarget and the movers.
+        - [ ] 72d. The world and the race: World, Race, RaceCoordinator,
+          RacingCar, Player, RaceParameters, cPlayerSettings, RideInfo,
+          DriverInfo, WorldTime, the joystick, the camera shakers,
+          NisManager, AnimatedDriver, TrafficCar, TrafficTeleporter,
+          Smokeable, VirginSmokeable and tTrackGraph.
+        - [ ] 72e. The cops: tCopManager, tPursuit, the roadblock's state
+          machine, tPlayerCop, tAICop, the spike strips, DroppedSpikes,
+          Rocket and Chopper.
+        - [ ] 72f. `ReplayManager` in full, in MainLoop in place of
+          main.c's stand-in. Checked in Azahar with retail's checksum
+          snapshots: a race replayed to where it paused, with every
+          checksum agreeing.
+        - [ ] 72g. The replay states (`RCSTATE_INSTANT_REPLAY`,
+          `RCSTATE_AUTO_REPLAY`) and `ReplayScreen` (its timeline, camera
+          modes and buttons). This brings the pause menu's View Replay
+          and the post-race's highlights.
+        - [ ] 72h. The pause pages' special events (`AddSpecialEvent`),
+          and `DemoModeReplay` with the disc's replays for attract mode.
+          The PS2's float rounding is not the 3DS's, so these may drift.
+          Measure it then.
 
 ### The retail frontend
 

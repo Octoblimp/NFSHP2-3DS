@@ -25197,3 +25197,205 @@ anywhere else". See docs/formats/stereo-3d.md.
 ### Next
 
 1. Replays (TASKS 72), then the known bugs and the verdict again.
+
+## Session 119 -- TASKS 72: the replay survey
+
+The user stopped the session here ("End off and write out HANDOFF.MD
+etc."). TASKS 72 is surveyed and planned, and nothing is ported yet.
+No source changed. The plan, slices 72a to 72h, is under TASKS 72 in
+TASKS.md.
+
+### How retail's replay works
+
+Retail plays nothing back from a recording of the cars. It runs the race
+again: it restores a snapshot of every simulated object and steps the
+world on the recorded pad events and timesteps. So the port's simulation
+has to be deterministic, and wireless lockstep already needs that.
+
+- **The main loop.** `MainLoop` (`0x0012f378`) calls
+  `ReplayManager::BeginFrame` (`0x0013d880`) before `GetTimestep` and
+  `DoTimestep`, and `EndFrame` (`0x0013e008`) after them. The port's
+  place for both is `raceFrame` in main.c, around the world's step.
+  `ReplayScreen::Update` (`0x001ec858`) comes after
+  `UpdatePlayersNonGameState`.
+- **The inputs already go through it.** `world_get_timestep`
+  (worldstep.c) records the quantized step on channel 1 (8 bits), and
+  `GenerateJoyEvents` (joyevent.c) records the frame's events. Both go
+  through `ReplayManager_AddData` and `GetData`. Today main.c's
+  `replayStandIn` keeps every flag clear.
+- **`MarkTheBeginningOfTime`** (`0x0013d6f8`) runs from the race's
+  `TICK` at GO. It needs `bCountFreeMemory(16) - 32768 >= 0xd0ad8`.
+  - A 0x32000-byte (200 KB) `bRepeat`: `PrepareToAddData(size, 4
+    channels, no Codeine)`.
+  - The channels' repeat size and default: channel 0 8/0, 1 4/1, 2 0/0,
+    3 8/0.
+  - The maxima: 17 snapshots, 2 instant replay, 0 auto replay, 8 lap
+    and 5 highlight.
+  - 17 snapshots of 0x9558 (38232) bytes on the free list.
+  - The constructor (`0x0013d448`) makes snapshots only for an active
+    `DemoModeReplay` (`0x002f0960`), whose bRepeat and list it takes.
+- **Capture and replay.** `BeginFrame` sets `CapturingFlag` while
+  `WorldLoopCounter` equals `EndCapturingLoopCount`, and `ReplayingFlag`
+  while it is from `BeginCapturingLoopCount` up to that. `EndFrame`,
+  when capturing, moves the end on by a frame and keeps `EndOfTime`. So
+  a replay runs from its snapshot up to where capture stopped, and
+  capture then carries on.
+- **The snapshots.**
+  - `TakeSnapshot` (`0x0013e9f0`) and `RestoreSnapshot` (`0x0013eb38`)
+    set the snapshot's mode flag, then call `HandleSnapshot`
+    (`0x0013e808`).
+  - `HandleSnapshot` sends a snapshot named END to `DoEndSnapshot`. For
+    any other, it calls, in order: `RaceParameters`'s DoSnapshot,
+    `bRepeat`'s (the add side at the end of capture, else the remove
+    side), `JoystickDoSnapshot`, and `RaceCoordinator`'s, which leads
+    to the World and the rest.
+- **The sync test for 72f.** `DoChecksumSnapshot` (`0x0013dd88`)
+  checksums while capturing, and verifies the same snapshot's checksums
+  while replaying.
+- **The cost.** The 99 `DoSnapshot` functions are 26.5 KB of code. The
+  `ReplayManager`, `ReplaySnapshot`, `bRepeat`, `ReplayScreen`, the two
+  replay states and `DemoModeReplay` add about 20 KB more.
+  `grep "DoSnapshot" out/retail_syms.txt` lists them with their retail
+  addresses.
+
+### The retail layouts
+
+**`ReplayManager`**, 20664 bytes. Retail added a word at +12, so it is
+not the demo's layout that replay.h has.
+
+| offset | field |
+|--------|-------|
+| 0 | `ReplayingFlag` |
+| 4 | `CapturingFlag` |
+| 8 | `RemoveDataError` |
+| 12 | new: mutes the highlights' sound |
+| 16 | `PausedFlag` |
+| 20 | `SlowMotionFlag` |
+| 24 | `ReplayPausedThisFrame` |
+| 28 | `NextFancyDebugTime` (9999999) |
+| 32 | `FancyReplayInProgress` |
+| 76 | `NextInstantReplaySnapshotTime` |
+| 80, 84 | `BeginCapturingLoopCount` and `EndCapturingLoopCount` (both -1) |
+| 88 | `FinishedAllCapturing` |
+| 92, 96 | `BeginningOfTime` and `EndOfTime` |
+| 100 | `pRepeat` |
+| 104, 112 | the free list and the snapshot list |
+| 120 to 136 | the five maxima |
+| 152 | 15.0f |
+| 160 | `EndCurrentHighlightTime` |
+| 164 | `LastSnapshotTime` (-1) |
+| 168 | `NumSnapshotsTaken` |
+| 176 | the snapshot time table, 4096 words |
+| 16560 | `NumSpecialEvents` |
+| 16564 | `LastSpecialEventNumber` |
+| 16568 | the special event table, 4096 bytes |
+
+The words from 140 to 172 still need confirming against their readers
+in 72f. joyevent.c, endgame.c, pausemenu.c and the rest read the head
+by field name, so moving it to retail's layout is safe.
+
+**`ReplaySnapshot`**, 38232 bytes.
+
+| offset | field |
+|--------|-------|
+| 0, 4 | `pNext`, `pPrev` |
+| 8 | `Name[32]` |
+| 40 | `Time` (gp-19576) |
+| 48 | the loop count (gp-19552) |
+| 60 to 63 | the mode flags: taking, restoring, checksum, verify |
+| 64 | `CurrentSectionDepth`, signed, -1 |
+| 65 | `OverflowedFlag` |
+| 66 | `CurrentSectionNumber` |
+| 68 | `PrintDepth` (-1) |
+| 72 | `PrintLoopCounter` |
+| 76 | 16 section infos of 16 bytes |
+| 332 | `TotalInterestingValue` |
+| 336 | `DataPosition` |
+| 340 | `SizeofData` |
+| 344 | 37888 bytes of data |
+
+- A section info is `Name` 0, `Object` 4, `Number` 8, `NumMoveData`
+  10, `ChecksumErrorDetected` 11 and `Size` 12.
+- replay.h still has the demo's 328 for `TotalInterestingValue`.
+- **`MoveData(p, stored, size, signed)`** (`0x0013cf08`):
+  - Taking: it writes `stored` bytes and checks that the rest of
+    `size` is the sign fill (or zeros); anything else is a `bBreak`.
+    Past 37888 bytes it sets `OverflowedFlag`.
+  - Restoring: it reads `stored` bytes and sign-extends them (or fills
+    with zeros) to `size`.
+  - Checksum: it writes a 16-bit hash, `GetChecksum`'s `h * 33 + byte`
+    from 0xffffffff.
+  - Verify: it compares the hash, and on a mismatch it marks the
+    section and calls `bBreak`.
+- **The overloads**:
+  - float and `Timer` are 4 bytes, `bVector2` is 8 and `bVector3` is
+    12, with `size` the same as `stored`.
+  - int is `(n, 4, signed)`, unsigned `(n, 4)`, short `(n, 2,
+    signed)`, unsigned short `(n, 2)`, char `(n, 1, signed)`, unsigned
+    char `(n, 1)` and bool `(n, 4)`.
+- **The sections.** `BeginSection` (`0x0013d288`) and `EndSection`
+  (`0x0013d358`) keep a 16-deep stack. Retail's printing is gone, and
+  `PrintSectionName` only measures.
+
+**`bRepeat`**: a header and a bit stream in one allocation.
+
+| offset | field |
+|--------|-------|
+| 0 | `Magic` 0x12345678 |
+| 4 | `CodeineNeedsUpdating` |
+| 8 | `AddLocation`, in bits from the allocation's start |
+| 12 | `HeaderSize`, 48 + 36 a channel |
+| 16 | `RemoveLocation` |
+| 20 | `AddBufferSize` |
+| 24 | `NumChannels` |
+| 28 | `EnableCodeineCapturing` |
+| 32, 36 | `NumItemsAdded`, `NumItemsRemoved` |
+| 40 | `RemoveDataError` |
+| 44 | `RecordingTime` |
+| 48 | the channels, 36 bytes each |
+
+- A channel is `RepeatSize`, `DefaultRemoveData`, `AddDataSize`,
+  `AddRepeatCount`, `AddLocation`, `AddData`, `RemoveRepeatCount`,
+  `RemoveLocation` and `RemoveData`.
+- **`AddData`** (`0x001eb2d8`):
+  - An item is the channel in 4 bits, a repeat count in `RepeatSize`
+    bits, then the value.
+  - The same value, size and channel again bumps that channel's last
+    count in place, until the count is full.
+  - At `AddBufferSize * 8 - 68` bits the stream is full and the answer
+    is 0.
+- **`RemoveData`** (`0x001eb4e8`) reads the items back in the same
+  order. A wrong channel, or a stream that has run out, sets
+  `RemoveDataError` and answers the channel's default.
+- **`DoSnapshot`** (`0x0013cb90`, section "bRepeat") moves either the
+  add side's or the remove side's positions and counts.
+- **Codeine** (`bFunkCallASync` and `Sync` to "CODEINE") is the PS2
+  dev kit's host link, so it does nothing on the port.
+
+### Attract mode's replays
+
+`DemoModeReplay` (`0x0013ee08` on) reads `REPLAY\%s`, with its base
+names at `0x002f0948`.
+
+- The first name, `REPLAY0.BIN`, is not on the retail disc.
+- The other five are, as `REPLAY\JUL23\*.BIN` in
+  docs/zdir_names_retail.txt: T33GoldVanquish, T12YellowSpider,
+  T62OrangeF1LM, T43GreenM5 and T11BlueElise, 64 to 149 KB each.
+- They are PS2 snapshots plus input streams. The EE rounds toward zero
+  and the 3DS rounds to nearest, so they may drift on the port. 72h
+  measures that.
+
+### Tools
+
+- `python tools/retaildis.py <demo name>` disassembles a retail
+  function, and `--callers 0x...` finds its callers.
+- tools/average_check.py is the pattern for 72a's checker: a C harness
+  in tools/src, and the retail image in `retail_model.RetailEmu`.
+
+### Next
+
+1. 72a: replay.h and replay.c in retail's layout, with `ReplaySnapshot`
+   (Init, the MoveData family, the sections, the checksums) and
+   `bRepeat` (add, remove, the locations, DoSnapshot). Then
+   tools/replay_check.py against retail, with mutations.
+2. Then 72b to 72h as TASKS 72 lists them, one at a time.
