@@ -187,6 +187,7 @@
 #include "mainloop.h"
 #include "mellowmover.h"
 #include "munition.h"
+#include "p32.h"
 #include "pausemenu.h"
 #include "pauseoptions.h"
 #include "endevent.h"
@@ -224,6 +225,7 @@
 #include "realdriver.h"
 #include "realtime.h"
 #include "replay.h"
+#include "replaymgr.h"
 #include "resource.h"
 #include "sinit.h"
 #include "shake.h"
@@ -5055,65 +5057,222 @@ static void logTrackView(const char* event)
 
 // ------------------------------------------------------------- the race
 //
-// ReplayManager is 20664 bytes in retail and not ported. World::GetTimestep
-// and DoTimestep's checksum read pReplayManager with no test, so
-// InitForRace's `new ReplayManager` gets a block with every flag clear: not
-// replaying, not capturing. The other readers test pReplayManager or a flag
-// first, and with CapturingFlag clear nothing walks the snapshot lists.
-static ReplayManager* replayStandIn(void* mem)
-{
-    memset(mem, 0, REPLAY_MANAGER_SIZE);
-    return (ReplayManager*)mem;
-}
-
-static void replayStandInDestroy(ReplayManager* rm, int32_t flags)
-{
-    if (flags & 1) bFree(rm);
-}
-
-// ReplayManager::GetData (0x0013eb88) and AddData (0x0013ec20), as far as
-// retail's heads: GetData reads only while replaying with no error, and
-// AddData records only while capturing. GenerateJoyEvents hands every
-// frame's events to AddData, and the stand-in does neither, so neither
-// reaches bRepeat, which is not ported.
-static void replayNoRepeat(void)
-{
-    fprintf(stderr, "replay: bRepeat is not ported\n");
-    abort();
-}
-
-static int32_t replayGetData(ReplayManager* rm, int32_t bits, int32_t channel)
-{
-    (void)bits;
-    (void)channel;
-    if (!rm->ReplayingFlag || rm->RemoveDataError) return 0;
-    replayNoRepeat();
-    return 0;
-}
-
-static void replayAddData(ReplayManager* rm, int32_t value, int32_t bits,
-                          int32_t channel)
-{
-    (void)value;
-    (void)bits;
-    (void)channel;
-    if (rm->CapturingFlag) replayNoRepeat();
-}
-
-// The beginning of time RACE_IN_PROGRESS's TICK reads. The stand-in is
-// zeroed, so the first TICK at RACING marks it and starts the race's music
-// six seconds on, as retail's does. Retail's MarkTheBeginningOfTime
-// (0x0013d6f8) also stamps the capture's loop counts and EndOfTime and
-// begins capturing when there is memory for it; the stand-in captures
-// nothing, so it keeps only the Timer.
+// ReplayManager is retail's (replaymgr.c, TASKS 72f): InitForRace's `new
+// ReplayManager` is its constructor, the TICK at RACING marks the
+// beginning of time, and MainLoop's BeginFrame and EndFrame (raceFrame)
+// capture each frame from there into the log and the snapshots.
+// RACE_IN_PROGRESS's TICK reads the beginning of time through an accessor
+// retail inlines.
 static int32_t replayGetBeginningOfTime(const ReplayManager* rm)
 {
     return rm->BeginningOfTime;
 }
 
-static void replayMarkTheBeginningOfTime(ReplayManager* rm)
+// ReplayCheck (configitems.h), the port's own test of the replay (TASKS
+// 72f-2). The race captures as retail's does; this plays two parts of it
+// back and counts what does not come out the same. Round 1 sets the four
+// checksum loops 600 to 900 loops into the capture and, once they are
+// taken, restores the last lap snapshot before them. Round 2 sets them
+// 30 to 120 loops on and then restores the older instant replay, as View
+// Replay will (72g). Each replay runs on to the loop the capture had got
+// to, the world's checksum (log channel 2) checked on every frame and the
+// checksum snapshots verified against the race; capture then goes on.
+// Each round logs the frames that did not match, the snapshot sections
+// that did not verify, the snapshots held, and the slowest BeginFrame.
+static struct {
+    const ReplayManager* rm;   // the race's manager, to start again on a new one
+    int32_t  round;            // 1 and 2 the rounds, 3 done
+    int32_t  restoreAt;        // the loop the round restores on
+    int32_t  replaying;        // restored, not yet back at the capture's end
+    int32_t  from, to;         // the replay's loops
+    int32_t  worldBad, firstWorldBad;
+    int32_t  breaks, breakLines;
+    int32_t  replayed;         // frames BeginFrame said replay, this round
+    int32_t  verified;         // checksum snapshots it verified, this round
+    u64      worst;            // the slowest BeginFrame this round, in ticks
+    int32_t  worstLoop;
+} g_replayCheck;
+
+static void replayCheckPostMessage(struct RaceCoordinator* rc, int32_t msg,
+                                   int32_t param)
 {
-    rm->BeginningOfTime = WorldTimer;
+    // World::VerifyDebugChecksums: a replayed frame whose checksum differs
+    // from the captured one.
+    if (msg == RC_SKIP_REPLAY && g_replayCheck.replaying
+        && g_replayCheck.worldBad++ == 0)
+        g_replayCheck.firstWorldBad = WorldLoopCounter;
+    racecoordinator_post_message(rc, msg, param);
+}
+
+static void replayCheckBreak(const ReplaySnapshot* s)
+{
+    char    path[192];
+    size_t  n = 0;
+    int32_t d;
+
+    g_replayCheck.breaks++;
+    if (g_replayCheck.breakLines >= 24) return;
+    g_replayCheck.breakLines++;
+    path[0] = '\0';
+    for (d = 0; d <= s->CurrentSectionDepth && d < REPLAY_SNAPSHOT_SECTIONS;
+         d++) {
+        const char* name = p32_ptr(s->SectionInfo[d].Name);
+        int         k    = snprintf(path + n, sizeof path - n, "%s%s#%u",
+                                    d ? " / " : "", name ? name : "?",
+                                    (unsigned)s->SectionInfo[d].Number);
+
+        if (k < 0 || (size_t)k >= sizeof path - n) break;
+        n += (size_t)k;
+    }
+    logLine("replaycheck: %s does not verify at loop %d: %s", s->Name,
+            (int)WorldLoopCounter, path);
+}
+
+// After BeginFrame: its time, the snapshots it took counted in, and
+// whether it replayed, verifying a checksum snapshot (as
+// maybe_do_checksum_snapshot does, the first of the four times this loop).
+static void replayCheckFrame(u64 ticks)
+{
+    const ReplayManager* rm = pReplayManager;
+    int                  i;
+
+    if (!g_replayCheck.replaying && ticks > g_replayCheck.worst) {
+        g_replayCheck.worst     = ticks;
+        g_replayCheck.worstLoop = WorldLoopCounter;
+    }
+    if (!g_replayCheck.replaying || !rm->ReplayingFlag) return;
+    g_replayCheck.replayed++;
+    if (rm->ReplayPausedThisFrame) return;
+    for (i = 0; i < 4; i++)
+        if (ChecksumSnapshotTimes[i] == WorldLoopCounter) {
+            char name[16];
+
+            snprintf(name, sizeof name, "CHECKSUM%d", i);
+            if (replaymgr_find_snapshot(pReplayManager, name, 0) != NULL)
+                g_replayCheck.verified++;
+            break;
+        }
+}
+
+static void replayCheckReport(void)
+{
+    ReplayManager*        rm   = pReplayManager;
+    const void*           head = rm->ReplaySnapshotList;
+    const ReplaySnapshot* s;
+
+    logLine("replaycheck: round %d replayed loops %d..%d (%d frames, %d "
+            "checksum snapshots verified): %d frames off (the first at "
+            "loop %d), %d sections did not verify, %d breaks in all",
+            (int)g_replayCheck.round, (int)g_replayCheck.from,
+            (int)g_replayCheck.to, (int)g_replayCheck.replayed,
+            (int)g_replayCheck.verified, (int)g_replayCheck.worldBad,
+            (int)g_replayCheck.firstWorldBad, (int)g_replayCheck.breaks,
+            (int)replay_breaks);
+    logLine("replaycheck: the slowest BeginFrame captured %.2f ms, at loop %d",
+            clockTicksMs((u32)g_replayCheck.worst),
+            (int)g_replayCheck.worstLoop);
+    // EndLoopTime is a highlight's (the instant replay it was made from).
+    for (s = p32_ptr(rm->ReplaySnapshotList[0]); (const void*)s != head;
+         s = p32_ptr(s->pNext)) {
+        char loops[24];
+
+        if (s->EndLoopTime != 0)
+            snprintf(loops, sizeof loops, "loops %d..%d",
+                     (int)s->BeginLoopTime, (int)s->EndLoopTime);
+        else
+            snprintf(loops, sizeof loops, "loop %d", (int)s->BeginLoopTime);
+        logLine("replaycheck:   %-20s %-16s %d of %d bytes%s", s->Name, loops,
+                (int)s->DataPosition, (int)REPLAY_SNAPSHOT_DATA_SIZE,
+                s->OverflowedFlag ? ", overflowed" : "");
+    }
+}
+
+static void replayCheckSetChecksums(int32_t first, int32_t spacing)
+{
+    static const char* const kNames[4] = {
+        "CHECKSUM0", "CHECKSUM1", "CHECKSUM2", "CHECKSUM3"};
+    int i;
+
+    for (i = 0; i < 4; i++) {
+        while (replaymgr_delete_snapshot_named(pReplayManager, kNames[i]))
+            ;
+        ChecksumSnapshotTimes[i] = first + i * spacing;
+    }
+    g_replayCheck.restoreAt = first + 3 * spacing + 30;
+    logLine("replaycheck: round %d: checksums from loop %d every %d, "
+            "the restore at %d", (int)g_replayCheck.round, (int)first,
+            (int)spacing, (int)g_replayCheck.restoreAt);
+}
+
+static void replayCheckRestore(void)
+{
+    ReplayManager*  rm = pReplayManager;
+    ReplaySnapshot* s  = NULL;
+    ReplaySnapshot* t;
+    int32_t         k;
+
+    if (g_replayCheck.round == 1) {
+        // The last lap snapshot before the first checksum.
+        for (k = 0; (t = replaymgr_find_snapshot(rm, "LAP_SNAPSHOT", k)) != NULL;
+             k++)
+            if (t->BeginLoopTime < ChecksumSnapshotTimes[0]
+                && (s == NULL || t->BeginLoopTime > s->BeginLoopTime))
+                s = t;
+    } else {
+        // The older instant replay, as View Replay's.
+        for (k = 0; (t = replaymgr_find_snapshot(rm, "INSTANT_REPLAY", k)) != NULL;
+             k++)
+            if (s == NULL || t->BeginLoopTime < s->BeginLoopTime) s = t;
+    }
+    if (s == NULL) {
+        logLine("replaycheck: round %d: no snapshot to restore",
+                (int)g_replayCheck.round);
+        g_replayCheck.round = 3;
+        return;
+    }
+    g_replayCheck.from       = s->BeginLoopTime;
+    g_replayCheck.to         = rm->EndCapturingLoopCount;
+    g_replayCheck.worldBad   = 0;
+    g_replayCheck.breaks     = 0;
+    g_replayCheck.breakLines = 0;
+    g_replayCheck.replayed   = 0;
+    g_replayCheck.verified   = 0;
+    logLine("replaycheck: round %d restores %s from loop %d (%.1f s back) "
+            "at loop %d", (int)g_replayCheck.round, s->Name,
+            (int)s->BeginLoopTime,
+            (double)(WorldTimer - s->Time) * 0.00025, (int)WorldLoopCounter);
+    replaymgr_restore_snapshot(rm, s);
+    g_replayCheck.replaying = 1;
+}
+
+// Each race frame, after the coordinator's TICK.
+static void replayCheckTick(void)
+{
+    ReplayManager* rm = pReplayManager;
+
+    if (!ConfigReplayCheck || rm == NULL) return;
+    if (rm != g_replayCheck.rm) {
+        memset(&g_replayCheck, 0, sizeof g_replayCheck);
+        g_replayCheck.rm = rm;
+    }
+    if (rm->pRepeat == 0 || g_replayCheck.round == 3) return;
+    if (g_replayCheck.replaying) {
+        if (WorldLoopCounter < g_replayCheck.to) return;
+        g_replayCheck.replaying = 0;
+        replayCheckReport();
+        g_replayCheck.worst = 0;
+        if (++g_replayCheck.round == 2)
+            replayCheckSetChecksums(WorldLoopCounter + 30, 30);
+        else
+            logLine("replaycheck: done");
+        return;
+    }
+    if (g_replayCheck.round == 0) {
+        g_replayCheck.round = 1;
+        replayCheckSetChecksums(rm->BeginCapturingLoopCount + 600, 100);
+        return;
+    }
+    if (WorldLoopCounter >= g_replayCheck.restoreAt) replayCheckRestore();
 }
 
 // The packs' ranges still being read in: CarLoader's skins and the HUD's,
@@ -5823,17 +5982,23 @@ static void raceFrame(void)
     racecoordinator_send_message(rc, RC_TICK, 0);
     bgf_service(&g_flow);
     if (pRaceCoordinator == NULL) return;
+    replayCheckTick();
 
     // UpdateStomper is empty, and 0x0012f190 is the joylog's checksum.
     // Then the players' handlers for the coordinator's state: racing is
     // what gives the car the pad.
     determine_all_players_input_modes();
+    if (pReplayManager != NULL)
+        replaymgr_do_fancy_joylog_debugging(pReplayManager);
 
-    // The flow paused (the coordinator in PAUSE) steps the world by 0.
-    // Otherwise MainLoop asks for the World with no test: InitForRace made
-    // it with the coordinator. ReplayManager's BeginFrame and EndFrame are
-    // not ported; the stand-in is never playing back, so the step is the
-    // world's own.
+    // The flow paused (the coordinator in PAUSE) steps the world by 0, as
+    // a paused world does, and neither is a replay's frame. Otherwise
+    // MainLoop asks for the World and the ReplayManager with no test:
+    // InitForRace made both with the coordinator. BeginFrame says whether
+    // the frame captures or replays. A replay paused this frame (the
+    // replay screen's pause, or three frames in four of its slow motion)
+    // steps by 0, its events still read; otherwise the world steps.
+    // EndFrame moves the capture on.
     // MainLoopTiming's ticks (mainloop.h) are stamped where MainLoop
     // stamps them: after the events, and after the world's step.
     w = pCurrentWorld;
@@ -5848,14 +6013,27 @@ static void raceFrame(void)
             GenerateJoyEvents();
             MainLoopTiming.GenerateJoyEvents = bGetTicker();
         } else {
-            float step = world_get_timestep(w);
+            u64 t0 = ConfigReplayCheck ? svcGetSystemTick() : 0;
 
-            PrepareWorldTimestep(step);
-            GenerateJoyEvents();
-            MainLoopTiming.GenerateJoyEvents = bGetTicker();
-            frameMark("race: the world's step");
-            forceChopperTick(step);
-            world_do_timestep(w, step);
+            frameMark("race: the replay's frame");
+            replaymgr_begin_frame(pReplayManager);
+            if (ConfigReplayCheck)
+                replayCheckFrame(svcGetSystemTick() - t0);
+            if (pReplayManager->ReplayPausedThisFrame) {
+                PrepareWorldTimestep(0.0f);
+                GenerateJoyEvents();
+                MainLoopTiming.GenerateJoyEvents = bGetTicker();
+            } else {
+                float step = world_get_timestep(w);
+
+                PrepareWorldTimestep(step);
+                GenerateJoyEvents();
+                MainLoopTiming.GenerateJoyEvents = bGetTicker();
+                frameMark("race: the world's step");
+                forceChopperTick(step);
+                world_do_timestep(w, step);
+            }
+            replaymgr_end_frame(pReplayManager);
         }
     }
     MainLoopTiming.WorldDoTimestep = bGetTicker();
@@ -6623,8 +6801,8 @@ static void endGameAutosaveNow(void (*cb)(void))
 }
 
 // View Replay changes to RCSTATE_INSTANT_REPLAY. Until that state has a
-// handler, the race would sit there with nothing up, so the End Game Menu
-// leaves the item off; the ReplayManager is a stand-in until then.
+// handler (72g), the race would sit there with nothing up, so the End Game
+// Menu leaves the item off, though the ReplayManager captures the race.
 static int32_t endGameReplayViewable(void)
 {
     return gRCStateCallbacks[RCSTATE_INSTANT_REPLAY] != NULL;
@@ -7974,19 +8152,29 @@ int main(int argc, char** argv)
     // EndGameFlowLoadingTrackSpecific's last call, `new RaceCoordinator`,
     // whose constructor builds the race -- InitForRace's players, Race,
     // World and cars -- and the Begin of unloading's delete. InitForRace's
-    // ReplayManager is the stand-in above.
+    // ReplayManager is retail's (replaymgr.c): the TICK at RACING marks its
+    // beginning of time, TheRaceHasFinished its end. RealDriver's and the
+    // chopper's fire register the race's interesting moments with it, and
+    // World::VerifyDebugChecksums posts RC_SKIP_REPLAY when a replayed
+    // frame comes out differently (ReplayCheck counts those).
     // InitAIPlans and CloseAIPlans: the AI actions' slot pool, made as a
     // track loads and deleted as it unloads.
     gInitAIPlansFn           = ai_init_ai_plans;
     gCloseAIPlansFn          = ai_close_ai_plans;
     gNewRaceCoordinatorFn    = racecoordinator_new;
     gDeleteRaceCoordinatorFn = racecoordinator_destroy;
-    gReplayManagerCtorFn     = replayStandIn;
-    gReplayManagerDestroyFn  = replayStandInDestroy;
-    gReplayManagerGetData    = replayGetData;
-    gReplayManagerAddData    = replayAddData;
-    gReplayGetBeginningOfTimeFn     = replayGetBeginningOfTime;
-    gReplayMarkTheBeginningOfTimeFn = replayMarkTheBeginningOfTime;
+    gReplayManagerCtorFn     = replaymgr_construct;
+    gReplayManagerDestroyFn  = replaymgr_destroy;
+    gReplayManagerGetData    = replaymgr_get_data;
+    gReplayManagerAddData    = replaymgr_add_data;
+    gReplayGetBeginningOfTimeFn       = replayGetBeginningOfTime;
+    gReplayMarkTheBeginningOfTimeFn   = replaymgr_mark_the_beginning_of_time;
+    gReplayMarkTheEndOfTimeFn         = replaymgr_mark_the_end_of_time;
+    gReplayRegisterInterestingEventFn = ReplayManager_RegisterInterestingEvent;
+    gRaceCoordinatorPostMessageFn = ConfigReplayCheck
+                                        ? replayCheckPostMessage
+                                        : racecoordinator_post_message;
+    if (ConfigReplayCheck) gReplayChecksumBreakFn = replayCheckBreak;
     // The race's sound: the regions hook loads the race's banks and turns
     // the jukebox to the racing list as the track loads, the TICK starts
     // the music six seconds after GO, the cleanup stops it and the

@@ -176,6 +176,14 @@ extern int32_t ConfigTestFinish;            // 0
 extern int32_t ConfigTestFinishPlace;       // 1
 extern int32_t ConfigTestFinishTime;        // 0
 
+// The port's own: "ReplayCheck 1" plays parts of each race back as it
+// goes and logs what does not come out as it was captured (main.c,
+// replayCheckTick; TASKS 72f-2). The race jumps back twice: some 20
+// seconds after GO to the last lap snapshot, then to the older instant
+// replay, each played on to where the capture had got to. Needs
+// "DebugLog 1" for the log. Off by default (2026-10-17).
+extern int32_t ConfigReplayCheck;           // 0
+
 typedef void (*ConfigItemsLogFn)(const char *line);
 
 // Applies `text` (NUL-terminated), each word as it is read; SkipFE goes

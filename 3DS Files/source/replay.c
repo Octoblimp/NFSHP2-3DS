@@ -15,6 +15,7 @@ ReplayGetDataFn gReplayManagerGetData;
 ReplayAddDataFn gReplayManagerAddData;
 
 int32_t replay_breaks;
+void (*gReplayChecksumBreakFn)(const ReplaySnapshot *s);
 
 // ---------------------------------------------------------- ReplaySnapshot
 
@@ -156,6 +157,8 @@ void ReplaySnapshot_MoveData(ReplaySnapshot *s, void *p, int32_t stored,
         if (h != was && !sec->ChecksumErrorDetected) {
             sec->ChecksumErrorDetected = 1;
             replay_breaks++;
+            if (gReplayChecksumBreakFn != NULL)
+                gReplayChecksumBreakFn(s);
         }
     }
 }

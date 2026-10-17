@@ -4166,7 +4166,7 @@ phases.
             mutations caught, one equivalent. `spikestrip_check` checks
             the constructor. The 21 other checkers that link the changed
             files pass again.
-        - [ ] 72f. `ReplayManager` in full, in MainLoop in place of
+        - [x] 72f. `ReplayManager` in full, in MainLoop in place of
           main.c's stand-in. Checked in Azahar with retail's checksum
           snapshots: a race replayed to where it paused, with every
           checksum agreeing.
@@ -4184,11 +4184,19 @@ phases.
             beside retail's: 17370 lines, 0 differ; 280 mutations, 273
             caught, 7 equivalent. The 189 other checkers that link the
             changed files pass again. main.c still runs its stand-in.
-          - [ ] 72f-2. In the race: InitForRace's constructor, MainLoop's
+          - [x] 72f-2. In the race: InitForRace's constructor, MainLoop's
             BeginFrame, EndFrame and DoFancyJoylogDebugging, the TICK's
             beginning of time and TheRaceHasFinished's end, in place of
             main.c's stand-in. Then the Azahar run with the checksum
             snapshots.
+            **Done in Session 124:** main.c binds the real manager, and
+            every race captures. "ReplayCheck 1" (the port's own,
+            configitems.h) replays two parts of a race as it goes. On
+            Azahar, 502 and 201 frames were replayed, 4 checksum
+            snapshots verified in each part, 0 frames off and 0
+            sections failed. A career race ran to its end and back to
+            the tree. The 190 checkers that link the changed files pass
+            again.
         - [ ] 72g. The replay states (`RCSTATE_INSTANT_REPLAY`,
           `RCSTATE_AUTO_REPLAY`) and `ReplayScreen` (its timeline, camera
           modes and buttons). This brings the pause menu's View Replay

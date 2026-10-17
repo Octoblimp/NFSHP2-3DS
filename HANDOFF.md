@@ -26055,3 +26055,72 @@ The 189 other checkers that compile a changed file or header pass again.
 2. Then 72g and 72h, one at a time.
 3. When 72h is committed, the launch checklist the user asked for,
    published, before TASKS 73.
+
+## Session 124 -- TASKS 72f-2: the replay manager in the race
+
+The second of 72f's two slices, and the end of 72f. main.c binds
+retail's ReplayManager (72f-1's `replaymgr.c`) where its stand-in was,
+and every race now captures into the log and the snapshots as retail's
+does. Session 123's last turn wrote and built it, then ran out of time
+during the Azahar run. This session checked that run and committed it.
+
+### What changed
+
+- main.c: the stand-in (`replayStandIn`, its destructor and the
+  GetData/AddData stubs) is gone. The seams are bound to the real
+  constructor and destructor, GetData and AddData, the beginning and
+  end of time, and RegisterInterestingEvent. The coordinator's
+  PostMessage is bound too, for VerifyDebugChecksums's RC_SKIP_REPLAY;
+  nothing bound it before.
+- main.c's `raceFrame`, in MainLoop's order: the TICK, the players'
+  input modes, DoFancyJoylogDebugging, then BeginFrame, the world's step
+  (a step of 0 on a paused replay frame, the events still read), and
+  EndFrame. A paused flow still steps by 0 with no replay frame.
+- "ReplayCheck 1" (`configitems.c`/`.h`, the port's own, off by
+  default) plays two parts of a race back as it goes. It logs the
+  frames replayed, the checksum snapshots verified, the frames off and
+  the sections that did not verify. `replay.c` gains
+  `gReplayChecksumBreakFn`, which MoveData calls on a section that does
+  not verify (NULL by default).
+- The End Game Menu still leaves View Replay off until 72g gives
+  RCSTATE_INSTANT_REPLAY a handler.
+
+`docs/formats/replay.md` has a 72f-2 section: where the race reaches the
+manager, the frame, the memory, what is not bound yet, and ReplayCheck.
+
+### On Azahar
+
+- A SkipFE race with ReplayCheck on and the gas held. Round 1 restored
+  the lap snapshot at loop 428 at loop 930 and replayed 502 frames,
+  verifying 4 checksum snapshots. Round 2 restored the instant replay at
+  loop 879 at loop 1080 and replayed 201 frames, verifying 4. Both had
+  0 frames off, 0 sections failed and 0 breaks. Session 123's run,
+  before the counts were logged, matched it (0 and 0 over 405..930 and
+  859..1080). The slowest BeginFrame took 2.97 ms, a lap snapshot. There
+  were 0 bakes failed, about 19.7 MB of linear memory was free, and
+  stderr stayed empty.
+- `run_azahar_career.ps1 -Race -FinishSeconds 30 -FinishPlace 1`
+  played a World Racing event to its end. TheRaceHasFinished marked the
+  end of time, then came the end screens, the autosave and the unload
+  (the manager's destructor), and the event tree. PASS.
+- Azahar's `nfshp2_config.txt` is back as it was ("DebugLog 1",
+  "DebugMenu 1").
+
+### Checkers re-run
+
+The 190 checkers that compile a changed file or header pass again, with
+0 differ and 0 faults (`mainloop`, `world`, `replay`, `replaymgr` and
+`copmgrsnap` among them). The seven data checkers the same search names
+(bfont, bmenu, bsnd, bui, langtab, sndbank, texpack) take data files as
+arguments and compile none of these files. They were not run, as in
+72f-1.
+
+### Next
+
+1. 72g: the replay states (`RCSTATE_INSTANT_REPLAY`,
+   `RCSTATE_AUTO_REPLAY`) and `ReplayScreen`, its timeline, camera modes
+   and buttons. They bring the pause menu's View Replay and the
+   post-race highlights; the End Game Menu then shows View Replay.
+2. Then 72h: the pause pages' special events and DemoModeReplay.
+3. When 72h is committed, the launch checklist the user asked for,
+   published, before TASKS 73.

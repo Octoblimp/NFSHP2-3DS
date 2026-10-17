@@ -507,8 +507,8 @@ rest) reach an empty function and are left out.
 `replaymgr.c` has retail's ReplayManager, from Replay.obj
 (`0x0013d448`..`0x0013ec98`). It captures a race into the log, takes the
 snapshots a replay starts from, and plays the log back. `replay.h` has
-its retail layout, 20664 bytes. main.c still runs its stand-in until
-72f-2.
+its retail layout, 20664 bytes. main.c has run it in the race since
+72f-2, below.
 
 ### The layout
 
@@ -675,6 +675,101 @@ is read again after each.
   sign-extended. The port keeps retail's shifts.
 - AddData (`0x0013ec20`) works only while capturing. With fewer than 68
   bits left, the capture ends.
+
+## 72f-2: the manager in the race
+
+main.c binds retail's manager where its stand-in was. Every race now
+captures as retail's does.
+
+### Where the race reaches it
+
+- RaceCoordinator's constructor (InitForRace) makes it with
+  `replaymgr_construct`. Its destructor deletes it with
+  `replaymgr_destroy` after the race and the world are gone.
+- The coordinator's TICK at RACING marks the beginning of time
+  (MarkTheBeginningOfTime). The log is made, and the capture starts, if
+  there is memory for it. RACE_IN_PROGRESS's TICK reads BeginningOfTime
+  through an accessor retail inlines; main.c keeps it.
+- TheRaceHasFinished marks the end of time (MarkTheEndOfTime).
+- GetData and AddData are the manager's. GenerateJoyEvents's pad events
+  and World::VerifyDebugChecksums's byte (channel 2) go into the log
+  while capturing and come out of it while replaying.
+- RealDriver's E-brake and the chopper's fire register interesting
+  events (RegisterInterestingEvent), which weigh the instant replays.
+- VerifyDebugChecksums posts RC_SKIP_REPLAY through the coordinator's
+  PostMessage (`gRaceCoordinatorPostMessageFn`) when a replayed frame
+  comes out differently. Nothing bound that seam before, since nothing
+  replayed.
+
+### MainLoop's frame
+
+main.c's `raceFrame`, in MainLoop's order:
+
+1. The coordinator's TICK, then the flow's service.
+2. The players' input modes, then DoFancyJoylogDebugging.
+3. With the flow paused (the coordinator in PAUSE), the world steps by 0
+   and there is no replay frame.
+4. Otherwise BeginFrame decides whether this frame captures or replays.
+   A replay paused this frame (the replay screen's pause, or three
+   frames in four of its slow motion) prepares a step of 0 and still
+   reads the events. Any other frame steps the world as before.
+   EndFrame then moves the capture on.
+
+### Memory
+
+The log is 0x32000 bytes. Each snapshot is 38232 bytes, and up to 17
+are made as they are needed. MarkTheBeginningOfTime asks for 0xd0ad8
+bytes (the log and all 17) free past 32 KB, or it captures nothing.
+With the port's 48 MB heap, the races in Azahar capture with room to
+spare: 0 bakes failed. Most of a snapshot is unused. In the runs below,
+a race snapshot holds 2.5 to 3.3 KB and a checksum 5.7 to 6.4 KB.
+
+### Not bound yet
+
+- The special events' handler (`gReplayHandleSpecialEventFn`, retail's
+  HandlePauseMenuReplaySpecialEvents) and DemoModeReplay::Service
+  (`gDemoModeReplayServiceFn`) are NULL until 72h.
+- RCSTATE_INSTANT_REPLAY and RCSTATE_AUTO_REPLAY have no handlers until
+  72g. The End Game Menu still leaves View Replay off.
+
+### ReplayCheck, the port's own test
+
+"ReplayCheck 1" in `sdmc:/nfshp2_config.txt`, with "DebugLog 1", plays
+two parts of each race back as the race goes. main.c's
+`replayCheckTick` and `replayCheckFrame` do it. Each round sets
+retail's four checksum loops (ChecksumSnapshotTimes), waits for them to
+be taken, then restores a snapshot from before them:
+
+- Round 1: checksums 600 to 900 loops into the capture, 100 apart. It
+  restores the last lap snapshot before the first one.
+- Round 2: checksums 30 to 120 loops on, 30 apart. It restores the
+  older instant replay, as View Replay will.
+
+Each replay runs on to where the capture had got to. Every frame
+compares the world's checksum byte from the log, and each checksum
+snapshot is verified against the race. Capture then goes on. Each
+round logs:
+
+- the frames replayed;
+- the checksum snapshots verified;
+- the frames whose checksum differed (RC_SKIP_REPLAY);
+- the snapshot sections that did not verify, by name
+  (`gReplayChecksumBreakFn`, the port's own, called by MoveData);
+- every snapshot held;
+- the slowest BeginFrame while capturing.
+
+On Azahar (2026-10-17), a SkipFE race with the gas held:
+
+| round | restored | replayed | frames | checksums verified | frames off | sections failed |
+|-------|----------|----------|--------|--------------------|------------|-----------------|
+| 1 | LAP_SNAPSHOT, loop 428 | 428..930 | 502 | 4 | 0 | 0 |
+| 2 | INSTANT_REPLAY, loop 879 | 879..1080 | 201 | 4 | 0 | 0 |
+
+There were 0 breaks in all. The slowest BeginFrame took 2.97 ms, the
+lap snapshot at loop 0. An earlier run, before the frame and checksum
+counts were logged, also had 0 frames off and 0 failed sections over
+loops 405..930 and 859..1080. The race between the snapshots is the
+same on every replay, so 72g's View Replay can start from any of them.
 
 ## The checker for 72d-1
 

@@ -149,6 +149,12 @@ typedef char replaysnapshot_layout_check[
 // sign, or a checksum that does not verify. The console carries on.
 extern int32_t replay_breaks;
 
+// The port's own: told of each checksum that does not verify, with the
+// snapshot in the section that failed (its SectionInfo up to
+// CurrentSectionDepth names the path). main.c's ReplayCheck logs them.
+// NULL by default.
+extern void (*gReplayChecksumBreakFn)(const ReplaySnapshot *s);
+
 // 0x0013cce8. Names the snapshot and stamps it with WorldTimer and
 // WorldLoopCounter; empties it, out of every mode and section.
 void ReplaySnapshot_Init(ReplaySnapshot *s, const char *name);
