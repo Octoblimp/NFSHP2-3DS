@@ -32,7 +32,6 @@
 #include "hangwatch.h"
 #include "scenery.h"
 #include "sky.h"
-#include "stereo3d.h"
 #include "sun.h"
 #include "sundraw.h"
 #include "texpack.h"
@@ -2687,9 +2686,7 @@ static void render_epoly(ePoly* p, TextureInfo* info, int flags)
     }
     // Every fragment of a screen quad has the one depth, where its Z says.
     depth = depth_of_gs_z((float)ee_trunc_w(p->Vertices[0].z));
-    // In 3D the sun and its glare are at the far plane, the glare round the
-    // sun in both eyes.
-    drawn = georender_draw_quad(q, &gt, blend, depth, p->SunPoly != 0);
+    drawn = georender_draw_quad(q, &gt, blend, depth);
     if (!drawn) {
         v->sunQuadsFailed++;
         return;
@@ -3561,7 +3558,7 @@ static void display_rvms(TrackView* v)
         q[i].st[1]  = kT[i];
         memset(q[i].colour, 0x80, 4);
     }
-    georender_draw_quad(q, &gt, GEO_BLEND_ALPHA, -1.0f, false);
+    georender_draw_quad(q, &gt, GEO_BLEND_ALPHA, -1.0f);
 }
 
 void trackview_draw(TrackView* v)
@@ -3616,17 +3613,14 @@ void trackview_draw(TrackView* v)
 
     // eDisplayFrame's sky (0x00112a38 .. 0x00112b0c): the Z writes off,
     // StuffSky for the view, and what it put on the lists attached and
-    // drawn before any of the scenery. Then the Z writes back on. In 3D the
-    // sky is at the horizon's depth, behind all the scenery (stereo3d.h).
+    // drawn before any of the scenery. Then the Z writes back on.
     georender_set_fog(s_fogOn ? &s_skyFog : NULL, s_fogColour);
     georender_set_zwrite(false);
     hangwatch_mark("the sky begun");
-    stereo3d_race_far(true);
     georender_run_begin();
     StuffSky(view);
     draw_deferred(v, true);
     georender_run_end();
-    stereo3d_race_far(false);
     georender_set_zwrite(true);
     v->skyDrawn    = v->drawn;
     hangwatch_gpu_stage("the sky");

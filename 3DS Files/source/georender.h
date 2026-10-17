@@ -125,17 +125,6 @@ void georender_run_end(void);
 // after each list it times (hangwatch.h).
 void georender_forget(void);
 
-// Stereo 3D (TASKS 59, stereo3d.h). While on, the world's batches, lit
-// batches and strips draw through geosolid's and geolit's stereo copies,
-// which move each vertex for the eye by the `stereo` uniform: clip +
-// stereo[0] * max(w + stereo[1], 0). The sprites and the sun's quads take
-// them at their depth; the other screen quads stay on the plain programs.
-// georender_stereo_uniform is that uniform's first
-// register, which only the eye's own writes set, or -1 when the shbin has
-// no copies; then georender_set_stereo(true) does nothing.
-int  georender_stereo_uniform(void);
-void georender_set_stereo(bool on);
-
 // ---------------------------------------------------------- the lit strips
 
 // One lit batch's inputs to geolit.v.pica, from the model's eLightContext
@@ -294,14 +283,12 @@ void georender_set_fog(const GeoFog* fog, uint32_t colour);
 // unless `gt`'s pass has none, as a semitransparent texture's (the sun's)
 // does. With a `depth` of 0 or more, the Z-buffer's, the
 // quad draws where that is GEQUAL to the buffer's; with -1, everywhere.
-// It never writes the depth. In 3D (georender_set_stereo) a quad
-// `atHorizon`, the sun's, takes the eyes' shift for the far plane; any
-// other stays on the screen's plane. The vertices go into a ring on
+// It never writes the depth. The vertices go into a ring on
 // the linear heap, which georender_quads_rewind starts again once the GPU
 // is done with the last frame, and which C3D_FrameEnd(0) flushes with the
 // rest of the heap. False when the ring is full or there is no texture.
 bool georender_draw_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
-                         uint8_t blend, float depth, bool atHorizon);
+                         uint8_t blend, float depth);
 // The same for a Flailer poly over the HUD, on a screen `width` by
 // `height`, citro2d's mapping: blended as citro2d blends, with neither
 // the alpha test nor the depth test, as the rest of the HUD draws. The
@@ -347,8 +334,7 @@ bool georender_draw_strip(const GeoRenderVertex* v, int n,
 // draw in one call as two triangles each. The colour is the GS's, 0x80 for
 // 1.0, and the texture modulates it; the pass is the texture's, with the
 // main target's tests, as a strip's. PRIM 0x54 has no fog, so none is laid
-// on. In 3D each corner takes the eyes' shift for the view's depth at its
-// z. False when the ring is full, or for no texture.
+// on. False when the ring is full, or for no texture.
 bool georender_draw_sprites(const GeoRenderVertex* v, int n,
                             const GeoTexture* gt);
 

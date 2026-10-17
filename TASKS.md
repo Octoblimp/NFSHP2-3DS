@@ -3486,7 +3486,7 @@ phases.
         If it comes back, the place to look is the rail meshes against
         their wall polygons (retail data), where a scraping car's side
         can show through a rail.
-59. [ ] **Stereoscopic 3D on the top screen.** Asked for on 2026-10-13.
+59. [x] **Stereoscopic 3D on the top screen.** Asked for on 2026-10-13.
         Draw the top screen in stereo when the 3D slider is up: each
         eye's view (`gfxSet3D`, `osGet3DSliderState`, a left and right
         render target). The bottom screen has no 3D. The user said it is
@@ -3535,9 +3535,13 @@ phases.
           the horizon. In Azahar: the far trees +9, the car +3 to +4,
           the near road 0 to +4 (it was down to -9), the HUD 0. The
           boot walk's 32 shots, the movies among them, are flat.
-        - Left: the user's second test on a real 3DS. If the depth is
-          still not comfortable, take 3D out (the slider does
-          nothing). TASKS 72 waits for it.
+        - Closed, 2026-10-16, after the user's second test: "Remove 3D
+          support entirely, I don't like it." All of TASKS 59's code is
+          out. The sources are their b9556b3 selves again, and
+          `stereo3d.c`, `stereo3d.h` and docs/formats/stereo-3d.md are
+          gone. libctru leaves the top screen's 3D off, so the slider
+          does nothing. The design and its Azahar measurements stay in
+          git, in b6bd138's docs/formats/stereo-3d.md.
 60. [ ] **The car's particle effects (Car::TriggerEffect).** Found on
         2026-10-13 with TASKS 51a. `gCarTriggerEffectFn` is never set, so
         `Car::TriggerEffect` (`0x0011e2b8`) is skipped: a broken light,
@@ -4044,6 +4048,8 @@ phases.
         **The user, 2026-10-16, later:** "I want to test the game on
         real hardware once task 59 is 100% done before you continue to
         task 72". So this starts after their report.
+        **2026-10-16, later still:** the report came, and 3D is out
+        (TASKS 59). So this is next.
 
 ### The retail frontend
 

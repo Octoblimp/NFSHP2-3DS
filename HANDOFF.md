@@ -25170,8 +25170,30 @@ anywhere else". See docs/formats/stereo-3d.md.
   the sed in the Makefile needs `build/geosolid_st.v.pica`,
   `build/geolit_st.v.pica` and `build/geosolid.shbin*` deleted first.
 
+### 3D taken out
+
+- The user, after trying b6bd138 on their 3DS: "Remove 3D support
+  entirely, I don't like it."
+- Their log (`3DS Files/nfshp2_debug.txt`, New 3DS XL): one quick race
+  on track 16, 2 laps, 3 AI and 4 cops, finished with 59,200 points.
+  - The race's frame lines (one a second) have a median of 26.6 FPS,
+    with 46 of 276 seconds under 20.
+  - The first race frames are GPU-bound: 64 ms of GPU, "G 14 fps".
+  - No errors, and a clean exit.
+- **All of TASKS 59's code is out.** The Makefile, `georender.*`,
+  `hangwatch.*`, `main.c`, `trackview.c` and `uirender.*` are their
+  b9556b3 selves again. `stereo3d.c`, `stereo3d.h` and
+  docs/formats/stereo-3d.md are deleted.
+  - libctru leaves the top screen's 3D off, so the slider does nothing
+    and its light stays off.
+  - The shbin is back to two DVLEs. The build's stale `_st` copies and
+    `stereo3d.o` were deleted by hand.
+- **Checked in Azahar** with its 3D display on at factor 100 (restored
+  after): five race shots on track 12 with gas, the two eyes identical
+  (0.00), App FPS 30.
+- The design and its measurements stay in git, in b6bd138's
+  docs/formats/stereo-3d.md.
+
 ### Next
 
-1. The user's second test of TASKS 59 on their 3DS. If the depth is
-   still not comfortable, take 3D out (the slider does nothing).
-2. Replays (TASKS 72), then the known bugs and the verdict again.
+1. Replays (TASKS 72), then the known bugs and the verdict again.
