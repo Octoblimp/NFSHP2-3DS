@@ -89,7 +89,8 @@ NL = chr(10)
 HARNESS = "tools/src/cardamage_test.c"
 CDC = "3DS Files/source/cardamage.c"
 ESD = "3DS Files/source/estripdata.c"
-SOURCES = [HARNESS, CDC, ESD]
+SOURCES = [HARNESS, CDC, ESD, "3DS Files/source/replay.c",
+           "3DS Files/source/p32.c"]
 HARNESS_TIMEOUT = 120
 
 GP = retail_model.RETAIL_GP

@@ -8,6 +8,7 @@
 #include "bmatrix.h"
 #include "bvector.h"
 #include "emath.h"
+#include "replay.h"
 
 // --------------------------------------------------------- the constants
 //
@@ -460,4 +461,69 @@ void carstate_calculate_geometry_position(CarState *s)
 void carstate_print_state(CarState *s)
 {
     (void)s;
+}
+
+// ---------------------------------------------------------------- the replay
+
+// 0x001c0270. The Position.x clear is an `and` with 0xfffffff0 on the word.
+void carstate_do_snapshot(CarState *s, ReplaySnapshot *snap)
+{
+    int32_t i;
+
+    ReplaySnapshot_BeginNamedSection(snap, "CarState");
+    ReplaySnapshot_MoveVector3(snap, &s->GeometryPosition);
+    if (snap->TakingSnapshotFlag || snap->RestoringSnapshotFlag) {
+        uint32_t bits;
+
+        memcpy(&bits, &s->Position.x, 4);
+        bits &= 0xfffffff0u;
+        memcpy(&s->Position.x, &bits, 4);
+    }
+    ReplaySnapshot_MoveVector3(snap, &s->Position);
+    ReplaySnapshot_MoveVector3(snap, &s->Velocity);
+    ReplaySnapshot_MoveVector3(snap, &s->Acceleration);
+    ReplaySnapshot_MoveMatrix(snap, &s->BodyMatrix);
+    ReplaySnapshot_MoveVector3(snap, &s->AngularVelocity);
+    ReplaySnapshot_MoveVector3(snap, &s->AngularAcceleration);
+    for (i = 0; i < 4; i++) {
+        ReplaySnapshot_MoveFloat(snap, &s->WheelAngularVelocity[i]);
+        ReplaySnapshot_MoveFloat(snap, &s->WheelAngle[i]);
+        ReplaySnapshot_MoveFloat(snap, &s->WheelZForce[i]);
+        ReplaySnapshot_MoveFloat(snap, &s->WheelBottomOutMagnitude[i]);
+        ReplaySnapshot_MoveChar(snap, &s->WheelTouchingGround[i], 1);
+        ReplaySnapshot_MoveData(snap, &s->WheelTerrain[i], 1, -1, 0);
+        ReplaySnapshot_MoveVector2(snap, &s->WheelSlip[i]);
+        ReplaySnapshot_MoveFloat(snap, &s->WheelTractionUsage[i]);
+        ReplaySnapshot_MoveFloat(snap, &s->WheelSuspensionHeight[i]);
+        if (snap->TakingSnapshotFlag || snap->RestoringSnapshotFlag)
+            s->CrossedWheelTerrain[i] = 1;
+    }
+    ReplaySnapshot_MoveUShort(snap, &s->Angle, 2);
+    ReplaySnapshot_MoveUShort(snap, &s->SteeringAngle, 2);
+    ReplaySnapshot_MoveFloat(snap, &s->Odometer);
+    if (snap->TakingSnapshotFlag || snap->RestoringSnapshotFlag) {
+        s->TractionUsage = 0.0f;
+        s->SkidLeft = 0.0f;
+        s->SkidRight = 0.0f;
+    }
+    ReplaySnapshot_MoveFloat(snap, &s->ForwardSpeed);
+    ReplaySnapshot_MoveFloat(snap, &s->VelocityMagnitude);
+    ReplaySnapshot_MoveData(snap, &s->CurrentGear, 1, -1, 0);
+    ReplaySnapshot_MoveFloat(snap, &s->Throttle);
+    ReplaySnapshot_MoveFloat(snap, &s->RPM);
+    ReplaySnapshot_MoveInt(snap, &s->ClutchEngaged, 1);
+    ReplaySnapshot_MoveInt(snap, &s->DriverMode, 1);
+    ReplaySnapshot_MoveFloat(snap, &s->BoostFactor);
+    ReplaySnapshot_MoveInt(snap, &s->BurnOutState, 4);
+    ReplaySnapshot_MoveFloat(snap, &s->BurnOutTime);
+    ReplaySnapshot_MoveFloat(snap, &s->BurnOutTraction);
+    if (snap->TakingSnapshotFlag || snap->RestoringSnapshotFlag) {
+        bIdentity(&s->RelCoordMatrix);
+        s->MatrixValid = 0;
+        s->nWheelsTouchingGround = 0;
+        for (i = 0; i < 4; i++)
+            s->nWheelsTouchingGround += s->WheelTouchingGround[i];
+        carstate_calculate_wheel_matrices(s);
+    }
+    ReplaySnapshot_EndNamedSection(snap);
 }

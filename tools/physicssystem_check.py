@@ -81,6 +81,7 @@ SOURCES = [
     # ~PhysicsComponent is physicscomponent_fini, which rigidbody.c has
     # carried since the RigidBody slice; it brings its own includes.
     "3DS Files/source/rigidbody.c",
+    "3DS Files/source/replay.c",
     "3DS Files/source/bmatrix.c",
     "3DS Files/source/table.c",
     "3DS Files/source/bvector.c",

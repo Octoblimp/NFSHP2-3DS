@@ -78,6 +78,7 @@ SOURCES = [HARNESS, FRC, RPC, CIC, EDC, PSC, CFC] + [
         "cartypeinfo.c", "langtab.c", "portlang.c", "realtime.c", "bticker.c", "joylog.c",
         "timer.c", "track.c",
         "terraintype.c", "cartrack.c", "carstate.c", "emath.c", "bmatrix.c",
+        "replay.c",
         "terraintypetab.c", "bslotpool.c", "bvector.c", "bmath.c",
         "bmathtab.c", "bchunk.c", "p32.c")]
 

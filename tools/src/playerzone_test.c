@@ -62,6 +62,7 @@ int32_t PlayerNumPlayers;
 struct Player *PlayerPlayersByIndex[2];
 int32_t SoundEnabled;
 int32_t WorldTimer;
+int32_t WorldLoopCounter;   // realtime.c's too; ReplaySnapshot_Init reads it
 int32_t RealTimer;
 float WorldTimeElapsed;
 int32_t TweakerPauseWorld;

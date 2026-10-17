@@ -63,6 +63,9 @@ SOURCES = [
     "tools/src/aerodynamics_test.c",
     "3DS Files/source/aerodynamics.c",
     "3DS Files/source/rigidbody.c",
+    "3DS Files/source/replay.c",
+    "3DS Files/source/p32.c",
+    "3DS Files/source/vtable.c",
     "3DS Files/source/bmatrix.c",
     "3DS Files/source/table.c",
     "3DS Files/source/bvector.c",
@@ -481,15 +484,17 @@ def s_at_speed():
 def s_snapshot():
     emit("[snapshot]")
     pairs = [(0, 0), (1, 0), (0, 2), (128, 64)]
-    for k in range(-1, 4):
+    for k in range(4):
         a = aero_init()
         a["boost"], a["draft"] = f32(1.25), f32(0.5)
         a["throttle"], a["ge"] = f32(0.75), f32(0.625)
-        # The image ORs bytes 56 and 57 (lbu at 0x001a4b58/5c); the port
-        # asks wheel.h's seam, which NULL leaves alone.
-        if k >= 0 and (pairs[k][0] | pairs[k][1]):
+        # The image ORs bytes 56 and 57 (lbu at 0x001a4b58/5c), the demo's
+        # TakingSnapshotFlag and RestoringSnapshotFlag; retail's are at 60
+        # and 61, which the port's ReplaySnapshot follows (TASKS 72a).
+        if pairs[k][0] | pairs[k][1]:
             a["ge"], a["boost"], a["throttle"] = (f32(0.0),) * 3
-        dump_aero("  seam" if k >= 0 else "  null", a)
+        emit("  flags %d,%d" % pairs[k])
+        dump_aero("  snap", a)
 
 
 assert imm(0x001a4b58, 0x24) == 57 and imm(0x001a4b5c, 0x24) == 56   # lbu
@@ -743,12 +748,12 @@ MUTATIONS = [
      "    return m * a->AI->RearDownforce;"),
 
     # -- DoSnapshot --------------------------------------------------------
-    ("snap-ignores-answer", AC,
-     "    if (gReplayShouldResetFn && gReplayShouldResetFn(snap)) {",
-     "    if (gReplayShouldResetFn) {"),
-    ("snap-null-resets", AC,
-     "    if (gReplayShouldResetFn && gReplayShouldResetFn(snap)) {",
-     "    if (!gReplayShouldResetFn || gReplayShouldResetFn(snap)) {"),
+    ("snap-taking-only", AC,
+     "    if (s->TakingSnapshotFlag || s->RestoringSnapshotFlag) {",
+     "    if (s->TakingSnapshotFlag) {"),
+    ("snap-restoring-only", AC,
+     "    if (s->TakingSnapshotFlag || s->RestoringSnapshotFlag) {",
+     "    if (s->RestoringSnapshotFlag) {"),
     ("snap-clears-draft", AC,
      "        a->Boost        = 0.0f;",
      "        a->Draft        = 0.0f;"),

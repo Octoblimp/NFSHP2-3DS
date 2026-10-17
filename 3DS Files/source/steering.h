@@ -181,9 +181,17 @@ void ackerman_set_steering(TwoWheelAckermanSteering *a, uint16_t bam);
 // and so are the two destructors, the Ackerman's table and Steering's.
 // PhysicsCar's constructor inlines the new rather than calling it.
 
-// Steering::BaseDoSnapshot (0x0019c558) and
-// TwoWheelAckermanSteering::DoSnapshot (0x0019bac0) are **not** ported --
-// they need ReplaySnapshot, the same dependency that stopped
-// CarState::DoSnapshot, Engine::DoSnapshot and CarDriver::DoSnapshot.
+// Retail's 0x001a5d10 (the demo's 0x0019bac0), the replay's, the
+// Ackerman's table entry: AckermanMatrix[0] through the compressed matrix
+// move in a section named "TwoWheelAckermanSteering". The image passes 128,
+// both matrices' size, which the move does not read, so the second matrix
+// is not in the replay; ComputeAuxiliaries makes both from the steering
+// angle anyway.
+//
+// Steering::BaseDoSnapshot (retail's 0x001a67a8), a non-virtual call of
+// the table's DoSnapshot, has no caller in the image and is not ported.
+struct ReplaySnapshot;
+void ackerman_do_snapshot(TwoWheelAckermanSteering *a,
+                          struct ReplaySnapshot *s);
 
 #endif

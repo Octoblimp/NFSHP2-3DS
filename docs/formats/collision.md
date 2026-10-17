@@ -1,7 +1,7 @@
 # Collision -- the record of two bodies in contact
 
     retail 0x0021e5c8 .. 0x0021ec54    Collision.obj, 1676 bytes
-    retail 0x0021e760                  DoSnapshot (not ported)
+    retail 0x0021e760                  DoSnapshot (TASKS 72b, carsnap_check)
     retail 0x0014e3e8, 0x0014e440      World::GetDistanceToClosestPlayer
     gp-15880 (0x00331ae8)              CollisionSlotPool
     gp-15884 (0x00331ae4)              CollisionLifetime, 0.3 (3e99999a)

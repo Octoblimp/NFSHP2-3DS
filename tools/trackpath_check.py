@@ -84,6 +84,8 @@ HARNESS = "tools/src/trackpath_test.c"
 TPC = "3DS Files/source/trackpath.c"
 TPH = "3DS Files/source/trackpath.h"
 SOURCES = [HARNESS, TPC,
+           "3DS Files/source/replay.c",
+           "3DS Files/source/p32.c",
            "3DS Files/source/quickspline.c",
            "3DS Files/source/bmem.c",
            "3DS Files/source/bmatrix.c",

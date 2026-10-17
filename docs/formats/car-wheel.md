@@ -511,33 +511,31 @@ lane of row 2 and **leaves rows 0 and 1 carrying `WorldMatrix`'s** — which
 frame 2 does not, and which changes the result because the multiply is
 affine.
 
-## DoSnapshot: a list of clears with four holes in it
+## DoSnapshot: a list of clears with three holes in it
 
-The replay serialiser. `MoveData` runs in whichever direction the snapshot
-is going, so one body both records and plays back; `BeginNamedSection` is
-handed the string `"Wheel"` at 0x00323d10.
+The replay serialiser, retail's 0x001a3f60 (the demo's 0x00199c90).
+`MoveData` runs in whichever direction the snapshot is going, so one body
+both records and plays back; `BeginNamedSection` is handed the string
+`"Wheel"`. Since TASKS 72b the port runs it on the real `ReplaySnapshot`
+(`replay.c`), and `carsnap_check` runs retail's beside it.
 
-Three moves: `State.a`, `State.w`, and then **four words from `LastSign`** —
-`MoveData(this + 272, 4)`, which covers `LastSign`, both `GroundForce`
-floats and the four bytes of padding behind them. The image hands the pad to
-the replay and the port hands over the same four words, which is safe to
-spell as one pointer and a count precisely because the slack multiplier is
-constant at 5 across that whole span: the four words are the same four
-fields on the handheld and on a 64-bit host.
+Three moves: `State.a`, `State.w`, and then `LastSign` — retail's
+`MoveData(int *, int)` with 4, four bytes of the one int. The demo read as
+four words from `LastSign` on; retail's overload is a count of bytes.
 
-Then, if either of two bytes in the snapshot is set, twenty-three
+Then, if TakingSnapshotFlag or RestoringSnapshotFlag is set, twenty-four
 `bMemSet` calls clear most of the record. What is *not* on the list is the
 interesting part:
 
 * **`MomentOfInertia`** — survives, so a restored wheel does not need
   recalibrating.
 * **`LastSign`** — survives, because it was just moved.
-* **`RoadNoise`** (348) and **`Damage`** (364) — survive, and the clear list
-  steps around both: it goes 344 for four bytes, then 352; 360 for four,
-  then 368. Damage surviving a rewind is deliberate — a car that lost a
-  wheel does not get it back — and road noise surviving is probably not,
-  but it is what the image does.
+* **`RoadNoise`** (348) — survives: the list goes 344 for four bytes,
+  then 352. Probably not meant, but it is what the image does.
 * **the pad at 284** — survives, because the clears jump from 276+8 to 288.
+
+**`Damage`** (364) is retail's twenty-fourth clear. The demo stepped around
+it.
 
 `TractionBoost` and `CatchupFrictionMultiplier` *are* cleared, to **0**, not
 to the 1.0 the constructor gave them. A wheel restored from a rewind has no

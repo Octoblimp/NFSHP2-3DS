@@ -114,9 +114,8 @@ port with ee_div: CollisionImpulse's friction divides by the slide, which is
 zero for a car dropped straight onto flat ground, and the script drops one.
 No other division or vrsqrt may see a zero.
 
-**The tables.** DoSnapshot is not ported (the replay is not), so slot 16
-prints as DoSnapshot on both sides; every other entry prints as the image
-names it.
+**The tables.** Every entry prints as the image names it; slot 16's
+DoSnapshot is ported since TASKS 72b, and carsnap_check runs it.
 
     python tools/collisionbody_check.py
     python tools/collisionbody_check.py --mutate [--only NAME,...]
@@ -150,7 +149,7 @@ SOURCES = [HARNESS, CBC] + ["3DS Files/source/" + s for s in (
     "bmatrix.c", "bvector.c", "bmath.c", "bmathtab.c", "emath.c", "p32.c",
     "bchunk.c", "vtable.c", "espresso.c", "bticker.c", "terraintype.c",
     "terraintypetab.c", "rigidbody.c", "table.c", "carcollisionbody.c",
-    "race.c", "copmanager.c", "contact.c")]
+    "race.c", "copmanager.c", "contact.c", "replay.c")]
 CCB = "3DS Files/source/carcollisionbody.c"
 RCC = "3DS Files/source/race.c"
 CTC = "3DS Files/source/contact.c"
@@ -2994,8 +2993,6 @@ class Model(object):
                     name = "0"
                 else:
                     name = e.elf.by_addr.get(fn, "?")
-                    if name.startswith("DoSnapshot__"):
-                        name = "DoSnapshot"
                 self.emit("  %d %d %d %s" % (8 * i, s16(e.u16(a)),
                                              s16(e.u16(a + 2)), name))
 
@@ -4201,9 +4198,11 @@ MUTATIONS = [
     # the tables
     _m("vt_base_blinking", "    E(collisionbody_is_blinking),                   // 184",
        "    PURE,                                           // 184"),
-    _m("vt_static_terrain", "    STATIC_SLOTS(staticcollisionbody_destroy, PURE, PURE)",
-       "    STATIC_SLOTS(staticcollisionbody_destroy, PURE,\n"
-       "                 E(trackpolygoncollisionbody_get_terrain_type))"),
+    _m("vt_static_terrain", "                 PURE, PURE)",
+       "                 PURE, E(trackpolygoncollisionbody_get_terrain_type))"),
+    _m("vt_static_snapshot",
+       "    STATIC_SLOTS(staticcollisionbody_destroy, staticcollisionbody_do_snapshot,",
+       "    STATIC_SLOTS(staticcollisionbody_destroy, collisionbody_do_snapshot,"),
     _m("vt_friction_bounciness",
        "    E(staticcollisionbody_get_bounciness),                          \\\n"
        "    E(staticcollisionbody_get_friction)",

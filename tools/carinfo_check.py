@@ -51,6 +51,8 @@ HARNESS = "tools/src/carinfo_test.c"
 CI = "3DS Files/source/carinfo.c"
 SOURCES = [HARNESS, CI] + ["3DS Files/source/" + f for f in (
     "cartypeinfo.c", "langtab.c", "portlang.c", "drivetrain.c", "engine.c", "wheel.c",
+    "vtable.c",
+    "replay.c", "p32.c",
     "suspension.c", "steering.c", "rigidbody.c", "carstate.c", "emath.c",
     "bmatrix.c", "table.c", "bvector.c", "bmath.c", "bmathtab.c")]
 

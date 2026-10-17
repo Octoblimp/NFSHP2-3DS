@@ -8,9 +8,15 @@
 #include <string.h>
 
 #include "bmath.h"
+#include "p32.h"
+#include "replay.h"
 #include "suspension.h"   // for the four .sdata globals Suspension owns
 #include "wheel.h"
 #include "carstate.h"
+
+// realtime.c's clock, which ReplaySnapshot_Init stamps; not linked here.
+int32_t WorldTimer;
+int32_t WorldLoopCounter;
 
 static void pf(const char *tag, float x)
 {
@@ -86,87 +92,6 @@ static void *fake_topology_of(void *carState)
     (void)carState;
     g_topology_calls++;
     return g_topology;
-}
-
-// ------------------------------------------------------ the replay seams
-//
-// DoSnapshot's only observable behaviour is the sequence of MoveData calls
-// and which fields survive the reset, so the fakes record the calls rather
-// than serialising anything. The moved addresses are kept raw and turned
-// into offsets by the scenario, because the offsets are what has to agree
-// with the image and the addresses are not reproducible.
-
-static int    g_rp_begin, g_rp_end, g_rp_float, g_rp_ints, g_rp_reset_calls;
-static void  *g_rp_snap;
-static char   g_rp_name[64];
-static float *g_rp_fp[8];
-static int32_t *g_rp_ip;
-static int32_t g_rp_n;
-static int    g_rp_reset;
-
-static void fake_rp_begin(void *snap, const char *name)
-{
-    g_rp_begin++;
-    g_rp_snap = snap;
-    strncpy(g_rp_name, name ? name : "(null)", sizeof g_rp_name - 1);
-    g_rp_name[sizeof g_rp_name - 1] = 0;
-}
-
-static void fake_rp_end(void *snap)
-{
-    g_rp_end++;
-    g_rp_snap = snap;
-}
-
-static void fake_rp_move_float(void *snap, float *q)
-{
-    g_rp_snap = snap;
-    if (g_rp_float < 8)
-        g_rp_fp[g_rp_float] = q;
-    g_rp_float++;
-}
-
-static void fake_rp_move_ints(void *snap, int32_t *q, int32_t n)
-{
-    g_rp_snap = snap;
-    g_rp_ints++;
-    g_rp_ip = q;
-    g_rp_n = n;
-}
-
-static int32_t fake_rp_should_reset(const void *snap)
-{
-    (void)snap;
-    g_rp_reset_calls++;
-    return g_rp_reset;
-}
-
-static void install_replay_seams(void)
-{
-    gReplayBeginSectionFn = fake_rp_begin;
-    gReplayEndSectionFn   = fake_rp_end;
-    gReplayMoveFloatFn    = fake_rp_move_float;
-    gReplayMoveIntsFn     = fake_rp_move_ints;
-    gReplayShouldResetFn  = fake_rp_should_reset;
-}
-
-static void clear_replay_seams(void)
-{
-    gReplayBeginSectionFn = NULL;
-    gReplayEndSectionFn   = NULL;
-    gReplayMoveFloatFn    = NULL;
-    gReplayMoveIntsFn     = NULL;
-    gReplayShouldResetFn  = NULL;
-}
-
-static void reset_replay_record(void)
-{
-    g_rp_begin = g_rp_end = g_rp_float = g_rp_ints = g_rp_reset_calls = 0;
-    g_rp_snap = NULL;
-    g_rp_name[0] = 0;
-    memset(g_rp_fp, 0, sizeof g_rp_fp);
-    g_rp_ip = NULL;
-    g_rp_n = -1;
 }
 
 static void install_terrain_seams(void)
@@ -1640,78 +1565,92 @@ static void scenario_accessors(void)
 
 // ---------------------------------------------------------- the snapshot
 
+// Through a real ReplaySnapshot since TASKS 72b, so the claims are the
+// bytes a take writes and a restore reads, the section DoSnapshot opens,
+// and what a take or a restore leaves of the record. carsnap_check pins
+// the same function inside the whole car against retail.
+
+static void snap_fixture(Wheel *w)
+{
+    uint32_t magic = 0xa5a5a5a5u;
+
+    // The four bytes behind GroundForce[1]. The demo image moved them as
+    // the last of four words; retail moves LastSign alone, and so a port
+    // that still moved four words writes them into the data.
+    memcpy(w->_pad2, &magic, sizeof magic);
+    // Not the zero fresh() leaves, so a reset that cleared LastSign --
+    // which neither image's list does -- would show.
+    w->LastSign = 3;
+    w->RoadNoise = 0.55f;
+    w->Damage = 0.37f;
+    w->NumTimesSkidding = 9;
+    w->TheSkidMaker.pSkidSet = (void *)(size_t)0x777;
+}
+
+static void snap_print(const char *tag, const ReplaySnapshot *s,
+                       const Wheel *w)
+{
+    const ReplaySectionInfo *sec = &s->SectionInfo[0];
+    uint32_t back;
+    int32_t i;
+
+    printf("%s depth %d sections %u\n", tag, (int)s->CurrentSectionDepth,
+           (unsigned)s->CurrentSectionNumber);
+    printf("%s sec %s obj %u num %u moves %u size %d\n", tag,
+           sec->Name ? (const char *)p32_ptr(sec->Name) : "(null)",
+           (unsigned)sec->Object, (unsigned)sec->Number,
+           (unsigned)sec->NumMoveData, (int)sec->Size);
+    printf("%s pos %d data", tag, (int)s->DataPosition);
+    for (i = 0; i < s->DataPosition; i++)
+        printf(" %02x", s->Data[i]);
+    printf("\n");
+    printf("%s skid %d\n", tag,
+           w->TheSkidMaker.pSkidSet == (void *)(size_t)0x777);
+    memcpy(&back, w->_pad2, sizeof back);
+    printf("%s pad %08x\n", tag, (unsigned)back);
+    dump(tag, w);
+}
+
 static void scenario_snapshot(void)
 {
-    static const int resets[] = { 0, 1 };
+    // Take, restore, a checksum taken, and none of the four.
+    static const struct {
+        const char *tag;
+        int8_t take, restore, sum;
+    } modes[] = {
+        { "sntake", 1, 0, 0 },
+        { "snrest", 0, 1, 0 },
+        { "snsum",  0, 0, 1 },
+        { "snnone", 0, 0, 0 },
+    };
+    static ReplaySnapshot snap;
     size_t r;
-    char tag[96];
-    void *snap = (void *)(size_t)0xbeef;
 
     printf("[snapshot]\n");
 
-    for (r = 0; r < sizeof resets / sizeof resets[0]; r++) {
+    for (r = 0; r < sizeof modes / sizeof modes[0]; r++) {
         Wheel *w = fresh();
-        uint32_t magic = 0xa5a5a5a5u;
-        int32_t words[4];
-        int j;
 
-        // The four-word move reaches past GroundForce[1] into the
-        // alignment pad, so the pad is given a value no float here could
-        // produce. A port that moved three words, or that moved the two
-        // forces as floats, loses it.
-        memcpy(w->_pad2, &magic, sizeof magic);
-        // Not the zero fresh() leaves, so a reset that cleared LastSign --
-        // which the image's list does not -- would show.
-        w->LastSign = 3;
-        w->RoadNoise = 0.55f;
-        w->Damage = 0.37f;
-        w->NumTimesSkidding = 9;
-        w->TheSkidMaker.pSkidSet = (void *)(size_t)0x777;
-
-        install_replay_seams();
-        reset_replay_record();
-        g_rp_reset = resets[r];
-        wheel_do_snapshot(w, snap);
-
-        sprintf(tag, "sn%u", (unsigned)r);
-        printf("%s calls %d %d %d %d %d\n", tag, g_rp_begin, g_rp_float,
-               g_rp_ints, g_rp_reset_calls, g_rp_end);
-        printf("%s name %s\n", tag, g_rp_name);
-        printf("%s snap %d\n", tag, g_rp_snap == snap);
-        printf("%s foff %d %d\n", tag,
-               (int)((char *)g_rp_fp[0] - (char *)w),
-               (int)((char *)g_rp_fp[1] - (char *)w));
-        printf("%s ioff %d n %d\n", tag,
-               (int)((char *)g_rp_ip - (char *)w), (int)g_rp_n);
-        // Read back through the int pointer the port handed the seam, as
-        // raw words, so the pad is pinned alongside the two forces.
-        memcpy(words, g_rp_ip, sizeof words);
-        for (j = 0; j < 4; j++)
-            printf("%s word%d %08x\n", tag, j, (unsigned)words[j]);
-        printf("%s skid %d\n", tag, w->TheSkidMaker.pSkidSet
-                                         == (void *)(size_t)0x777);
-        {
-            uint32_t back;
-            memcpy(&back, w->_pad2, sizeof back);
-            printf("%s pad %08x\n", tag, (unsigned)back);
+        snap_fixture(w);
+        memset(&snap, 0x5a, sizeof snap);
+        ReplaySnapshot_Init(&snap, "wheel");
+        snap.TakingSnapshotFlag = modes[r].take;
+        snap.RestoringSnapshotFlag = modes[r].restore;
+        snap.TakingChecksumFlag = modes[r].sum;
+        if (modes[r].restore) {
+            // What a take of another wheel left: State.a 2.5, State.w -6
+            // and LastSign -2.
+            static const uint8_t was[12] = {
+                0x00, 0x00, 0x20, 0x40, 0x00, 0x00, 0xc0, 0xc0,
+                0xfe, 0xff, 0xff, 0xff,
+            };
+            memcpy(snap.Data, was, sizeof was);
+            snap.SizeofData = (int32_t)sizeof was;
         }
-        dump(tag, w);
+        wheel_do_snapshot(w, &snap);
+        snap_print(modes[r].tag, &snap, w);
     }
 
-    // With no replay attached at all. Nothing should move and nothing
-    // should clear -- the reset is behind the same seam as the moves.
-    {
-        Wheel *w = fresh();
-        clear_replay_seams();
-        reset_replay_record();
-        g_rp_reset = 1;
-        wheel_do_snapshot(w, snap);
-        printf("snnull calls %d %d %d %d %d\n", g_rp_begin, g_rp_float,
-               g_rp_ints, g_rp_reset_calls, g_rp_end);
-        dump("snnull", w);
-    }
-
-    clear_replay_seams();
     install_terrain_seams();
 }
 

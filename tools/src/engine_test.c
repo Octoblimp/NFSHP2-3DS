@@ -14,6 +14,7 @@
 // The clock object's tick, which DecrementNitro reads. Defined here rather
 // than linked from realtime.c, which would bring the joylog in behind it.
 int32_t WorldTimer = 0;
+int32_t WorldLoopCounter;   // realtime.c's too; ReplaySnapshot_Init reads it
 
 static int g_dirt;
 

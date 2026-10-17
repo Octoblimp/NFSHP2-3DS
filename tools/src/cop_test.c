@@ -51,6 +51,10 @@
 #include "vtable.h"
 #include "world.h"
 
+// realtime.c's clock, which ReplaySnapshot_Init stamps; not linked here.
+int32_t WorldTimer;
+int32_t WorldLoopCounter;
+
 // Retail's sizeof(Car), which its bMalloc is asked for.
 #define RETAIL_CAR_SIZE 2208
 

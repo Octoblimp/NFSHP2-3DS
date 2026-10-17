@@ -386,8 +386,9 @@ race coordinator before the state is read. Retail would read the word at
 address 0, which is not 3 either.
 
 `Car::TriggerEffect` (`0x0011e2b8`, `gCarTriggerEffectFn`) is not
-ported, so the effects are skipped (TASKS 60). The replay's DoSnapshot
-waits on the ReplayManager.
+ported, so the effects are skipped (TASKS 60). The replay's DoSnapshots,
+BodyDamage's (retail's 0x001b4c58) and CarDamage's (0x001b5638), are
+ported since TASKS 72b, and `carsnap_check` runs them against retail.
 
 ## The check
 

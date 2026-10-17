@@ -21,6 +21,10 @@
 #include "topology.h"
 #include "track.h"
 
+// realtime.c's clock, which ReplaySnapshot_Init stamps; not linked here.
+int32_t WorldTimer;
+int32_t WorldLoopCounter;
+
 enum {
     OP_TAG, OP_CLEAR, OP_CHUNKW, OP_FILE, OP_LOADER, OP_UNLOADER,
     OP_TTLOADER, OP_TTUNLOADER, OP_MEM, OP_TREEINIT, OP_INITTREE,

@@ -346,37 +346,7 @@ extern WheelTopologyOfCarStateFn gWheelTopologyOfCarStateFn;
 typedef void (*WheelMaybeMakeSkidsFn)(Wheel *w, float dt);
 extern WheelMaybeMakeSkidsFn gWheelMaybeMakeSkidsFn;
 
-// --------------------------------------------- what the replay wants
-//
-// DoSnapshot is the replay serialiser and ReplaySnapshot is not ported --
-// it belongs with the replay system, not with the car -- so its four calls
-// are seams of the same kind as the terrain ones. MoveData runs in
-// whichever direction the snapshot is going, so one body both records and
-// plays back, which is exactly why the field list is worth pinning down
-// before the snapshot exists.
-
-// 0x001374a8 / 0x001374a0. The section is named "Wheel", the string at
-// 0x00323d10.
-typedef void (*ReplayBeginSectionFn)(void *snap, const char *name);
-typedef void (*ReplayEndSectionFn)(void *snap);
-
-// 0x00134b30, MoveData(float *) -- one float.
-typedef void (*ReplayMoveFloatFn)(void *snap, float *p);
-
-// 0x00134b40, MoveData(int *, int) -- a run of words.
-typedef void (*ReplayMoveIntsFn)(void *snap, int32_t *p, int32_t n);
-
-// `lbu v0,56(s1)`, `lbu v1,57(s1)`, `or`, `beq zero`: two bytes of the
-// snapshot, OR'd together. Which two is the replay system's to name --
-// DoSnapshot only asks whether either is set, so the seam reports that and
-// nothing else. NULL reads as "no reset", which leaves the record alone.
-typedef int32_t (*ReplayShouldResetFn)(const void *snap);
-
-extern ReplayBeginSectionFn gReplayBeginSectionFn;
-extern ReplayEndSectionFn   gReplayEndSectionFn;
-extern ReplayMoveFloatFn    gReplayMoveFloatFn;
-extern ReplayMoveIntsFn     gReplayMoveIntsFn;
-extern ReplayShouldResetFn  gReplayShouldResetFn;
+struct ReplaySnapshot;
 
 // ------------------------------------------ what Suspension asks Wheel
 //
@@ -519,11 +489,11 @@ float     wheel_get_ebrake(const Wheel *w);
 void      wheel_set_ebrake(Wheel *w, float v);
 void      wheel_set_brake(Wheel *w, float v);
 
-// 0x00199c90. The replay serialiser: three MoveData calls inside a named
-// section, and then, if the snapshot says to, twenty-three clears that
-// step around MomentOfInertia, LastSign, RoadNoise, Damage and the pad
-// behind GroundForce. See docs/formats/car-wheel.md.
-void wheel_do_snapshot(Wheel *w, void *snap);
+// Retail's 0x001a3f60, the replay's: State's two floats and LastSign in a
+// section named "Wheel", then, taking or restoring, twenty-four clears that
+// step around MomentOfInertia, LastSign, RoadNoise and the pad behind
+// GroundForce. See docs/formats/car-wheel.md.
+void wheel_do_snapshot(Wheel *w, struct ReplaySnapshot *s);
 
 // 0x00199e90. Places the wheel from a CarState -- the replay and network
 // path. `cs` is a CarState * and `cti` a CarTypeInfo * that the image

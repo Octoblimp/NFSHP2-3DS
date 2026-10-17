@@ -15,6 +15,10 @@
 #include "quickspline.h"
 #include "trackpath.h"
 
+// realtime.c's clock, which ReplaySnapshot_Init stamps; not linked here.
+int32_t WorldTimer;
+int32_t WorldLoopCounter;
+
 enum {
     OP_TAG, OP_PATH, OP_POINT, OP_CHUNK, OP_LOAD, OP_SETUP, OP_CLOSE,
     OP_UNLOAD, OP_CTOR, OP_DTOR, OP_LOADER, OP_UNLOADER, OP_MPOKE, OP_DUMP,

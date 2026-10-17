@@ -29,6 +29,10 @@
 #include "trackroute.h"
 #include "vtable.h"
 
+// realtime.c's clock, which ReplaySnapshot_Init stamps; not linked here.
+int32_t WorldTimer;
+int32_t WorldLoopCounter;
+
 // ------------------------------------------------------------- the world
 
 #define COP_SLOT 3

@@ -4,7 +4,7 @@
 
 #include <math.h>
 
-#include "wheel.h"   // gReplayShouldResetFn
+#include "replay.h"
 
 float OffThrottleDragFactor       = 2.0f;
 float OffThrottleDragCenterHeight = -0.100000001f;
@@ -153,9 +153,9 @@ float aerodynamics_get_downforce_at_speed(const Aerodynamics *a, float speed)
     return m * (a->AI->FrontDownforce + a->AI->RearDownforce);
 }
 
-void aerodynamics_do_snapshot(Aerodynamics *a, void *snap)
+void aerodynamics_do_snapshot(Aerodynamics *a, ReplaySnapshot *s)
 {
-    if (gReplayShouldResetFn && gReplayShouldResetFn(snap)) {
+    if (s->TakingSnapshotFlag || s->RestoringSnapshotFlag) {
         a->GroundEffect = 0.0f;
         a->Boost        = 0.0f;
         a->Throttle     = 0.0f;

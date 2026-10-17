@@ -54,6 +54,7 @@ enum {
 
 // WorldTimer is realtime.c's; the harness does not link the clock.
 int32_t WorldTimer;
+int32_t WorldLoopCounter;   // realtime.c's too; ReplaySnapshot_Init reads it
 
 static FILE *script;
 

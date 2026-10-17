@@ -85,6 +85,7 @@ NL = chr(10)
 SOURCES = [
     "tools/src/wheel_test.c",
     "3DS Files/source/wheel.c",
+    "3DS Files/source/replay.c", "3DS Files/source/p32.c",
     "3DS Files/source/suspension.c",
     "3DS Files/source/steering.c",
     "3DS Files/source/rigidbody.c",
@@ -92,6 +93,7 @@ SOURCES = [
     "3DS Files/source/emath.c",      # and the eMulMatrix it calls
     "3DS Files/source/bmatrix.c",
     "3DS Files/source/table.c",
+    "3DS Files/source/vtable.c",     # rigidbody.c's DoSnapshot
     "3DS Files/source/bvector.c",
     "3DS Files/source/bmath.c",
     "3DS Files/source/bmathtab.c",
@@ -487,9 +489,9 @@ class Wheel(object):
         self.TractionBoost = ZERO
         self.CatchupFrictionMultiplier = ZERO
         self.SkidSet = None
-        # The four bytes at 284. Nothing in the object reads them, but
-        # DoSnapshot's four-word move hands them to the replay, so they
-        # have to be somewhere the transcript can print.
+        # The four bytes at 284. Nothing in the object reads them; the
+        # demo's DoSnapshot moved them as its fourth word and retail's does
+        # not, so they have to be somewhere the transcript can print.
         self.Pad2 = 0
 
 
@@ -989,58 +991,78 @@ def bRotateVector(m, v):
 
 
 class Snap(object):
-    """What the replay saw. The addresses the image moves are stated as PS2
-    offsets and widened, the same way the layout is, because the offsets are
-    the claim and the pointers are not reproducible."""
+    """A ReplaySnapshot as replay.c's MoveData uses it: one of the four
+    modes, the data and its position, and the first level of the section
+    stack, which is the only one DoSnapshot opens."""
 
-    def __init__(self):
-        self.begin = 0
-        self.end = 0
-        self.floats = 0
-        self.ints = 0
-        self.reset_calls = 0
-        self.name = ""
-        self.foff = []
-        self.ioff = None
-        self.n = -1
+    def __init__(self, take=0, restore=0, csum=0, data=b""):
+        self.take = take
+        self.restore = restore
+        self.csum = csum
+        self.depth = -1
+        self.number = 0
+        self.data = bytearray(data)
+        self.size_of_data = len(data)
+        self.pos = 0
+        self.sec = None
+
+    def begin(self, name):
+        if self.depth == -1:
+            self.number = 0
+        self.depth += 1
+        self.sec = {"name": name, "obj": 0, "num": self.number,
+                    "moves": 0, "size": self.pos}
+        self.number += 1
+
+    def end(self):
+        self.sec["size"] = self.pos - self.sec["size"]
+        self.depth -= 1
+
+    def move(self, raw):
+        """`raw` is the field's bytes; a restore returns the bytes read."""
+        self.sec["moves"] += 1
+        n = len(raw)
+        if self.take:
+            self.data[self.pos:self.pos + n] = raw
+            self.pos += n
+        elif self.restore:
+            if self.size_of_data >= self.pos + n:
+                raw = bytes(self.data[self.pos:self.pos + n])
+                self.pos += n
+        elif self.csum:
+            h = 0xffffffff
+            for b in raw:
+                h = (h * 33 + b) & 0xffffffff
+            self.data[self.pos:self.pos + 2] = struct.pack("<H", h & 0xffff)
+            self.pos += 2
+        return raw
 
 
-def do_snapshot(w, snap, reset, attached):
-    """0x00199c90, 488 bytes. BeginNamedSection, three MoveData calls, and
-    then twenty-three bMemSets behind a single test.
+def do_snapshot(w, snap):
+    """Retail's 0x001a3f60, the demo's 0x00199c90. BeginNamedSection, three
+    MoveData calls, and then bMemSets behind a test of the two flags.
 
-    The move list is 4-byte, 4-byte, then 16-byte-as-four-words. The third
-    starts at LastSign and runs past both GroundForce floats into the
-    alignment pad at 284 -- the image serialises the pad. It is spelled as
-    one pointer and a count of four because the slack multiplier is 5 for
-    that whole span, so the four words are the same four fields wherever
-    the port is built.
+    The demo moved 4-byte, 4-byte, then 16 bytes as four words from
+    LastSign, past both GroundForce floats into the alignment pad at 284.
+    Retail's third move is MoveData(int *, int) with 4: LastSign alone.
 
     The reset steps around four live fields. MomentOfInertia at 36 is
     outside the first bMemSet, which starts at 48; LastSign at 272 was just
-    moved and is not in the list; RoadNoise at 348 and Damage at 364 are
-    jumped over -- the list runs 344 for four, then 352, and 360 for four,
-    then 368. The pad at 284 survives for the same reason: 276 for eight,
-    then 288.
+    moved and is not in the list; RoadNoise at 348 is jumped over -- the
+    list runs 344 for four, then 352. The pad at 284 survives for the same
+    reason: 276 for eight, then 288. The demo also kept Damage at 364;
+    retail's last bMemSet clears it.
 
     TractionBoost and CatchupFrictionMultiplier go to zero, not to the 1.0
     the constructor gave them, so a wheel restored from a rewind has no grip
     multiplier at all until something outside this object writes one."""
-    if not attached:
-        return snap
+    snap.begin("Wheel")
 
-    snap.begin += 1
-    snap.name = "Wheel"
+    w.a = struct.unpack("<f", snap.move(struct.pack("<f", w.a)))[0]
+    w.w = struct.unpack("<f", snap.move(struct.pack("<f", w.w)))[0]
+    w.LastSign = struct.unpack("<i", snap.move(struct.pack("<i", w.LastSign)))[0]
 
-    snap.foff.append(28 + 5 * SLACK)        # State.a
-    snap.foff.append(32 + 5 * SLACK)        # State.w
-    snap.floats += 2
-    snap.ints += 1
-    snap.ioff = 272 + 5 * SLACK             # LastSign
-    snap.n = 4
-
-    snap.reset_calls += 1
-    if reset:
+    if snap.take or snap.restore:
         w.Matrix = [(ZERO,) * 4 for _ in range(4)]
         w.WorldMatrix = [(ZERO,) * 4 for _ in range(4)]
         w.CarMatrix = [(ZERO,) * 4 for _ in range(4)]
@@ -1064,8 +1086,9 @@ def do_snapshot(w, snap, reset, attached):
         w.EBrake = ZERO
         w.TractionBoost = ZERO
         w.CatchupFrictionMultiplier = ZERO
+        w.Damage = ZERO
 
-    snap.end += 1
+    snap.end()
     return snap
 
 
@@ -2067,49 +2090,34 @@ def s_accessors():
 def s_snapshot():
     emit("[snapshot]")
 
-    for r in range(2):
+    # What a take of another wheel left: State.a 2.5, State.w -6 and
+    # LastSign -2.
+    was = struct.pack("<ffi", 2.5, -6.0, -2)
+    modes = [("sntake", Snap(take=1)),
+             ("snrest", Snap(restore=1, data=was)),
+             ("snsum", Snap(csum=1)),
+             ("snnone", Snap())]
+    for tag, snap in modes:
         w = fresh()
-        # A value no float in this fixture could produce, so a port that
-        # moved three words, or moved the two forces as floats, loses it.
         w.Pad2 = 0xa5a5a5a5
-        # Not the zero fresh() leaves, so a reset that cleared LastSign --
-        # which the image's list does not -- would show.
         w.LastSign = 3
         w.RoadNoise = f32(0.55)
         w.Damage = f32(0.37)
         w.NumTimesSkidding = 9
         w.SkidSet = 0x777
 
-        snap = Snap()
-        do_snapshot(w, snap, r, True)
+        do_snapshot(w, snap)
 
-        tag = "sn%d" % r
-        emit("%s calls %d %d %d %d %d" % (tag, snap.begin, snap.floats,
-                                          snap.ints, snap.reset_calls,
-                                          snap.end))
-        emit("%s name %s" % (tag, snap.name))
-        emit("%s snap 1" % tag)
-        emit("%s foff %d %d" % (tag, snap.foff[0], snap.foff[1]))
-        emit("%s ioff %d n %d" % (tag, snap.ioff, snap.n))
-        words = [w.LastSign & 0xffffffff,
-                 fbits(w.GroundForce[0]),
-                 fbits(w.GroundForce[1]),
-                 w.Pad2]
-        for j in range(4):
-            emit("%s word%d %08x" % (tag, j, words[j]))
+        sec = snap.sec
+        emit("%s depth %d sections %d" % (tag, snap.depth, snap.number))
+        emit("%s sec %s obj %d num %d moves %d size %d"
+             % (tag, sec["name"], sec["obj"], sec["num"], sec["moves"],
+                sec["size"]))
+        emit("%s pos %d data%s" % (tag, snap.pos, "".join(
+            " %02x" % b for b in snap.data[:snap.pos])))
         emit("%s skid %d" % (tag, 1 if w.SkidSet == 0x777 else 0))
         emit("%s pad %08x" % (tag, w.Pad2))
         dump(tag, w)
-
-    # With no replay attached at all. Nothing moves and nothing clears --
-    # the reset is behind the same seam as the moves.
-    w = fresh()
-    snap = Snap()
-    do_snapshot(w, snap, 1, False)
-    emit("snnull calls %d %d %d %d %d" % (snap.begin, snap.floats,
-                                          snap.ints, snap.reset_calls,
-                                          snap.end))
-    dump("snnull", w)
 
 
 # ------------------------------------------- SetState(CarState *, ...)
@@ -2861,6 +2869,28 @@ MUTATIONS = [
     ("wh-table-last-index-interpolates", TC,
      "    if (i == last)" + NL + "        return t->pTable[i];",
      "    if (0)" + NL + "        return t->pTable[i];"),
+
+    # -- DoSnapshot ---------------------------------------------------------
+    ("wh-snap-floats-swapped", WC,
+     "    ReplaySnapshot_MoveFloat(s, &w->State.a);" + NL
+     + "    ReplaySnapshot_MoveFloat(s, &w->State.w);",
+     "    ReplaySnapshot_MoveFloat(s, &w->State.w);" + NL
+     + "    ReplaySnapshot_MoveFloat(s, &w->State.a);"),
+    ("wh-snap-lastsign-short", WC,
+     "    ReplaySnapshot_MoveInt(s, &w->LastSign, 4);",
+     "    ReplaySnapshot_MoveInt(s, &w->LastSign, 2);"),
+    ("wh-snap-clears-taking-only", WC,
+     "    if (s->TakingSnapshotFlag || s->RestoringSnapshotFlag) {",
+     "    if (s->TakingSnapshotFlag) {"),
+    ("wh-snap-boost-to-one", WC,
+     "        w->TractionBoost = 0.0f;",
+     "        w->TractionBoost = 1.0f;"),
+    ("wh-snap-damage-kept", WC,
+     "        w->Damage = 0.0f;" + NL,
+     ""),
+    ("wh-snap-section-name", WC,
+     "    ReplaySnapshot_BeginNamedSection(s, \"Wheel\");",
+     "    ReplaySnapshot_BeginNamedSection(s, \"wheel\");"),
 
     # -- the ones that cannot be seen --------------------------------------
     ("wh-guess-dynamic-init", WC,

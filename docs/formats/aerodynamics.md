@@ -132,16 +132,18 @@ port's.
 
 ## DoSnapshot
 
-0x001a4b58. When either of two snapshot bytes (56 and 57, OR'd) is set,
-it clears GroundEffect, Boost and Throttle, in that order. In the port,
-the byte test is wheel.h's `gReplayShouldResetFn` seam, which is NULL
-until the replay system exists. Boost 0 would make ResolveForces divide
-by zero, and PhysicsCar::Move sets Boost again before the next call.
+0x001a4b58 (retail's 0x001add48). When either of two snapshot bytes (56
+and 57, OR'd, in the demo; retail's are 60 and 61) is set, it clears
+GroundEffect, Boost and Throttle, in that order. Since TASKS 72b the port
+tests the real `ReplaySnapshot`'s TakingSnapshotFlag and
+RestoringSnapshotFlag. Boost 0 would make ResolveForces divide by zero,
+and PhysicsCar::Move sets Boost again before the next call.
+`carsnap_check` runs it against retail.
 
 ## Cross-check
 
 ```
-python tools/aerodynamics_check.py            # 7 scenarios, 107 lines, 0 differ
+python tools/aerodynamics_check.py            # 7 scenarios, 110 lines, 0 differ
 python tools/aerodynamics_check.py --mutate   # 74 mutations, 74 caught
 ```
 

@@ -75,6 +75,7 @@ M128 = (1 << 128) - 1
 SOURCES = [
     "tools/src/vclip_test.c",
     "3DS Files/source/vclip.c",
+    "3DS Files/source/replay.c", "3DS Files/source/p32.c",
     "3DS Files/source/bmatrix.c",
     "3DS Files/source/bmem.c",
     "3DS Files/source/espresso.c",

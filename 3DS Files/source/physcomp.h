@@ -188,10 +188,6 @@ typedef void (*SteeringDoSnapshotFn)(void *self, void *snap);
 // return. Engine's and DriveTrain's GetDerivative return an int in the
 // port where the slot returns a float *; nothing reads the value --
 // PhysicsSystem::GetDerivative discards it -- so the thunks return NULL.
-//
-// TwoWheelAckermanSteering::DoSnapshot (0x0019bac0) is not ported --
-// ReplaySnapshot, as everywhere -- and its entry is NULL, so a call
-// aborts in vt_slot rather than doing nothing.
 void    vt_RigidBody_dtor(void *self, int32_t flags);
 int32_t vt_RigidBody_GetSize(void *self);
 float  *vt_RigidBody_GetState(void *self);
@@ -235,6 +231,7 @@ void    vt_DriveTrain_ComputeAuxiliaries(void *self);
 
 void    vt_Ackerman_dtor(void *self, int32_t flags);
 void    vt_Ackerman_SetSteering(void *self, uint16_t bam);
+void    vt_Ackerman_DoSnapshot(void *self, void *snap);
 void    vt_Steering_dtor(void *self, int32_t flags);
 
 // Installs all seven at their image addresses. The game calls it once at

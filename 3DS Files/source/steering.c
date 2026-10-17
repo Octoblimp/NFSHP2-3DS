@@ -3,6 +3,7 @@
 #include "steering.h"
 
 #include "bmath.h"
+#include "replay.h"
 
 void steering_init(Steering *s, const CarTypeInfo *cti)
 {
@@ -114,4 +115,14 @@ void ackerman_set_steering(TwoWheelAckermanSteering *a, uint16_t bam)
 
     ackerman_rotate_z(&a->AckermanMatrix[0], first);
     ackerman_rotate_z(&a->AckermanMatrix[1], second);
+}
+
+// ---------------------------------------------------------------- the replay
+
+// 0x001a5d10.
+void ackerman_do_snapshot(TwoWheelAckermanSteering *a, ReplaySnapshot *s)
+{
+    ReplaySnapshot_BeginNamedSection(s, "TwoWheelAckermanSteering");
+    ReplaySnapshot_MoveMatrix(s, &a->AckermanMatrix[0]);
+    ReplaySnapshot_EndNamedSection(s);
 }

@@ -168,6 +168,41 @@ void ReplaySnapshot_VerifyData(ReplaySnapshot *s, void *p, int32_t stored,
         ReplaySnapshot_MoveData(s, p, stored, size, is_signed);
 }
 
+// 0x0013d100. The compares are c.eq.s, so -0 is 0 and a NaN is not; the
+// code is worked out in every mode and a restore reads it over the one
+// worked out.
+void ReplaySnapshot_MoveMatrix(ReplaySnapshot *s, bMatrix4 *m)
+{
+    int8_t code = 0;
+
+    if (m->v0.w == 0.0f && m->v1.w == 0.0f && m->v2.w == 0.0f
+        && m->v3.w == 1.0f) {
+        if (m->v3.x == 0.0f && m->v3.y == 0.0f && m->v3.z == 0.0f)
+            code = 1;
+        else
+            code = 2;
+    }
+    ReplaySnapshot_MoveChar(s, &code, 1);
+    if (code == 0) {
+        ReplaySnapshot_MoveData(s, m, 64, -1, 0);
+        return;
+    }
+    ReplaySnapshot_MoveData(s, &m->v0, 12, -1, 0);
+    ReplaySnapshot_MoveData(s, &m->v1, 12, -1, 0);
+    ReplaySnapshot_MoveData(s, &m->v2, 12, -1, 0);
+    m->v3.w = 1.0f;
+    m->v0.w = 0.0f;
+    m->v1.w = 0.0f;
+    m->v2.w = 0.0f;
+    if (code == 2) {
+        ReplaySnapshot_MoveData(s, &m->v3, 12, -1, 0);
+    } else {
+        m->v3.z = 0.0f;
+        m->v3.x = 0.0f;
+        m->v3.y = 0.0f;
+    }
+}
+
 // 0x0013d288. The first level of a snapshot numbers its sections from 0.
 // Its Size is where its data starts until EndSection makes it the length.
 // Retail then prints the section's name when PrintDepth asks for it, and

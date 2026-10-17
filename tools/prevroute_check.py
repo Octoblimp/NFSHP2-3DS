@@ -58,6 +58,7 @@ PRC = "3DS Files/source/previewroute.c"
 PZC = "3DS Files/source/playerzone.c"
 SOURCES = [HARNESS, PRC, PZC] + ["3DS Files/source/" + f for f in (
     "trackroute.c", "trackpath.c", "quickspline.c", "bvector.c", "bmath.c",
+    "replay.c", "p32.c",
     "bmathtab.c", "bmatrix.c")]
 
 HARNESS_TIMEOUT = 120

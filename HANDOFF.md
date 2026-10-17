@@ -25491,3 +25491,90 @@ The CIA builds with no warnings from the new files.
    retail's DoSnapshot and the port's over the same object in take,
    restore and checksum modes.
 2. Then 72c to 72h, one at a time.
+
+## Session 121 -- TASKS 72b: the car's snapshots
+
+The second slice of the replay is done: retail's DoSnapshot for the car
+and everything under it, checked against retail's own code. Nothing
+calls them in a race yet; 72f's ReplayManager will.
+
+### What is ported
+
+Each DoSnapshot is beside its class, at retail's address:
+
+- RigidBody (`0x0019ca70`), Wheel (`0x001a3f60`), Suspension
+  (`0x001a5ed0`), Engine (`0x0018a8e8`), DriveTrain (`0x0018af10`),
+  Aerodynamics (`0x001add48`) and TwoWheelAckermanSteering
+  (`0x001a5d10`).
+- PhysicsCar (`0x00137450`), which walks that tree, and CarMover's empty
+  one (`0x001309f0`). Both are in the PhysicsCar tables now.
+- CarState (`0x001c0270`), BodyDamage (`0x001b4c58`) and CarDamage
+  (`0x001b5638`).
+- CollisionBody (`0x001d6a98`), StaticCollisionBody's jump to it
+  (`0x001d8760`), TrackPolygonCollisionBody (`0x001d8918`),
+  DynamicCollisionBody (`0x001d7050`) and CarCollisionBody
+  (`0x001d8058`), in their tables.
+- CollisionBodyWitness (`0x001d6168`), VCWitness (`0x001d0948`) and
+  Collision (`0x0021e760`). main.c binds `gCollisionDoSnapshotFn`.
+- TrackPathCoordinate (`0x00208768`) and TrackPathManager's pointer move.
+- CarController (`0x001c00d0`), through its table.
+- Car (`0x00130ff0`), in the new `carsnap.c`. The AnimatedDriver's is a
+  seam (`gAnimatedDriverDoSnapshotFn`) until 72d. It aborts if a car
+  has a driver.
+- `ReplaySnapshot_MoveMatrix` in replay.c.
+- OBB's (`0x0021dca8`) has no caller in retail and is not ported.
+
+The old replay seams in wheel.h (`gReplayBeginSectionFn` and the rest)
+are gone. Every snapshot takes the real `ReplaySnapshot`.
+
+### Layouts
+
+- PhysicsCar gains retail's FlippedTimer, kept after the demo's fields
+  at 116 (retail's 108), as Car keeps retail's four at its end. The
+  checkers that read the demo image mark it retail-only.
+- The port's CarState keeps the demo's layout, with retail's
+  DistanceMoved in its padding.
+
+### The checker
+
+`tools/carsnap_check.py` with `tools/src/carsnap_test.c`. The model is
+retail's code in RetailEmu, with the layouts parsed from the port's
+headers plus a map where retail's differ. Each object is taken, restored
+over other values, checksummed and verified, alone and as the trees the
+game builds.
+
+- 6608 script lines, 22867 lines, 0 differ.
+- 100 mutations, 100 caught.
+
+Where retail and the port part, the checker sets the field both read to
+the same value. Those differences are the new TASKS 73: retail's
+BottomOut and its flipped Timer, CalculateWheelMatrices' WheelInfo word
+at 24, and the layouts of CarState, CollisionBodyWitness and
+CarCollisionBody.
+
+### Checkers re-run
+
+The 57 checkers that link a changed file pass again, all 0 differ:
+
+- 37 gained replay.c (and p32.c where missing) in their sources.
+- The harnesses that link replay.c without realtime.c define
+  `WorldTimer` and `WorldLoopCounter`.
+- wheel gained vtable.c, and racerun lost its own `pReplayManager`
+  (replay.c's now).
+- aerodynamics and wheel drive the real ReplaySnapshot now. wheel_check
+  has six new DoSnapshot mutations, all caught.
+- careffects stubs the four snapshot calls, since it keeps its own
+  RegisterInterestingEvent.
+- physcomp and physicscar lost their "pending" DoSnapshot entries, with
+  a mutation each for the slot; collisionbody names Static's DoSnapshot,
+  with a mutation for it. All caught.
+
+The CIA builds with no warnings from the changed files.
+
+### Next
+
+1. 72c: the drivers and the AI (TASKS 72 lists them).
+   `grep DoSnapshot out/retail_syms.txt` gives the addresses. The same
+   recipe: each DoSnapshot beside its class, then a checker running
+   retail's beside the port's in take, restore and checksum modes.
+2. Then 72d to 72h, one at a time. TASKS 73 after 72.

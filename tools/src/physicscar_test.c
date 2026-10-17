@@ -40,6 +40,7 @@
 // behind it. The tick and the step are the image's 0; nothing this
 // harness runs reads the frame count.
 int32_t WorldTimer = 0;
+int32_t WorldLoopCounter;   // realtime.c's too; ReplaySnapshot_Init reads it
 int32_t WorldTimeFrames = 0;
 float   WorldTimeElapsed = 0.0f;
 

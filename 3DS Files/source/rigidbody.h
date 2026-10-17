@@ -354,6 +354,14 @@ float rigidbody_get_moment_of_inertia_about_z(const RigidBody *rb);
 // TwoWheelAckermanSteering's do. Both are physcomp.h's rigidbody_new and
 // rigidbody_delete, beside the destructor and `_vt$9RigidBody`.
 //
-// RigidBody::DoSnapshot (0x00192d60) is not ported: ReplaySnapshot again.
+// Retail's 0x0019ca70 (the demo's 0x00192d60), the replay's: a section
+// named "RigidBody". X and R's first three rows go in as 12 bytes each.
+// Taking or restoring then writes R's fourth column and row as the
+// identity's and turns MotionDamping on. MotionDampingFactor follows, then
+// a bool that P and L are all zero: P and L go in only when it is clear,
+// and a taken or restored zero pair is written zero. Taking or restoring
+// ends with the table's ComputeAuxiliaries.
+struct ReplaySnapshot;
+void rigidbody_do_snapshot(RigidBody *rb, struct ReplaySnapshot *s);
 
 #endif

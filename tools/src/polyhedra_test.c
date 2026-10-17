@@ -44,6 +44,10 @@
 #include "polyhedra.h"
 #include "vclip.h"
 
+// realtime.c's clock, which ReplaySnapshot_Init stamps; not linked here.
+int32_t WorldTimer;
+int32_t WorldLoopCounter;
+
 enum {
     OP_TAG = 1, OP_TABLES, OP_CONSTS, OP_RECT, OP_CUBE, OP_WAFER,
     OP_DESTROY, OP_CHUNK, OP_LOAD, OP_UNLOAD, OP_FIND, OP_MOVECOG, OP_LIST,

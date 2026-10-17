@@ -8,6 +8,10 @@
 
 #include "rigidbody.h"
 
+// realtime.c's clock, which ReplaySnapshot_Init stamps; not linked here.
+int32_t WorldTimer;
+int32_t WorldLoopCounter;
+
 // ------------------------------------------------------------- printing
 
 static void pv(const char *tag, const bVector4 *v)

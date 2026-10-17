@@ -1,4 +1,4 @@
-// physicscar -- PhysicsCar.obj (0x00134c50 .. 0x001374d8), minus DoSnapshot.
+// physicscar -- PhysicsCar.obj (0x00134c50 .. 0x001374d8).
 //
 // A PhysicsCar is what drives a Car when the car is being simulated rather
 // than scripted: `Car::SetMovementMode`'s MM_PHYSICS arm builds one. It
@@ -16,9 +16,10 @@
 // is `-offsetof(PhysicsCar, Vehicle)`, which is -8 on the 3DS and -16 on the
 // 64-bit host.
 //
-// Everything is here but the replay's `DoSnapshot` (0x00135580), which
-// waits for ReplaySnapshot with every other class's. It is a NULL entry in
-// `_vt$10PhysicsCar` until then, and vt_slot aborts on a NULL entry.
+// The object is the demo's, with retail's DoSnapshot (0x00137450) and the
+// Timer retail added for it, kept after the demo's fields as Car keeps
+// retail's; retail's BottomOut, which runs that Timer, is not here yet
+// (TASKS 73).
 //
 // See docs/formats/physics-car.md.
 
@@ -82,8 +83,10 @@ void carmover_do_snapshot(CarMover *m, void *snap);
 
 // ------------------------------------------------------------ PhysicsCar
 
-// 116 bytes. The names are the mdebug record's, except the two bases',
-// which it leaves unnamed.
+// 120 bytes, the demo's 116 and retail's Timer. The names are the mdebug
+// record's, except the two bases', which it leaves unnamed, and the Timer.
+// Retail has the Timer at 108, so its FrictionBoost and
+// YawControlMultiplier are at 112 and 116.
 typedef struct PhysicsCar {
     CarMover          Mover;              //   0  Driver 0, vptr 4
     PhysicsSystem     Vehicle;            //   8  PhysicsVehicle; vptr at 20
@@ -102,9 +105,14 @@ typedef struct PhysicsCar {
     int32_t           BrakeStanding;      //  96  bool, stored as a word
     int32_t           ThrottleReleased;   // 100  bool, stored as a word
     int32_t           LurchsLeft;         // 104
-    float             FrictionBoost;      // 108
-    float             YawControlMultiplier; // 112
-} PhysicsCar;                             // 116
+    float             FrictionBoost;      // 108  retail's 112
+    float             YawControlMultiplier; // 112  retail's 116
+    // New in retail at 108, and the name is ours: the constructor zeroes
+    // it and retail's BottomOut starts it when the body is upside down,
+    // asking the Car to reset a second later. The demo's BottomOut, the
+    // one here, never touches it; the replay moves it.
+    Timer             FlippedTimer;       // 116  retail's 108
+} PhysicsCar;                             // 120
 
 // Every pointer before a field widens it by four bytes on the host. The
 // k in PHYSICSCAR_AT is how many pointers come before the field, counting
@@ -135,11 +143,13 @@ typedef char physicscar_layout_check[
      && PHYSICSCAR_AT(LurchsLeft, 104, 18)
      && PHYSICSCAR_AT(FrictionBoost, 108, 18)
      && PHYSICSCAR_AT(YawControlMultiplier, 112, 18)
-     && sizeof(PhysicsCar) == 116 + 19 * PHYSICSCAR_SLACK) ? 1 : -1];
+     && PHYSICSCAR_AT(FlippedTimer, 116, 18)
+     && sizeof(PhysicsCar) == 120 + 18 * PHYSICSCAR_SLACK) ? 1 : -1];
 #endif
 
 // _vt$10PhysicsCar, 0x00292708, CarMover's layout: the destructor
-// (0x001357a8), Move (0x00135c78) and DoSnapshot (0x00135580).
+// (0x001357a8), Move (0x00135c78) and DoSnapshot (the demo's 0x00135580,
+// retail's 0x00137450).
 #define PHYSICSCAR_VTABLE 0x00292708u
 
 // _vt$10PhysicsCar$14PhysicsVehicle, 0x002926e8, PhysicsSystem's layout
@@ -332,8 +342,16 @@ void physicscar_set_boost(PhysicsCar *pc, float f);
 // scaled by the mass and by JumpStabilization at the spin's magnitude.
 void physicscar_jump_stabilizer(PhysicsCar *pc);
 
-// 0x001374c8. `jr ra ; swc1 $f12,108(a0)`.
+// 0x001374c8. `jr ra ; swc1 $f12,108(a0)`, retail's 112.
 void physicscar_set_friction_boost(PhysicsCar *pc, float f);
+
+// Retail's 0x00137450, the table's DoSnapshot: a section named
+// "PhysicsCar" around FrictionBoost, the body, the steering (through its
+// table), each wheel then its suspension, the engine, the drive train, the
+// aerodynamics, CarMover's empty one, YawControlMultiplier, the two brake
+// stand Timers and two bools, LurchsLeft and the flipped Timer.
+struct ReplaySnapshot;
+void physicscar_do_snapshot(PhysicsCar *pc, struct ReplaySnapshot *s);
 
 // 0x00135c78, the CarMover entry: one frame of the car. In order:
 //

@@ -72,6 +72,7 @@ M32 = 0xFFFFFFFF
 SOURCES = [
     "tools/src/collision_test.c",
     "3DS Files/source/collision.c",
+    "3DS Files/source/replay.c", "3DS Files/source/p32.c",
     "3DS Files/source/world.c",
     "3DS Files/source/bslotpool.c",
     "3DS Files/source/vtable.c",

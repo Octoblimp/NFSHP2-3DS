@@ -81,6 +81,7 @@ TG = "3DS Files/source/trackgraph.c"
 CU = "3DS Files/source/coputil.c"
 SOURCES = [HARNESS, TG, CU, "3DS Files/source/world.c",
            "3DS Files/source/trackroute.c", "3DS Files/source/trackpath.c",
+           "3DS Files/source/replay.c", "3DS Files/source/p32.c",
            "3DS Files/source/quickspline.c", "3DS Files/source/bchunk.c",
            "3DS Files/source/vtable.c", "3DS Files/source/bmatrix.c",
            "3DS Files/source/bvector.c", "3DS Files/source/bmath.c",

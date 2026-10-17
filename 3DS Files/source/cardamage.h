@@ -44,7 +44,7 @@
 // changes the solid's packet and strip flags; the port's renderer bakes
 // meshes from them and takes the change after the walk (trackview.c).
 //
-// Not here: the replay's DoSnapshot (no ReplayManager yet).
+// The replay's two DoSnapshots are retail's, at the bottom.
 //
 // Cross-check: tools/cardamage_check.py. Write-up:
 // docs/formats/car-damage.md.
@@ -268,5 +268,14 @@ void  cardamage_apply_damage(CarDamage *d);
 // Every zone whole by an impact of 9999, so everything breaks.
 void  cardamage_wreck(CarDamage *d);
 void  cardamage_repair_all(CarDamage *d);
+
+// Retail's 0x001b4c58 and 0x001b5638, the replay's. BodyDamage: a section
+// named "BodyDamage" with the 32 compressed zone amounts and the
+// compressed total; a restore applies the damage. CarDamage: a section
+// for the object named "CarDamage" around its BodyDamage's and the
+// breakable items' bits; a restore applies the damage again, the items'.
+struct ReplaySnapshot;
+void  bodydamage_do_snapshot(BodyDamage *b, struct ReplaySnapshot *s);
+void  cardamage_do_snapshot(CarDamage *d, struct ReplaySnapshot *s);
 
 #endif

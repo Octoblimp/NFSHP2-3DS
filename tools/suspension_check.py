@@ -78,6 +78,8 @@ NL = chr(10)
 SOURCES = [
     "tools/src/suspension_test.c",
     "3DS Files/source/suspension.c",
+    "3DS Files/source/vtable.c",
+    "3DS Files/source/replay.c", "3DS Files/source/p32.c",
     "3DS Files/source/wheel.c",
     "3DS Files/source/steering.c",
     "3DS Files/source/rigidbody.c",

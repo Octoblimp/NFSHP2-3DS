@@ -1,6 +1,7 @@
 // obb -- OBB, the oriented box World's collision prediction keeps twenty of
 // for each car. Its methods are the last seven in DriveTarget.obj,
-// 0x0020a840 .. 0x0020ab48. DoSnapshot (0x0020a928) waits on ReplaySnapshot.
+// 0x0020a840 .. 0x0020ab48. DoSnapshot (the demo's 0x0020a928, retail's
+// 0x0021dca8) is not here: nothing in retail calls it.
 // docs/formats/world.md has the decode.
 
 #ifndef OBB_H

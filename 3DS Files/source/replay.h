@@ -19,6 +19,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "bmatrix.h"
 #include "brepeat.h"
 #include "bvector.h"
 
@@ -266,6 +267,14 @@ static inline void ReplaySnapshot_VerifyChar(ReplaySnapshot *s, int8_t *p,
 {
     ReplaySnapshot_VerifyData(s, p, stored, 1, 1);
 }
+
+// 0x0013d100, MoveData(bMatrix4 *, int); the name is ours. A code byte
+// first: 0 for the whole 64 bytes, 1 for three 12-byte rows with a fourth
+// column of (0, 0, 0, 1) and no translation, 2 for the same with a
+// translation. Codes 1 and 2 write that column back in every mode, and 1
+// zeros the translation. Callers pass the size as well, 64 or the
+// Ackerman's 128, and nothing reads it: one matrix moves either way.
+void ReplaySnapshot_MoveMatrix(ReplaySnapshot *s, bMatrix4 *m);
 
 // 0x0013cb90. The stream's place, its counts and every channel's last
 // item: the add side's at the end of capture, else the remove side's.

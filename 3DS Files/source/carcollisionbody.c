@@ -21,6 +21,7 @@
 #include "player.h"
 #include "race.h"
 #include "realtime.h"
+#include "replay.h"
 #include "rigidbody.h"
 #include "terraintype.h"
 #include "vtable.h"
@@ -112,6 +113,7 @@ CarCollisionBody *carcollisionbody_init(CarCollisionBody *b, Car *car)
     d->pBody = NULL;
     b->LastPenetrationTime.PackedTime = (uint32_t)WorldTimer;
     b->LastYawControlCollisionTime.PackedTime = (uint32_t)WorldTimer;
+    b->ThirdTime.PackedTime = (uint32_t)WorldTimer;       // retail's
 
     // bSPrintf, which the port does not have.
     snprintf(name, sizeof name, "Car%d", car->DriverNumber);
@@ -462,6 +464,31 @@ float dynamiccollisionbody_get_distance_and_speed(float *speed,
     return *speed;
 }
 
+// ------------------------------------------------------------- the replay
+
+// 0x001d8058. The index is the car's byte at 10, DriverNumber's low byte.
+void carcollisionbody_do_snapshot(CollisionBody *b, ReplaySnapshot *s)
+{
+    CarCollisionBody *c = (CarCollisionBody *)b;
+    int8_t index;
+
+    ReplaySnapshot_BeginSection(s, c, "CarCollisionBody");
+    dynamiccollisionbody_do_snapshot(b, s);
+    index = (int8_t)c->pCar->DriverNumber;
+    ReplaySnapshot_VerifyChar(s, &index, 1);
+    if (s->RestoringSnapshotFlag)
+        carcollisionbody_setup_physics_pointers(c);
+    if (s->TakingSnapshotFlag || s->RestoringSnapshotFlag)
+        dynamiccollisionbody_update_position(&c->Dynamic);
+    ReplaySnapshot_VerifyVector2(s, &b->BBoxMin);
+    ReplaySnapshot_VerifyVector2(s, &b->BBoxMax);
+    ReplaySnapshot_MoveTimer(s, (int32_t *)&c->LastPenetrationTime.PackedTime);
+    ReplaySnapshot_MoveTimer(s,
+        (int32_t *)&c->LastYawControlCollisionTime.PackedTime);
+    ReplaySnapshot_MoveTimer(s, (int32_t *)&c->ThirdTime.PackedTime);
+    ReplaySnapshot_EndSection(s);
+}
+
 // ------------------------------------------------------------- the table
 
 #define E(f) { 0, 0, (VtFn)(f) }
@@ -471,7 +498,7 @@ float dynamiccollisionbody_get_distance_and_speed(float *speed,
 static const VtEntry carcollisionbody_vt[COLLISIONBODY_VT_ENTRIES] = {
     PURE,
     E(carcollisionbody_destroy),
-    PURE,                                           // DoSnapshot
+    E(carcollisionbody_do_snapshot),
     E(carcollisionbody_get_position),
     E(carcollisionbody_get_velocity),
     E(carcollisionbody_get_rotation),

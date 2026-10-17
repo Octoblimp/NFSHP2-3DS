@@ -13,6 +13,7 @@
 #include <math.h>
 
 #include "eefpu.h"
+#include "replay.h"
 #include "table.h"
 
 // ---------------------------------------------------------- the constants
@@ -829,4 +830,24 @@ int32_t drivetrain_get_size(const DriveTrain *d)
     (void)d;
 
     return DRIVETRAIN_STATE_FLOATS;
+}
+
+// ---------------------------------------------------------------- the replay
+
+// 0x0018af10. The gears and the clutch state go in through MoveData(void *)
+// rather than the int overload: four bytes each, unsigned.
+void drivetrain_do_snapshot(DriveTrain *d, ReplaySnapshot *s)
+{
+    ReplaySnapshot_BeginNamedSection(s, "DriveTrain");
+    ReplaySnapshot_MoveFloat(s, &d->State.clutch);
+    ReplaySnapshot_MoveData(s, &d->DesiredGear, 4, -1, 0);
+    ReplaySnapshot_MoveData(s, &d->SportGear, 4, -1, 0);
+    ReplaySnapshot_MoveData(s, &d->PreviousGear, 4, -1, 0);
+    ReplaySnapshot_MoveData(s, &d->CurrentGear, 4, -1, 0);
+    ReplaySnapshot_MoveData(s, &d->CurrentClutchState, 4, -1, 0);
+    ReplaySnapshot_MoveInt(s, &d->Shifting, 4);
+    ReplaySnapshot_MoveFloat(s, &d->DifferentialAngularVelocity);
+    ReplaySnapshot_MoveFloat(s, &d->GearHoldTime);
+    ReplaySnapshot_MoveFloat(s, &d->ShiftUpRPM[0]);
+    ReplaySnapshot_EndNamedSection(s);
 }

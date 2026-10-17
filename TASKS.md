@@ -4077,11 +4077,17 @@ phases.
           **Done in Session 120:** replay.c and the new brepeat.c, in
           retail's layouts. `replay_check` runs retail's own code: 0
           differ, 186 of 188 mutations caught and 2 equivalent.
-        - [ ] 72b. The snapshots of the cars and their physics: Car,
+        - [x] 72b. The snapshots of the cars and their physics: Car,
           PhysicsCar, RigidBody, Wheel, Suspension, the steering,
           Aerodynamics, Engine, DriveTrain, CarState, CarController,
           CarDamage, BodyDamage, the collision bodies and witnesses, OBB,
           Collision and VCWitness.
+          **Done in Session 121:** all of them from retail, and
+          TrackPathCoordinate's with them. Car's is the new `carsnap.c`.
+          OBB's has no caller in retail and is not ported.
+          `carsnap_check` runs retail's beside the port's: 22867 lines,
+          0 differ; 100 of 100 mutations caught. The 57 checkers that
+          link the changed files pass again.
         - [ ] 72c. The drivers and the AI: CarDriver, RealDriver,
           AIDriver, PsychoDriver, TrafficDriver, CopDriver,
           AICarController, the AI plan and its actions, Average and
@@ -4109,6 +4115,25 @@ phases.
           and `DemoModeReplay` with the disc's replays for attract mode.
           The PS2's float rounding is not the 3DS's, so these may drift.
           Measure it then.
+
+73. [ ] **The car's retail pass: where 72b found retail and the port
+        apart.** The port's car physics is the demo's code. Porting
+        retail's DoSnapshots (72b) showed where retail changed the objects
+        they move. `carsnap_check` sets each such field the same on both
+        sides, so these are not checked yet:
+        - PhysicsCar's BottomOut: retail's starts the new FlippedTimer
+          when the body is upside down and asks the Car to reset a second
+          later (PleaseResetMeLater). The port's is the demo's, which
+          never touches it.
+        - CarState::CalculateWheelMatrices: retail reads the y offset from
+          WheelInfo's word at 24 and lifts the brake matrix.
+        - CarState's layout: retail adds DistanceMoved after Odometer, and
+          the fields from TractionUsage to BurnOutAllow move on by 4. The
+          port keeps the demo's layout, with DistanceMoved in the padding.
+        - CollisionBodyWitness: retail's pCollision is at 108, the demo's
+          at 104.
+        - CarCollisionBody's retail fields.
+        It comes after TASKS 72, unless the replays need it sooner.
 
 ### The retail frontend
 

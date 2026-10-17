@@ -7450,6 +7450,7 @@ int main(int argc, char** argv)
     // NULL until tasks 29 and 30, and it makes neither.
     gCollisionNewFn        = collision_new;
     gCollisionAddImpulseFn = collision_add_impulse;
+    gCollisionDoSnapshotFn = collision_do_snapshot;
     gCollisionDestroyFn    = collision_destroy;
 
     // World::DoTimestep ends every car's step with Car::FinishMovement,

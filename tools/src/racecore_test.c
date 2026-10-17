@@ -39,6 +39,7 @@
 // is GracePeriodIsActive's, which drivingchoice_check checks.
 void (*gWorldObjectDeleteFn)(WorldObject *o);
 int32_t WorldTimer;
+int32_t WorldLoopCounter;   // realtime.c's too; ReplaySnapshot_Init reads it
 
 static const char *const markerNames[NMARK] = {
     "ForwardStartLine", "BackwardStartLine", "ForwardFinishLine",

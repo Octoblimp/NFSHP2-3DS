@@ -25,6 +25,7 @@
 
 #include "bmem.h"
 #include "eefpu.h"
+#include "replay.h"
 
 int32_t       PrintThisTime;
 int32_t       PlotClosestFeatures;
@@ -490,6 +491,27 @@ void vcwitness_destroy(VCWitness *w, int32_t flags)
 }
 
 // 0x001c68a0.
+// 0x001d0948.
+void vcwitness_do_snapshot(VCWitness *w, ReplaySnapshot *s)
+{
+    uint32_t code1, code2;
+
+    ReplaySnapshot_BeginSection(s, w, "VCWitness");
+    code1 = vcpoly_get_feature_code(w->P1, w->F1);
+    code2 = vcpoly_get_feature_code(w->P2, w->F2);
+    ReplaySnapshot_MoveUInt(s, &code1, 4);
+    ReplaySnapshot_MoveUInt(s, &code2, 4);
+    if (s->RestoringSnapshotFlag) {
+        w->F1 = vcpoly_get_feature(w->P1, code1);
+        w->F2 = vcpoly_get_feature(w->P2, code2);
+    }
+    ReplaySnapshot_MoveInt(s, &w->SwitchState, 4);
+    ReplaySnapshot_MoveVector3(s, &w->CP1);
+    ReplaySnapshot_MoveVector3(s, &w->CP2);
+    ReplaySnapshot_MoveFloat(s, &w->Distance);
+    ReplaySnapshot_EndSection(s);
+}
+
 void vcwitness_print_state(VCWitness *w)
 {
     (void)w;

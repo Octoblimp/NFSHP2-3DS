@@ -79,6 +79,7 @@ SOURCES = [
     "tools/src/polyhedra_test.c",
     "3DS Files/source/polyhedra.c",
     "3DS Files/source/vclip.c",
+    "3DS Files/source/replay.c", "3DS Files/source/p32.c",
     "3DS Files/source/bmatrix.c",
     "3DS Files/source/bvector.c",
     "3DS Files/source/bmath.c",

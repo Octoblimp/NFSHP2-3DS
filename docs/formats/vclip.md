@@ -210,8 +210,9 @@ as the constructor does.
   polyhedra. `PlotClosestFeatures` makes it build the two placement
   matrices and then use neither, because the plot call is compiled out.
   Both switches are zero on the disc, and nothing in the image writes them.
-- **`DoSnapshot`** is not ported. It needs `ReplaySnapshot`, the same
-  dependency that held back `CarState::DoSnapshot`.
+- **`DoSnapshot`** (VCWitness's, retail's 0x001d0948) is ported since
+  TASKS 72b (`vcwitness_do_snapshot`), and `carsnap_check` runs it
+  against retail.
 
 ## Verification
 

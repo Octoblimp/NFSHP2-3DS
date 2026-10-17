@@ -14,8 +14,7 @@
 //
 // The functions are in two runs because the compiler split the object:
 // the arithmetic at 0x001823d8..0x00182824 and the accessors at
-// 0x00183e10..0x00183f70. DoSnapshot (0x001824d8) is not ported; it needs
-// ReplaySnapshot, the same dependency that stopped CarState::DoSnapshot.
+// 0x00183e10..0x00183f70. DoSnapshot is the replay's; see the bottom.
 //
 // Layout from .mdebug, `Engine (size=92)`, every offset re-derived from
 // the listing. See docs/formats/car-engine.md.
@@ -204,5 +203,12 @@ void  engine_set_is_hp(Engine *e, int32_t b);
 void  engine_set_nitro_flag(Engine *e, int32_t b);
 void  engine_set_nitro_boost_timer(Engine *e, float t);
 void  engine_set_catchup_torque_multiplier(Engine *e, float m);
+
+// Retail's 0x0018a8e8 (the demo's 0x001824d8), the replay's. Taking or
+// restoring first clears CatchupTorqueMultiplier, outside the section;
+// then a section named "Engine": State, Throttle, RoadTorque,
+// ThrottleOverride and NitroBoostTimer, and NitroFlag in one byte.
+struct ReplaySnapshot;
+void engine_do_snapshot(Engine *e, struct ReplaySnapshot *s);
 
 #endif

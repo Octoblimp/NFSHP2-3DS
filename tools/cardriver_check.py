@@ -62,6 +62,7 @@ SOURCES = [
     "3DS Files/source/vtable.c",
     "3DS Files/source/drivetarget.c",
     "3DS Files/source/carstate.c",
+    "3DS Files/source/replay.c", "3DS Files/source/p32.c",
     "3DS Files/source/trackroute.c",
     "3DS Files/source/trackpath.c",
     "3DS Files/source/quickspline.c",

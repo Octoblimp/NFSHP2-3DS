@@ -16,9 +16,9 @@
 // then the closest parameter on that path's spline, and reads the distance
 // out of the spline's w lane.
 //
-// Everything in the object is here except DoSnapshot, which waits on
-// ReplaySnapshot, and PlotToCaffeine, a debug plot into Caffeine that
-// nothing calls.
+// Everything in the object is here except PlotToCaffeine, a debug plot into
+// Caffeine that nothing calls. The two DoSnapshots are retail's (TASKS
+// 72b).
 //
 // Retail's TrackPath.obj has three functions the demo's lacks, and the
 // rest are the same. FindClosestPoint gains an overload that weighs the
@@ -233,6 +233,22 @@ void trackpath_coord_reset_position_near(TrackPathCoordinate *c,
 // 0x001f5df8. TheTrackPathManager's UpdatePosition(along, side, 0).
 void trackpath_coord_update_position_along(TrackPathCoordinate *c,
                                            float along, float side);
+
+// ------------------------------------------------------------ the replay
+
+struct ReplaySnapshot;
+
+// Retail's 0x00207bd0: the pointer as its index in pPoints, a short, -1
+// for NULL. Whatever the mode, the pointer is then made again from the
+// index, and a negative one makes it NULL.
+void trackpath_manager_do_snapshot(TrackPathManager *m, TrackPathPoint **pp,
+                                   struct ReplaySnapshot *s);
+
+// Retail's 0x00208768: a section named "TrackPathCoordinate" with Position,
+// the point (TheTrackPathManager's), SplineParam, RatioAroundTrack,
+// DistanceAroundTrack and PathDirection.
+void trackpath_coord_do_snapshot(TrackPathCoordinate *c,
+                                 struct ReplaySnapshot *s);
 
 // -------------------------------------------------- the global wrappers
 

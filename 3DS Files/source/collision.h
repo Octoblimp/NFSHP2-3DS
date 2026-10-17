@@ -13,8 +13,8 @@
 // The start of a nearby one and every scrape and hard knock near a player
 // reach the sound and the terrain's particles.
 //
-// The sixteenth slice of task 27. The image's DoSnapshot (0x0021e760) is the
-// replay's, which the port does not have.
+// The sixteenth slice of task 27. DoSnapshot is retail's (0x0021e760),
+// TASKS 72b.
 //
 // Retail's pass (step 8m-4b): retail made the record 112 bytes. The sixteen
 // it added hold the direction of the last impulse AddImpulse took near a
@@ -142,6 +142,12 @@ void collision_destroy(Collision *c, int32_t flags);
 
 // 0x0021ec48. bFree on CollisionSlotPool.
 void collision_delete(void *p);
+
+// Retail's 0x0021e760, the replay's: a section for the object named
+// "Collision" with the two Timers, the initial and current contact points,
+// the total impulse and its magnitude. contact.c's gCollisionDoSnapshotFn.
+struct ReplaySnapshot;
+void collision_do_snapshot(Collision *c, struct ReplaySnapshot *s);
 
 // 0x0021e7f0. One impulse of a contact at `at`: added in (all four lanes)
 // with its length, the contact stamped and kept, and `scrape` as the

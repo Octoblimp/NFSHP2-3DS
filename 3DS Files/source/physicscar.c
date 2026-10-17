@@ -16,6 +16,7 @@
 #include "physcomp.h"
 #include "race.h"
 #include "realdriver.h"
+#include "replay.h"
 #include "vtable.h"
 
 // ------------------------------------------------------------ the tuning
@@ -134,6 +135,38 @@ void carmover_do_snapshot(CarMover *m, void *snap)
     (void)snap;
 }
 
+// ------------------------------------------------------------- the replay
+
+// 0x00137450.
+void physicscar_do_snapshot(PhysicsCar *pc, ReplaySnapshot *s)
+{
+    const VtEntry *e;
+    int32_t i;
+
+    ReplaySnapshot_BeginNamedSection(s, "PhysicsCar");
+    ReplaySnapshot_MoveFloat(s, &pc->FrictionBoost);
+    rigidbody_do_snapshot(pc->pBody, s);
+    e = vt_slot(pc->pSteering->_vtable, STEERING_VT_DO_SNAPSHOT);
+    ((SteeringDoSnapshotFn)e->fn)(vt_this(pc->pSteering, e), s);
+    for (i = 0; i < 4; i++) {
+        wheel_do_snapshot(pc->pWheel[i], s);
+        suspension_do_snapshot(pc->pSuspension[i], s);
+    }
+    engine_do_snapshot(pc->pEngine, s);
+    drivetrain_do_snapshot(pc->pDriveTrain, s);
+    aerodynamics_do_snapshot(pc->pAerodynamics, s);
+    carmover_do_snapshot(&pc->Mover, s);
+    ReplaySnapshot_MoveFloat(s, &pc->YawControlMultiplier);
+    ReplaySnapshot_MoveTimer(s, (int32_t *)&pc->BrakeStandTimer.PackedTime);
+    ReplaySnapshot_MoveTimer(s,
+                             (int32_t *)&pc->BrakeStandTimerStart.PackedTime);
+    ReplaySnapshot_MoveBool(s, &pc->BrakeStanding, 1);
+    ReplaySnapshot_MoveBool(s, &pc->ThrottleReleased, 1);
+    ReplaySnapshot_MoveInt(s, &pc->LurchsLeft, 4);
+    ReplaySnapshot_MoveTimer(s, (int32_t *)&pc->FlippedTimer.PackedTime);
+    ReplaySnapshot_EndNamedSection(s);
+}
+
 // -------------------------------------------------------- the lifecycle
 
 PhysicsCar *physicscar_init(PhysicsCar *pc, const CarTypeInfo *cti,
@@ -150,6 +183,7 @@ PhysicsCar *physicscar_init(PhysicsCar *pc, const CarTypeInfo *cti,
     pc->Mover.Driver          = driver;
     pc->BrakeStandTimer.PackedTime      = 0;
     pc->BrakeStandTimerStart.PackedTime = 0;
+    pc->FlippedTimer.PackedTime         = 0;
     pc->CTI                   = cti;
     pc->pCar                  = car;
     pc->Vehicle._vtable       = PHYSICSCAR_VEHICLE_VTABLE;
@@ -1092,6 +1126,11 @@ static void vt_PhysicsCar_dtor(void *self, int32_t flags)
     physicscar_destroy((PhysicsCar *)self, flags);
 }
 
+static void vt_PhysicsCar_DoSnapshot(void *self, void *snap)
+{
+    physicscar_do_snapshot((PhysicsCar *)self, snap);
+}
+
 static float vt_PhysicsCar_Move(void *self, float dt)
 {
     return physicscar_move((PhysicsCar *)self, dt);
@@ -1138,12 +1177,11 @@ static const VtEntry carmover_vt[CARMOVER_VT_ENTRIES] = {
     { 0, 0, (VtFn)carmover_do_snapshot },
 };
 
-// DoSnapshot is not ported yet; see physicscar.h.
 static const VtEntry physicscar_vt[PHYSICSCAR_VT_ENTRIES] = {
     { 0, 0, NULL },
     { 0, 0, (VtFn)vt_PhysicsCar_dtor },
     { 0, 0, (VtFn)vt_PhysicsCar_Move },
-    { 0, 0, NULL },
+    { 0, 0, (VtFn)vt_PhysicsCar_DoSnapshot },
 };
 
 // The PhysicsVehicle's entries adjust back to the PhysicsCar, and the empty

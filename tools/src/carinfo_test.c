@@ -54,6 +54,7 @@ static Chunk chunks[NCHUNKS];
 
 // The world clock the drivetrain and the engine read; nothing here does.
 int32_t WorldTimer = 0;
+int32_t WorldLoopCounter;   // realtime.c's too; ReplaySnapshot_Init reads it
 float   WorldTimeElapsed = 0.0f;
 
 typedef struct Malloc {

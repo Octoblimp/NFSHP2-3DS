@@ -403,6 +403,11 @@ void vt_Ackerman_SetSteering(void *self, uint16_t bam)
     ackerman_set_steering((TwoWheelAckermanSteering *)self, bam);
 }
 
+void vt_Ackerman_DoSnapshot(void *self, void *snap)
+{
+    ackerman_do_snapshot((TwoWheelAckermanSteering *)self, snap);
+}
+
 void vt_Steering_dtor(void *self, int32_t flags)
 {
     steering_destroy((Steering *)self, flags);
@@ -470,12 +475,11 @@ static const VtEntry drivetrain_vt[DRIVETRAIN_VT_ENTRIES] = {
     { 0, 0, (VtFn)vt_DriveTrain_ComputeAuxiliaries },
 };
 
-// DoSnapshot is not ported; see physcomp.h.
 static const VtEntry ackerman_vt[STEERING_VT_ENTRIES] = {
     { 0, 0, NULL },
     { 0, 0, (VtFn)vt_Ackerman_dtor },
     { 0, 0, (VtFn)vt_Ackerman_SetSteering },
-    { 0, 0, NULL },
+    { 0, 0, (VtFn)vt_Ackerman_DoSnapshot },
 };
 
 // The two NULLs are the base's __pure_virtual entries.

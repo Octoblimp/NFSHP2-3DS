@@ -32,6 +32,7 @@
 // Defined here rather than linked from realtime.c, which would bring the
 // joylog in behind it.
 int32_t WorldTimer = 0;
+int32_t WorldLoopCounter;   // realtime.c's too; ReplaySnapshot_Init reads it
 float   WorldTimeElapsed = 0.0f;
 
 // ------------------------------------------------------------ the names
@@ -89,6 +90,8 @@ static const Named names[] = {
 
     N("_$_24TwoWheelAckermanSteering",     vt_Ackerman_dtor),
     N("SetSteering__24TwoWheelAckermanSteeringUs", vt_Ackerman_SetSteering),
+    N("DoSnapshot__24TwoWheelAckermanSteeringP14ReplaySnapshot",
+      vt_Ackerman_DoSnapshot),
     N("_$_8Steering",                      vt_Steering_dtor),
 };
 

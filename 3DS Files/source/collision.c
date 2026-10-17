@@ -1,6 +1,6 @@
 // collision -- see collision.h.
 //
-// Collision.obj whole but DoSnapshot: InitCollision and CloseCollision, the
+// Collision.obj whole: InitCollision and CloseCollision, the
 // constructor and destructor, AddImpulse, Update, End, GetTerrainType and
 // the four questions about who is in it, and the inline bTNode destructor
 // and operator delete beside them. The sixteenth slice of task 27.
@@ -19,6 +19,7 @@
 #include "car.h"
 #include "eefpu.h"
 #include "realtime.h"
+#include "replay.h"
 #include "terraintype.h"
 #include "vtable.h"
 #include "world.h"
@@ -339,4 +340,19 @@ int32_t collision_is_smokeable_involved(Collision *c)
     if (w->pBody1->Type == SMOKEABLE_COLLISION_BODY)
         return 1;
     return w->pBody2->Type == SMOKEABLE_COLLISION_BODY;
+}
+
+// ---------------------------------------------------------------- the replay
+
+// 0x0021e760. The scrape speed and the impulse's direction are not in it.
+void collision_do_snapshot(Collision *c, ReplaySnapshot *s)
+{
+    ReplaySnapshot_BeginSection(s, c, "Collision");
+    ReplaySnapshot_MoveTimer(s, (int32_t *)&c->CollisionTime.PackedTime);
+    ReplaySnapshot_MoveTimer(s, (int32_t *)&c->LastContactTime.PackedTime);
+    ReplaySnapshot_MoveVector3(s, &c->InitialContactPoint);
+    ReplaySnapshot_MoveVector3(s, &c->CurrentContactPoint);
+    ReplaySnapshot_MoveVector3(s, &c->TotalImpulse);
+    ReplaySnapshot_MoveFloat(s, &c->TotalImpulseMagnitude);
+    ReplaySnapshot_EndSection(s);
 }

@@ -23,6 +23,7 @@
 #include "trackroute.h"
 
 int32_t WorldTimer = 0;
+int32_t WorldLoopCounter;   // realtime.c's too; ReplaySnapshot_Init reads it
 
 // ----------------------------------------------------------------- output
 

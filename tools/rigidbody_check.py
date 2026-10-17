@@ -71,6 +71,8 @@ NL = chr(10)
 SOURCES = [
     "tools/src/rigidbody_test.c",
     "3DS Files/source/rigidbody.c",
+    "3DS Files/source/vtable.c",
+    "3DS Files/source/replay.c", "3DS Files/source/p32.c",
     "3DS Files/source/bmatrix.c",
     "3DS Files/source/table.c",
     "3DS Files/source/bvector.c",

@@ -280,10 +280,14 @@ bMatrix4 *suspension_get_matrix(Suspension *s);
 void suspension_set_sway_bar(Suspension *s, Suspension *other);
 void suspension_set_magic_force(Suspension *s, float f);
 
-// Suspension::DoSnapshot (0x0019bc88) is not ported: ReplaySnapshot again,
-// the same dependency that has held up CarState, Engine, CarDriver,
-// Steering and RigidBody. operator new and operator delete are the PS2
-// slot allocator, SuspensionSlotPool; they, the destructor and
-// `_vt$10Suspension` are physcomp.h's.
+// Retail's 0x001a5ed0 (the demo's 0x0019bc88), the replay's: State's two
+// floats in a section named "Suspension", then, taking or restoring,
+// Force, Position, Matrix, TouchingGround and GroundForce cleared.
+struct ReplaySnapshot;
+void suspension_do_snapshot(Suspension *s, struct ReplaySnapshot *snap);
+
+// operator new and operator delete are the PS2 slot allocator,
+// SuspensionSlotPool; they, the destructor and `_vt$10Suspension` are
+// physcomp.h's.
 
 #endif // SUSPENSION_H

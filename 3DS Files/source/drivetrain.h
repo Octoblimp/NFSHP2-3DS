@@ -441,10 +441,15 @@ void             drivetrain_get_state_array(const DriveTrain *d, float *out);
 DriveTrainState *drivetrain_get_state(DriveTrain *d);
 int32_t          drivetrain_get_size(const DriveTrain *d);
 
-// DriveTrain::DoSnapshot (0x00182b00) is not ported: ReplaySnapshot, the
-// same dependency that has held up CarState, Engine, CarDriver, Steering,
-// RigidBody, Suspension and Wheel. operator new and operator delete are
-// the PS2 slot allocator -- DriveTrainSlotPool at 0x00323090. They and
+// Retail's 0x0018af10 (the demo's 0x00182b00), the replay's: a section
+// named "DriveTrain" with State, the five gear and clutch words, Shifting,
+// DifferentialAngularVelocity, GearHoldTime and ShiftUpRPM[0] -- that one
+// float of the eighteen.
+struct ReplaySnapshot;
+void drivetrain_do_snapshot(DriveTrain *d, struct ReplaySnapshot *s);
+
+// operator new and operator delete are the PS2 slot allocator --
+// DriveTrainSlotPool at 0x00323090. They and
 // the destructor, which is PhysicsComponent's plus that delete, are
 // physcomp.h's, beside `_vt$10DriveTrain`.
 //

@@ -3612,6 +3612,12 @@ and so replaced every boot.
    - `replay.h` is in retail's layout since TASKS 72a (Session 120):
      the ReplayManager's head to `ReplaySnapshotList` at 112, and the
      whole 38232-byte `ReplaySnapshot` (TotalInterestingValue at 332).
+   - The car's DoSnapshots are retail's since TASKS 72b (Session 121):
+     Car's in `carsnap.c`, the rest beside each class, all run against
+     retail by `carsnap_check`. The old replay seams in `wheel.h`
+     (`gReplay*Fn`) are gone. PhysicsCar's new FlippedTimer sits after the
+     demo's fields at 116 (retail's 108). Where retail's objects differ
+     from the demo's is TASKS 73.
 
    **7b, DriveCameraMover::Update, is done** (HANDOFF.md, Session 31,
    continued: the drive camera's Update). `docs/formats/camera.md`,

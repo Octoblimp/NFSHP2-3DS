@@ -2,7 +2,10 @@
 
 #include "suspension.h"
 
+#include <string.h>
+
 #include "bmath.h"
+#include "replay.h"
 
 // The shipped values, read out of .sdata in the ELF.
 float   gLoadFactor               = 0.8f;
@@ -388,4 +391,22 @@ void suspension_set_sway_bar(Suspension *s, Suspension *other)
 void suspension_set_magic_force(Suspension *s, float f)
 {
     s->MagicForce = f;
+}
+
+// ---------------------------------------------------------------- the replay
+
+// 0x001a5ed0. Five bMemSets, in the image's order.
+void suspension_do_snapshot(Suspension *s, ReplaySnapshot *snap)
+{
+    ReplaySnapshot_BeginNamedSection(snap, "Suspension");
+    ReplaySnapshot_MoveFloat(snap, &s->State.z);
+    ReplaySnapshot_MoveFloat(snap, &s->State.v);
+    if (snap->TakingSnapshotFlag || snap->RestoringSnapshotFlag) {
+        s->Force = 0.0f;
+        memset(&s->Position, 0, sizeof s->Position);
+        memset(&s->Matrix, 0, sizeof s->Matrix);
+        s->TouchingGround = 0;
+        s->GroundForce = 0.0f;
+    }
+    ReplaySnapshot_EndNamedSection(snap);
 }

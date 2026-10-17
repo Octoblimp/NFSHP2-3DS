@@ -124,6 +124,7 @@ SOURCES = [
     "tools/src/drivetarget_test.c",
     "3DS Files/source/drivetarget.c",
     "3DS Files/source/carstate.c",
+    "3DS Files/source/replay.c", "3DS Files/source/p32.c",
     "3DS Files/source/trackroute.c",   # drivetarget.c's trmgr_get_route
     "3DS Files/source/trackpath.c",    # and trackroute.c's own dependencies
     "3DS Files/source/quickspline.c",

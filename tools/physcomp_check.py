@@ -16,9 +16,7 @@ every entry's delta, index and target are compared with the port's, the
 target by its image name. The port pairs its entries with image names in
 one place, the harness's registry, so a port entry in the wrong slot, or a
 base entry where the class has its own, shows up as a different name.
-Entries the image has and the port does not yet -- `__pure_virtual`, which
-aborts, and DoSnapshot, which waits on ReplaySnapshot -- are NULL, and
-PENDING below lists the second kind with its reason.
+`__pure_virtual`, which aborts, is NULL in the port.
 
 **The simple slots.** GetSize, GetState(), GetState(float *) and
 SetState(float *) are a handful of instructions each. The model decodes
@@ -75,6 +73,7 @@ SOURCES = [
     "3DS Files/source/bticker.c",
     "3DS Files/source/p32.c",
     "3DS Files/source/rigidbody.c",
+    "3DS Files/source/replay.c",
     "3DS Files/source/wheel.c",
     "3DS Files/source/suspension.c",
     "3DS Files/source/engine.c",
@@ -214,20 +213,13 @@ def vt_entries(table):
             for i in range(size // 8)]
 
 
-# The entries the image has and the port leaves NULL, each with why.
-# `__pure_virtual` is not listed: NULL is what it is in the port, since
-# vt_slot aborts on it exactly as __pure_virtual does.
-PENDING = {
-    "DoSnapshot__24TwoWheelAckermanSteeringP14ReplaySnapshot":
-        "ReplaySnapshot is not ported; no DoSnapshot of any class is",
-}
-
-
+# `__pure_virtual` is NULL in the port, since vt_slot aborts on it exactly
+# as __pure_virtual does.
 def entry_name(fn):
     if fn == 0:
         return "NULL"
     n = name_at(fn)
-    if n == "__pure_virtual" or n in PENDING:
+    if n == "__pure_virtual":
         return "NULL"
     return n
 
@@ -853,11 +845,9 @@ MUTATIONS = [
     ("vt-drivetrain-delta", PCC,
      "    { 0, 0, (VtFn)vt_DriveTrain_ComputeAuxiliaries },",
      "    { 4, 0, (VtFn)vt_DriveTrain_ComputeAuxiliaries },"),
-    ("vt-ackerman-snapshot-filled", PCC,
-     "    { 0, 0, (VtFn)vt_Ackerman_SetSteering }," + NL
-     + "    { 0, 0, NULL },",
-     "    { 0, 0, (VtFn)vt_Ackerman_SetSteering }," + NL
-     + "    { 0, 0, (VtFn)vt_Ackerman_SetSteering },"),
+    ("vt-ackerman-snapshot-null", PCC,
+     "    { 0, 0, (VtFn)vt_Ackerman_DoSnapshot },",
+     "    { 0, 0, NULL },"),
     ("vt-steering-not-pure", PCC,
      "    { 0, 0, (VtFn)vt_Steering_dtor }," + NL + "    { 0, 0, NULL },",
      "    { 0, 0, (VtFn)vt_Steering_dtor }," + NL
@@ -1134,8 +1124,6 @@ def main():
     if rc != 0:
         print("harness exited %d" % rc)
         bad += 1
-    for k, why in sorted(PENDING.items()):
-        print("pending: %s -- %s" % (k, why))
     print("%d scenarios, %d lines, %d differ"
           % (len(SCENARIOS), len(harness), bad))
     sys.exit(1 if bad else 0)

@@ -27,8 +27,9 @@
 // polygons' bodies near it -- and the thirteenth, CarCollisionBody whole,
 // in carcollisionbody.c because it needs car.h -- and the fourteenth and
 // fifteenth, in contact.c: the witness's TestForContact and its collision,
-// and Contact whole. The image's DoSnapshot and SnapshotEverything methods
-// are the replay's, which the port does not have; their slots are empty.
+// and Contact whole. The bodies' and the witness's DoSnapshots are
+// retail's (TASKS 72b); the witness's SnapshotEverything is the replay's
+// and not here yet.
 //
 // Every record is the image's layout on the handheld. On a 64-bit host the
 // pointers widen, and the asserts below allow for it: CB_AT(T, f, n, k) is
@@ -185,7 +186,10 @@ typedef struct CarCollisionBody {
     struct Car *pCar;                           // 256
     Timer     LastPenetrationTime;              // 260
     Timer     LastYawControlCollisionTime;      // 264
-    uint8_t   _pad268[4];                       // 268  the quadword round-up
+    // Retail's, in the demo's round-up, and the name is ours: its
+    // constructor stamps it with WorldTimer beside the two above and the
+    // replay moves it; nothing in the object reads it.
+    Timer     ThirdTime;                        // 268
     bMatrix4  ScaledInverseInertiaTensor;       // 272
 } CarCollisionBody;                             // 336
 
@@ -196,6 +200,7 @@ typedef char carcollisionbody_layout_check[
     (CB_AT(CarCollisionBody, pCar, 256, 10)
      && CB_AT(CarCollisionBody, LastPenetrationTime, 260, 11)
      && CB_AT(CarCollisionBody, LastYawControlCollisionTime, 264, 11)
+     && CB_AT(CarCollisionBody, ThirdTime, 268, 11)
      && CB_AT(CarCollisionBody, ScaledInverseInertiaTensor, 272, 11)
      && sizeof(CarCollisionBody) == CB_ROUND(336 + 11 * CB_SLACK))
     ? 1 : -1];
@@ -296,8 +301,8 @@ typedef struct CollisionStats {
 // and twenty-three methods. The base's are `__pure_virtual` but for its
 // destructor, DoSnapshot and IsBlinking; StaticCollisionBody fills all but
 // GetPosition and GetTerrainType; TrackPolygonCollisionBody fills those
-// two and its destructor and takes the rest from Static. DoSnapshot is
-// empty in all three here. Slot 136 is `AreCollisionsEnabled__16Car
+// two, its destructor and its DoSnapshot and takes the rest from Static.
+// Slot 136 is `AreCollisionsEnabled__16Car
 // CollisionBody` (0x001cdb50) in the car's table, which is the one every
 // Car's body carries: two global switches first, then `CollisionsDisabled
 // == 0`. Car::IsCollideable is its one caller in Car.obj.
@@ -453,6 +458,12 @@ CollisionBody *collisionbody_init(CollisionBody *b, int32_t id,
 // number goes back. bFree when flags & 1.
 void collisionbody_destroy(CollisionBody *b, int32_t flags);
 
+// Retail's 0x001d6a98, slot 16. No section: CollisionsDisabled and
+// ActiveCollisionDetection as one byte, the first in the low four bits;
+// then, checksumming only, ID, Type and Dynamic.
+struct ReplaySnapshot;
+void collisionbody_do_snapshot(CollisionBody *b, struct ReplaySnapshot *s);
+
 // 0x001cc530. The list's order: 1 when a's BBoxMax.x is the greater, and
 // on a tie (or a NaN) when b's ID is below a's.
 int32_t collisionbody_flip_function(const CollisionBody *a,
@@ -546,6 +557,10 @@ StaticCollisionBody *staticcollisionbody_init(StaticCollisionBody *s,
                                               int32_t id, int32_t type);
 void staticcollisionbody_destroy(StaticCollisionBody *s, int32_t flags);
 
+// Retail's 0x001d8760, slot 16: a jump to collisionbody_do_snapshot.
+void staticcollisionbody_do_snapshot(CollisionBody *b,
+                                     struct ReplaySnapshot *s);
+
 // The table's methods (0x001ce8e8 .. 0x001cea30). A static body does not
 // move and cannot be pushed: no velocity, no mass inverse, identity
 // rotation, impulses considered in full and ignored.
@@ -601,6 +616,12 @@ void trackpolygoncollisionbody_destroy(TrackPolygonCollisionBody *t,
 void *trackpolygoncollisionbody_new(void);
 void  trackpolygoncollisionbody_delete(void *p);
 
+// Retail's 0x001d8918, slot 16: a section for the body named
+// "TrackPolygonCollisionBody" around Static's, then, checksumming, the
+// box.
+void trackpolygoncollisionbody_do_snapshot(CollisionBody *b,
+                                           struct ReplaySnapshot *s);
+
 // 0x001ce3d0, 0x001ce3e0, 0x001ce8b0.
 bVector3     *trackpolygoncollisionbody_get_position(CollisionBody *b);
 int32_t       trackpolygoncollisionbody_get_terrain_type(CollisionBody *b);
@@ -621,6 +642,13 @@ DynamicCollisionBody *dynamiccollisionbody_init(DynamicCollisionBody *d,
 
 // 0x001cc928. The count down, then the base's destructor.
 void dynamiccollisionbody_destroy(DynamicCollisionBody *d, int32_t flags);
+
+// Retail's 0x001d7050, slot 16: a section for the body named
+// "DynamicCollisionBody" around the base's, PhysicsMode's first byte, the
+// topology's interest box cleared when taking or restoring, the volumes
+// when checksumming, and the backup cleared when taking or restoring.
+void dynamiccollisionbody_do_snapshot(CollisionBody *b,
+                                      struct ReplaySnapshot *s);
 
 // 0x001cca58. Over pPoly's vertices: the box, the sphere's radius about
 // the origin, and a vertical cylinder -- the widest radius in x and y, the
@@ -933,6 +961,13 @@ static inline struct Car *carcollisionbody_get_car(const CarCollisionBody *b)
     return b->pCar;
 }
 
+// Retail's 0x001d8058, slot 16: a section for the body named
+// "CarCollisionBody" around Dynamic's; the car's driver number
+// checksummed; on a restore the physics pointers again, and taking or
+// restoring the box from where the body is; the box checksummed and the
+// three Timers moved.
+void carcollisionbody_do_snapshot(CollisionBody *b, struct ReplaySnapshot *s);
+
 // 0x001cda20. Clears pSystem and pBody. Then, if PhysicsMode is set and the
 // car moves by PHYSICS_MOVEMENT or MELLOW_MOVEMENT, points them at the
 // mover's PhysicsSystem base (mover + 8) and its RigidBody (mover + 24).
@@ -986,6 +1021,10 @@ extern struct Collision *(*gCollisionNewFn)(CollisionBodyWitness *w,
                                             bVector3 *pt);
 extern void (*gCollisionAddImpulseFn)(struct Collision *c, bVector3 *at,
                                       bVector3 *impulse, float scrape);
+// The witness's DoSnapshot reaches the Collision's through this one.
+struct ReplaySnapshot;
+extern void (*gCollisionDoSnapshotFn)(struct Collision *c,
+                                      struct ReplaySnapshot *s);
 
 // 0x001ca170 and 0x001ca1a0. EndGameFlowLoadingTrackSpecific and
 // BeginGameFlowUnloadingTrackSpecific are the callers.
@@ -1070,6 +1109,12 @@ struct Collision *cbwitness_get_collision(CollisionBodyWitness *w,
 // 0x001cbe18. Both bodies' NumCollisions and the stats up one, and a new
 // Collision.
 void cbwitness_begin_collision(CollisionBodyWitness *w, bVector3 *pt);
+
+// Retail's 0x001d6168: a section for the witness named
+// "CollisionBodyWitness" around VCWitness's, then a byte for whether it
+// has a Collision; if so a restore begins one (at no point) and the
+// Collision's own snapshot follows.
+void cbwitness_do_snapshot(CollisionBodyWitness *w, struct ReplaySnapshot *s);
 
 // 0x001cc058. VClip on the two bodies where they are now; PrintThisTime
 // cleared. Overlapping: two dynamic bodies one of which blinks only stamp

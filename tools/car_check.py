@@ -96,6 +96,7 @@ NL = chr(10)
 SOURCES = [
     "tools/src/car_test.c",
     "3DS Files/source/car.c",
+    "3DS Files/source/replay.c", "3DS Files/source/p32.c",
     "3DS Files/source/carstate.c",
     "3DS Files/source/bvector.c",
     "3DS Files/source/bmath.c",

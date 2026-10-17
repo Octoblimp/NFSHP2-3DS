@@ -4,6 +4,10 @@
 
 #include <math.h>
 
+#include "physicssystem.h"
+#include "replay.h"
+#include "vtable.h"
+
 // ------------------------------------------------------------- the tables
 
 const float RigidBodyAngularMomentumDampingValues[6] = {
@@ -576,4 +580,52 @@ bVector4 *rigidbody_get_position(RigidBody *rb) { return &rb->State.X; }
 float rigidbody_get_moment_of_inertia_about_z(const RigidBody *rb)
 {
     return 1.0f / rb->I_body_inv.v2.z;
+}
+
+// ---------------------------------------------------------------- the replay
+
+// 0x0019ca70. The tests are c.eq.s, so -0 counts as zero.
+void rigidbody_do_snapshot(RigidBody *rb, ReplaySnapshot *s)
+{
+    RigidBodyState *st = &rb->State;
+    int32_t still = 0;
+
+    ReplaySnapshot_BeginNamedSection(s, "RigidBody");
+    ReplaySnapshot_MoveVector3(s, (bVector3 *)&st->X);
+    ReplaySnapshot_MoveVector3(s, (bVector3 *)&st->R.v0);
+    ReplaySnapshot_MoveVector3(s, (bVector3 *)&st->R.v1);
+    ReplaySnapshot_MoveVector3(s, (bVector3 *)&st->R.v2);
+    if (s->TakingSnapshotFlag || s->RestoringSnapshotFlag) {
+        rb->MotionDamping = 1;
+        st->R.v3.w = 1.0f;
+        st->R.v0.w = 0.0f;
+        st->R.v1.w = 0.0f;
+        st->R.v2.w = 0.0f;
+        st->R.v3.x = 0.0f;
+        st->R.v3.y = 0.0f;
+        st->R.v3.z = 0.0f;
+    }
+    ReplaySnapshot_MoveFloat(s, &st->MotionDampingFactor);
+    if (st->P.x == 0.0f && st->P.y == 0.0f && st->P.z == 0.0f
+        && st->L.x == 0.0f && st->L.y == 0.0f && st->L.z == 0.0f)
+        still = 1;
+    ReplaySnapshot_MoveBool(s, &still, 1);
+    if (!still) {
+        ReplaySnapshot_MoveVector3(s, (bVector3 *)&st->P);
+        ReplaySnapshot_MoveVector3(s, (bVector3 *)&st->L);
+    } else if (s->TakingSnapshotFlag || s->RestoringSnapshotFlag) {
+        st->P.x = 0.0f;
+        st->P.z = 0.0f;
+        st->P.y = 0.0f;
+        st->L.x = 0.0f;
+        st->L.z = 0.0f;
+        st->L.y = 0.0f;
+    }
+    if (s->TakingSnapshotFlag || s->RestoringSnapshotFlag) {
+        const VtEntry *e = vt_slot(rb->_vtable,
+                                   PHYSICSCOMPONENT_VT_COMPUTE_AUXILIARIES);
+
+        ((PhysicsVoidFn)e->fn)(vt_this(rb, e));
+    }
+    ReplaySnapshot_EndNamedSection(s);
 }

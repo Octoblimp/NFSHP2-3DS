@@ -10,8 +10,8 @@
 //
 // The object is bounded by CarController before it and Signpost (the head of
 // TrackRoute.obj, docs/formats/track-route.md) after it, and holds sixteen
-// functions. All sixteen are ported except DoSnapshot -- see the bottom of
-// this file.
+// functions, all ported; DoSnapshot is retail's (see the bottom of this
+// file).
 //
 // The struct layout is not guesswork: it comes out of the .mdebug type info
 // (docs/formats/mdebug-stabs.md, entry `CarState (size=1024)`) and every
@@ -292,10 +292,22 @@ void carstate_calculate_geometry_position(CarState *s);
 // NDEBUG. Kept so the call sites read the same.
 void carstate_print_state(CarState *s);
 
-// Not ported: DoSnapshot (0x001b6230), the replay serializer. It is 828
-// bytes of ReplaySnapshot::MoveData calls plus the six thunks after
-// CalculateGeometryPosition, and ReplaySnapshot is its own object that
-// nothing else in the port needs yet. It belongs with the replay work, not
-// here. See docs/formats/car-state.md.
+// Retail's 0x001c0270 (the demo's 0x001b6230), the replay's: a section
+// named "CarState". GeometryPosition; then, taking or restoring, the low
+// four bits of Position.x's float cleared, in the car itself; Position,
+// Velocity, Acceleration, BodyMatrix (the compressed move), the two angular
+// vectors; per wheel its angular velocity, angle, Z force, bottom-out,
+// touching byte, the terrain's first byte, slip, traction usage and
+// suspension height, with CrossedWheelTerrain set when taking or
+// restoring; Angle, SteeringAngle and Odometer. Taking or restoring clears
+// TractionUsage and both skids. Then ForwardSpeed, VelocityMagnitude,
+// CurrentGear's first byte, Throttle, RPM, a byte each of ClutchEngaged and
+// DriverMode, BoostFactor, BurnOutState, BurnOutTime and BurnOutTraction.
+// Taking or restoring ends by making RelCoordMatrix the identity and not
+// valid, counting the wheels down again and CalculateWheelMatrices.
+// DistanceMoved, retail's own field, is not in it. See
+// docs/formats/car-state.md.
+struct ReplaySnapshot;
+void carstate_do_snapshot(CarState *s, struct ReplaySnapshot *snap);
 
 #endif // CARSTATE_H

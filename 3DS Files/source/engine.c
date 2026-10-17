@@ -2,6 +2,7 @@
 
 #include "engine.h"
 #include "carstate.h"
+#include "replay.h"
 
 // gp-30428, 0x3983126f. Seconds per WorldTimer tick.
 #define WORLD_TICK_SECONDS 0.000250000012f
@@ -189,4 +190,21 @@ void engine_set_nitro_boost_timer(Engine *e, float t) { e->NitroBoostTimer = t; 
 void engine_set_catchup_torque_multiplier(Engine *e, float m)
 {
     e->CatchupTorqueMultiplier = m;
+}
+
+// ---------------------------------------------------------------- the replay
+
+// 0x0018a8e8.
+void engine_do_snapshot(Engine *e, ReplaySnapshot *s)
+{
+    if (s->TakingSnapshotFlag || s->RestoringSnapshotFlag)
+        e->CatchupTorqueMultiplier = 0.0f;
+    ReplaySnapshot_BeginNamedSection(s, "Engine");
+    ReplaySnapshot_MoveFloat(s, &e->State.w);
+    ReplaySnapshot_MoveFloat(s, &e->Throttle);
+    ReplaySnapshot_MoveFloat(s, &e->RoadTorque);
+    ReplaySnapshot_MoveFloat(s, &e->ThrottleOverride);
+    ReplaySnapshot_MoveFloat(s, &e->NitroBoostTimer);
+    ReplaySnapshot_MoveBool(s, &e->NitroFlag, 1);
+    ReplaySnapshot_EndNamedSection(s);
 }

@@ -104,6 +104,8 @@ NL = chr(10)
 SOURCES = [
     "tools/src/drivetrain_test.c",
     "3DS Files/source/drivetrain.c",
+    "3DS Files/source/vtable.c",
+    "3DS Files/source/replay.c", "3DS Files/source/p32.c",
     "3DS Files/source/engine.c",
     "3DS Files/source/wheel.c",       # drivetrain.c's SetState/GetRadius
     "3DS Files/source/suspension.c",  # and wheel.c's own dependencies

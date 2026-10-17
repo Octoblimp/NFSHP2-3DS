@@ -46,6 +46,7 @@ bNode ModelList;
 int32_t RealTimeFrames;
 int32_t WorldTimeFrames;
 int32_t WorldTimer;
+int32_t WorldLoopCounter;   // realtime.c's too; ReplaySnapshot_Init reads it
 float WorldTimeElapsed;
 bVector3 SunPosition;
 uint32_t eFrameCounter;

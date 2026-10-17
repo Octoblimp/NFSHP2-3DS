@@ -871,7 +871,11 @@ static const struct {
 #define N(f, s) { (VtFn)(f), s }
     N(collisionbody_destroy, "_$_13CollisionBody"),
     N(collisionbody_is_blinking, "IsBlinking__13CollisionBody"),
+    N(collisionbody_do_snapshot,
+      "DoSnapshot__13CollisionBodyP14ReplaySnapshot"),
     N(staticcollisionbody_destroy, "_$_19StaticCollisionBody"),
+    N(staticcollisionbody_do_snapshot,
+      "DoSnapshot__19StaticCollisionBodyP14ReplaySnapshot"),
     N(staticcollisionbody_get_velocity, "GetVelocity__19StaticCollisionBody"),
     N(staticcollisionbody_get_rotation, "GetRotation__19StaticCollisionBody"),
     N(staticcollisionbody_set_position,
@@ -907,6 +911,8 @@ static const struct {
       "GetBounciness__19StaticCollisionBody"),
     N(staticcollisionbody_get_friction, "GetFriction__19StaticCollisionBody"),
     N(trackpolygoncollisionbody_destroy, "_$_25TrackPolygonCollisionBody"),
+    N(trackpolygoncollisionbody_do_snapshot,
+      "DoSnapshot__25TrackPolygonCollisionBodyP14ReplaySnapshot"),
     N(trackpolygoncollisionbody_get_position,
       "GetPosition__25TrackPolygonCollisionBody"),
     N(trackpolygoncollisionbody_get_terrain_type,
@@ -933,9 +939,13 @@ static const struct {
       "GetMassInverse__20DynamicCollisionBody"),
     N(dynamiccollisionbody_get_inertia_tensor_inverse,
       "GetInertiaTensorInverse__20DynamicCollisionBody"),
+    N(dynamiccollisionbody_do_snapshot,
+      "DoSnapshot__20DynamicCollisionBodyP14ReplaySnapshot"),
     N(dynamiccollisionbody_change_in_energy,
       "ChangeInEnergy__20DynamicCollisionBodyP8bVector3T1"),
     N(carcollisionbody_destroy, "_$_16CarCollisionBody"),
+    N(carcollisionbody_do_snapshot,
+      "DoSnapshot__16CarCollisionBodyP14ReplaySnapshot"),
     N(carcollisionbody_get_position, "GetPosition__16CarCollisionBody"),
     N(carcollisionbody_get_velocity, "GetVelocity__16CarCollisionBody"),
     N(carcollisionbody_get_rotation, "GetRotation__16CarCollisionBody"),
@@ -964,9 +974,7 @@ static const char *fname(VtFn fn, int slot)
     size_t i;
 
     if (fn == NULL)
-        return slot == 0 ? "0"
-             : slot == COLLISIONBODY_VT_DO_SNAPSHOT ? "DoSnapshot"
-             : "__pure_virtual";
+        return slot == 0 ? "0" : "__pure_virtual";
     for (i = 0; i < sizeof fnames / sizeof fnames[0]; i++)
         if (fnames[i].fn == fn)
             return fnames[i].name;

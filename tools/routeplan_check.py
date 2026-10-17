@@ -68,6 +68,7 @@ PLAN = "3DS Files/source/airouteplan.c"
 SOURCES = [HARNESS, PLAN,
            "3DS Files/source/trackroute.c",
            "3DS Files/source/trackpath.c",
+           "3DS Files/source/replay.c", "3DS Files/source/p32.c",
            "3DS Files/source/quickspline.c",
            "3DS Files/source/bmem.c",
            "3DS Files/source/bmatrix.c",

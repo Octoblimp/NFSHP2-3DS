@@ -23,6 +23,7 @@
 
 #include "eefpu.h"
 #include "realtime.h"
+#include "replay.h"
 #include "vtable.h"
 
 // ------------------------------------------------------------ the globals
@@ -38,6 +39,7 @@ float MaxFrictionScrapeSpeed      = 1.0f;   // 0x003243f8  3f800000
 struct Collision *(*gCollisionNewFn)(CollisionBodyWitness *w, bVector3 *pt);
 void (*gCollisionAddImpulseFn)(struct Collision *c, bVector3 *at,
                                bVector3 *impulse, float scrape);
+void (*gCollisionDoSnapshotFn)(struct Collision *c, struct ReplaySnapshot *s);
 
 // The literals, gp-28816 .. gp-28780. The two 0.3s and the two 4/7s are
 // each loaded from a word of their own.
@@ -748,6 +750,30 @@ void cbwitness_begin_collision(CollisionBodyWitness *w, bVector3 *pt)
         abort();
     }
     w->pCollision = gCollisionNewFn(w, pt);
+}
+
+// 0x001d6168. A restore that finds a Collision begins one at no point, so
+// the constructor zeroes InitialContactPoint, and the Collision's own
+// snapshot fills it in.
+void cbwitness_do_snapshot(CollisionBodyWitness *w, ReplaySnapshot *s)
+{
+    int8_t has;
+
+    ReplaySnapshot_BeginSection(s, w, "CollisionBodyWitness");
+    vcwitness_do_snapshot(&w->Witness, s);
+    has = w->pCollision != NULL;
+    ReplaySnapshot_MoveChar(s, &has, 1);
+    if (has) {
+        if (s->RestoringSnapshotFlag)
+            cbwitness_begin_collision(w, NULL);
+        if (gCollisionDoSnapshotFn == NULL) {
+            fprintf(stderr, "cbwitness_do_snapshot: Collision is not "
+                            "ported\n");
+            abort();
+        }
+        gCollisionDoSnapshotFn(w->pCollision, s);
+    }
+    ReplaySnapshot_EndSection(s);
 }
 
 static Contact *contact_new(void)

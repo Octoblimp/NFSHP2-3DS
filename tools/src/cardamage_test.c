@@ -43,6 +43,10 @@
 #include "estripdata.h"
 #include "race.h"
 
+// realtime.c's clock, which ReplaySnapshot_Init stamps; not linked here.
+int32_t WorldTimer;
+int32_t WorldLoopCounter;
+
 // race.c's and carrace.c's, which the harness does not link.
 RaceParameters     TheRaceParameters;
 CarTriggerEffectFn gCarTriggerEffectFn;

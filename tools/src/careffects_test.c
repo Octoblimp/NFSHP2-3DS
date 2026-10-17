@@ -78,6 +78,35 @@ void bFree(void *p)
     unreached("bFree");
 }
 
+// The DoSnapshots in car.c, carstate.c and cardamage.c (TASKS 72b) call
+// these; nothing here takes a snapshot, and replay.c is not linked because
+// its RegisterInterestingEvent is the stub below.
+void ReplaySnapshot_BeginSection(ReplaySnapshot *s, void *object,
+                                 const char *name)
+{
+    (void)s; (void)object; (void)name;
+    unreached("ReplaySnapshot_BeginSection");
+}
+
+void ReplaySnapshot_EndSection(ReplaySnapshot *s)
+{
+    (void)s;
+    unreached("ReplaySnapshot_EndSection");
+}
+
+void ReplaySnapshot_MoveData(ReplaySnapshot *s, void *p, int32_t stored,
+                             int32_t size, int32_t is_signed)
+{
+    (void)s; (void)p; (void)stored; (void)size; (void)is_signed;
+    unreached("ReplaySnapshot_MoveData");
+}
+
+void ReplaySnapshot_MoveMatrix(ReplaySnapshot *s, bMatrix4 *m)
+{
+    (void)s; (void)m;
+    unreached("ReplaySnapshot_MoveMatrix");
+}
+
 static Car        car;
 static CarDamage  cdmg;
 static PhysicsCar pcar;

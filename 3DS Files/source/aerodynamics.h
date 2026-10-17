@@ -121,10 +121,11 @@ void aerodynamics_resolve_forces(Aerodynamics *a, float *out);
 // arm would give at full weight, which Calibrate uses.
 float aerodynamics_get_downforce_at_speed(const Aerodynamics *a, float speed);
 
-// 0x001a4b58. On a replay reset -- the two snapshot bytes wheel.h's
-// gReplayShouldResetFn stands for -- clears GroundEffect, Boost and
+// Retail's 0x001add48 (the demo's 0x001a4b58), the replay's, with no
+// section of its own: taking or restoring clears GroundEffect, Boost and
 // Throttle, in that order. Boost 0 would divide ResolveForces' speed by
 // zero; PhysicsCar::Move sets it again first.
-void aerodynamics_do_snapshot(Aerodynamics *a, void *snap);
+struct ReplaySnapshot;
+void aerodynamics_do_snapshot(Aerodynamics *a, struct ReplaySnapshot *s);
 
 #endif

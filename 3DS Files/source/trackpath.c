@@ -7,6 +7,7 @@
 #include "bchunk.h"
 #include "bmem.h"
 #include "eefpu.h"
+#include "replay.h"
 
 #define CHUNK_TRACKPATH        0x80034147u
 #define CHUNK_TRACKPATH_PATHS  0x00034148u
@@ -653,4 +654,37 @@ void load_track_paths(TrackPathPoint *points, int npoints, TrackPath *paths,
 void unload_track_paths(void)
 {
     trackpath_manager_unload(&TheTrackPathManager);
+}
+
+// ---------------------------------------------------------------- the replay
+
+// 0x00207bd0. The index is the byte difference times 5's inverse, shifted
+// down two: an exact division by the point's 20 bytes.
+void trackpath_manager_do_snapshot(TrackPathManager *m, TrackPathPoint **pp,
+                                   ReplaySnapshot *s)
+{
+    int16_t index = -1;
+
+    if (*pp != NULL)
+        index = (int16_t)(*pp - m->pPoints);
+    ReplaySnapshot_MoveShort(s, &index, 2);
+    if (index == -1)
+        *pp = NULL;
+    else if (index < 0)
+        *pp = NULL;
+    else
+        *pp = m->pPoints + index;
+}
+
+// 0x00208768.
+void trackpath_coord_do_snapshot(TrackPathCoordinate *c, ReplaySnapshot *s)
+{
+    ReplaySnapshot_BeginNamedSection(s, "TrackPathCoordinate");
+    ReplaySnapshot_MoveVector2(s, &c->Position);
+    trackpath_manager_do_snapshot(&TheTrackPathManager, &c->pTrackPoint, s);
+    ReplaySnapshot_MoveFloat(s, &c->SplineParam);
+    ReplaySnapshot_MoveFloat(s, &c->RatioAroundTrack);
+    ReplaySnapshot_MoveFloat(s, &c->DistanceAroundTrack);
+    ReplaySnapshot_MoveVector2(s, &c->PathDirection);
+    ReplaySnapshot_EndNamedSection(s);
 }

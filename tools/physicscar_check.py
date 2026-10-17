@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Cross-check physicscar -- PhysicsCar.obj minus DoSnapshot -- against the
-image itself, run in mipsemu.
+"""Cross-check physicscar -- PhysicsCar.obj minus DoSnapshot, which
+carsnap_check runs against retail -- against the image itself, run in
+mipsemu.
 
     3DS Files/source/physicscar.{c,h}   the constructor and destructor, the
                                         two vtables and their deltas,
@@ -124,6 +125,7 @@ MDEBUG = (ROOT / "docs" / "mdebug_structs.txt").read_text(errors="replace")
 
 SOURCES_PORT = [
     "3DS Files/source/physicscar.c",
+    "3DS Files/source/replay.c",
     "3DS Files/source/race.c",
     "3DS Files/source/cardamage.c",
     "3DS Files/source/estripdata.c",
@@ -199,9 +201,9 @@ UNNAMED = {("PhysicsCar", "Mover"), ("PhysicsCar", "Vehicle"),
 LINKS = {"pNext", "pPrev"}
 
 # Fields retail added that the demo image does not have, kept where the
-# demo has padding. Neither checked against mdebug nor dumped: the demo
-# code these checkers run never writes them.
-RETAIL_ONLY = {("CarState", "DistanceMoved")}
+# demo has padding or after its fields. Neither checked against mdebug nor
+# dumped: the demo code these checkers run never writes them.
+RETAIL_ONLY = {("CarState", "DistanceMoved"), ("PhysicsCar", "FlippedTimer")}
 
 FIELD_RE = re.compile(
     r"^\s*(?:const\s+)?(?:struct\s+)?(\w+)\s*(\*?)\s*(?:const\s+)?(\w+)\s*"
@@ -993,9 +995,6 @@ TABLE_SYM = {
     VT_PHYSICSVEHICLE: "_vt$14PhysicsVehicle",
 }
 
-# The entry the port leaves NULL until DoSnapshot lands.
-PENDING = {(VT_PHYSICSCAR, 3): "DoSnapshot"}
-
 # CarMover's Move is `__pure_virtual`, which the port spells NULL: a call
 # aborts in vt_slot instead of in the pure-virtual trap.
 # Where two components' uninitialised stack words are zeroed (see Model).
@@ -1568,7 +1567,7 @@ class Model(object):
             for i in range(n):
                 delta = struct.unpack("<h", self.e.read(vt + 8 * i, 2))[0]
                 fn = self.w(vt + 8 * i + 4)
-                if (vt, i) in PENDING or fn == PURE:
+                if fn == PURE:
                     fn = 0
                 d = "pc" if delta == -vehicle and delta else str(delta)
                 cells.append("%s/%s" % (d, "fn" if fn else "null"))
@@ -2285,6 +2284,9 @@ MUTATIONS = [
      "    { VEHICLE_DELTA, 0, NULL },"),
     ("pc-vt-mover-no-snapshot", PCC,
      "    { 0, 0, (VtFn)carmover_do_snapshot },",
+     "    { 0, 0, NULL },"),
+    ("pc-vt-no-snapshot", PCC,
+     "    { 0, 0, (VtFn)vt_PhysicsCar_DoSnapshot },",
      "    { 0, 0, NULL },"),
 
     # -- Move: the pedals, the steering and the gearbox -------------------

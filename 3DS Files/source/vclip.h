@@ -45,8 +45,7 @@
 // The Caffeine plot helpers and the Print family are development code: the
 // plots have no callers at all, and every Print does nothing but store the
 // polyhedron it was given (PrintFeature, PrintMatrix and PrintState are
-// each a bare `jr ra`). DoSnapshot is not ported; it needs ReplaySnapshot,
-// the same dependency that stopped CarState::DoSnapshot.
+// each a bare `jr ra`). DoSnapshot is retail's (0x001d0948), TASKS 72b.
 //
 // docs/formats/vclip.md has the decode.
 
@@ -283,6 +282,13 @@ void    vcwitness_init(VCWitness *w, VCPolyhedron *p1, VCPolyhedron *p2);
                                                                  // 0x001c6700
 void    vcwitness_destroy(VCWitness *w, int32_t flags);          // 0x001c6750
 void    vcwitness_print_state(VCWitness *w);                     // 0x001c68a0
+
+// Retail's 0x001d0948, the replay's: a section for the witness named
+// "VCWitness" with its two features as their polyhedra's codes (a restore
+// looks them up again), SwitchState, the two closest points and the
+// distance. The codes are taken from the features even when restoring.
+struct ReplaySnapshot;
+void    vcwitness_do_snapshot(VCWitness *w, struct ReplaySnapshot *s);
 
 // The five pair checks. x12 takes the first feature into the second's
 // frame and x21 the reverse; SwitchState says which of F1/F2 is which.

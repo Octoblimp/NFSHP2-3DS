@@ -14,7 +14,9 @@
 #include "bmem.h"
 #include "eefpu.h"
 #include "physicssystem.h"
+#include "replay.h"
 #include "rigidbody.h"
+#include "topology.h"
 #include "vtable.h"
 
 // ------------------------------------------------------------ the globals
@@ -1382,6 +1384,70 @@ void dynamiccollisionbody_set_position(CollisionBody *b, bVector3 *p)
     *to = *p;
 }
 
+// ------------------------------------------------------------- the replay
+
+// 0x001d6a98. A restore that reads nothing leaves the stack's byte in
+// retail; the port's is 0.
+void collisionbody_do_snapshot(CollisionBody *b, ReplaySnapshot *s)
+{
+    uint8_t bits = 0;
+
+    if (s->RestoringSnapshotFlag) {
+        ReplaySnapshot_MoveUChar(s, &bits, 1);
+        b->CollisionsDisabled = (int8_t)(bits & 15);
+        b->ActiveCollisionDetection = (int8_t)(bits >> 4);
+    } else {
+        bits = (uint8_t)((uint8_t)b->CollisionsDisabled
+                         + ((uint8_t)b->ActiveCollisionDetection << 4));
+        ReplaySnapshot_MoveUChar(s, &bits, 1);
+    }
+    ReplaySnapshot_VerifyShort(s, &b->ID, 2);
+    ReplaySnapshot_VerifyChar(s, &b->Type, 1);
+    ReplaySnapshot_VerifyChar(s, &b->Dynamic, 1);
+}
+
+// 0x001d8760.
+void staticcollisionbody_do_snapshot(CollisionBody *b, ReplaySnapshot *s)
+{
+    collisionbody_do_snapshot(b, s);
+}
+
+// 0x001d8918.
+void trackpolygoncollisionbody_do_snapshot(CollisionBody *b, ReplaySnapshot *s)
+{
+    ReplaySnapshot_BeginSection(s, b, "TrackPolygonCollisionBody");
+    collisionbody_do_snapshot(b, s);
+    ReplaySnapshot_VerifyVector2(s, &b->BBoxMin);
+    ReplaySnapshot_VerifyVector2(s, &b->BBoxMax);
+    ReplaySnapshot_EndSection(s);
+}
+
+// 0x001d7050. Four bMemSets, in the image's order: BackupTime, then the
+// backup's rotation, position and velocity.
+void dynamiccollisionbody_do_snapshot(CollisionBody *b, ReplaySnapshot *s)
+{
+    DynamicCollisionBody *d = (DynamicCollisionBody *)b;
+    int32_t taking = s->TakingSnapshotFlag || s->RestoringSnapshotFlag;
+
+    ReplaySnapshot_BeginSection(s, d, "DynamicCollisionBody");
+    collisionbody_do_snapshot(b, s);
+    ReplaySnapshot_MoveInt(s, &d->PhysicsMode, 1);
+    if (taking)
+        topology_clear_interest_bbox(d->pTC);
+    ReplaySnapshot_VerifyFloat(s, &d->CylinderBaseHeight);
+    ReplaySnapshot_VerifyFloat(s, &d->CylinderTopHeight);
+    ReplaySnapshot_VerifyFloat(s, &d->CylinderRadius);
+    ReplaySnapshot_VerifyVector3(s, &d->LocalBBMin);
+    ReplaySnapshot_VerifyVector3(s, &d->LocalBBMax);
+    if (s->TakingSnapshotFlag || s->RestoringSnapshotFlag) {
+        d->BackupTime = 0.0f;
+        memset(&d->BackupRotation, 0, sizeof d->BackupRotation);
+        memset(&d->BackupPosition, 0, sizeof d->BackupPosition);
+        memset(&d->BackupVelocity, 0, sizeof d->BackupVelocity);
+    }
+    ReplaySnapshot_EndSection(s);
+}
+
 // ------------------------------------------------------------- the tables
 
 #define E(f) { 0, 0, (VtFn)(f) }
@@ -1391,7 +1457,7 @@ void dynamiccollisionbody_set_position(CollisionBody *b, bVector3 *p)
 static const VtEntry collisionbody_vt[COLLISIONBODY_VT_ENTRIES] = {
     PURE,
     E(collisionbody_destroy),
-    PURE,                                           // DoSnapshot
+    E(collisionbody_do_snapshot),
     PURE, PURE, PURE, PURE, PURE, PURE, PURE, PURE, // 24 .. 80
     PURE, PURE, PURE, PURE, PURE, PURE, PURE, PURE, // 88 .. 144
     PURE, PURE, PURE, PURE,                         // 152 .. 176
@@ -1401,10 +1467,10 @@ static const VtEntry collisionbody_vt[COLLISIONBODY_VT_ENTRIES] = {
 
 // _vt$19StaticCollisionBody (0x0029be78) and
 // _vt$25TrackPolygonCollisionBody (0x0029bda8).
-#define STATIC_SLOTS(dtor, getpos, terrain)                         \
+#define STATIC_SLOTS(dtor, snapshot, getpos, terrain)               \
     PURE,                                                           \
     E(dtor),                                                        \
-    PURE,                                                           \
+    E(snapshot),                                                    \
     getpos,                                                         \
     E(staticcollisionbody_get_velocity),                            \
     E(staticcollisionbody_get_rotation),                            \
@@ -1430,12 +1496,14 @@ static const VtEntry collisionbody_vt[COLLISIONBODY_VT_ENTRIES] = {
     E(staticcollisionbody_get_friction)
 
 static const VtEntry staticcollisionbody_vt[COLLISIONBODY_VT_ENTRIES] = {
-    STATIC_SLOTS(staticcollisionbody_destroy, PURE, PURE)
+    STATIC_SLOTS(staticcollisionbody_destroy, staticcollisionbody_do_snapshot,
+                 PURE, PURE)
 };
 
 static const VtEntry
 trackpolygoncollisionbody_vt[COLLISIONBODY_VT_ENTRIES] = {
     STATIC_SLOTS(trackpolygoncollisionbody_destroy,
+                 trackpolygoncollisionbody_do_snapshot,
                  E(trackpolygoncollisionbody_get_position),
                  E(trackpolygoncollisionbody_get_terrain_type))
 };
@@ -1444,7 +1512,7 @@ trackpolygoncollisionbody_vt[COLLISIONBODY_VT_ENTRIES] = {
 static const VtEntry dynamiccollisionbody_vt[COLLISIONBODY_VT_ENTRIES] = {
     PURE,
     E(dynamiccollisionbody_destroy),
-    PURE,                                           // DoSnapshot
+    E(dynamiccollisionbody_do_snapshot),
     PURE, PURE, PURE,                               // 24, 32, 40
     E(dynamiccollisionbody_set_position),
     E(dynamiccollisionbody_get_max_backup_time),

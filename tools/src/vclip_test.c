@@ -25,6 +25,10 @@
 #include "espresso.h"
 #include "vclip.h"
 
+// realtime.c's clock, which ReplaySnapshot_Init stamps; not linked here.
+int32_t WorldTimer;
+int32_t WorldLoopCounter;
+
 enum {
     OP_TAG = 1, OP_POLY_CTOR, OP_POLY_ALLOC, OP_POLY_ARRAYS, OP_NEW_PLANES,
     OP_NEW_VERTEX, OP_NEW_EDGE, OP_NEW_FACE, OP_SET_NB, OP_SET_VORONOI,

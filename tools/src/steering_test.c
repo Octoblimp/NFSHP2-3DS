@@ -9,6 +9,10 @@
 #include "steering.h"
 #include "bmath.h"
 
+// realtime.c's clock, which ReplaySnapshot_Init stamps; not linked here.
+int32_t WorldTimer;
+int32_t WorldLoopCounter;
+
 static unsigned fbits(float f)
 {
     unsigned u;

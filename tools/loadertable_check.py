@@ -151,6 +151,7 @@ SOURCES = [HARNESS, STUBS, BCL, ESC, EMC] + ["3DS Files/source/" + f for f in (
     "scenery.c", "emath.c", "bmath.c", "bmathtab.c", "bmatrix.c",
     "bvector.c", "race.c", "track.c", "terraintype.c", "cartrack.c",
     "carstate.c", "terraintypetab.c", "bslotpool.c", "bticker.c", "p32.c",
+    "replay.c",
     "bchunk.c", "trackpath.c", "quickspline.c", "bmem.c", "trackroute.c",
     "polyhedra.c", "vclip.c", "espresso.c", "difficultyinfo.c",
     "texturepack.c", "sun.c", "weatherman.c", "carinfo.c",

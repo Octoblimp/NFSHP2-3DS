@@ -15,11 +15,13 @@
 #include <string.h>
 
 #include "aerodynamics.h"
+#include "realtime.h"
+#include "replay.h"
 #include "rigidbody.h"
-#include "wheel.h"
 
-// wheel.c owns this seam; the harness links Aerodynamics without Wheel.
-ReplayShouldResetFn gReplayShouldResetFn;
+// The clock replay.c reads, which the harness does not link realtime.c for.
+int32_t WorldTimer;
+int32_t WorldLoopCounter;
 
 static unsigned fbits(float f)
 {
@@ -305,39 +307,30 @@ static void s_at_speed(void)
                aerodynamics_get_downforce_at_speed(&a, speeds[k]));
 }
 
-static int32_t snap_reset(const void *snap)
-{
-    const uint8_t *b = (const uint8_t *)snap;
-    return (b[56] | b[57]) != 0;
-}
-
 static void s_snapshot(void)
 {
     static const uint8_t pairs[4][2] = { { 0, 0 }, { 1, 0 }, { 0, 2 },
                                          { 128, 64 } };
-    uint8_t snap[64];
+    static ReplaySnapshot snap;
     Aerodynamics a;
     AeroInfo ai = { 0.0f, 0.0f, 0.0f, 0.0f };
     RigidBody rb;
     int k;
 
     printf("[snapshot]\n");
-    for (k = -1; k < 4; k++) {
-        memset(snap, 0, sizeof snap);
-        if (k >= 0) {
-            snap[56] = pairs[k][0];
-            snap[57] = pairs[k][1];
-        }
-        gReplayShouldResetFn = k >= 0 ? snap_reset : NULL;
+    for (k = 0; k < 4; k++) {
+        memset(&snap, 0, sizeof snap);
+        snap.TakingSnapshotFlag = (int8_t)pairs[k][0];
+        snap.RestoringSnapshotFlag = (int8_t)pairs[k][1];
         aerodynamics_init(&a, &rb, &ai);
         a.Boost = 1.25f;
         a.Draft = 0.5f;
         a.Throttle = 0.75f;
         a.GroundEffect = 0.625f;
-        aerodynamics_do_snapshot(&a, snap);
-        dump_aero(k >= 0 ? "  seam" : "  null", &a, &ai, &rb);
+        aerodynamics_do_snapshot(&a, &snap);
+        printf("  flags %d,%d\n", pairs[k][0], pairs[k][1]);
+        dump_aero("  snap", &a, &ai, &rb);
     }
-    gReplayShouldResetFn = NULL;
 }
 
 int main(void)

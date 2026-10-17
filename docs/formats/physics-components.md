@@ -56,9 +56,10 @@ The Steering tables use slot 8 for the destructor, 16 for
 In `_vt$8Steering`, slots 16 and 24 are `__pure_virtual`. In the port they
 are NULL, and `vt_slot` aborts on NULL as the image's handler does.
 
-**One entry is pending.** Ackerman's DoSnapshot waits on ReplaySnapshot,
-which is not ported, and no class's DoSnapshot is ported yet. The port
-leaves that entry NULL, and the checker's `PENDING` records why.
+**Ackerman's DoSnapshot** is ported since TASKS 72b
+(`vt_Ackerman_DoSnapshot`, `ackerman_do_snapshot` in `steering.c`), and
+`carsnap_check` runs it against retail. Every entry of the seven tables is
+now the image's.
 
 ### The simple slots
 

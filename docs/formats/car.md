@@ -2203,6 +2203,58 @@ the lanes both sides print as `*`.
 carinit_check --mutate  169 mutations, 168 caught, 1 equivalent, 0 unexplained
 ```
 
+## The replay's snapshot
+
+TASKS 72b ports the replay's DoSnapshot for the car and everything under
+it, from retail (SLES_507.31). A snapshot is a memory image: each
+DoSnapshot moves its object's fields into `ReplaySnapshot`'s data when
+taking, back out when restoring, and checksums or verifies them otherwise
+(`replay.c`, TASKS 72a). Nothing calls them in a race yet; the
+ReplayManager that takes the snapshots is 72f.
+
+`Car::DoSnapshot` (retail's 0x00130ff0) is `carsnap.c`, a file of its own
+because it reaches CarDamage, the render info's skin, the collision body
+and the track path, which car.c's checkers do not link. In order:
+
+- a section named `Car<CarIndex>`, bSPrintf'd into 16 bytes of the stack;
+- the lights, the horn and its timings, the siren, the wipers and the
+  blown tyres, each by retail's overload (a bool is one byte, an enum one
+  byte of four);
+- the CarDamage's, when the car has one;
+- TheControlMode and TheMovementMode, and the ride's SkinNumber. A
+  restore sets both modes to 0 and back, so the controller and the mover
+  are made again, and switches the skin if it changed;
+- through their tables, the controller's, the mover's (PhysicsCar's tree:
+  the body, the steering, four wheels and suspensions, the engine, the
+  drivetrain and the aerodynamics) and the collision body's;
+- CarState's, the animated driver's (a seam until 72d, which aborts if a
+  car has a driver) and the track path coordinate's;
+- ResetMe and JustResetFrames as one byte, the first in the low four
+  bits;
+- the blink, the trough, the skid counts, and the boost overrides.
+  DraftFactor is cleared when taking or restoring.
+
+The port's Car keeps the demo's order with retail's four fields at the
+end, so each move names its field, and the comments give retail's offset.
+PhysicsCar likewise keeps the demo's fields and puts retail's new Timer
+after them (`physicscar.h`).
+
+**The check.** `tools/carsnap_check.py` runs retail's own DoSnapshots in
+RetailEmu and the port's in a host harness over the same objects. Each is
+taken, restored over other values, checksummed and verified, alone and as
+the trees the game builds. The layouts are the port's headers, parsed,
+with a map where retail's offsets differ.
+
+```
+carsnap_check           6608 script lines, 22867 lines, 0 differ
+carsnap_check --mutate  100 mutations, 100 caught
+```
+
+Where retail and the port part, the checker sets the field both read to
+the same value and the difference goes to TASKS 73: retail's BottomOut
+and its flipped Timer, CalculateWheelMatrices' WheelInfo word at 24, and
+the layouts of CarState, CollisionBodyWitness and CarCollisionBody.
+
 ## What is not ported yet
 
 The measure that matters for planning is whether a method makes a direct
@@ -2252,15 +2304,14 @@ damage, render and event calls are seams.
 `DamageAbove` and `DamageCap` are ported too (`cardamageabove.c`,
 [car-damage](car-damage.md), "The marker over the car").
 
-Ten are left, nine of the forty-six and `DoWheelForces`, and every
+Nine are left, eight of the forty-six and `DoWheelForces`, and every
 one reaches a class that is not ported:
 - `TriggerEvents` (`0x00131a58`): the event manager, the ferns,
   `Player::TriggerVisibleDrivingLine`;
 - `AssignAnimatedDriver` and `UnAssignAnimatedDriver`;
 - the render group: `TriggerEffect` and `SwitchSkin`;
 - force feedback and rumble: `DoWheelForces`, `CalcForceParameters`,
-  `StartForceImpact` and `MaybeRumble`;
-- `DoSnapshot`, which waits on `ReplaySnapshot`.
+  `StartForceImpact` and `MaybeRumble`.
 
 They belong to tasks 26, 27 and 29.
 

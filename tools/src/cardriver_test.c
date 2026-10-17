@@ -14,6 +14,7 @@
 // own: linking engine.c would drag Table, CarTypeInfo and Wheel in behind
 // it, and nothing in this harness calls the code that reads it.
 int32_t WorldTimer = 0;
+int32_t WorldLoopCounter;   // realtime.c's too; ReplaySnapshot_Init reads it
 
 // ------------------------------------------------------------- the layout
 

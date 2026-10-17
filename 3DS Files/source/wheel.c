@@ -11,6 +11,7 @@
                           // gTireForceEllipseRatio, gUglyTimestepHack --
                           // one .sdata block, and Suspension defines it.
 #include "carstate.h"
+#include "replay.h"
 #include "table.h"
 
 // The shipped values, read out of .sdata in the ELF.
@@ -37,12 +38,6 @@ TopologyGetElevationFn    gTopologyGetElevationFn    = NULL;
 TerrainRoadNoiseFn        gTerrainRoadNoiseFn        = NULL;
 WheelTopologyOfCarStateFn gWheelTopologyOfCarStateFn = NULL;
 WheelMaybeMakeSkidsFn     gWheelMaybeMakeSkidsFn     = NULL;
-
-ReplayBeginSectionFn gReplayBeginSectionFn = NULL;
-ReplayEndSectionFn   gReplayEndSectionFn   = NULL;
-ReplayMoveFloatFn    gReplayMoveFloatFn    = NULL;
-ReplayMoveIntsFn     gReplayMoveIntsFn     = NULL;
-ReplayShouldResetFn  gReplayShouldResetFn  = NULL;
 
 // The eight curves, out of .data at 0x00308e28..0x00308f08.
 const float gCorneringForceTable[WHEEL_CORNERING_ENTRIES] = {
@@ -958,42 +953,24 @@ void wheel_maybe_make_skids(Wheel *w, float dt)
         gWheelMaybeMakeSkidsFn(w, dt);
 }
 
-// 0x00199c90. The replay serialiser. MoveData copies in whichever
-// direction the snapshot is running, so this one body both records the
-// wheel and restores it.
-//
-// The four-word move is the part to read twice. `MoveData(this + 272, 4)`
-// covers LastSign, both GroundForce floats and the four bytes of padding
-// behind them -- the image really does hand the pad to the replay. One
-// pointer and a count is a faithful spelling of that on both targets
-// because the slack multiplier is constant at 5 across that whole span,
-// so the four words are the same four fields on the handheld and on a
-// 64-bit host. The layout assert in wheel.h is what makes that safe.
-void wheel_do_snapshot(Wheel *w, void *snap)
+// Retail's 0x001a3f60 (the demo's 0x00199c90), the replay's. The int move
+// is MoveData(int *, int) with 4: LastSign alone, four bytes. Taking or
+// restoring then clears the rest of the record but MomentOfInertia,
+// LastSign, RoadNoise and the pad behind GroundForce; retail's last clear,
+// Damage, is new.
+void wheel_do_snapshot(Wheel *w, ReplaySnapshot *s)
 {
-    if (gReplayBeginSectionFn)
-        gReplayBeginSectionFn(snap, "Wheel");
+    ReplaySnapshot_BeginNamedSection(s, "Wheel");
 
     // One MoveData each, not the 64-bit pair move SetState/GetState use.
-    if (gReplayMoveFloatFn) {
-        gReplayMoveFloatFn(snap, &w->State.a);
-        gReplayMoveFloatFn(snap, &w->State.w);
-    }
-    if (gReplayMoveIntsFn)
-        gReplayMoveIntsFn(snap, (int32_t *)&w->LastSign, 4);
+    ReplaySnapshot_MoveFloat(s, &w->State.a);
+    ReplaySnapshot_MoveFloat(s, &w->State.w);
+    ReplaySnapshot_MoveInt(s, &w->LastSign, 4);
 
-    if (gReplayShouldResetFn && gReplayShouldResetFn(snap)) {
-        // Twenty-three bMemSet calls, in the image's order. Written as the
+    if (s->TakingSnapshotFlag || s->RestoringSnapshotFlag) {
+        // Twenty-four bMemSet calls, in the image's order. Written as the
         // fields they clear rather than as offsets and lengths, because
         // the offsets move on a 64-bit host and the fields do not.
-        //
-        // The clears step around four live fields, and all four matter:
-        // MomentOfInertia (36), so a restored wheel needs no recalibrating;
-        // LastSign (272), because it was just moved; RoadNoise (348) and
-        // Damage (364), which the list jumps over -- 344 for four bytes
-        // then 352, and 360 for four bytes then 368. The pad at 284
-        // survives too, for the same reason: the list goes 276 for eight
-        // and then 288.
         memset(&w->Matrix, 0, sizeof w->Matrix);
         memset(&w->WorldMatrix, 0, sizeof w->WorldMatrix);
         memset(&w->CarMatrix, 0, sizeof w->CarMatrix);
@@ -1023,10 +1000,10 @@ void wheel_do_snapshot(Wheel *w, void *snap)
         // does.
         w->TractionBoost = 0.0f;
         w->CatchupFrictionMultiplier = 0.0f;
+        w->Damage = 0.0f;
     }
 
-    if (gReplayEndSectionFn)
-        gReplayEndSectionFn(snap);
+    ReplaySnapshot_EndNamedSection(s);
 }
 
 // 0x00199e90. Places the wheel from a CarState: the replay and network

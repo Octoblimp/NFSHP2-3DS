@@ -60,6 +60,7 @@ HARNESS = "tools/src/playerzone_test.c"
 PZC = "3DS Files/source/playerzone.c"
 SOURCES = [HARNESS, PZC] + ["3DS Files/source/" + f for f in (
     "previewroute.c", "trackroute.c", "trackpath.c", "quickspline.c",
+    "replay.c", "p32.c",
     "bvector.c", "bmath.c", "bmathtab.c", "bmatrix.c")]
 
 HARNESS_TIMEOUT = 120

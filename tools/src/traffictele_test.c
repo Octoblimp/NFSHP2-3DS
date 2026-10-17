@@ -102,6 +102,7 @@ static NearestRoutePointInfo out[OUT_ROOM];
 
 // What the linked files leave to the game.
 int32_t        WorldTimer;
+int32_t WorldLoopCounter;   // realtime.c's too; ReplaySnapshot_Init reads it
 World         *pCurrentWorld;
 int32_t        PlayerNumPlayers;
 struct Player *PlayerPlayersByIndex[2];

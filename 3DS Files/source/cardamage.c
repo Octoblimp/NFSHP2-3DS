@@ -14,6 +14,7 @@
 #include "eefpu.h"
 #include "epositionmarker.h"
 #include "estripdata.h"
+#include "replay.h"
 #include "race.h"
 
 #define ZONE_SCALE      0.0078125f      // `lui at,0x3c00`, 1/128
@@ -600,4 +601,29 @@ void cardamage_repair_all(CarDamage *d)
 {
     bodydamage_repair_all(&d->TheBodyDamage);
     cardamage_rethink_damage(d);
+}
+
+// ---------------------------------------------------------------- the replay
+
+// 0x001b4c58. The restore test is the one flag's byte, 61.
+void bodydamage_do_snapshot(BodyDamage *b, ReplaySnapshot *s)
+{
+    ReplaySnapshot_BeginNamedSection(s, "BodyDamage");
+    ReplaySnapshot_MoveData(s, b->CompressedDamageAmounts, BODYDAMAGE_ZONES,
+                            BODYDAMAGE_ZONES, 0);
+    ReplaySnapshot_MoveUShort(s, &b->CompressedTotalDamage, 2);
+    if (s->RestoringSnapshotFlag)
+        bodydamage_apply_damage(b);
+    ReplaySnapshot_EndNamedSection(s);
+}
+
+// 0x001b5638.
+void cardamage_do_snapshot(CarDamage *d, ReplaySnapshot *s)
+{
+    ReplaySnapshot_BeginSection(s, d, "CarDamage");
+    bodydamage_do_snapshot(&d->TheBodyDamage, s);
+    ReplaySnapshot_MoveUInt(s, &d->BreakableCarItemDamageAmounts, 4);
+    if (s->RestoringSnapshotFlag)
+        cardamage_apply_damage(d);
+    ReplaySnapshot_EndSection(s);
 }

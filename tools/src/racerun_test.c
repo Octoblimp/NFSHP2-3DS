@@ -44,9 +44,10 @@
 #define VTAB_IMAGE 0x01002400u
 
 // What racerun.c and racecore.c reach outside the sources linked with them.
+// pReplayManager is replay.c's, linked for trackpath.c's DoSnapshot.
 World         *pCurrentWorld;
-ReplayManager *pReplayManager;
 int32_t        WorldTimer;
+int32_t        WorldLoopCounter;   // realtime.c's; ReplaySnapshot_Init reads it
 int32_t        WorldTimeFrames;
 float          WorldTimeElapsed;
 void         (*gWorldObjectDeleteFn)(WorldObject *o);

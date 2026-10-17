@@ -105,6 +105,7 @@ TTC = "3DS Files/source/terraintype.c"
 CTC = "3DS Files/source/cartrack.c"
 SOURCES = [HARNESS, TRC, TTC, CTC,
            "3DS Files/source/carstate.c",
+           "3DS Files/source/replay.c",
            "3DS Files/source/emath.c",
            "3DS Files/source/bmatrix.c",
            "3DS Files/source/terraintypetab.c",

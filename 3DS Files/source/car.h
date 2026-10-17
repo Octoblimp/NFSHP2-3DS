@@ -738,4 +738,19 @@ extern PlayerCleanUpJumpCamFn     gPlayerCleanUpJumpCamFn;
 #define PLAYER_ZONE_JUMP_CAM   6
 #define PLAYER_ZONE_AFTER_JUMP 7
 
+// ---------------------------------------------------------------- the replay
+
+// Retail's Car::DoSnapshot (0x00130ff0), in carsnap.c. A section named
+// "Car%d" for CarIndex. carsnap.c's comments map each retail offset to its
+// field; the port's Car keeps the demo's order, so the moves go by name.
+struct ReplaySnapshot;
+void car_do_snapshot(Car *c, struct ReplaySnapshot *s);
+
+// AnimatedDriver::DoSnapshot (0x001a9770), a car's driver's arms and head;
+// TASKS 72d. Car::DoSnapshot reaches it only for a car that has one, and
+// the port builds none yet, so an unset seam reached aborts.
+typedef void (*AnimatedDriverDoSnapshotFn)(AnimatedDriver *d,
+                                           struct ReplaySnapshot *s);
+extern AnimatedDriverDoSnapshotFn gAnimatedDriverDoSnapshotFn;
+
 #endif // CAR_H

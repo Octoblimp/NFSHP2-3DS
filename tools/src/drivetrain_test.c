@@ -25,6 +25,7 @@
 // the image. Defined here rather than linked from realtime.c, which would
 // bring the joylog in behind it. The sport-shift scenario sets the step.
 int32_t WorldTimer = 0;
+int32_t WorldLoopCounter;   // realtime.c's too; ReplaySnapshot_Init reads it
 float   WorldTimeElapsed = 0.0f;
 
 // ----------------------------------------------------------------- output
