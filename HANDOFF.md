@@ -26124,3 +26124,63 @@ arguments and compile none of these files. They were not run, as in
 2. Then 72h: the pause pages' special events and DemoModeReplay.
 3. When 72h is committed, the launch checklist the user asked for,
    published, before TASKS 73.
+
+## Session 124, continued -- TASKS 72g-1: the post-race's highlights
+
+The first of 72g's three slices. RCSTATE_POSTRACE (`rcpost.c`) already
+called the four replay seams for the highlights, but nothing bound
+them, so the world behind the end screens stood still on the race's last
+frame. main.c binds them to retail's manager now.
+
+### What changed
+
+- main.c: `gReplayBeginRaceHighlightsFn` and
+  `gReplayBeginNextRaceHighlightFn` are bound to
+  `replaymgr_begin_race_highlights` (`0x0013e308`) and
+  `replaymgr_begin_next_race_highlight` (`0x0013e318`).
+  `gReplayMuteHighlightsFn` and `gReplayEndCurrentHighlightTimeFn` are
+  bound to two new accessors, `replayMuteHighlights` and
+  `replayEndCurrentHighlightTime`. They return the manager's words 12 and
+  160, which retail reads inline.
+- TASKS 72g is split into three slices: 72g-1 (this one), 72g-2
+  (ReplayScreen from retail, with a checker), and 72g-3 (the
+  instant-replay state, View Replay in the pause menu and the End Game
+  Menu, and the auto-replay state for completeness).
+
+`docs/formats/replay.md` has a 72g-1 section.
+
+### On Azahar
+
+`run_azahar_career.ps1 -Race -FinishSeconds 40 -FinishPlace 1` played
+event 32 (Coastal Parklands) with the gas held.
+
+- Behind the results, the Reward menu and the best times, the world
+  played loops 1744 to about 2890 and then went back to 1744. It did this
+  twice over and was on a third pass when the save came.
+- The replay matched the live race on every logged loop. For example,
+  car 0 was at 186.4 -752.7 on loop 1744 replayed and at 189.6 -752.2 on
+  loop 1748 live. The second and third passes were the same to the 0.1.
+- The screenshots show the player's car in the demo camera's shots, at
+  29.9 FPS.
+- The verdict was PASS: the autosave, the unload and the event tree
+  followed. There were 0 bakes failed, stderr stayed empty, and Azahar's
+  `nfshp2_config.txt` is back as it was.
+
+### Checkers re-run
+
+These checkers pass again, with 0 differ and 0 faults:
+
+- The 12 that compile main.c: aicarcontroller, bsound, cameracoord,
+  copmgrsnap, copsnap, democam, helpglyph, joystick, netrace, netstep,
+  sinit and sound.
+- The four replay ones: mainloop, world, replay and replaymgr.
+
+### Next
+
+1. 72g-2: `ReplayScreen` from retail (`0x001ec0c0` .. `0x001ed4e0`) with
+   a checker.
+2. 72g-3: the instant-replay state and View Replay. The auto-replay
+   state comes in for completeness.
+3. 72h: the pause pages' special events and DemoModeReplay.
+4. When 72h is committed, the launch checklist the user asked for,
+   published, before TASKS 73.

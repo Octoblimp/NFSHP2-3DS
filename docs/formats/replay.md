@@ -771,6 +771,44 @@ counts were logged, also had 0 frames off and 0 failed sections over
 loops 405..930 and 859..1080. The race between the snapshots is the
 same on every replay, so 72g's View Replay can start from any of them.
 
+## 72g-1: the post-race's highlights
+
+RCSTATE_POSTRACE (`rcpost.c`) already called four seams, but nothing
+bound them, so the world behind the end screens stood still on the
+race's last frame. main.c now binds them to the manager:
+
+- `gReplayBeginRaceHighlightsFn`: BeginRaceHighlights (`0x0013e308`),
+  on the state's ACTIVATE.
+- `gReplayBeginNextRaceHighlightFn`: BeginNextRaceHighlight
+  (`0x0013e318`), on its TICK once WorldLoopCounter reaches the current
+  highlight's end. The state then makes the demo camera again.
+- `gReplayEndCurrentHighlightTimeFn` and `gReplayMuteHighlightsFn`:
+  EndCurrentHighlightTime and MuteHighlightSoundFlag, words 160 and 12
+  of the manager. Retail reads them inline, as do the End Game Menu and
+  the pause menu. Two accessors in main.c return them.
+
+The world now replays the race's highlights behind the end screens, as
+retail's does. The rules are the ones in "The highlights" above.
+
+The instant-replay state and View Replay are 72g-3. Until then, the End
+Game Menu and the pause menu still leave View Replay off.
+
+On Azahar (2026-10-17), `run_azahar_career.ps1 -Race -FinishSeconds 40
+-FinishPlace 1` played event 32 (Coastal Parklands) with the gas held:
+
+- The race moved from loop 1146 and finished past loop 3494.
+- Behind the results, the Reward menu and the best times, the world
+  played loops 1744 to about 2890 and then went back to 1744. It played
+  them twice over, and was on a third pass when the save came.
+- The replay is the race. Car 0 was at 186.4 -752.7 on loop 1744
+  replayed and at 189.6 -752.2 on loop 1748 live; at 350.7 -912.2 on loop
+  2106 replayed and at 349.7 -913.8 on loop 2108 live. The second and
+  third passes were the same to the 0.1 on every logged loop.
+- The end screens showed the player's car in the demo camera's shots, at
+  29.9 FPS.
+- PASS: the autosave, the unload and the event tree followed, with 0
+  bakes failed and stderr empty.
+
 ## The checker for 72d-1
 
 `tools/racesnap_check.py` runs retail's code beside the port's, on

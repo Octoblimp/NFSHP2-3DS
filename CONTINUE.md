@@ -3654,8 +3654,10 @@ and so replaced every boot.
      retail. Since 72f-2 every race captures with it, in place of
      main.c's stand-in. "ReplayCheck 1" (configitems.h) replays two
      parts of a race as it goes; on Azahar, every frame and checksum
-     snapshot agreed (`docs/formats/replay.md`, 72f-2). 72g (the replay
-     states and ReplayScreen, which bring View Replay) is next.
+     snapshot agreed (`docs/formats/replay.md`, 72f-2). Since 72g-1 the
+     post-race plays the race's highlights behind the end screens.
+     72g-2 (ReplayScreen from retail) is next, then 72g-3 (the
+     instant-replay state and View Replay).
 
    **7b, DriveCameraMover::Update, is done** (HANDOFF.md, Session 31,
    continued: the drive camera's Update). `docs/formats/camera.md`,

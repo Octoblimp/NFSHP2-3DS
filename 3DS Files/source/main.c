@@ -5068,6 +5068,21 @@ static int32_t replayGetBeginningOfTime(const ReplayManager* rm)
     return rm->BeginningOfTime;
 }
 
+// RCSTATE_POSTRACE plays the race's highlights behind the end screens
+// (TASKS 72g-1): its ACTIVATE begins them, and its TICK begins the next
+// once WorldLoopCounter reaches the end of the current one. The two words
+// it reads, as do the End Game Menu and the pause menu, through accessors
+// retail inlines (lw 12 and lw 160 of the manager).
+static int32_t replayMuteHighlights(const ReplayManager* rm)
+{
+    return rm->MuteHighlightSoundFlag;
+}
+
+static int32_t replayEndCurrentHighlightTime(const ReplayManager* rm)
+{
+    return rm->EndCurrentHighlightTime;
+}
+
 // ReplayCheck (configitems.h), the port's own test of the replay (TASKS
 // 72f-2). The race captures as retail's does; this plays two parts of it
 // back and counts what does not come out the same. Round 1 sets the four
@@ -8171,6 +8186,10 @@ int main(int argc, char** argv)
     gReplayMarkTheBeginningOfTimeFn   = replaymgr_mark_the_beginning_of_time;
     gReplayMarkTheEndOfTimeFn         = replaymgr_mark_the_end_of_time;
     gReplayRegisterInterestingEventFn = ReplayManager_RegisterInterestingEvent;
+    gReplayBeginRaceHighlightsFn      = replaymgr_begin_race_highlights;
+    gReplayBeginNextRaceHighlightFn   = replaymgr_begin_next_race_highlight;
+    gReplayMuteHighlightsFn           = replayMuteHighlights;
+    gReplayEndCurrentHighlightTimeFn  = replayEndCurrentHighlightTime;
     gRaceCoordinatorPostMessageFn = ConfigReplayCheck
                                         ? replayCheckPostMessage
                                         : racecoordinator_post_message;

@@ -4201,6 +4201,33 @@ phases.
           `RCSTATE_AUTO_REPLAY`) and `ReplayScreen` (its timeline, camera
           modes and buttons). This brings the pause menu's View Replay
           and the post-race's highlights.
+          - [x] 72g-1. The post-race's highlights: the four seams
+            RCSTATE_POSTRACE already calls (BeginRaceHighlights
+            `0x0013e308`, BeginNextRaceHighlight `0x0013e318`, and the
+            two words retail reads inline) bound to 72f-1's manager.
+            The world behind the end screens then replays the race's
+            highlights on the demo camera. Checked on Azahar with a
+            career race to its end.
+            Done in Session 124, continued (`docs/formats/replay.md`,
+            72g-1). On Azahar, event 32's end screens replayed loops
+            1744 to about 2890 again and again, matching the race on
+            every logged loop. The run passed: the autosave, the unload
+            and the event tree. The 16 checkers that compile main.c or
+            run the replay pass again.
+          - [ ] 72g-2. `ReplayScreen` from retail (`0x001ec0c0` ..
+            `0x001ed4e0`): the constructor and destructor, Tick and
+            Update, the joystick handlers, the camera movers, the NIS
+            watch, the timeline and its flailer bitmap. A checker runs
+            it beside retail's.
+          - [ ] 72g-3. RCStateInstantReplayCallback (`0x0014b568`) with
+            the screen, and the pause menu's and End Game Menu's View
+            Replay (`gReplayNumInstantReplaySnapshotsFn`, the End Game
+            Menu's test). Also RCStateAutoReplayCallback (`0x0014b848`)
+            and the auto replay's four helpers (`0x0014c0f8` ..
+            `0x0014c2d8`), for completeness: nothing in retail posts
+            RC_REQUEST_AUTO_REPLAY (7), so the state is never entered.
+            Checked on Azahar: View Replay from the pause menu and
+            from the End Game Menu.
         - [ ] 72h. The pause pages' special events (`AddSpecialEvent`),
           and `DemoModeReplay` with the disc's replays for attract mode.
           The PS2's float rounding is not the 3DS's, so these may drift.
