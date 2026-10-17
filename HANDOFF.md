@@ -25399,3 +25399,95 @@ names at `0x002f0948`.
    `bRepeat` (add, remove, the locations, DoSnapshot). Then
    tools/replay_check.py against retail, with mutations.
 2. Then 72b to 72h as TASKS 72 lists them, one at a time.
+
+## Session 120 -- TASKS 72a: ReplaySnapshot and bRepeat
+
+The first slice of the replay is done: the snapshot's memory image and
+the input stream, in retail's layouts, checked against retail's own
+code. Nothing calls them yet. main.c's `replayStandIn` still keeps every
+flag clear until 72f.
+
+### What is ported
+
+- **`brepeat.h` and `brepeat.c`** (new): `bRepeat` and its 36-byte
+  channels at retail's offsets.
+  - The functions: WriteToLocation (`0x001eb050`), ReadFromLocation
+    (`0x001eb0c0`), PrepareToAddData (`0x001eb120`),
+    ShovelDataOffToCodeine (`0x001eb1a8`), AddData (`0x001eb2d8`),
+    PrepareToRemoveData (`0x001eb498`) and RemoveData (`0x001eb4e8`).
+  - `bRepeat_InitChannel` is MarkTheBeginningOfTime's two inline
+    stores.
+  - Codeine's sends are gone. The shovel still does its bookkeeping:
+    the channels lose their last item, and the part byte moves to the
+    start of the stream.
+  - The three Codeine queries from `0x001eb610` on are Joylog's (the dev
+    kit's) and are not ported.
+- **`replay.h` and `replay.c`**:
+  - The ReplayManager's head is in retail's layout up to
+    `ReplaySnapshotList` at 112, with retail's new word at 12
+    (`MuteHighlightSoundFlag`; the name is ours).
+  - `ReplaySectionInfo` is 16 bytes and `ReplaySnapshot` 38232, with
+    layout checks.
+  - The ReplaySnapshot functions: Init, ChangeName, GetChecksum,
+    WriteData, ReadData, MoveData, VerifyData, BeginSection and
+    EndSection.
+  - The inline overloads as retail has them (float, Timer, bVector2,
+    bVector3, int, unsigned, short, unsigned short, char, unsigned char
+    and bool), and BeginNamedSection / EndNamedSection.
+  - `bRepeat_DoSnapshot` (`0x0013cb90`).
+  - `replay_breaks` counts retail's `bBreak`s.
+- **main.c**: only the stand-in's comment changed.
+
+### Retail's edges, kept
+
+- WriteData overflows when `pos + stored > 37887`, so the data's last
+  byte is never written. An OverflowedFlag already up keeps its value.
+- A MoveData outside every section (depth -1) counts itself in
+  PrintDepth's third byte, since the section stack is `76 + depth * 16`
+  with no bound.
+- Verifying past SizeofData compares with whatever retail's stack held.
+  The port compares with 0; the checker's model zeroes the stack to
+  match.
+- The bit shifts are the EE's, mod 32. A repeat bumps the channel's
+  last count even past other channels' items, until the count is full.
+- PrepareToAddData with a size under 48 would send retail's bMemSet
+  through all of memory. The port clears nothing then, and the replay
+  passes 0x32000.
+- Retail's printing (PrintSectionName, PrintSpaces,
+  VerifyMoveDataInSync) has no effect, so it is gone.
+
+### The checker
+
+`tools/replay_check.py` with `tools/src/replay_test.c`. The model is
+retail's own code in RetailEmu: every function above, the overloads at
+their own addresses, and PrintSectionName and PrintSpaces as they are.
+bBreak counts and bFunkCallASync answers 0.
+
+- The script takes, restores, checksums and verifies through every
+  overload, and nests sections 16 deep. For bRepeat it adds and removes
+  on 4 and 12 channels, fills a stream to its limit with and without
+  Codeine, shovels, and takes and restores both halves of DoSnapshot.
+- The break count is printed after every op, so each bBreak is placed.
+- 1332 ops, 3025 lines, 0 differ. Mutations: 188, 186 caught, 2
+  equivalent. A char's sign cannot show: it fills only when nothing is
+  stored.
+
+### Checkers re-run
+
+All 0 differ. These link replay.c or read the replay layouts: joystick,
+carmode, careffects, drivingchoice, nearbycar, realcontroller,
+realdriver, world, joyhid, endgame, pursuit, racecoord, racerun,
+raceupdate, rcstates and pausemenu. The drivingchoice and nearbycar
+harnesses now define `WorldLoopCounter` beside `WorldTimer`, because
+Init reads it.
+
+The CIA builds with no warnings from the new files.
+
+### Next
+
+1. 72b: the snapshots of the cars and their physics (TASKS 72 lists
+   them). `grep DoSnapshot out/retail_syms.txt` gives the addresses.
+   Each DoSnapshot goes beside its object's code, checked by running
+   retail's DoSnapshot and the port's over the same object in take,
+   restore and checksum modes.
+2. Then 72c to 72h, one at a time.

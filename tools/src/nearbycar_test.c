@@ -51,6 +51,7 @@
 // bring the joylog in behind it (as tools/src/realdriver_test.c).
 int32_t WorldTimer;
 int32_t WorldTimeFrames;
+int32_t WorldLoopCounter;
 float   WorldTimeElapsed;
 
 static World world;

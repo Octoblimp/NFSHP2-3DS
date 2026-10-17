@@ -5100,23 +5100,20 @@ static void replayAddData(ReplayManager* rm, int32_t value, int32_t bits,
     if (rm->CapturingFlag) replayNoRepeat();
 }
 
-// The beginning of time RACE_IN_PROGRESS's TICK reads, retail's Timer at
-// +92 (replay.h names the demo's head, where +92 is EndOfTime). The
-// stand-in is zeroed, so the first TICK at RACING marks it and starts the
-// race's music six seconds on, as retail's does. Retail's
-// MarkTheBeginningOfTime (0x0013d6f8) also stamps +80, +84 and +96 and
+// The beginning of time RACE_IN_PROGRESS's TICK reads. The stand-in is
+// zeroed, so the first TICK at RACING marks it and starts the race's music
+// six seconds on, as retail's does. Retail's MarkTheBeginningOfTime
+// (0x0013d6f8) also stamps the capture's loop counts and EndOfTime and
 // begins capturing when there is memory for it; the stand-in captures
 // nothing, so it keeps only the Timer.
 static int32_t replayGetBeginningOfTime(const ReplayManager* rm)
 {
-    int32_t t;
-    memcpy(&t, (const uint8_t*)rm + 92, 4);
-    return t;
+    return rm->BeginningOfTime;
 }
 
 static void replayMarkTheBeginningOfTime(ReplayManager* rm)
 {
-    memcpy((uint8_t*)rm + 92, &WorldTimer, 4);
+    rm->BeginningOfTime = WorldTimer;
 }
 
 // The packs' ranges still being read in: CarLoader's skins and the HUD's,

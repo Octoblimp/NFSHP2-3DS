@@ -4068,12 +4068,15 @@ phases.
           `REPLAY\JUL23\T11BlueElise.bin` and four more, on the retail
           disc.
         The slices, one at a time:
-        - [ ] 72a. `ReplaySnapshot` and `bRepeat`: the snapshot's image
+        - [x] 72a. `ReplaySnapshot` and `bRepeat`: the snapshot's image
           (Init, the MoveData family with its sections, the checksums,
           WriteData, ReadData, VerifyData), and the stream's channels
           (PrepareToAddData, AddData, PrepareToRemoveData, RemoveData,
           the locations, its DoSnapshot). The Codeine calls are the PS2
           dev kit's host link, so they do nothing.
+          **Done in Session 120:** replay.c and the new brepeat.c, in
+          retail's layouts. `replay_check` runs retail's own code: 0
+          differ, 186 of 188 mutations caught and 2 equivalent.
         - [ ] 72b. The snapshots of the cars and their physics: Car,
           PhysicsCar, RigidBody, Wheel, Suspension, the steering,
           Aerodynamics, Engine, DriveTrain, CarState, CarController,

@@ -3609,10 +3609,9 @@ and so replaced every boot.
    - `careffects_check` runs it in RetailEmu: 110 ops, 519 lines, 0
      differ, 133 of 136 mutations caught and 3 equivalent.
      `carmode_check` no longer runs slice ten.
-   - `replay.h` is still the demo's layout (retail's ReplaySnapshotList
-     is at 112 and TotalInterestingValue at 332). Nothing reads a
-     ReplayManager in place yet, so it owes a retail pass before that
-     happens.
+   - `replay.h` is in retail's layout since TASKS 72a (Session 120):
+     the ReplayManager's head to `ReplaySnapshotList` at 112, and the
+     whole 38232-byte `ReplaySnapshot` (TotalInterestingValue at 332).
 
    **7b, DriveCameraMover::Update, is done** (HANDOFF.md, Session 31,
    continued: the drive camera's Update). `docs/formats/camera.md`,
