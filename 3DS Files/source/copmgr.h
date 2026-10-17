@@ -275,6 +275,18 @@ extern void    (*gCopManagerMonitorSpikeBeltsFn)(tCopManager *m);
 extern void    (*gCopManagerEndPulloverFn)(tCopManager *m, int32_t i);
 extern void    (*gCopManagerBeACopThinkFn)(tCopManager *m);
 
+struct ReplaySnapshot;
+
+// tCopManager::DoSnapshot, 0x00223b70 (copmgrsnap.c, TASKS 72e-3), a
+// section named "tCopManager", bound to world.h's gCopManagerDoSnapshotFn:
+// the three counts verified; on a restore the roadblocks' and radar
+// traps' cops emptied, every pursuit and spike strip deleted and made
+// again from the counts (the pursuits by their ids). Then each pursuit's,
+// each cop's and each strip's own, the pullovers, the chopper's flag, the
+// speakers, the timers, Be A Cop's damage and time while BeACop, and Be A
+// Cop's counts.
+void copmanager_do_snapshot(tCopManager *m, struct ReplaySnapshot *s);
+
 // Registers tCopManager's table, 0x002bd280.
 void copmgr_install_vtables(void);
 

@@ -4133,7 +4133,7 @@ phases.
             beside the port's: 5631 lines, 0 differ; 88 of 88 mutations
             caught. The 121 checkers that link the changed files pass
             again.
-        - [ ] 72e. The cops: tCopManager, tPursuit, the roadblock's state
+        - [x] 72e. The cops: tCopManager, tPursuit, the roadblock's state
           machine, tPlayerCop, tAICop, the spike strips, DroppedSpikes,
           Rocket and Chopper. In three:
           - [x] 72e-1. DroppedSpikes' (0x001bef90) and Rocket's
@@ -4155,9 +4155,17 @@ phases.
             beside retail's: 10696 lines, 0 differ; 183 of 183 mutations
             caught. The 52 other checkers that link the changed files
             pass again.
-          - [ ] 72e-3. tCopManager (0x00223b70): the pursuits, the
+          - [x] 72e-3. tCopManager (0x00223b70): the pursuits, the
             strips and the cops, bound to World's
             `gCopManagerDoSnapshotFn`.
+            **Done in Session 123:** from retail in the new
+            `copmgrsnap.c`, with tSpikeStrip's default constructor
+            (0x00241308) in `spikestrip.c`. A restore deletes and makes
+            the pursuits and the strips again. `copmgrsnap_check` runs
+            it beside retail's: 62527 lines, 0 differ; 89 of 90
+            mutations caught, one equivalent. `spikestrip_check` checks
+            the constructor. The 21 other checkers that link the changed
+            files pass again.
         - [ ] 72f. `ReplayManager` in full, in MainLoop in place of
           main.c's stand-in. Checked in Azahar with retail's checksum
           snapshots: a race replayed to where it paused, with every

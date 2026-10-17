@@ -3641,8 +3641,15 @@ and so replaced every boot.
    - tPursuit's, tCop's, tPlayerCop's and tAICop's DoSnapshots are
      retail's since TASKS 72e-2 (Session 123, continued), in
      `copsnap.c`, with the cop manager's pursuit, cop and radar trap
-     pointers; the cops' are slot 32 of their tables. 72e-3 (the cop
-     manager's own, `0x00223b70`) is next.
+     pointers; the cops' are slot 32 of their tables.
+   - tCopManager's DoSnapshot is retail's since TASKS 72e-3 (Session
+     123, continued), in `copmgrsnap.c`; main.c binds
+     `gCopManagerDoSnapshotFn`. A restore deletes and makes the pursuits
+     and the strips (tSpikeStrip's default constructor, `0x00241308`).
+     `copmgrsnap_check` runs it against retail. Every snapshot World
+     takes is retail's now, but for the clans', the fern shakers' and
+     AnimatedDriver's, whose classes are not ported. 72f (ReplayManager
+     in full, in place of main.c's stand-in) is next.
 
    **7b, DriveCameraMover::Update, is done** (HANDOFF.md, Session 31,
    continued: the drive camera's Update). `docs/formats/camera.md`,

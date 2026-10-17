@@ -52,6 +52,16 @@ void tspikestriprenderelement_destruct(tSpikeStripRenderElement *e,
 
 // ------------------------------------------------------------ the strip
 
+tSpikeStrip *tspikestrip_construct_default(tSpikeStrip *s)
+{
+    int32_t k;
+
+    s->vptr = TSPIKESTRIP_VTABLE;
+    for (k = 0; k < TSPIKESTRIP_MAX_ELEMENTS; k++)
+        tspikestriprenderelement_construct(&s->Elements[k]);
+    return s;
+}
+
 tSpikeStrip *tspikestrip_construct(tSpikeStrip *s, const bVector2 *a,
                                    const bVector2 *b, int32_t id,
                                    float lifetime)

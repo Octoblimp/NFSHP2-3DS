@@ -25928,3 +25928,66 @@ stand-ins for them that abort if ever called.
 2. Then 72f to 72h, one at a time.
 3. When 72h is committed, the launch checklist the user asked for,
    published, before TASKS 73.
+
+## Session 123, continued -- TASKS 72e-3: the cop manager's snapshot
+
+The last of 72e's three slices: tCopManager's own snapshot, which takes
+the pursuits, the cops and the strips of 72e-1 and 72e-2. With it, every
+snapshot World takes is retail's, but for the clans', the fern shakers'
+and AnimatedDriver's, whose classes are not ported.
+
+### What is ported
+
+From retail, at retail's address:
+
+- tCopManager::DoSnapshot (`0x00223b70`), in the new `copmgrsnap.c`,
+  bound to `gCopManagerDoSnapshotFn` in main.c. It verifies the three
+  counts, and a restore empties the roadblocks' and radar traps' cops.
+  The pursuits go as a count and their ids; a restore deletes every
+  pursuit and makes one for each id (DeletePursuit `0x00224560`,
+  NewPursuit `0x002244e0`). Each pursuit's snapshot, then each cop's
+  (slot 32). The strips go as a count; a restore destroys every strip
+  and builds each again at the head of the list. Then the pullovers, the
+  chopper's flag, the speakers' ring (turned a whole time round on a
+  take, refilled at the head on a restore, ended by a 6), the timers up
+  to `CopCarPos`, Be A Cop's damage and time, and its counts.
+- tSpikeStrip's default constructor (`0x00241308`) in `spikestrip.c`:
+  the table and the twenty pieces, nothing else.
+
+The VerifyMoveDataInSync calls between the parts reach an empty function
+and are left out. `docs/formats/replay.md` has every move in a 72e-3
+section; `docs/formats/cop-manager.md` points to it.
+
+### The checkers
+
+`tools/copmgrsnap_check.py` and `tools/src/copmgrsnap_test.c` are new.
+Run real on both sides: ReplaySnapshot and the function. Recorded: the
+pursuits', strips' and cops' snapshots (the cops' through tables the
+harness installs at retail's addresses), the strip's destructor and
+constructor, DeletePursuit, NewPursuit and the pool.
+
+- 3207 script lines, 62527 lines, 0 differ.
+- 90 mutations: 89 caught, one equivalent (the id's write moved before
+  the push while the ring turns; a take never writes into the id).
+- A source check holds main.c to binding the seam.
+
+`tools/spikestrip_check.py` builds two strips with the default
+constructor, from a dirty pool and a clean one: 747 ops, 6545 lines, 0
+differ. Its full constructor's two mutations matched both constructors
+once the default one was added; they name the full one alone now, and
+three new ones for the default are caught. All 151 needles are unique.
+
+### Checkers re-run
+
+The 21 other checkers that compile a changed file or header pass again.
+
+### Next
+
+1. 72f: ReplayManager in full (retail's Replay.obj, near
+   `0x0013d000`..`0x00140000`), in MainLoop in place of main.c's stand-in
+   (`replayStandIn` and the GetData/AddData seams). Checked in Azahar
+   with retail's checksum snapshots: a race replayed to where it paused,
+   with every checksum agreeing.
+2. Then 72g and 72h, one at a time.
+3. When 72h is committed, the launch checklist the user asked for,
+   published, before TASKS 73.

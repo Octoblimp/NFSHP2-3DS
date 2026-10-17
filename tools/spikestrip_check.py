@@ -10,8 +10,10 @@ WorldObject's (0x001cd760) and bStringHash under it; MonitorSpikeBelts
 (0x00227758) with Update (0x002417b8), BlinkBlinkPoof (0x00241880),
 AICarController's force_pull_over (0x001908d8) and the strip's and the
 pieces' destructors (0x00241430, 0x00241a48) with WorldObject's
-(0x001cd828), reached through their tables; and InitWorldObjects
-(0x001cd918) and CloseWorldObjects (0x001cd948). The harness
+(0x001cd828), reached through their tables; InitWorldObjects
+(0x001cd918) and CloseWorldObjects (0x001cd948); and the default
+constructor (0x00241308), which the cop manager's replay snapshot uses
+(TASKS 72e-3). The harness
 (tools/src/spikestrip_test.c) runs spikestrip.c, worldobject.c and
 vtable.c and prints the same lines.
 
@@ -41,7 +43,9 @@ their lives down through the blink to the end, with a NaN and with no
 lifetime; and runs the manager's watch over cars out of range, blinking,
 off to the side, and on the strip with each set of wheels down, as AI
 racers, players, the player's own cop and traffic, in Be A Cop and not,
-at each difficulty, with tires already blown and not.
+at each difficulty, with tires already blown and not. Last, it builds
+two strips with the default constructor, from a dirty pool and a clean
+one.
 
     python tools/spikestrip_check.py
     python tools/spikestrip_check.py --mutate [--only a,b]
@@ -85,6 +89,7 @@ G_WOL = GP - 18120                      # WorldObjectList (prev at +4)
 G_WOP = GP - 18112                      # WorldObjectSlotPool
 
 F_ADD = 0x002276d0
+F_DFLT = 0x00241308                     # tSpikeStrip(void)
 F_MON = 0x00227758
 F_INIT = 0x002414e8
 F_UPDATE = 0x002417b8
@@ -625,6 +630,12 @@ class Model(object):
             i = int(a[1], 0)
             self.emit("poof S%d" % i)
             e.call(F_POOF, self.strips[i])
+        elif o == "dflt":
+            self.emit("dflt")
+            e.reg[4] = self.ssp
+            p = self.s_omalloc(e)
+            e.call(F_DFLT, p)
+            self.dump_strip(p)
         elif o == "dtor":
             i, fl = int(a[1], 0), int(a[2], 0)
             self.emit("dtor S%d %d" % (i, fl))
@@ -994,8 +1005,15 @@ def rendering():
     return s
 
 
+def defaults():
+    # The replay's constructor (72e-3): from a dirty pool and a clean one,
+    # every field but the table and the pieces' left as the pool had it.
+    return ["fill|cd", "dflt", "fill|0", "dflt", "list"]
+
+
 def script():
     s = world_objects() + laying() + lifetimes() + monitors() + rendering()
+    s += defaults()
     s += ["closewo", "list", "renderall|0", "initwo", "list"]
     return s
 
@@ -1093,12 +1111,37 @@ MUTATIONS = [
     # ---- the constructor and Init
     ("ctor_19", S,
      "    for (k = 0; k < TSPIKESTRIP_MAX_ELEMENTS; k++)\n"
-     "        tspikestriprenderelement_construct",
+     "        tspikestriprenderelement_construct(&s->Elements[k]);\n"
+     "    tspikestrip_init",
      "    for (k = 0; k < TSPIKESTRIP_MAX_ELEMENTS - 1; k++)\n"
-     "        tspikestriprenderelement_construct"),
+     "        tspikestriprenderelement_construct(&s->Elements[k]);\n"
+     "    tspikestrip_init"),
     ("ctor_no_vptr", S,
-     "    s->vptr = TSPIKESTRIP_VTABLE;\n    for (k = 0; k < TSPIKESTRIP_MAX",
-     "    for (k = 0; k < TSPIKESTRIP_MAX"),
+     "    s->vptr = TSPIKESTRIP_VTABLE;\n    for (k = 0; k < TSPIKESTRIP_MAX"
+     "_ELEMENTS; k++)\n        tspikestriprenderelement_construct(&s->Elements"
+     "[k]);\n    tspikestrip_init",
+     "    for (k = 0; k < TSPIKESTRIP_MAX"
+     "_ELEMENTS; k++)\n        tspikestriprenderelement_construct(&s->Elements"
+     "[k]);\n    tspikestrip_init"),
+    # The replay's default constructor (72e-3).
+    ("dflt_19", S,
+     "    for (k = 0; k < TSPIKESTRIP_MAX_ELEMENTS; k++)\n"
+     "        tspikestriprenderelement_construct(&s->Elements[k]);\n"
+     "    return s;",
+     "    for (k = 0; k < TSPIKESTRIP_MAX_ELEMENTS - 1; k++)\n"
+     "        tspikestriprenderelement_construct(&s->Elements[k]);\n"
+     "    return s;"),
+    ("dflt_from_1", S,
+     "    for (k = 0; k < TSPIKESTRIP_MAX_ELEMENTS; k++)\n"
+     "        tspikestriprenderelement_construct(&s->Elements[k]);\n"
+     "    return s;",
+     "    for (k = 1; k < TSPIKESTRIP_MAX_ELEMENTS; k++)\n"
+     "        tspikestriprenderelement_construct(&s->Elements[k]);\n"
+     "    return s;"),
+    ("dflt_no_vptr", S,
+     "tspikestrip_construct_default(tSpikeStrip *s)\n{\n    int32_t k;\n\n"
+     "    s->vptr = TSPIKESTRIP_VTABLE;\n",
+     "tspikestrip_construct_default(tSpikeStrip *s)\n{\n    int32_t k;\n\n"),
     ("init_no_id", S, "    s->nRoadBlockID = id;\n", ""),
     ("init_no_life", S, "    s->fLifetime = lifetime;\n", ""),
     ("init_ends_swapped", S,

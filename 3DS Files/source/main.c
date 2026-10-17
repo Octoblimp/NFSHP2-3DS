@@ -8091,6 +8091,9 @@ int main(int argc, char** argv)
     gChopperDestroyFn                   = chopper_destruct;
     gChopperFlyFn                       = chopper_fly;
     gChopperDoSnapshotFn                = chopper_do_snapshot;
+    // The cop manager's own snapshot (copmgrsnap.c, 72e-3): the pursuits,
+    // the cops and the strips, made again on a restore, and the rest.
+    gCopManagerDoSnapshotFn             = copmanager_do_snapshot;
     gChopperNew960Fn                    = pursuitchopper_new960;
     gChopperFollowThisCarFn             = pursuitchopper_follow_this_car;
     gPursuitUpdateChopperFn             = tpursuit_update_chopper;

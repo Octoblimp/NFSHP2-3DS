@@ -681,6 +681,12 @@ static void op(char **a, int na)
     } else if (!strcmp(o, "poof")) {
         printf("poof S%d\n", (int)num(a[1]));
         tspikestrip_blink_blink_poof(strips[num(a[1])]);
+    } else if (!strcmp(o, "dflt")) {
+        tSpikeStrip *s;
+
+        printf("dflt\n");
+        s = bSlotOMalloc((BSlotPool *)(void *)tok_ssp);
+        dump_strip(tspikestrip_construct_default(s));
     } else if (!strcmp(o, "dtor")) {
         tSpikeStrip   *s = strips[num(a[1])];
         const VtEntry *v = vt_slot(s->vptr, TSPIKESTRIP_VT_DTOR);

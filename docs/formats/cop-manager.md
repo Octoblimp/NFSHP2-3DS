@@ -41,6 +41,7 @@ AddCopCarToRace that make them, are `cops.md`'s (12b on).
 | ReclaimPatrollers | `0x00224e00` | `copmanager_reclaim_patrollers` |
 | tPursuit::NotInChasingState | `0x002295c8` | `tpursuit_not_in_chasing_state` (copmanager.c) |
 | tPursuit::AboutToSaySomething | `0x0022b9e8` | `tpursuit_about_to_say_something` (copmanager.c) |
+| DoSnapshot | `0x00223b70` | `copmanager_do_snapshot` (copmgrsnap.c, 72e-3) |
 
 All are in `copmgr.c`, declared in `copmgr.h`. The records and the
 small queries the HUD, cameras and AI already used stay in
@@ -400,9 +401,11 @@ side of p's line q and q + e lie; if their product is above 0 (or NaN),
 the answer is 0. Then the same for p and p + d against q's line. So
 segments on one line count as crossing even when apart, as retail's do.
 
-The default constructor (`0x00241308`) is the replay's. DoSnapshot
-(`0x00241898`) is in copsnap.c (TASKS 72e-1): [replay.md](replay.md)
-lists its moves, and `tools/copsnap_check.py` checks it.
+The default constructor (`0x00241308`) is the replay's: the cop
+manager's snapshot (`copmgrsnap.c`, TASKS 72e-3) builds each strip of a
+restore with it. DoSnapshot (`0x00241898`) is in copsnap.c (TASKS 72e-1):
+[replay.md](replay.md) lists its moves, and `tools/copsnap_check.py`
+checks it.
 
 ## Drawing the strips (12j-2b)
 
@@ -596,6 +599,13 @@ matrices, four solids and a 4 KB frame arena, then covers:
 - RenderWorldObjects over objects with Enabled 0, 2, -1 and 1.
 
 742 operations, 6337 lines, 0 differ. 32 more mutations, all caught.
+
+72e-3 adds the default constructor (`0x00241308`). Two strips are built
+with it, from a dirty pool and a clean one: the table and the twenty
+pieces are set, and every other field is left as the pool had it. 747
+operations, 6545 lines, 0 differ. Three more mutations, all caught. The
+full constructor's two old ones now name it alone, as the default one
+has the same lines.
 
 DoSegmentsIntersect is a stand-in there and is checked on its own in
 `tools/trackgraph_check.py`. Segments are crossed, touched at an end,

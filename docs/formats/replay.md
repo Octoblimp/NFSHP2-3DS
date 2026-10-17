@@ -20,7 +20,8 @@ The drivers and the AI are 72c's (each class's page,
 classes (72d-1), then World's and RaceCoordinator's, which take all of
 them, with the smokeables and the collision bodies (72d-2). Then 72e's,
 the cops: the munitions, the spike strip and the chopper (72e-1); the
-pursuit and the cops (72e-2).
+pursuit and the cops (72e-2); the cop manager, which takes them all
+(72e-3).
 
 ## How the lists read
 
@@ -456,6 +457,50 @@ Retail names its section as the base's.
 
 Slot 32 of its table.
 
+## 72e-3: the cop manager
+
+`copmgrsnap.c` has tCopManager's, a file of its own: it deletes and makes
+the pursuits and the strips a restore needs, and reaches the pursuits',
+the cops' and the strips' snapshots. World's SnapshotCops calls it
+through `gCopManagerDoSnapshotFn`, which main.c binds. Retail's
+VerifyMoveDataInSync calls between the parts ("After tPursuits" and the
+rest) reach an empty function and are left out.
+
+### tCopManager, 0x00223b70, section "tCopManager"
+
+1. `nNumAICops`, `nNumRoadBlocks` and `nNumSpeedTraps` verify int 4.
+2. A restore empties both cops of each roadblock below the count and the
+   cop of each radar trap below its count. The cops' own snapshots give
+   them back.
+3. The pursuits: their count (TraversebList, `0x00250428`, given NULL)
+   as an unsigned char 1. A restore deletes every pursuit on the list
+   (DeletePursuit, `0x00224560`, first to last) and, for each one it
+   reads, takes an id as a char 1 and makes a pursuit with it and no car
+   (NewPursuit, `0x002244e0`). Otherwise each pursuit's `nPursuitId` as
+   a char 1. Then each pursuit's own (72e-2), first to last.
+4. The cops: slot 32 of each cop's table, for each below `nNumCops`.
+5. The spike strips: their count as an int 4. A restore unlinks and
+   destroys every strip (slot 8 of its table, with 3), then for each one
+   it reads builds a strip from `SpikeStripSlotPool` with the default
+   constructor (`0x00241308`) and puts it at the head of the list. Then
+   each strip's own (72e-1), first to last.
+6. For each of the eight pullovers: `bActive`, `bPlayNIS` and `bArrest`
+   bool; `fHoldTimer` float; `nNumTickets` char 1; `nCopIndex` int 4.
+7. `bChopperBusy` bool.
+8. The speakers' ring (`CopSpeakers`, a Deque of four uints): each id
+   as a uint 4, back to front, then 6. Taking, and either checksum,
+   turns the ring a whole time round, each id from the tail to the head,
+   until the id that was at the head comes round again; an empty ring
+   moves only the 6. A restore empties the ring and pushes each id it
+   reads at the head until the 6.
+9. For each car up to the world's `CopCarPos`: `fPursuableTimer`, then
+   `fSpeedTrapSpawnTimer`, float.
+10. In Be A Cop (`TheRaceParameters.BeACop` not 0): the fourteen of
+    `fCarDamage`, then `fBeACopTime`, float.
+11. `bBeACopAlreadySaidLookOutForSpeeders` and the bool at 10488;
+    `nBeACopNumRoadBlocks`, `nBeACopNumChopperAttacks` and
+    `nBeACopNumArrestsMade` int 4.
+
 ## The checker for 72d-1
 
 `tools/racesnap_check.py` runs retail's code beside the port's, on
@@ -608,10 +653,41 @@ The run is 2789 script lines and 10696 output lines; none differ. All
 183 of 183 mutations are caught. Source checks hold cop.c's tPlayerCop
 and tAICop tables to the new snapshots in slot 32.
 
+## The checker for 72e-3
+
+`tools/copmgrsnap_check.py` runs retail's beside the port's, on
+`tools/src/copmgrsnap_test.c`, with the same five passes. ReplaySnapshot
+and the function run real on both sides. Recorded, as lines both sides
+print: the pursuits' and the strips' snapshots, the two cops' (through
+tables the harness installs at retail's addresses), the strip's
+destructor and default constructor, DeletePursuit (which unlinks the
+pursuit), NewPursuit (a pursuit `P<n>` at the list's tail) and the pool
+(a strip `S<n>`). Each line ends with where the data stands.
+
+The scenarios cover these cases:
+
+- none to four pursuits, ids from -1 to 5, restored over none to four;
+- none to three strips, restored over none to three;
+- one to four cops, the player's and the AI's, in different orders;
+- none, one, two, five and 64 roadblocks and radar traps, each with a
+  cop past the count that a restore must keep;
+- speaker rings full at heads 0 and 1, empty, partly filled, and with
+  every id the same;
+- `CopCarPos` 0, 3, 5, 7 and 8; Be A Cop 0, 1 and 2.
+
+The run is 3207 script lines and 62527 output lines; none differ. 90
+mutations: 89 caught, one equivalent. That one moves the id's write
+before the push while the ring turns; a take never writes into the id,
+so the push sees the same one. A source check holds main.c to binding
+`gCopManagerDoSnapshotFn`. `tools/spikestrip_check.py` checks the
+strip's default constructor.
+
+    python tools/copmgrsnap_check.py
+    python tools/copmgrsnap_check.py --stubs
+    python tools/copmgrsnap_check.py --mutate [--only a,b]
+
 ## Not yet
 
-- 72e-3: tCopManager's (0x00223b70), which takes the pursuits, the
-  strips and the cops, bound to `gCopManagerDoSnapshotFn`.
 - `FlushClans` (0x001ab650) and `FlushFernShakers` (0x001da1b0): the port
   has neither the clans nor the fern shakers yet.
 - `AnimatedDriver::DoSnapshot` (0x001a9770): AnimatedDriver is not

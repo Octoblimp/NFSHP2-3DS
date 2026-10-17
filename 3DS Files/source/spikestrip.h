@@ -16,7 +16,8 @@
 //
 // copmanager.h has both layouts. The pieces are drawn with the other world
 // objects, which is the renderer's (12j-2b). The default constructor
-// (0x00241308) and DoSnapshot (0x00241898) are the replay's, and
+// (0x00241308, here) and DoSnapshot (0x00241898, copsnap.c) are the
+// replay's, and
 // DroppedSpikes::MakeSpikeBelt (0x001bf188), AddSpikeStrip's other caller,
 // is not reached.
 
@@ -39,6 +40,11 @@ tspikestriprenderelement_construct(tSpikeStripRenderElement *e);
 // WorldObjectSlotPool (__dl__11WorldObject). The strip passes 0.
 void tspikestriprenderelement_destruct(tSpikeStripRenderElement *e,
                                        int32_t flags);
+
+// tSpikeStrip::tSpikeStrip(void), 0x00241308: the table and the twenty
+// pieces built in order, nothing else. The replay's: the cop manager's
+// snapshot builds a strip with it and restores the rest (TASKS 72e-3).
+tSpikeStrip *tspikestrip_construct_default(tSpikeStrip *s);
 
 // tSpikeStrip::tSpikeStrip(bVector2 const &, bVector2 const &, int, float),
 // 0x00241378: the table, the twenty pieces built in order, then Init.
