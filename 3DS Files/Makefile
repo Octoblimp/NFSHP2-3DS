@@ -286,16 +286,19 @@ geosolid.shbin.o geosolid_shbin.h : geolit.v.pica geosolid_st.v.pica \
 
 # The stereo 3D copies (TASKS 59, docs/formats/stereo-3d.md): the shader
 # as it is, with its position put in r1 and moved for the eye before it
-# goes out, clip + stereo[0] * w + stereo[1]. The race's world draws
-# through them when the slider is up, so the flat frames pay nothing for
-# the eye's two instructions. Made in the build directory from the shader itself, its
+# goes out, clip + stereo[0] * max(w + stereo[1], 0), stereo[1] the
+# convergence's depth negated: nothing nearer than it moves, so nothing
+# comes out of the screen. The race's world draws through them when the
+# slider is up, so the flat frames pay nothing for the eye's three
+# instructions. Made in the build directory from the shader itself, its
 # procedure renamed: picasso's names are the shbin's, not the file's.
 %_st.v.pica : %.v.pica
 	@echo $(notdir $@)
 	@sed -e 's/^\(\.entry\|\.proc\) \([A-Za-z0-9_]*\)/\1 \2_st/' \
 	     -e 's/^\([ ]*\)dp4 outpos\.\([xyzw]\), mvp/\1dp4 r1.\2, mvp/' \
-	     -e '/^[ ]*dp4 r1\.w, mvp/a\    mad r2, r1.wwww, stereo[0], r1' \
-	     -e '/^[ ]*dp4 r1\.w, mvp/a\    add outpos, stereo[1], r2' \
+	     -e '/^[ ]*dp4 r1\.w, mvp/a\    add r2, stereo[1], r1.wwww' \
+	     -e '/^[ ]*dp4 r1\.w, mvp/a\    max r2, zeros, r2' \
+	     -e '/^[ ]*dp4 r1\.w, mvp/a\    mad outpos, r2, stereo[0], r1' \
 	     -e '/^\.fvec mvp\[4\]/a\.fvec stereo[2]' $< > $@
 
 -include $(DEPSDIR)/*.d

@@ -5,7 +5,8 @@ alone sets it, and there is no option for it. The user set the scope on
 2026-10-16: 3D in the game and the movies only. The menus, the title
 screen, the loading screens, the pause and the results are one image for
 both eyes. With no image drawn for the right eye, the screen's 3D is off
-and so is the slider's light.
+and so is the slider's light. After their first test on a 3DS the same
+day, the movies went back to flat too (see "The movies").
 
 What the slices cover:
 
@@ -14,8 +15,11 @@ What the slices cover:
   and the sun. Done; the sprites are checked in Azahar, the sun is not
   (see below). The light flares were already strips, so 59a covered
   them.
-- **59c**, the full-screen movies, behind the screen. Done, and checked
-  in Azahar.
+- **59c**, the full-screen movies, behind the screen. Done, then taken
+  back at the user's word: they flickered on the 3DS.
+- **59d**, the race's depth made comfortable: nothing in front of the
+  screen, a fixed convergence, a smaller budget, the sky at the horizon.
+  Done, and checked in Azahar.
 
 ## What is in 3D
 
@@ -42,8 +46,7 @@ The HUD, the rear-view mirror, the bottom screen and the song box are
 drawn once. They sit on the screen's plane, and both eyes show them at
 the same place. The effects' sprites (smoke, dust, sparks) and the sun
 are in the screen's pixels too, but they take the eye's shift for their
-depth; see "The screen's own draws" below. The movies that fill the
-screen are in 3D too, outside the race; see "The movies".
+depth; see "The screen's own draws" below. The movies are flat.
 
 ## The eye's term
 
@@ -51,7 +54,8 @@ The vertex shaders `geosolid.v.pica` and `geolit.v.pica` each get a copy,
 made by a Makefile rule (`%_st.v.pica`). The copy:
 
 - writes the position to `r1` instead of `outpos`;
-- adds `outpos = r1 + stereo[0] * r1.w + stereo[1]`;
+- adds `outpos = r1 + stereo[0] * max(r1.w + stereo[1], 0)`, in three
+  instructions (`add`, `max`, `mad`);
 - declares `.fvec stereo[2]`;
 - renames its procedures with `_st`, because picasso's names belong to
   the whole shbin.
@@ -79,29 +83,57 @@ On clip axis y (`Mtx_PerspTilt` turns the view's x into clip y, the
 framebuffer's 400 pixels):
 
 ```
-a          = side * AXIS_SIGN * shift
+a           = side * AXIS_SIGN * shift
 stereo[0].y = a
-stereo[1].y = -a * convergence
-y'         = y + a * (w - convergence)
+stereo[1].y = -convergence
+y'          = y + a * max(w - convergence, 0)
 ```
 
-A vertex at depth `w` moves by `a * (1 - convergence / w)` of the
+A vertex at depth `w` moves by `a * max(1 - convergence / w, 0)` of the
 screen's half-width:
 
-- none at the convergence;
-- `a` at the horizon;
-- the other way for anything nearer than the convergence, which comes
-  out of the screen.
+- none at the convergence, or nearer;
+- `a` at the horizon.
+
+So nothing comes out of the screen. The HUD and the mirror are on the
+screen's plane, in front of the whole world.
 
 Its values:
 
-- **`shift`**: `slider * 6 px / 200`. At the slider's top, the two images
-  are 12 pixels apart at the horizon.
-- **The convergence**: the player's car's depth in the player's view,
-  clamped to 2–12 m.
+- **`shift`**: `slider * 5 px / 200`. At the slider's top, the two images
+  are 10 pixels apart at the horizon, and nothing is further apart.
+- **The convergence**: a fixed 3 m, the same in every camera. The chase
+  camera has the player's car 4.2 m off (the 3DS's log), so the car sits
+  just behind the screen.
 - **`AXIS_SIGN`**: −1. The right eye's far things must sit right of the
   left eye's. Azahar's side by side showed +1 put the horizon 10 pixels
   the wrong way.
+
+**The sky** is the furthest thing in the picture whatever its dome's
+size. Around the main view's sky (`trackview.c`, `stereo3d_race_far`)
+the shared lists set `stereo[1]` to 0, which puts every depth at the
+horizon's shift, and then back to the convergence. `stereo[1]` is the
+same for both eyes, so the change can sit in the lists both eyes run.
+
+### Why: the first test on a 3DS
+
+59a's term put the car's depth on the screen's plane and let anything
+nearer come out of the screen, by `a * (1 - convergence / w)` with no
+limit. The user tried it on their 3DS on 2026-10-16: "Depth is not
+comfortable at all".
+
+- The near road, the walls and the poles going past the screen's edges
+  came out of it by up to 9 px in Azahar, more the nearer they were.
+  Things cut off by the screen's edge in front of it are the classic
+  cause of eye strain.
+- The world in front of the screen also crossed the HUD, which is on
+  it: two depth cues that disagree.
+- The convergence followed the car every frame, and went to 12 m in
+  the flybys, so the whole picture's depth moved.
+
+59d follows the usual rules for comfortable stereo instead: the world
+behind the screen only, a convergence that does not move, and a small
+budget, 10 px at most.
 
 ## The screen's own draws
 
@@ -114,7 +146,7 @@ screen's mapping is changed to match (`screen_for_depth`):
   empty, so the position comes out as d times the flat one, and its w
   is d;
 - the divide by d puts the vertex back where it was, and the term then
-  shifts it by `a * (1 - convergence / d)`, as it does the world.
+  shifts it by `a * max(1 - convergence / d, 0)`, as it does the world.
 
 For each kind:
 
@@ -131,35 +163,12 @@ Flat, both draw as before: the plain program and the screen's mapping.
 
 ## The movies
 
-Five movies fill the top screen through the title's plane
-(`MOVIES\INTRO\`): the EA logo, the Black Box Games logo, the intro, the
-making-of and the reward. The boot plays the EA logo and the intro. The
-credits play the other four. `main.c`'s `hookMovieOpen` opens each one as
-a filling override and sets `movieFull`. The menus' panel movies
-(`hookPanelMovieOpen`) belong to their menus and stay flat.
-
-A frame with a filling movie and no race (`movieFrame`) is sent in
-parts, as the race's frames are. `stereo3d_movie_wanted` asks for the
-rest of `stereo3d_race_wanted`'s list: the slider up, the right eye's
-target, the stereo shaders, the sends. Then `stereo3d_movie_begin`
-starts the eyes the way the race does, with a convergence of 0. With
-no convergence, the term moves every vertex by the eye's whole shift,
-at any w.
-
-- **`shift`**: `slider * 4 px / 200`. At the slider's top the two
-  pictures are 8 pixels apart. The whole picture is behind the screen,
-  nearer than the race's horizon (12).
-- **The movie's quad**: `uirender_set_fill_eyes` sends the filling
-  override to `georender_draw_movie_quad` instead of citro2d. The quad
-  has citro2d's corners, colours and UVs, with T turned back over:
-  georender's shader turns it (`1 - T`), and `subtex_from_pixels` has
-  turned it already. The quad binds the stereo program with a w of 1
-  (`draw_screen_quad`'s `eyeDepth`).
-- **What draws over it** keeps citro2d's shaders, which have no term,
-  so it sits on the screen's plane in both eyes.
-
-Only a view's frame rewinds the quads' ring, so a movie's frame rewinds
-it first (`georender_quads_rewind`).
+59c (c9614c5) put the five movies that fill the top screen behind it:
+the EA logo, the Black Box Games logo, the intro, the making-of and the
+reward, 8 px apart at the slider's top. On the user's 3DS they
+flickered, and the user asked for them flat: "There is flicker on the
+movies, I think remove 3D support for movies." 59d takes 59c's code out
+again. The flicker was not looked into, since the movies are flat now.
 
 ## The frame on the GPU
 
@@ -226,11 +235,28 @@ The test sets `[Layout] render_3d=1` (side by side) and `factor_3d=100`
 in qt-config.ini, then restores them. The shots compare the two halves
 row band by row band: the right image's x minus the left image's.
 
+59a's shots:
+
 | Shot | Far trees | Horizon | Car | Near road |
 |---|---|---|---|---|
 | Race, 3D | +10 to +11 | +10 to +11 | 0 to +5 | 0 to −9 |
 | Pause | 0 | 0 | 0 | 0 |
 | Slider at 0 | 0 | 0 | 0 | 0 |
+
+59d's shots (track 12, gas held, four race shots):
+
+| Where | Right minus left |
+|---|---|
+| The far trees, the top of the picture | +9 |
+| The horizon, the cabin across the road | +8 to +9 |
+| The roadside at the horizon's height | +8 |
+| The player's car | +3 to +4 |
+| The near road | 0 to +4 |
+| The mirror, the speedo, the song box | 0 |
+
+Nothing is in front of the screen. The LOADING screen before the race
+and all 32 shots of the boot walk, the EA logo and the intro among
+them, differ by 0.00 between the eyes.
 
 59b's shots (track 12, gas held): the chimneys' smoke, which is
 sprites, sits at +10 like the chimneys and the roof under it. Before
@@ -246,30 +272,17 @@ Before 59c, the boot flow's 32 shots differed by 0.00 between the
 eyes. These cover the loading screen, the language and autoload screens,
 the movies, the title, the main menu, Be A Cop's setup and the options.
 
-59c's shots (`run_azahar_test.ps1` and `run_azahar_credits.ps1`):
-
-| Shot | Right minus left |
-|---|---|
-| EA logo, intro (boot) | +8, the whole picture |
-| Black Box logo, intro, making-of, reward (credits) | +8, the whole picture |
-| Everything else in both walks | 0.00 |
-
-"Everything else" is the loading, language and autoload screens, the
-title, the main menu and its panel movie, Be A Cop's setup, the
-options, and the credits' slideshow and names.
-
-The movies run at the flat game's rate. Azahar's App FPS was 26 in 3D
-and 25 flat on the EA logo, and 20 both ways on the intro. The Black
-Box logo, the one movie that played whole in both walks, skipped 107 of
-its 392 frames in 3D and 104 flat.
-
 In 59a, with the swap fix,
 the game logs 30 frames a second, Azahar's App FPS is back to the flat
 game's (21 to 30 under load), and none of seven 3D race shots has a
 stale eye.
 
+On the user's New 3DS XL (2026-10-16, 59c's build) the frame rate in
+3D was "pretty much the same" as flat.
+
 Not checked yet:
 
 - the sun's shift, in a shot where it shows;
-- the cost on a real 3DS: the view's lists run twice on the GPU;
-- how deep the race and the movies look on a real 3DS.
+- the sky's shift: the forest's sky is in gaps too small to measure;
+- whether 59d's depth is comfortable on a real 3DS. If it is not, the
+  fallback is no 3D at all, with the slider doing nothing.

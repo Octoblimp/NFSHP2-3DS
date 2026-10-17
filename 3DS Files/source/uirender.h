@@ -180,7 +180,6 @@ typedef struct {
 
     float     targetW, targetH;   // the C3D render target, e.g. 400x240
     float     scrollTime;         // seconds, for UV-scrolling textures
-    bool      fillEyes;           // see uirender_set_fill_eyes
     int       missingTextures;    // counters, for a bring-up overlay
     int       missingFonts;
     int       missingStrings;
@@ -226,13 +225,6 @@ void uirender_set_time(UIRenderer* r, float seconds);
 // top screen rather than sit in the planes the PS2's TV layout put them in.
 void uirender_override_texture(UIRenderer* r, uint32_t hash, C3D_Tex* tex,
                                uint16_t w, uint16_t h, bool fill);
-
-// With `on`, a filling override (a movie) draws through
-// georender_draw_movie_quad instead of citro2d, so that in 3D it takes the
-// eye's term and sits behind the screen (stereo3d.h). Everything else
-// draws as before. Off by default; the caller turns it on for the frames
-// stereo3d_movie_begin starts.
-void uirender_set_fill_eyes(UIRenderer* r, bool on);
 
 // Gives back the slot of a hash no bundle has, and its override with it, so
 // a caller that draws many such hashes over time through overrides -- Select

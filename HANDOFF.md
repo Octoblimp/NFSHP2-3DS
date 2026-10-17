@@ -25129,7 +25129,49 @@ anywhere else". See docs/formats/stereo-3d.md.
 - The user, mid-59c: "I want to test the game on real hardware once
   task 59 is 100% done before you continue to task 72".
 
+### The user's 3DS test
+
+- The user, on their New 3DS XL with 59c's build: "Frame rate is pretty
+  much the same. There is flicker on the movies, I think remove 3D
+  support for movies. Depth is not comfortable at all." They also said
+  "if you can make it real good, do it".
+- Their log (`3DS Files/nfshp2_debug.txt`, a quick race on track 16
+  backwards): the chase camera has the car 4.2 m off, and the race runs
+  15 to 30 FPS. The EA logo decoded 128 frames and skipped 52; the intro
+  decoded 412 and skipped 2.
+- The eyes were not swapped: citro3d's `Mtx_PerspStereoTilt` moves far
+  things the same way for the right eye.
+- What was wrong was the depth. Everything nearer than the car came out
+  of the screen with no limit (the near road at -9 px in Azahar), past
+  the screen's edges and through the HUD. The convergence also moved
+  with the car every frame, out to 12 m in the flybys.
+
+### 59d done
+
+- **The movies are flat again**: 59c's code is out of `stereo3d.*`,
+  `georender.*`, `uirender.*` and `main.c`, which are their pre-59c
+  selves.
+- **The race's depth**:
+  - The stereo copies' term is now `clip.y + a * max(w - conv, 0)`
+    (`add`, `max`, `mad` in the Makefile's sed). Nothing nearer than the
+    convergence moves, so nothing comes out of the screen.
+  - The convergence is a fixed 3 m (`CONVERGENCE`), and `main.c`'s
+    `raceConvergence` is gone.
+  - `SHIFT_PX` is 5: 10 px apart at the slider's top, at most.
+  - The sky is at the horizon: `stereo3d_race_far` sets `stereo[1]` to 0
+    around the main view's sky in `trackview.c`.
+- **Checked in Azahar** (track 12, gas held, 3D at factor 100, restored):
+  - The far trees at +9, the cabin across the road at +9, the car at +3
+    to +4, the near road at 0 to +4, the mirror, speedo and song box at
+    0.
+  - The boot walk's 32 shots, the EA logo and the intro among them,
+    are all 0.00.
+- The `_st.v.pica` copies hang off their `.v.pica` alone. A change to
+  the sed in the Makefile needs `build/geosolid_st.v.pica`,
+  `build/geolit_st.v.pica` and `build/geosolid.shbin*` deleted first.
+
 ### Next
 
-1. The user's test of TASKS 59 on their 3DS. Wait for the report.
+1. The user's second test of TASKS 59 on their 3DS. If the depth is
+   still not comfortable, take 3D out (the slider does nothing).
 2. Replays (TASKS 72), then the known bugs and the verdict again.

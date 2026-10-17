@@ -3486,7 +3486,7 @@ phases.
         If it comes back, the place to look is the rail meshes against
         their wall polygons (retail data), where a scraping car's side
         can show through a rail.
-59. [x] **Stereoscopic 3D on the top screen.** Asked for on 2026-10-13.
+59. [ ] **Stereoscopic 3D on the top screen.** Asked for on 2026-10-13.
         Draw the top screen in stereo when the 3D slider is up: each
         eye's view (`gfxSet3D`, `osGet3DSliderState`, a left and right
         render target). The bottom screen has no 3D. The user said it is
@@ -3523,9 +3523,21 @@ phases.
           credits' names and every menu stay at 0, and 3D costs the
           movies no frames there (the Black Box logo skipped 107 of 392
           frames in 3D, 104 flat).
-        - Left: the user's own test on a real 3DS (2026-10-16): the
-          cost of two eyes in a race, and how deep it looks. TASKS 72
-          waits for it.
+        - The user's test on their 3DS, 2026-10-16: "Frame rate is
+          pretty much the same. There is flicker on the movies, I think
+          remove 3D support for movies. Depth is not comfortable at
+          all." Also "if you can make it real good, do it". So 59c is
+          taken back, and 59d redoes the race's depth.
+        - 59d done, 2026-10-16: nothing comes out of the screen any more
+          (the eye's term is `max(1 - convergence / w, 0)`). The
+          convergence is a fixed 3 m instead of the car's depth. The
+          eyes are 10 px apart at most instead of 12, and the sky is at
+          the horizon. In Azahar: the far trees +9, the car +3 to +4,
+          the near road 0 to +4 (it was down to -9), the HUD 0. The
+          boot walk's 32 shots, the movies among them, are flat.
+        - Left: the user's second test on a real 3DS. If the depth is
+          still not comfortable, take 3D out (the slider does
+          nothing). TASKS 72 waits for it.
 60. [ ] **The car's particle effects (Car::TriggerEffect).** Found on
         2026-10-13 with TASKS 51a. `gCarTriggerEffectFn` is never set, so
         `Car::TriggerEffect` (`0x0011e2b8`) is skipped: a broken light,

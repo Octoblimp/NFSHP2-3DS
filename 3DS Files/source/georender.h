@@ -128,8 +128,9 @@ void georender_forget(void);
 // Stereo 3D (TASKS 59, stereo3d.h). While on, the world's batches, lit
 // batches and strips draw through geosolid's and geolit's stereo copies,
 // which move each vertex for the eye by the `stereo` uniform: clip +
-// stereo[0] * w + stereo[1]. The screen quads and the sprites stay on the
-// plain programs. georender_stereo_uniform is that uniform's first
+// stereo[0] * max(w + stereo[1], 0). The sprites and the sun's quads take
+// them at their depth; the other screen quads stay on the plain programs.
+// georender_stereo_uniform is that uniform's first
 // register, which only the eye's own writes set, or -1 when the shbin has
 // no copies; then georender_set_stereo(true) does nothing.
 int  georender_stereo_uniform(void);
@@ -307,13 +308,6 @@ bool georender_draw_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
 // caller flushes citro2d first and runs C2D_Prepare after.
 bool georender_draw_hud_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
                              float width, float height);
-// The same for a movie that fills the top screen. In 3D
-// (georender_set_stereo) it takes the eye's term, which
-// stereo3d_movie_begin makes the whole shift: the picture sits behind the
-// screen. Flat, it is georender_draw_hud_quad.
-bool georender_draw_movie_quad(const GeoRenderVertex v[4],
-                               const GeoTexture* gt, float width,
-                               float height);
 // The same with a w for each vertex, for the GS's STQ: each `pos` is
 // (x w, y w, w) for the screen's (x, y), and the ST interpolates over the
 // quad as the GS's S / Q and T / Q do, with w = 1 / Q. `blend` is a

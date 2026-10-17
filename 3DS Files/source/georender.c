@@ -1550,8 +1550,8 @@ bool georender_draw_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
                             depth, false, atHorizon ? s_fogFar : 0.0f);
 }
 
-static bool draw_hud_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
-                          float width, float height, float eyeDepth)
+bool georender_draw_hud_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
+                             float width, float height)
 {
     C3D_Mtx screen;
     int     i;
@@ -1564,22 +1564,7 @@ static bool draw_hud_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
     }
     Mtx_OrthoTilt(&screen, 0.0f, width, height, 0.0f, 1.0f, -1.0f, true);
     return draw_screen_quad(v, gt, &screen, GEO_BLEND_ALPHA, false, -1.0f,
-                            false, eyeDepth);
-}
-
-bool georender_draw_hud_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
-                             float width, float height)
-{
-    return draw_hud_quad(v, gt, width, height, 0.0f);
-}
-
-bool georender_draw_movie_quad(const GeoRenderVertex v[4],
-                               const GeoTexture* gt, float width,
-                               float height)
-{
-    // Any w does: the movie's term (stereo3d_movie_begin) has no
-    // convergence.
-    return draw_hud_quad(v, gt, width, height, 1.0f);
+                            false, 0.0f);
 }
 
 bool georender_draw_hud_quad_w(const GeoRenderVertex v[4],

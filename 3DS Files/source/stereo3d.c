@@ -13,17 +13,16 @@
 void C3Di_UpdateContext(void);
 
 // The eye's shift at the horizon at the slider's top, in pixels across the
-// top screen's 400: the two eyes' images are twice this apart there.
-#define SHIFT_PX 6.0f
+// top screen's 400: the two eyes' images are twice this apart there, and
+// nothing is further apart. The user, on their 3DS (2026-10-16), could
+// not stand 12 with the near road out of the screen.
+#define SHIFT_PX 5.0f
 
-// A movie's, the same way: the whole picture behind the screen, nearer
-// than the race's horizon.
-#define MOVIE_SHIFT_PX 4.0f
-
-// The convergence's bounds, in the view's units (metres): the bumper's
-// camera has the car under it, a flyby's can be far off.
-#define CONVERGENCE_MIN 2.0f
-#define CONVERGENCE_MAX 12.0f
+// The depth on the screen's plane, in the view's units (metres), the same
+// in every camera: nothing nearer moves, so nothing comes out of the
+// screen, past its edges or through the HUD. The chase camera has the
+// player's car 4.2 m off (the device log, 2026-10-16), just behind it.
+#define CONVERGENCE 3.0f
 
 // The clip axis across the screen: Mtx_PerspTilt turns the view a quarter
 // so that the view's x is clip's y, the framebuffer's 400 (trackview's
@@ -35,7 +34,7 @@ void C3Di_UpdateContext(void);
 
 static C3D_RenderTarget* s_left;
 static C3D_RenderTarget* s_right;
-static bool              s_drawing;     // between eyes_begin and stereo3d_end
+static bool              s_drawing;     // between race_begin and race_end
 static u32*              s_leftList;    // the left eye's target and term
 static u32               s_leftWords;
 static bool              s_leftMade;
@@ -61,46 +60,51 @@ bool stereo3d_race_wanted(bool scene)
         && georender_stereo_uniform() >= 0 && hangwatch_gpu_sending();
 }
 
-bool stereo3d_movie_wanted(bool movie)
-{
-    return stereo3d_race_wanted(movie);
-}
-
-// The eye's term, into the list being made: clip + stereo[0] * w +
-// stereo[1] on the axis across the screen. At depth w the vertex moves by
-// side * shift * (1 - convergence / w) of the screen's half-width: none at
-// the convergence, `shift` at the horizon, the other way nearer than it.
-// The registers are the uniform's own, which nothing sets through
-// citro3d, so its uploads never send them: each eye's value stands for
-// all its lists. A C3D_FVec is w, z, y, x in memory, as the GPU takes a
-// float uniform's four words.
-static void eye_term(float side, float shift, float convergence)
+// The eye's term, into the list being made: clip + stereo[0] *
+// max(w + stereo[1], 0) on the axis across the screen. At depth w the
+// vertex moves by side * shift * max(1 - convergence / w, 0) of the
+// screen's half-width: none at the convergence and nearer, `shift` at the
+// horizon. The registers are the uniform's own, which nothing sets
+// through citro3d, so its uploads never send them: each eye's value
+// stands for all its lists. A C3D_FVec is w, z, y, x in memory, as the GPU
+// takes a float uniform's four words.
+static void eye_term(float side, float shift)
 {
     C3D_FVec v[2];
-    float    a = side * AXIS_SIGN * shift;
 
     v[0] = FVec4_New(0.0f, 0.0f, 0.0f, 0.0f);
     v[1] = FVec4_New(0.0f, 0.0f, 0.0f, 0.0f);
-    v[0].c[3 - AXIS] = a;
-    v[1].c[3 - AXIS] = -a * convergence;
+    v[0].c[3 - AXIS] = side * AXIS_SIGN * shift;
+    v[1].c[3 - AXIS] = -CONVERGENCE;
     GPUCMD_AddWrite(GPUREG_VSH_FLOATUNIFORM_CONFIG,
                     0x80000000u | (u32)georender_stereo_uniform());
     GPUCMD_AddWrites(GPUREG_VSH_FLOATUNIFORM_DATA, (const u32*)v, 8);
 }
 
-// The eyes' start, for the race and the movies alike: `shift` in the
-// clip's half-width, at the horizon.
-static void eyes_begin(uint32_t clear, float shift, float convergence)
+// stereo[1] alone, the same for both eyes, so the shared lists can change
+// it: a convergence of 0 puts everything at the horizon's shift.
+static void convergence_term(float convergence)
 {
-    u32* list;
-    u32  words;
+    C3D_FVec v = FVec4_New(0.0f, 0.0f, 0.0f, 0.0f);
+
+    v.c[3 - AXIS] = -convergence;
+    GPUCMD_AddWrite(GPUREG_VSH_FLOATUNIFORM_CONFIG,
+                    0x80000000u | (u32)(georender_stereo_uniform() + 1));
+    GPUCMD_AddWrites(GPUREG_VSH_FLOATUNIFORM_DATA, (const u32*)&v, 4);
+}
+
+void stereo3d_race_begin(uint32_t clear)
+{
+    float shift = osGet3DSliderState() * SHIFT_PX / 200.0f;
+    u32*  list;
+    u32   words;
 
     // The right eye's lists go first: its clear into the queue now, after
     // the mirror's send, then its target and term, sent.
     C3D_RenderTargetClear(s_right, C3D_CLEAR_ALL, clear, 0);
     C3D_FrameDrawOn(s_right);
     C3Di_UpdateContext();
-    eye_term(1.0f, shift, convergence);
+    eye_term(1.0f, shift);
     if (hangwatch_gpu_split(&list, &words)) {
         hangwatch_gpu_send_list(list, words, true);
     }
@@ -111,7 +115,7 @@ static void eyes_begin(uint32_t clear, float shift, float convergence)
     // then draw on without sending it: the target is the eyes' alone.
     C3D_FrameDrawOn(s_left);
     C3Di_UpdateContext();
-    eye_term(-1.0f, shift, convergence);
+    eye_term(-1.0f, shift);
     s_leftMade = hangwatch_gpu_split(&s_leftList, &s_leftWords);
 
     // The view's lists send all they read but the target, so they draw
@@ -123,27 +127,14 @@ static void eyes_begin(uint32_t clear, float shift, float convergence)
     s_drawing = true;
 }
 
-void stereo3d_race_begin(uint32_t clear, float convergence)
+void stereo3d_race_far(bool on)
 {
-    if (!(convergence >= CONVERGENCE_MIN)) {
-        convergence = CONVERGENCE_MIN;
+    if (s_drawing) {
+        convergence_term(on ? 0.0f : CONVERGENCE);
     }
-    if (convergence > CONVERGENCE_MAX) {
-        convergence = CONVERGENCE_MAX;
-    }
-    eyes_begin(clear, osGet3DSliderState() * SHIFT_PX / 200.0f, convergence);
 }
 
-// A convergence of 0 moves every vertex by the eye's whole shift, at any
-// w: the movie's quad (georender_draw_movie_quad) goes behind the screen,
-// and citro2d's draws over it keep their own shaders, on the screen's
-// plane.
-void stereo3d_movie_begin(uint32_t clear)
-{
-    eyes_begin(clear, osGet3DSliderState() * MOVIE_SHIFT_PX / 200.0f, 0.0f);
-}
-
-void stereo3d_end(uint32_t clear)
+void stereo3d_race_end(uint32_t clear)
 {
     int kept;
 
