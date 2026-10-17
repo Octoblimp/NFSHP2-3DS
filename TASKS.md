@@ -3486,7 +3486,7 @@ phases.
         If it comes back, the place to look is the rail meshes against
         their wall polygons (retail data), where a scraping car's side
         can show through a rail.
-59. [ ] **Stereoscopic 3D on the top screen.** Asked for on 2026-10-13.
+59. [x] **Stereoscopic 3D on the top screen.** Asked for on 2026-10-13.
         Draw the top screen in stereo when the 3D slider is up: each
         eye's view (`gfxSet3D`, `osGet3DSliderState`, a left and right
         render target). The bottom screen has no 3D. The user said it is
@@ -3516,7 +3516,16 @@ phases.
           In Azahar the chimney smoke sits at +10 like its chimney (0
           before). The sun was behind trees or a hill in every test, so
           its shift is not measured.
-        - Left: 59c, the movies; the cost and the look on a real 3DS.
+        - 59c done, 2026-10-16: the five movies that fill the screen
+          (the EA and Black Box logos, the intro, the making-of, the
+          reward) sit behind it. In Azahar the two pictures are 8 px
+          apart at the slider's top. The menus' panel movies, the
+          credits' names and every menu stay at 0, and 3D costs the
+          movies no frames there (the Black Box logo skipped 107 of 392
+          frames in 3D, 104 flat).
+        - Left: the user's own test on a real 3DS (2026-10-16): the
+          cost of two eyes in a race, and how deep it looks. TASKS 72
+          waits for it.
 60. [ ] **The car's particle effects (Car::TriggerEffect).** Found on
         2026-10-13 with TASKS 51a. `gCarTriggerEffectFn` is never set, so
         `Car::TriggerEffect` (`0x0011e2b8`) is skipped: a broken light,
@@ -4020,6 +4029,9 @@ phases.
         **The user, 2026-10-16:** "For replay feature, implement that
         after task 59". So it comes right after the stereo 3D slider
         (TASKS 59), before the known bugs and the launch verdict.
+        **The user, 2026-10-16, later:** "I want to test the game on
+        real hardware once task 59 is 100% done before you continue to
+        task 72". So this starts after their report.
 
 ### The retail frontend
 

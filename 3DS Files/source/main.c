@@ -643,6 +643,7 @@ typedef struct {
     bool        moviePlaying;
     uint32_t    movieTexHash;
     bool        movieAttached;
+    bool        movieFull;     // the title's, filling the screen: in 3D
     const char* panelMissing;  // the last menu movie not found, logged once
 
     char        note[64];      // last thing worth putting on the status line
@@ -1619,6 +1620,7 @@ static void hookMovieClose(void* user)
     uirender_override_texture(b->ui, b->movieTexHash, NULL, 0, 0, false);
     aviplayer_close(&b->movie);
     b->moviePlaying = false;
+    b->movieFull = false;
 }
 
 // The flow names the disc's files, MOVIES\INTRO\EALOGO_EN.AVI; the card has
@@ -1656,6 +1658,7 @@ static int hookMovieOpen(void* user, const char* path)
                               in->width, in->height, true);
     b->moviePlaying = true;
     b->movieAttached = true;
+    b->movieFull = true;
     // gameflow.c already traces the full path; the status line just says it
     // is running, and bootNote's buffer is smaller than a path anyway.
     bootNote("movie playing");
@@ -8904,7 +8907,12 @@ int main(int argc, char** argv)
             frameMark("C3D_FrameBegin: the GPU's last frame");
             C3D_FrameBegin(0);
             hangwatch_gpu_begin();
-            hangwatch_gpu_sends_begin(g_track.attached && ConfigGpuSends);
+            // A movie that fills the top screen is drawn for two eyes, as
+            // the race is, so its frame is sent in parts too (stereo3d.h).
+            bool movieFrame = !g_track.attached && g_boot.moviePlaying
+                && g_boot.movieFull;
+            hangwatch_gpu_sends_begin((g_track.attached || movieFrame)
+                                      && ConfigGpuSends);
             uint32_t drawTick = bGetTicker();
             // The GPU is done with the last frame: what the frontend's view
             // let go of since can be freed, and the slideshow's pictures.
@@ -8921,6 +8929,8 @@ int main(int argc, char** argv)
             // The race's clear, and whether its view is drawn for two eyes.
             const u32 sky = C2D_Color32(0x8c, 0xa8, 0xc8, 0xFF);
             bool      stereo = false;
+            u32       eyesClear = __builtin_bswap32(g_track.attached ? sky
+                                                                     : clear);
 
             if (g_track.attached) {
                 // eDisplayFrame: the race's view, then the Flailer screens
@@ -8942,8 +8952,7 @@ int main(int argc, char** argv)
                 // eyes' clears and targets are stereo3d's.
                 stereo = stereo3d_race_wanted(raceIn3D());
                 if (stereo) {
-                    stereo3d_race_begin(__builtin_bswap32(sky),
-                                        raceConvergence());
+                    stereo3d_race_begin(eyesClear, raceConvergence());
                 } else {
                     C3D_RenderTargetClear(top, C3D_CLEAR_ALL,
                                           __builtin_bswap32(sky), 0);
@@ -8952,9 +8961,16 @@ int main(int argc, char** argv)
                 trackview_draw(&g_track);
                 C2D_Prepare();
                 C3D_DepthTest(false, GPU_GREATER, GPU_WRITE_COLOR);
+            } else if (stereo3d_movie_wanted(movieFrame)) {
+                // The movie behind the screen for both eyes: its quad is
+                // georender's, whose ring no view starts again here.
+                stereo = true;
+                georender_quads_rewind();
+                stereo3d_movie_begin(eyesClear);
             } else {
                 C2D_TargetClear(top, clear);
             }
+            uirender_set_fill_eyes(&ui, stereo && !g_track.attached);
             // The HUD over the view, on the screen's plane for both eyes:
             // for two, citro2d's scene is the top screen's size without
             // C3D_FrameDrawOn, so its lists set no target.
@@ -8978,8 +8994,9 @@ int main(int argc, char** argv)
             // C2D_TargetClear's split, which flushes nothing. For two eyes
             // that was the right eye's, and the left's follows it.
             hangwatch_gpu_send();
+            uirender_set_fill_eyes(&ui, false);
             if (stereo)
-                stereo3d_race_end(__builtin_bswap32(sky));
+                stereo3d_end(eyesClear);
             C2D_TargetClear(g_bot, BOT_BACK);
             C2D_SceneBegin(g_bot);
             // In a race the bottom screen is the HUD's other half

@@ -25107,7 +25107,29 @@ anywhere else". See docs/formats/stereo-3d.md.
 - `run_azahar_race.ps1 -HoldKeys 65,70` through `powershell -File`
   reads one key, 6570. Call the script with `&` and `@(65,70)` instead.
 
+### 59c done
+
+- **The movies**: the five that fill the top screen (`movieFull`, set by
+  `hookMovieOpen`) are drawn for two eyes, outside the race too. A
+  movie's frame is sent in parts, and `stereo3d_movie_begin` starts the
+  eyes as the race does: 4 px a side at the slider's top, with no
+  convergence, so the whole picture is behind the screen.
+  `stereo3d_race_end` is now `stereo3d_end`, for both.
+  - `uirender_set_fill_eyes` sends the filling override to
+    `georender_draw_movie_quad`, which takes the eye's term. The quad
+    turns T back over, because georender's shader turns it again.
+  - The menus' panel movies stay flat, and so does whatever citro2d
+    draws over a movie.
+- **Checked in Azahar** (`render_3d=1`, `factor_3d=100`, restored):
+  - All five movies at +8, over the whole picture.
+  - Every other shot of the boot walk and the credits walk at 0.00.
+  - The frame rate is the flat game's: App FPS 26 and 25 on the EA
+    logo, 20 and 20 on the intro. The Black Box logo skipped 107 of
+    its 392 frames in 3D and 104 flat.
+- The user, mid-59c: "I want to test the game on real hardware once
+  task 59 is 100% done before you continue to task 72".
+
 ### Next
 
-1. 59c: the movies in 3D.
+1. The user's test of TASKS 59 on their 3DS. Wait for the report.
 2. Replays (TASKS 72), then the known bugs and the verdict again.

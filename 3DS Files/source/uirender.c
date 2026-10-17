@@ -482,6 +482,11 @@ void uirender_set_time(UIRenderer* r, float seconds)
     r->scrollTime = seconds;
 }
 
+void uirender_set_fill_eyes(UIRenderer* r, bool on)
+{
+    r->fillEyes = on;
+}
+
 void uirender_override_texture(UIRenderer* r, uint32_t hash, C3D_Tex* tex,
                                uint16_t w, uint16_t h, bool fill)
 {
@@ -735,6 +740,39 @@ static void draw_bitmap_clipped(UIRenderer* r, const BUIObject* o,
         st.right  += du;
         st.top    -= dv;
         st.bottom -= dv;
+    }
+
+    // A movie in 3D: georender's quad, which takes the eye's term, with
+    // citro2d's corners, UVs and colours (the GS's, as `gs` draws them).
+    if (t->override && t->overrideFill && r->fillEyes
+        && !(o->animation == BUI_ROTATE_CENTER && o->rotation)) {
+        static const int kOrder[4] = { 0, 1, 3, 2 };
+        GeoTexture      gt;
+        GeoRenderVertex q[4];
+
+        memset(&gt, 0, sizeof gt);
+        gt.tex        = tex;
+        gt.uvScale[0] = 1.0f;
+        gt.uvScale[1] = 1.0f;
+        memset(q, 0, sizeof q);
+        // A strip: top left, top right, bottom left, bottom right, as
+        // C2D_Corner counts them. georender's shader turns T over (1 - T,
+        // geosolid.v.pica), so it gets back the T subtex_from_pixels
+        // turned.
+        for (int i = 0; i < 4; i++) {
+            uint32_t c = tint_color(o->colors[kOrder[i]], v->alpha);
+            q[i].pos[0] = (i & 1) ? dx + dw : dx;
+            q[i].pos[1] = (i & 2) ? dy + dh : dy;
+            q[i].st[0]  = (i & 1) ? st.right : st.left;
+            q[i].st[1]  = 1.0f - ((i & 2) ? st.bottom : st.top);
+            memcpy(q[i].colour, &c, 4);
+        }
+        end_gs_scale();
+        C2D_Flush();
+        georender_draw_movie_quad(q, &gt, r->targetW, r->targetH);
+        C2D_Prepare();
+        C3D_DepthTest(false, GPU_GREATER, GPU_WRITE_COLOR);
+        return;
     }
 
     C2D_ImageTint tint;

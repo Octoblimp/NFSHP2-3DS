@@ -14,7 +14,8 @@ What the slices cover:
   and the sun. Done; the sprites are checked in Azahar, the sun is not
   (see below). The light flares were already strips, so 59a covered
   them.
-- **59c**, the movies.
+- **59c**, the full-screen movies, behind the screen. Done, and checked
+  in Azahar.
 
 ## What is in 3D
 
@@ -41,7 +42,8 @@ The HUD, the rear-view mirror, the bottom screen and the song box are
 drawn once. They sit on the screen's plane, and both eyes show them at
 the same place. The effects' sprites (smoke, dust, sparks) and the sun
 are in the screen's pixels too, but they take the eye's shift for their
-depth; see "The screen's own draws" below.
+depth; see "The screen's own draws" below. The movies that fill the
+screen are in 3D too, outside the race; see "The movies".
 
 ## The eye's term
 
@@ -127,6 +129,38 @@ For each kind:
 
 Flat, both draw as before: the plain program and the screen's mapping.
 
+## The movies
+
+Five movies fill the top screen through the title's plane
+(`MOVIES\INTRO\`): the EA logo, the Black Box Games logo, the intro, the
+making-of and the reward. The boot plays the EA logo and the intro. The
+credits play the other four. `main.c`'s `hookMovieOpen` opens each one as
+a filling override and sets `movieFull`. The menus' panel movies
+(`hookPanelMovieOpen`) belong to their menus and stay flat.
+
+A frame with a filling movie and no race (`movieFrame`) is sent in
+parts, as the race's frames are. `stereo3d_movie_wanted` asks for the
+rest of `stereo3d_race_wanted`'s list: the slider up, the right eye's
+target, the stereo shaders, the sends. Then `stereo3d_movie_begin`
+starts the eyes the way the race does, with a convergence of 0. With
+no convergence, the term moves every vertex by the eye's whole shift,
+at any w.
+
+- **`shift`**: `slider * 4 px / 200`. At the slider's top the two
+  pictures are 8 pixels apart. The whole picture is behind the screen,
+  nearer than the race's horizon (12).
+- **The movie's quad**: `uirender_set_fill_eyes` sends the filling
+  override to `georender_draw_movie_quad` instead of citro2d. The quad
+  has citro2d's corners, colours and UVs, with T turned back over:
+  georender's shader turns it (`1 - T`), and `subtex_from_pixels` has
+  turned it already. The quad binds the stereo program with a w of 1
+  (`draw_screen_quad`'s `eyeDepth`).
+- **What draws over it** keeps citro2d's shaders, which have no term,
+  so it sits on the screen's plane in both eyes.
+
+Only a view's frame rewinds the quads' ring, so a movie's frame rewinds
+it first (`georender_quads_rewind`).
+
 ## The frame on the GPU
 
 The race's view is drawn once. Its lists go to the GPU twice:
@@ -208,9 +242,28 @@ most 171 of its 1,024 test pixels sky and its alpha 6 of 128. Its path
 is the sprites' mapping with a fixed d, so it should sit with the
 horizon, at +11 or so.
 
-The boot flow's 32 shots differ by 0.00 between the eyes. These cover
-the loading screen, the language and autoload screens, the movies, the
-title, the main menu, Be A Cop's setup and the options. With the fix,
+Before 59c, the boot flow's 32 shots differed by 0.00 between the
+eyes. These cover the loading screen, the language and autoload screens,
+the movies, the title, the main menu, Be A Cop's setup and the options.
+
+59c's shots (`run_azahar_test.ps1` and `run_azahar_credits.ps1`):
+
+| Shot | Right minus left |
+|---|---|
+| EA logo, intro (boot) | +8, the whole picture |
+| Black Box logo, intro, making-of, reward (credits) | +8, the whole picture |
+| Everything else in both walks | 0.00 |
+
+"Everything else" is the loading, language and autoload screens, the
+title, the main menu and its panel movie, Be A Cop's setup, the
+options, and the credits' slideshow and names.
+
+The movies run at the flat game's rate. Azahar's App FPS was 26 in 3D
+and 25 flat on the EA logo, and 20 both ways on the intro. The Black
+Box logo, the one movie that played whole in both walks, skipped 107 of
+its 392 frames in 3D and 104 flat.
+
+In 59a, with the swap fix,
 the game logs 30 frames a second, Azahar's App FPS is back to the flat
 game's (21 to 30 under load), and none of seven 3D race shots has a
 stale eye.
@@ -219,4 +272,4 @@ Not checked yet:
 
 - the sun's shift, in a shot where it shows;
 - the cost on a real 3DS: the view's lists run twice on the GPU;
-- how deep it looks on a real 3DS.
+- how deep the race and the movies look on a real 3DS.
