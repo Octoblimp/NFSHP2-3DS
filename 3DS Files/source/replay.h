@@ -7,11 +7,12 @@
 // DoSnapshot moves its fields in and out of, through MoveData, in the same
 // order every time.
 //
-// ReplayManager is 20664 bytes in retail and only its head is here, in
-// retail's layout: retail added a word at +12 to the demo's. The joystick
-// layer reads its flags and the fancy-joyevent table, Car's reset its
-// snapshot list. pReplayManager is NULL until a replay exists, and in the
-// port nothing creates one yet (72f).
+// ReplayManager is 20664 bytes in retail, here in retail's layout: retail
+// added a word at +12 and a cursor at +172 to the demo's, dropped its Dummy,
+// made LapSnapshotSpacing a float and doubled the snapshot times. The
+// joystick layer reads its flags and the fancy-joyevent table, Car's reset
+// its snapshot list. Its methods are replaymgr.h's (TASKS 72f).
+// pReplayManager is NULL until RaceCoordinator::InitForRace makes one.
 
 #ifndef REPLAY_H
 #define REPLAY_H
@@ -22,6 +23,18 @@
 #include "bmatrix.h"
 #include "brepeat.h"
 #include "bvector.h"
+
+// ReplaySpecialEventInfo, 16 bytes: a pause page's change, kept with the
+// loop it happened on so a replay makes it again there.
+typedef struct ReplaySpecialEventInfo {
+    int32_t Type;                    // 0, an eReplaySpecialEvent
+    int32_t LoopCount;               // 4, WorldLoopCounter
+    int32_t A;                       // 8
+    int32_t B;                       // 12
+} ReplaySpecialEventInfo;
+
+#define REPLAY_MAX_SNAPSHOT_TIMES 4096
+#define REPLAY_MAX_SPECIAL_EVENTS 256
 
 typedef struct ReplayManager {
     int32_t ReplayingFlag;           // 0
@@ -47,7 +60,25 @@ typedef struct ReplayManager {
     // p32 handles. An empty list points at itself.
     uint32_t FreeReplaySnapshotList[2]; // 104
     uint32_t ReplaySnapshotList[2];  // 112
-    // ... to 20664.
+    int32_t MaxNumSnapshots;         // 120
+    int32_t MaxNumInstantReplaySnapshots; // 124
+    int32_t MaxNumAutoReplaySnapshots;    // 128
+    int32_t MaxNumLapSnapshots;      // 132
+    int32_t MaxNumHighlightSnapshots;     // 136
+    int32_t NumInstantReplaySnapshots;    // 140
+    int32_t NumLapSnapshots;         // 144
+    int32_t NumHighlightSnapshots;   // 148
+    float   LapSnapshotSpacing;      // 152, seconds; the demo's was an int
+    int32_t NextHighlightNumber;     // 156
+    int32_t EndCurrentHighlightTime; // 160, a loop count
+    int32_t LastSnapshotTime;        // 164, a loop count
+    int32_t NumSnapshotsTaken;       // 168, SnapshotTimeTable's count
+    int32_t SnapshotTimeCursor;      // 172, new in retail; the name is ours
+    int32_t SnapshotTimeTable[REPLAY_MAX_SNAPSHOT_TIMES]; // 176, loop counts
+    int32_t NumSpecialEvents;        // 16560
+    int32_t LastSpecialEventNumber;  // 16564
+    ReplaySpecialEventInfo SpecialEventTable[REPLAY_MAX_SPECIAL_EVENTS];
+                                     // 16568
 } ReplayManager;
 
 typedef char replaymanager_layout_check[
@@ -55,7 +86,12 @@ typedef char replaymanager_layout_check[
      && offsetof(ReplayManager, FancyJoyEventTable) == 44
      && offsetof(ReplayManager, BeginningOfTime) == 92
      && offsetof(ReplayManager, pRepeat) == 100
-     && offsetof(ReplayManager, ReplaySnapshotList) == 112) ? 1 : -1];
+     && offsetof(ReplayManager, ReplaySnapshotList) == 112
+     && offsetof(ReplayManager, LapSnapshotSpacing) == 152
+     && offsetof(ReplayManager, SnapshotTimeTable) == 176
+     && offsetof(ReplayManager, NumSpecialEvents) == 16560
+     && offsetof(ReplayManager, SpecialEventTable) == 16568
+     && sizeof(ReplayManager) == 20664) ? 1 : -1];
 
 // ReplaySnapshotSectionInfo, 16 bytes: one level of the section stack.
 typedef struct ReplaySectionInfo {

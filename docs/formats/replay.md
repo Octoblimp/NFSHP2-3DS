@@ -21,7 +21,8 @@ classes (72d-1), then World's and RaceCoordinator's, which take all of
 them, with the smokeables and the collision bodies (72d-2). Then 72e's,
 the cops: the munitions, the spike strip and the chopper (72e-1); the
 pursuit and the cops (72e-2); the cop manager, which takes them all
-(72e-3).
+(72e-3). Last, 72f-1's ReplayManager, which captures the race into the
+log and takes, restores and deletes the snapshots.
 
 ## How the lists read
 
@@ -501,6 +502,180 @@ rest) reach an empty function and are left out.
     `nBeACopNumRoadBlocks`, `nBeACopNumChopperAttacks` and
     `nBeACopNumArrestsMade` int 4.
 
+## 72f-1: the replay manager
+
+`replaymgr.c` has retail's ReplayManager, from Replay.obj
+(`0x0013d448`..`0x0013ec98`). It captures a race into the log, takes the
+snapshots a replay starts from, and plays the log back. `replay.h` has
+its retail layout, 20664 bytes. main.c still runs its stand-in until
+72f-2.
+
+### The layout
+
+| offset | field |
+|--------|-------|
+| 0 .. 24 | ReplayingFlag, CapturingFlag, RemoveDataError, MuteHighlightSoundFlag, PausedFlag, SlowMotionFlag, ReplayPausedThisFrame |
+| 28 | NextFancyDebugTime |
+| 32, 36, 40 | FancyReplayInProgress, FancyJoyEventNumber, NumFancyJoyEvents |
+| 44 | FancyJoyEventTable, 32 bytes |
+| 76 | NextInstantReplaySnapshotTime |
+| 80, 84 | BeginCapturingLoopCount, EndCapturingLoopCount |
+| 88 | FinishedAllCapturing |
+| 92, 96 | BeginningOfTime, EndOfTime |
+| 100 | pRepeat, the log (a p32) |
+| 104, 112 | the free snapshots' list, the snapshots' list |
+| 120 .. 136 | MaxNumSnapshots, MaxNumInstantReplaySnapshots, MaxNumAutoReplaySnapshots, MaxNumLapSnapshots, MaxNumHighlightSnapshots |
+| 140 .. 148 | NumInstantReplaySnapshots, NumLapSnapshots, NumHighlightSnapshots |
+| 152 | LapSnapshotSpacing, a float |
+| 156, 160 | NextHighlightNumber, EndCurrentHighlightTime |
+| 164 | LastSnapshotTime |
+| 168, 172 | NumSnapshotsTaken, SnapshotTimeCursor |
+| 176 | SnapshotTimeTable, 4096 loops |
+| 16560, 16564 | NumSpecialEvents, LastSpecialEventNumber |
+| 16568 | SpecialEventTable, 256 of 16 bytes: Type, LoopCount, A, B |
+
+### Making and unmaking
+
+- The constructor (`0x0013d448`) empties both lists and sets
+  LastSnapshotTime and the capture's two loops to -1,
+  LapSnapshotSpacing to 15 and NextFancyDebugTime to 9999999. The rest
+  is 0, but for MaxNumAutoReplaySnapshots, which it leaves. In a demo
+  replay it takes TheDemoModeReplay's log and snapshots (`0x002f0960`)
+  and makes one free snapshot.
+- The destructor (`0x0013d5c0`). A snapshot whose memory image was
+  loaded (a demo's) goes back to the demo, with the log. The others and
+  the free ones are freed, then the log, then the manager with flag 1.
+- MarkTheBeginningOfTime (`0x0013d6f8`) runs once. The capture begins
+  and ends at this loop and this time. With less than 0xd0ad8 bytes
+  free past 32 KB in pool 16 it stops there, without a log, and nothing
+  captures. Otherwise it makes a 0x32000-byte log with four channels:
+  - 0: 8-bit repeat counts;
+  - 1: 4-bit, answering 1 on an error;
+  - 2: no repeats;
+  - 3: 8-bit.
+
+  Then the limits: 17 snapshots, 2 instant replays, 8 laps and 5
+  highlights. All 17 snapshots are made, free.
+- MarkTheEndOfTime (`0x0013d868`): the capture is over.
+
+### A frame
+
+- BeginFrame (`0x0013d880`). Without a log nothing captures or replays.
+  - A demo replay replays.
+  - The loop at the capture's end replays when paused. Otherwise it
+    captures, until the capture is over.
+  - A loop from the capture's beginning up to its end replays.
+
+  Capturing, it takes the instant replay and the lap snapshots.
+  Replaying, a pause pauses the frame, and slow motion pauses three
+  frames in four of RealLoopCounter. Then this loop's special events.
+  Then the dummy snapshot and the checksum, both ways. Last,
+  DemoModeReplay::Service (`0x0013f500`), told whether a snapshot is on
+  this loop.
+- EndFrame (`0x0013e008`). Capturing, the end moves on to the next loop,
+  and the end of time to the world's timer plus this frame's step
+  (Timer::SetTime). Replaying, both flags clear.
+- IsSnapshotTime (`0x0013d9b8`, new in retail) looks for the loop in the
+  snapshot times. The search starts at the cursor (the last one found)
+  when that time is before the loop, else at 0.
+- The dummy snapshot (`0x0013da20`) is taken and deleted at once.
+  Replaying, it comes on each loop the capture took a snapshot on, but
+  not on a paused frame or the loop last taken or restored. Capturing,
+  it comes every 211th loop, and once more than 30 loops have passed
+  since the last snapshot.
+- The instant replays (`0x0013daf0`) come every 300 of
+  WorldTimeFrames. With both held, the older one goes. It stays as a
+  highlight when its interest is above 0 and above the highlight it
+  would replace; otherwise it is deleted. That highlight is the first
+  one ending after the instant replay begins, or else the least
+  interesting. But the walk sets none at each empty slot, so with a
+  slot free only an overlapping highlight is replaced; otherwise the
+  instant replay takes the free slot.
+- The checksums (`0x0013dd00`, `0x0013dd88`) come on the loops in
+  ChecksumSnapshotTimes (`0x002f08d8`), as "CHECKSUM0" .. "CHECKSUM3".
+  - Capturing, a checksum snapshot goes at the list's end. A second of
+    the same name is a bBreak.
+  - Replaying, on a frame that is not paused, the one of that name is
+    verified against the race now.
+- The lap snapshots (`0x0013ded8`) come when NumLapSnapshots spacings
+  have gone by since the beginning of time (ticks times 0.00025). With
+  all eight taken, the spacing doubles and every other one goes, the
+  first kept.
+
+### The joylog's debugging, `0x0013e078`
+
+FancyReplayInProgress is a state:
+
+- 0 waits for the joylog's replay to reach the loop before
+  NextFancyDebugTime. It then loads the first 24 pad events.
+- 1 turns the joylog off.
+- 2 waits for the capture's end while paused. Then it moves
+  NextFancyDebugTime 211 loops on, deletes the four checksums, sets
+  their loops to this one plus 1, 52, 105 and 158, and loads the second
+  13 pad events.
+- 3 waits for the events to run out, then turns the joylog back on.
+
+### The highlights, `0x0013e308` and `0x0013e318`
+
+BeginRaceHighlights starts at the first. Each next one restores the
+highlight and plays it to the loop it ended on; after the last it wraps
+to the first. With no highlight, the first lap snapshot plays to the
+capture's end; with neither, the end is 0. With MuteHighlightSoundFlag
+set it pauses instead, the highlight ending on the next loop.
+
+### The special events, `0x0013e3f8` and `0x0013e4b0`
+
+AddSpecialEvent keeps an event (its type, this loop and two words) from
+the beginning of time until the capture is over, only with a log. Once
+256 are kept, the next one ends the capture. Every event goes to the handler
+(`HandlePauseMenuReplaySpecialEvents`, `0x001703e0`) as it happens.
+Replaying, CheckForSpecialEvents starts at the last event looked at. It
+walks back past every event not before this loop, then on through those
+up to it, handling each one on it. A handler can add events; the count
+is read again after each.
+
+### The snapshots
+
+- FindSnapshot (`0x0013e5c8`) finds the k-th snapshot of a name.
+  GetSnapshot (`0x0013e648`) finds the k-th of any name.
+- SortSnapshots (`0x0013e690`) takes those of a name out and sorts them
+  by BeginLoopTime (bList::Sort's bubble sort), then puts them back at
+  the list's end.
+- RestoreSnapshotNamed (`0x0013e748`) and DeleteSnapshotNamed
+  (`0x0013e790`) act on the first of a name and answer whether there
+  was one. DeleteSnapshot (`0x0013e7d8`) moves a snapshot to the free
+  list's end.
+- HandleSnapshot (`0x0013e808`). "REPLAY_MANAGER_STATE" is the manager's
+  own. Any other takes the race's setup (RaceParameters), the log, the
+  pads (JoystickDoSnapshot) and RaceCoordinator's. The log's add side is
+  taken while a snapshot or a checksum is taken at the capture's end;
+  otherwise it is the remove side.
+- The manager's own (`0x0013e8d8`), section "ReplayManager":
+  1. BeginCapturingLoopCount, EndCapturingLoopCount and
+     NumSnapshotsTaken, int 4.
+  2. Each snapshot time, int 4.
+  3. NumSpecialEvents, int 4.
+  4. Each event, data 16.
+
+  A restore reads each count before the table it counts.
+- TakeSnapshot (`0x0013e9f0`) works only after the beginning of time.
+  The snapshot comes from the free list (made if there is none) and goes
+  to the list's end. On the loop at the capture's end, the loop goes in
+  the snapshot times while there is room. A snapshot that overflowed is
+  deleted, and the answer is NULL.
+- RestoreSnapshot (`0x0013eb38`) clears the log's error.
+  LastSnapshotTime becomes the loop restored.
+
+### The log
+
+- GetData (`0x0013eb88`) answers 0 unless replaying without an error. A
+  log error stays until a restore.
+- GetSignedData (`0x0013ebe8`) shifts left with sllv, then right with
+  srlv, a logical shift. The value is cut to its bits but not
+  sign-extended. The port keeps retail's shifts.
+- AddData (`0x0013ec20`) works only while capturing. With fewer than 68
+  bits left, the capture ends.
+
 ## The checker for 72d-1
 
 `tools/racesnap_check.py` runs retail's code beside the port's, on
@@ -685,6 +860,56 @@ strip's default constructor.
     python tools/copmgrsnap_check.py
     python tools/copmgrsnap_check.py --stubs
     python tools/copmgrsnap_check.py --mutate [--only a,b]
+
+## The checker for 72f-1
+
+`tools/replaymgr_check.py` runs retail's ReplayManager beside the
+port's, on `tools/src/replaymgr_test.c`.
+
+Run real on both sides: ReplaySnapshot, bRepeat, the p32 handles and
+Timer::SetTime. Recorded, as lines both sides print:
+
+- bMalloc, bFree, bCountFreeMemory and bBreak;
+- the setup's, the pads' and the coordinator's snapshots. Each moves
+  the data on by a set amount, and the script can make the next one of
+  a name overflow;
+- the special events' handler, which the script can have add one;
+- DemoModeReplay::Service.
+
+The scenarios cover these cases:
+
+- no beginning of time; too little memory for the log, and just enough;
+- a demo replay's log and three snapshots, handed over and back;
+- 520 captured frames: instant replays of set interest, laps thinned
+  twice, checksums (one twice), special events and snapshots that
+  overflow;
+- 330 replayed frames: slow motion and a pause over a checksum, a log
+  error, and an event a handler adds;
+- the highlights, the lists and the sort;
+- the manager's own snapshot, and the snapshot times full, out of order
+  and searched from cursors;
+- the joylog's debugging's four states;
+- a log filled to its last bits, and 257 special events;
+- a capture of dummies only, one allowed no instant replays, and each
+  of the highlights' choices.
+
+The run is 10161 script lines and 17370 output lines; none differ. 280
+mutations: 273 caught, 7 equivalent.
+
+- Two are DataPosition's zeroing in a take and a checksum; Init has
+  zeroed it already.
+- One is the section's name, a pointer kept only for printing.
+- Two are in IsSnapshotTime. With the cursor 0 the search starts at 0
+  either way. And the cursor's own entry is before the loop, so it is
+  never the match.
+- One stops the highlights' walk at NumHighlightSnapshots. Every later
+  step would only set none again.
+- One turns the overlap test in the replace condition into `<=`. With a
+  slot free, a highlight is picked only by the strict overlap test; with
+  none free, it goes anyway.
+
+    python tools/replaymgr_check.py
+    python tools/replaymgr_check.py --mutate [--only a,b]
 
 ## Not yet
 

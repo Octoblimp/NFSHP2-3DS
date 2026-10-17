@@ -4170,6 +4170,25 @@ phases.
           main.c's stand-in. Checked in Azahar with retail's checksum
           snapshots: a race replayed to where it paused, with every
           checksum agreeing.
+          - [x] 72f-1. The class from retail's Replay.obj
+            (`0x0013d448`..`0x0013ec98`) in a new `replaymgr.c`: the
+            constructor and destructor, the beginning and end of time,
+            BeginFrame and EndFrame with every snapshot they take, the
+            highlights, the special events' table, Find, Take, Restore
+            and Delete, HandleSnapshot and the manager's own snapshot,
+            GetData and AddData. A checker runs it beside retail's.
+            **Done in Session 123, continued:** all of it from retail
+            in `replaymgr.c`, with the joylog's debugging and the
+            snapshot times retail added; `replay.h` has the class's
+            retail layout, 20664 bytes. `replaymgr_check` runs it
+            beside retail's: 17370 lines, 0 differ; 280 mutations, 273
+            caught, 7 equivalent. The 189 other checkers that link the
+            changed files pass again. main.c still runs its stand-in.
+          - [ ] 72f-2. In the race: InitForRace's constructor, MainLoop's
+            BeginFrame, EndFrame and DoFancyJoylogDebugging, the TICK's
+            beginning of time and TheRaceHasFinished's end, in place of
+            main.c's stand-in. Then the Azahar run with the checksum
+            snapshots.
         - [ ] 72g. The replay states (`RCSTATE_INSTANT_REPLAY`,
           `RCSTATE_AUTO_REPLAY`) and `ReplayScreen` (its timeline, camera
           modes and buttons). This brings the pause menu's View Replay

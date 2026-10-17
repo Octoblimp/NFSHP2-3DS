@@ -25991,3 +25991,67 @@ The 21 other checkers that compile a changed file or header pass again.
 2. Then 72g and 72h, one at a time.
 3. When 72h is committed, the launch checklist the user asked for,
    published, before TASKS 73.
+
+## Session 123, continued -- TASKS 72f-1: the replay manager from retail
+
+The first of 72f's two slices: ReplayManager itself, from retail's
+Replay.obj. Nothing calls it yet; main.c's stand-in runs the race's
+replay until 72f-2.
+
+### What is ported
+
+From retail, at retail's address, in the new `replaymgr.c` (with
+`replaymgr.h`):
+
+- The constructor and destructor (`0x0013d448`, `0x0013d5c0`), with the
+  demo replay's log and snapshots handed over and back
+  (TheDemoModeReplay, `0x002f0960`).
+- MarkTheBeginningOfTime (`0x0013d6f8`): the 0x32000-byte log and its
+  four channels, the limits (17 snapshots, 2 instant replays, 8 laps, 5
+  highlights), no log below 0xd0ad8 bytes free past 32 KB.
+  MarkTheEndOfTime (`0x0013d868`).
+- BeginFrame and EndFrame (`0x0013d880`, `0x0013e008`), with the
+  snapshots they take: the instant replays and the highlights they
+  become, the laps (thinned when full), the dummy snapshots, the
+  checksums (ChecksumSnapshotTimes, `0x002f08d8`). Retail's new
+  snapshot-times table and IsSnapshotTime (`0x0013d9b8`).
+- DoFancyJoylogDebugging (`0x0013e078`), the highlights (`0x0013e308`,
+  `0x0013e318`), the special events (`0x0013e3f8`, `0x0013e4b0`).
+- Find, Get, Sort, RestoreNamed, DeleteNamed, Delete, HandleSnapshot,
+  the manager's own snapshot, Take and Restore (`0x0013e5c8` ..
+  `0x0013eb38`); GetData, GetSignedData and AddData (`0x0013eb88` ..
+  `0x0013ec20`). GetSignedData's right shift is retail's srlv, logical.
+
+`replay.h` has the class's retail layout (20664 bytes), with layout
+checks. Seams for main.c to bind in 72f-2: the special events' handler
+(`gReplayHandleSpecialEventFn`, retail's
+HandlePauseMenuReplaySpecialEvents) and DemoModeReplay::Service
+(`gDemoModeReplayServiceFn`). `docs/formats/replay.md` has a 72f-1
+section and the checker's.
+
+### The checker
+
+`tools/replaymgr_check.py` and `tools/src/replaymgr_test.c` are new.
+Run real on both sides: ReplaySnapshot, bRepeat, the p32 handles and
+Timer::SetTime. Recorded: the allocator, bBreak, the setup's, the pads'
+and the coordinator's snapshots (each can be made to overflow), the
+special events' handler and the demo's Service.
+
+- 10161 script lines, 17370 lines, 0 differ.
+- 280 mutations: 273 caught, 7 equivalent (each justified in the
+  checker and in replay.md).
+
+### Checkers re-run
+
+The 189 other checkers that compile a changed file or header pass again.
+
+### Next
+
+1. 72f-2: the manager in the race. InitForRace's constructor, MainLoop's
+   BeginFrame, EndFrame and DoFancyJoylogDebugging, the TICK's
+   beginning of time and TheRaceHasFinished's end, in place of main.c's
+   stand-in (`replayStandIn`, the GetData/AddData seams). Then an
+   Azahar run with the checksum snapshots.
+2. Then 72g and 72h, one at a time.
+3. When 72h is committed, the launch checklist the user asked for,
+   published, before TASKS 73.

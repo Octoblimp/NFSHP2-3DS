@@ -3648,8 +3648,12 @@ and so replaced every boot.
      and the strips (tSpikeStrip's default constructor, `0x00241308`).
      `copmgrsnap_check` runs it against retail. Every snapshot World
      takes is retail's now, but for the clans', the fern shakers' and
-     AnimatedDriver's, whose classes are not ported. 72f (ReplayManager
-     in full, in place of main.c's stand-in) is next.
+     AnimatedDriver's, whose classes are not ported.
+   - ReplayManager is retail's since TASKS 72f-1 (Session 123,
+     continued), in `replaymgr.c`; `replaymgr_check` runs it against
+     retail. Nothing calls it yet: main.c still runs its stand-in.
+     72f-2 (it in the race, in place of the stand-in, then an Azahar
+     run with the checksum snapshots) is next.
 
    **7b, DriveCameraMover::Update, is done** (HANDOFF.md, Session 31,
    continued: the drive camera's Update). `docs/formats/camera.md`,
