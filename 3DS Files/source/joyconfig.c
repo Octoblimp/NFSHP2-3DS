@@ -533,7 +533,6 @@ static void bindKey(ConfigScreen* c, int k)
 
 static void askToSave(BGameFlow* gf, ConfigScreen* c)
 {
-    static const char kMessage[] = "Save your changes to the card?";
     BPopupConfig cfg;
 
     memset(&cfg, 0, sizeof cfg);
@@ -542,7 +541,8 @@ static void askToSave(BGameFlow* gf, ConfigScreen* c)
                        | BPOPUP_BUTTONS_BELOW;
     cfg.parent         = gf->screen;
     cfg.screen         = BPOPUP_SCREEN_MEMCARD;
-    cfg.message        = kMessage;
+    cfg.message        = portlang_get(gf->currLanguage,
+                                      PORTLANG_SAVE_CHANGES, NULL);
     cfg.button[0]      = LANG_YES;
     cfg.button[1]      = LANG_NO;
     cfg.buttonParam[0] = ANSWER_SAVE;

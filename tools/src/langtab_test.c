@@ -72,11 +72,22 @@ int main(int argc, char** argv)
         int32_t key = (int32_t)bchunk_u32(table + (size_t)i * 8);
         size_t      n = 0;
         const char* s = english ? langtab_get_english(&t, key, &n)
-                                : langtab_get(&t, key, &n);
+                                : langtab_get_disc(&t, key, &n);
         if (!s) { printf("%d\t<MISSING>\n", (int)key); continue; }
         printf("%d\t", (int)key);
         print_hex(s, n);
         putchar('\n');
+        // What the game is given instead, where the port has its own
+        // wording (portlang_retail): "port <id> <hex>".
+        if (!english) {
+            size_t      m   = 0;
+            const char* own = langtab_get(&t, key, &m);
+            if (own != s) {
+                printf("port %d\t", (int)key);
+                print_hex(own, m);
+                putchar('\n');
+            }
+        }
     }
     free(buf);
     return 0;

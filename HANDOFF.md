@@ -25015,8 +25015,31 @@ run.
   Pursuit's Mode Select and Options, A swallowed under it; the lines'
   icons are the D-pad, A, B and L + A).
 
+### 52's card text done
+
+- **`portlang_retail`** (`portlang.c`'s `kRetail`): 27 retail IDs in
+  the six languages say the SD Card. That's 150004, the card's name; the
+  151xxx/152001 messages; and the Load/Save help lines 800070/800071.
+  The MEMORY CARD slot and the console reset are dropped. `langtab_get`
+  asks it before the disc, and `langtab_get_disc` is the disc alone.
+  LONGEST and ID_NUM keep the disc's. The scratchpad generator,
+  `cardtext.py`, made the rows from the disc with per-language
+  substitutions and asserts.
+- **`%2$d`**: 151011 and 151027 had the slot first and the KB second, so
+  with the slot gone they read the KB as the second argument
+  (`memcard.c`'s `formatPrompt` takes `%N$d`).
+- **The port's save prompt**: Audio, Display, Controller, Player Names
+  and the debug menu said "Save your changes to the card?" in English
+  only. It's now `PORTLANG_SAVE_CHANGES` (and `_RACE`) in six languages,
+  "SD Card".
+- `langtab_check`: 27 with the port's wording, 0 wrong, in each of the
+  six; 0 in FE_ID and FE_LONGEST; 0 differ. `run_azahar_display.ps1`:
+  PASS, and its overwrite popup reads "SD Card" / "Overwrite existing
+  game settings on the SD Card?". See docs/formats/language-table.md,
+  "The port's wording".
+
 ### Next
 
-1. The "Memory Card (PS2)" text in the popups, then stereo 3D (TASKS 59).
+1. Stereo 3D (TASKS 59): the slider alone, no option.
 2. Replays (TASKS 72), after 59.
 3. The known bugs, then the verdict again.

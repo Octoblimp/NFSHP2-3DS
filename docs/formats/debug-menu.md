@@ -186,7 +186,7 @@ menu takes a copy of what they touch:
 
 Two moves check the save against that copy: B on Debug Menu, and A on
 Start Race. If anything differs, the screen hides and the memory card's
-popup asks "Save your changes to the card?", titled "Save" (150000)
+popup asks "Save your changes to the SD Card?", titled "Save" (150000)
 with Yes and No (150103, 150104):
 
 | Answer | What happens |

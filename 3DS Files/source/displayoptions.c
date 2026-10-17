@@ -21,6 +21,7 @@
 #include "bsetup.h"
 #include "flailer.h"
 #include "fred.h"
+#include "portlang.h"
 
 // tScrollingMenuList's arrows and clip, and the value arrows.
 #define OBJ_SCROLL_UP   0xedf2e4eeu
@@ -356,14 +357,13 @@ static void displayDestruct(DisplayScreen* d)
 // ---------------------------------------------------------- the prompt
 //
 // The port's (the user's word, 2026-10-13): B with Fred not as it was when
-// Options opened the page asks "Save your changes to the card?" in the
+// Options opened the page asks "Save your changes to the SD Card?" in the
 // page's place, as Audio Options does. Yes saves on the Autosave screen, in
 // this page's place, so its end moves back to Options; No puts all four
 // back as they were, then moves back; B on the popup stays.
 
 static void askToSave(BGameFlow* gf, DisplayScreen* d)
 {
-    static const char kMessage[] = "Save your changes to the card?";
     BPopupConfig cfg;
 
     memset(&cfg, 0, sizeof cfg);
@@ -372,7 +372,8 @@ static void askToSave(BGameFlow* gf, DisplayScreen* d)
                        | BPOPUP_BUTTONS_BELOW;
     cfg.parent         = gf->screen;
     cfg.screen         = BPOPUP_SCREEN_MEMCARD;
-    cfg.message        = kMessage;
+    cfg.message        = portlang_get(gf->currLanguage,
+                                      PORTLANG_SAVE_CHANGES, NULL);
     cfg.button[0]      = LANG_YES;
     cfg.button[1]      = LANG_NO;
     cfg.buttonParam[0] = ANSWER_SAVE;

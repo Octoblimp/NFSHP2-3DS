@@ -65,8 +65,16 @@ static const char* lookup(const LangTable* t, const uint8_t* table,
 
 const char* langtab_get(const LangTable* t, int32_t id, size_t* outLen)
 {
-    // The port's own IDs (portlang.h) are past every retail one.
+    // The port's own IDs (portlang.h) are past every retail one, and a few
+    // retail ones have the port's wording.
     if (id >= PORTLANG_FIRST) return portlang_get(t->languageEnum, id, outLen);
+    const char* own = portlang_retail(t->languageEnum, id, outLen);
+    if (own) return own;
+    return langtab_get_disc(t, id, outLen);
+}
+
+const char* langtab_get_disc(const LangTable* t, int32_t id, size_t* outLen)
+{
     if (!t->idTable) return NULL;
     return lookup(t, t->idTable, t->numID, id, outLen);
 }

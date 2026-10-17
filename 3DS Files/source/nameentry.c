@@ -18,6 +18,7 @@
 #include "bsetup.h"
 #include "flailer.h"
 #include "fred.h"
+#include "portlang.h"
 
 // The rows, MENUITEM_1..4: Player 1's name and gender, Player 2's.
 #define ITEM_P1_NAME   BSCR_ITEM_MENUITEM(1)
@@ -330,7 +331,7 @@ static void dataPutBack(const NameEntryData* d)
 // ---------------------------------------------------------- the prompt
 //
 // The port's (the user's word, 2026-10-13): BACK with anything changed
-// asks "Save your changes to the card?" in the screen's place, as the
+// asks "Save your changes to the SD Card?" in the screen's place, as the
 // debug menu does. Yes saves on the Autosave screen, in NameEntry's place,
 // so its end moves back to Options; No puts the names and genders back as
 // the screen found them and moves back; B on the popup stays. Retail's
@@ -345,7 +346,6 @@ static void showScreen(BGameFlow* gf, uint32_t screen, int visible)
 
 static void askToSave(BGameFlow* gf, NameEntry* e)
 {
-    static const char kMessage[] = "Save your changes to the card?";
     BPopupConfig cfg;
 
     memset(&cfg, 0, sizeof cfg);
@@ -354,7 +354,8 @@ static void askToSave(BGameFlow* gf, NameEntry* e)
                        | BPOPUP_BUTTONS_BELOW;
     cfg.parent         = gf->screen;
     cfg.screen         = BPOPUP_SCREEN_MEMCARD;
-    cfg.message        = kMessage;
+    cfg.message        = portlang_get(gf->currLanguage,
+                                      PORTLANG_SAVE_CHANGES, NULL);
     cfg.button[0]      = LANG_YES;
     cfg.button[1]      = LANG_NO;
     cfg.buttonParam[0] = ANSWER_SAVE;

@@ -43,6 +43,11 @@ bool langtab_parse(LangTable* t, const uint8_t* payload, uint32_t size);
 // string in the pool ends on the pool's final byte -- so use *outLen.
 const char* langtab_get(const LangTable* t, int32_t id, size_t* outLen);
 
+// langtab_get with no port strings (portlang.h): the disc's string for a
+// retail ID, as GetString finds it. langtab_check reads the disc with it.
+const char* langtab_get_disc(const LangTable* t, int32_t id,
+                             size_t* outLen);
+
 // The same string copied into `out` and NUL-terminated, which is what a
 // drawing call wants. Returns the number of bytes copied, 0 when absent.
 size_t langtab_copy(const LangTable* t, int32_t id, char* out, size_t cap);

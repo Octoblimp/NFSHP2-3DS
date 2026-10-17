@@ -374,7 +374,9 @@ static const char* translate(BGameFlow* gf, int id)
 // sprintf (0x00251398) as the prompts use it: %d from the arguments in
 // order, and %% -- the only conversions the strings carry. Anything else is
 // copied as it stands rather than read off a stack that is not there, and
-// a %d past the arguments prints 0.
+// a %d past the arguments prints 0. The port's own "%2$d" (1 to 9) is that
+// argument: its SD Card strings drop the slot that came before the KB
+// (portlang.c).
 static void formatPrompt(char* out, size_t cap, const char* fmt,
                          const int* args, int nargs)
 {
@@ -382,13 +384,22 @@ static void formatPrompt(char* out, size_t cap, const char* fmt,
     int    used = 0;
     if (cap == 0) return;
     while (*fmt && n + 1 < cap) {
+        int which = -1;
+        int skip  = 0;
         if (fmt[0] == '%' && fmt[1] == 'd') {
+            which = used++;
+            skip  = 2;
+        } else if (fmt[0] == '%' && fmt[1] >= '1' && fmt[1] <= '9'
+                   && fmt[2] == '$' && fmt[3] == 'd') {
+            which = fmt[1] - '1';
+            skip  = 4;
+        }
+        if (which >= 0) {
             char num[16];
-            int  v = used < nargs ? args[used] : 0;
-            used++;
+            int  v = which < nargs ? args[which] : 0;
             snprintf(num, sizeof(num), "%d", v);
             for (const char* q = num; *q && n + 1 < cap; q++) out[n++] = *q;
-            fmt += 2;
+            fmt += skip;
         } else if (fmt[0] == '%' && fmt[1] == '%') {
             out[n++] = '%';
             fmt += 2;

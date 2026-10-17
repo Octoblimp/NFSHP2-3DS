@@ -48,9 +48,19 @@ enum {
     PORTLANG_HELICOPTER,
     PORTLANG_CONTROLS_BLURB,                    // the page's bottom screen
     PORTLANG_CONTROLS_PRESS,                    // and its wait, $NAME's key
+    PORTLANG_SAVE_CHANGES,                      // a screen's prompt on the
+    PORTLANG_SAVE_CHANGES_RACE,                 // way out, and the debug race's
     PORTLANG_END
 };
 
 // The string for `id` in `languageEnum` (LangEnum), or NULL when the ID is
 // not the port's. *outLen is its length; it is NUL-terminated too.
 const char* portlang_get(int32_t languageEnum, int32_t id, size_t* outLen);
+
+// The port's wording of one of retail's own IDs in `languageEnum`, or NULL
+// to keep retail's: the memory card's messages and the Load/Save screen's
+// help lines name the 3DS's SD Card and no MEMORY CARD slot (TASKS 52).
+// LANG_LONGEST and LANG_ID_NUM keep retail's. langtab_get() asks this
+// before the table on the disc.
+const char* portlang_retail(int32_t languageEnum, int32_t id,
+                            size_t* outLen);

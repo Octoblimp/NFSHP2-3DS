@@ -105,7 +105,7 @@ the same way for the pages that use it.
 Retail's B on either page writes the page into Fred and, with autosave on and
 anything changed, goes to the Autosave screen. The port follows the user's
 rule of 2026-10-13: any screen that changes the save asks "Save your changes
-to the card?" when it is left with changes, with autosave on or off.
+to the SD Card?" when it is left with changes, with autosave on or off.
 
 - Audio Options snapshots Fred's audio options (176 bytes) when the player
   comes in from Options. It keeps the snapshot while JukeBox Music is open,

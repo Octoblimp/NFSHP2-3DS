@@ -125,3 +125,46 @@ chunk header: the *payload* a reader is handed starts 8 bytes later, so
 and 108. `LanguageDescription` is exactly 100 bytes -- `bNode`(8) +
 `FileName[64]` + `LanguageEnum`(4) + three counts(12) + three dead
 pointers(12) -- which is the arithmetic to check a port against.
+
+### The port's wording
+
+The 3DS saves to its SD Card (`sdmc:/NFSHP2/SAVES`), so the PS2's "Memory
+Card (PS2)" and its "MEMORY CARD slot 1" would be wrong on the handheld.
+`portlang.c`'s `kRetail` has 27 retail IDs in the six languages, and
+`langtab_get()` asks `portlang_retail()` before the disc. `LONGEST` and
+`ID_NUM` keep the disc's, as they're only used for the build.
+
+| ids | what |
+|-----|------|
+| 150004 | the card's name, "SD Card" ("Carte SD", "Scheda SD", "Tarjeta SD", "SD-kort") |
+| 151001 .. 151027, 151101, 152001 | the memory card messages: loading, saving, checking, none found, no space, formatting, overwriting, failed |
+| 800070, 800071 | the Load/Save screen's help lines |
+
+How each was made from retail's text, per language:
+
+- The card's words become the SD Card's ("carte SD", "SD Card",
+  "scheda SD", "tarjeta SD", "SD-kort"), with the article retail's grammar
+  needs ("the SD Card", "auf der SD Card", "SD-kortet").
+- The slot is dropped ("in MEMORY CARD slot %d", "dans la fente pour
+  MEMORY CARD (carte memoire) %d" and the rest), and "Do not turn the
+  power off or reset the console" loses the reset: the 3DS has no reset
+  button.
+- The two messages that need space (151011, 151027) had the slot first
+  and the KB second. With the slot gone they take the KB as `%2$d`, which
+  `memcard.c`'s `formatPrompt` reads as its second argument, so the
+  caller passes the same arguments as retail does.
+- The help lines keep their button bytes (`0x82 0x83` the D-pad,
+  `0x86 0x80` Cross and START), which `helpglyph` draws as the 3DS keys.
+
+The port's own prompt for a screen left with changes (Audio, Display,
+Controller, Player Names, the debug menu) is `PORTLANG_SAVE_CHANGES`,
+"Save your changes to the SD Card?", in the six languages, and
+`PORTLANG_SAVE_CHANGES_RACE` for the debug menu's Start Race. Before
+this they were English only and said "the card".
+
+`tools/langtab_check.py` checks this too, against the disc. In the six
+languages, every disc string that names the card ("memory card",
+"minneskort (PS2)", "(PS2)") must have a port string, no port string may
+name it, and the two build tables must have none. Retail's tables give
+"27 with the port's wording, 0 wrong" in each of the six languages, and 0
+in `FE_ID` and `FE_LONGEST`.

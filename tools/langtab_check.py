@@ -36,12 +36,47 @@ def run_c(exe, path, english):
         sys.stderr.write(r.stderr)
         sys.exit("langtab_test failed on %s" % path)
     out = {}
+    port = {}
     for line in r.stdout.splitlines():
         if chr(9) not in line:
             continue
         k, v = line.split(chr(9), 1)
+        if k.startswith("port "):
+            port[int(k[5:])] = v
+            continue
         out.setdefault(int(k), v)             # first hit wins, as the dict does
-    return out, r.stderr.strip()
+    return out, port, r.stderr.strip()
+
+
+# The PS2's memory card, in each language's words; the port's SD Card text
+# (portlang.c's kRetail) must leave none of it in the six languages.
+CARD_WORDS = ("memory card", "minneskort (ps2)", "(ps2)")
+
+
+def names_card(s):
+    s = s.lower()
+    return any(w in s for w in CARD_WORDS)
+
+
+def check_port(t, py_text, port):
+    """The port's own wording for the six languages: every disc string that
+    names the PS2's card has one, none of them names it, and the build
+    tables (LONGEST, ID_NUM) have none."""
+    bad = []
+    if t.language > 5:
+        if port:
+            bad.append("%d port strings in a build table" % len(port))
+        return bad
+    for k, v in sorted(py_text.items()):
+        if names_card(v) and k not in port:
+            bad.append("[%d] still names the card: %r" % (k, v))
+    for k, h in sorted(port.items()):
+        s = bytes.fromhex(h).decode("latin-1")
+        if names_card(s):
+            bad.append("[%d] the port's names the card: %r" % (k, s))
+        if k not in py_text:
+            bad.append("[%d] the port's is not on the disc" % k)
+    return bad
 
 
 def main():
@@ -56,12 +91,13 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         exe = hostbuild.build(tmp, SOURCES, "langtab_test")
         for path in args.files:
-            c, info = run_c(exe, path, args.english)
+            c, port, info = run_c(exe, path, args.english)
             t = ld.load(path)
             py = t.by_hash if args.english else t.by_id
             if args.english:
                 py = {k - (1 << 32) if k >= 1 << 31 else k: v
                       for k, v in py.items()}
+            text = py
             py = {k: as_hex(v) for k, v in py.items()}
 
             bad = [k for k in sorted(set(c) | set(py))
@@ -73,6 +109,13 @@ def main():
             if len(bad) > args.max_report:
                 print("  ... and %d more" % (len(bad) - args.max_report))
             bad_total += len(bad)
+            if not args.english:
+                pbad = check_port(t, text, port)
+                print("%-40s %d with the port's wording, %d wrong"
+                      % ("", len(port), len(pbad)))
+                for line in pbad[:args.max_report]:
+                    print("  " + line)
+                bad_total += len(pbad)
     return 1 if bad_total else 0
 
 

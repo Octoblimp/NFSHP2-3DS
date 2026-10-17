@@ -173,6 +173,313 @@ static const char* const kStrings[PORTLANG_END - PORTLANG_FIRST][6] = {
       "Premi il nuovo tasto per $NAME. START annulla.",
       "Pulsa el nuevo bot\xf3n para $NAME. START cancela.",
       "Tryck p\xe5 den nya knappen f\xf6r $NAME. START avbryter." },
+    // PORTLANG_SAVE_CHANGES: the save prompt of a screen left with changes
+    { "Save your changes to the SD Card?",
+      "Sauvegarder vos modifications sur la carte SD ?",
+      "Deine \xc4nderungen auf der SD Card speichern?",
+      "Salvare le modifiche sulla scheda SD?",
+      "\xbfGuardar los cambios en la tarjeta SD?",
+      "Spara dina \xe4ndringar p\xe5 SD-kortet?" },
+    // PORTLANG_SAVE_CHANGES_RACE: the debug menu's Start Race
+    { "Save your changes to the SD Card before the race?",
+      "Sauvegarder vos modifications sur la carte SD avant la course ?",
+      "Deine \xc4nderungen vor dem Rennen auf der SD Card speichern?",
+      "Salvare le modifiche sulla scheda SD prima della gara?",
+      "\xbfGuardar los cambios en la tarjeta SD antes de la carrera?",
+      "Spara dina \xe4ndringar p\xe5 SD-kortet f\xf6re loppet?" },
+};
+
+// Retail's memory card messages and the Load/Save screen's help lines,
+// said for the 3DS: retail's text in each language with the card's words
+// put as the SD Card's and the MEMORY CARD slot dropped
+// (docs/formats/language-table.md, "The port's wording"). The slot went
+// first in the two that need space, so they take the KB as "%2$d"
+// (memcard.c's formatPrompt). The help lines keep their buttons: 0x82 0x83
+// the D-pad, 0x86 0x80 Cross and START.
+static const struct {
+    int32_t     id;
+    const char* text[6];
+} kRetail[] = {
+    { 150004, {
+        "SD Card",
+        "Carte SD",
+        "SD Card",
+        "Scheda SD",
+        "Tarjeta SD",
+        "SD-kort"
+    } },
+    { 151001, {
+        "Do not remove the SD Card or turn the power off. @ @ Loading game "
+        "settings.",
+        "Ne retirez pas la carte SD et n'\xe9teignez pas la console. @ @ "
+        "Chargement des param\xe8tres de la partie...",
+        "Die SD Card nicht entfernen. Konsole nicht ausschalten. @ "
+        "@Spieleinstellungen werden geladen.",
+        "Non rimuovere la scheda SD. Non spegnere la console. @ @ "
+        "Caricamento impostazioni di gioco.",
+        "No retires la tarjeta SD. No apagues la consola. @ @ Cargando "
+        "par\xe1metros del juego.",
+        "Ta inte ur ditt SD-kort. Sl\xe5 inte av str\xf6mmen. @ @ Laddar "
+        "spelinst\xe4llningar."
+    } },
+    { 151003, {
+        "No saved game settings found on the SD Card",
+        "Aucun param\xe8tre sauvegard\xe9 n'a \xe9t\xe9 d\xe9tect\xe9 sur "
+        "la carte SD.",
+        "Auf der SD Card wurden keine gespeicherten Einstellungen gefunden.",
+        "Nessuna partita salvata sulla scheda SD",
+        "No se han encontrado par\xe1metros del juego guardados en la "
+        "tarjeta SD.",
+        "Inga sparade spelinst\xe4llningar hittades p\xe5 ditt SD-kort"
+    } },
+    { 151004, {
+        "Saving game settings to the SD Card.@Do not remove the SD Card or "
+        "turn the power off.",
+        "Sauvegarde des param\xe8tres de la partie sur la carte SD en "
+        "cours. Ne retirez pas la carte SD et n'\xe9teignez pas la console.",
+        "Spieldaten werden auf der SD Card gespeichert. Die SD Card nicht "
+        "entfernen. Konsole nicht ausschalten.",
+        "Salvataggio del file di gioco sulla scheda SD@Non rimuovere la "
+        "scheda SD. Non spegnere la console.",
+        "Guardando par\xe1metros del juego en la tarjeta SD.@No retires la "
+        "tarjeta SD. No apagues la consola.",
+        "Sparar spelinst\xe4llningar till SD-kortet.@Ta inte ur ditt "
+        "SD-kort. Sl\xe5 inte av str\xf6mmen."
+    } },
+    { 151006, {
+        "No SD Card detected. @ @Would you like to retry?",
+        "Aucune carte SD n'a \xe9t\xe9 d\xe9tect\xe9" "e.@Voulez-vous "
+        "recommencer ?",
+        "Es wurde keine SD Card gefunden.@ @M\xf6" "chtest du es erneut "
+        "versuchen?",
+        "Nessuna scheda SD rilevata. @ @Vuoi riprovare?",
+        "No se ha detectado ninguna tarjeta SD. @\xbfQuieres volver a "
+        "intentarlo?",
+        "Inget SD-kort hittat. @ @Vill du f\xf6rs\xf6ka igen?"
+    } },
+    { 151007, {
+        "The SD Card is unformatted. Would you like to format it?",
+        "La carte SD n'est pas format\xe9" "e. Souhaitez-vous la formater ?",
+        "Die SD Card ist nicht formatiert. Soll jetzt formatiert werden?",
+        "La scheda SD non \xe8 formattata. Vuoi formattarla?",
+        "La tarjeta SD no est\xe1 formateada. \xbfQuieres formatearla?",
+        "Ditt SD-kort \xe4r inte formaterat. Vill du formatera det?"
+    } },
+    { 151008, {
+        "Do not remove the SD Card. @ @ Formatting...",
+        "Ne retirez pas la carte SD. @ @ Formatage en cours...",
+        "Die SD Card nicht entfernen. @ @ Formatierung wird "
+        "durchgef\xfchrt ...",
+        "Non rimuovere la scheda SD. @ @ Formattazione in corso...",
+        "No retires la tarjeta SD. @ @ Formateando...",
+        "Ta inte ur ditt SD-kort. @ @ Formaterar..."
+    } },
+    { 151009, {
+        "The SD Card was formatted successfully!",
+        "Formatage de la carte SD r\xe9ussi !",
+        "Die SD Card wurde erfolgreich formatiert!",
+        "La scheda SD \xe8 stata formattata correttamente!",
+        "\xa1Se ha formateado la tarjeta SD!",
+        "Ditt SD-kort formaterat!"
+    } },
+    { 151010, {
+        "Format failed for the SD Card. @ @ Do you want to try again?",
+        "Echec du formatage de la carte SD. @ @ Souhaitez-vous "
+        "r\xe9" "essayer ?",
+        "Die Formatierung der SD Card ist fehlgeschlagen. @ @ "
+        "M\xf6" "chtest du es erneut versuchen?",
+        "Formattazione fallita della scheda SD. @ @ Vuoi riprovare?",
+        "Error de formato para la tarjeta SD. @ @ \xbfQuieres volver a "
+        "intentarlo?",
+        "Kunde inte formatera ditt SD-kort. @ @ Vill du f\xf6rs\xf6ka igen?"
+    } },
+    { 151011, {
+        "There is not enough space to save the game on the SD Card. Need "
+        "For Speed: Hot Pursuit 2 requires %2$d KB free. Do you want to "
+        "try again?",
+        "La carte SD poss\xe8" "de un espace insuffisant. La sauvegarde "
+        "des donn\xe9" "es de Need For Speed : Poursuite Infernale 2 "
+        "n\xe9" "cessite %2$dKB d'espace libre. Souhaitez-vous "
+        "r\xe9" "essayer ?",
+        "Es ist nicht gen\xfcgend freier Speicher vorhanden, um das Spiel "
+        "auf der SD Card zu speichern. F\xfcr Need For Speed: Hot Pursuit "
+        "2 werden %2$d KB freier Speicherplatz ben\xf6tigt. M\xf6" "chtest "
+        "du es noch mal versuchen?",
+        "Spazio insufficiente sulla scheda SD. Need For Speed: Hot Pursuit "
+        "2 richiede %2$d KB liberi. Vuoi riprovare?",
+        "No hay espacio suficiente para guardar la partida en la tarjeta "
+        "SD. Need For Speed: Hot Pursuit 2 requiere %2$d KB libres. "
+        "\xbfQuieres volver a intentarlo?",
+        "Det finns inte tillr\xe4" "ckligt med minne f\xf6r att spara "
+        "spelet p\xe5 ditt SD-kort. Need For Speed: Hot Pursuit 2 "
+        "kr\xe4ver %2$d KB ledigt utrymme. Vill du f\xf6rs\xf6ka igen?"
+    } },
+    { 151012, {
+        "Save failed for the SD Card.@Do you want to try again?",
+        "Echec de la sauvegarde sur la carte SD.@Souhaitez-vous "
+        "r\xe9" "essayer ?",
+        "Die Daten konnten nicht auf der SD Card gespeichert "
+        "werden.@M\xf6" "chtest du es noch mal versuchen?",
+        "Salvataggio fallito sulla scheda SD.@Vuoi riprovare?",
+        "Error de guardado en la tarjeta SD.@\xbfQuieres volver a "
+        "intentarlo?",
+        "Kunde inte spara p\xe5 SD-kortet.@Vill du f\xf6rs\xf6ka igen?"
+    } },
+    { 151013, {
+        "Checking the SD Card",
+        "V\xe9rification de la carte SD...",
+        "Die Suche nach einer SD Card wurde gestartet.",
+        "Controllo della scheda SD",
+        "Comprobando la tarjeta SD.",
+        "Letar efter SD-kort"
+    } },
+    { 151014, {
+        "A new SD Card was found.",
+        "Une nouvelle carte SD a \xe9t\xe9 d\xe9tect\xe9" "e.",
+        "Es wurde eine neue SD Card gefunden.",
+        "\xc8 stata rilevata una nuova scheda SD.",
+        "Se ha encontrado una tarjeta SD nueva.",
+        "Ett nytt SD-kort hittades."
+    } },
+    { 151015, {
+        "No SD Card detected.@ Would you like to retry loading?",
+        "Aucune carte SD n'a \xe9t\xe9 d\xe9tect\xe9" "e.",
+        "Es wurde keine SD Card gefunden.@M\xf6" "chtest du erneut "
+        "versuchen, zu laden?",
+        "Nessuna scheda SD rilevata. Vuoi riprovare il caricamento?",
+        "No se ha detectado ninguna tarjeta SD. \xbfQuieres volver a "
+        "intentar cargar?",
+        "Inget SD-kort hittat.@ Vill du f\xf6rs\xf6ka ladda igen?"
+    } },
+    { 151016, {
+        "Invalid SD Card @ @ The inserted device is not an SD Card.",
+        "Carte SD non valide @ @ L'accessoire ins\xe9r\xe9 n'est pas une "
+        "carte SD.",
+        "Ung\xfcltige SD Card @ @ Der eingesteckte Gegenstand ist keine SD "
+        "Card.",
+        "Scheda SD non valida @ @ La periferica inserita non \xe8 una "
+        "scheda SD.",
+        "Tarjeta SD no v\xe1lida @ @ El dispositivo insertado no es una "
+        "tarjeta SD.",
+        "Ogiltigt SD-kort @ @ Enheten \xe4r inget SD-kort."
+    } },
+    { 151017, {
+        "No SD Card detected.",
+        "Aucune carte SD n'a \xe9t\xe9 d\xe9tect\xe9" "e.",
+        "Es wurde keine SD Card gefunden.",
+        "Nessuna scheda SD individuata.",
+        "No se ha detectado ninguna tarjeta SD.",
+        "Inget SD-kort hittat."
+    } },
+    { 151018, {
+        "Load failed for the SD Card.@Would you like to try again?",
+        "Echec du chargement \xe0 partir de la carte SD. @Souhaitez-vous "
+        "r\xe9" "essayer ?",
+        "Laden von der SD Card fehlgeschlagen.@M\xf6" "chtest du es noch "
+        "mal versuchen?",
+        "Caricamento fallito della scheda SD.@Vuoi riprovare?",
+        "Error al cargar la tarjeta SD. @\xbfQuieres volver a intentarlo?",
+        "Kunde inte ladda ditt SD-kort.@Vill du f\xf6rs\xf6ka igen?"
+    } },
+    { 151020, {
+        "Overwrite existing game settings@on the SD Card?",
+        "Ecraser les param\xe8tres sauvegard\xe9s@sur la carte SD ?",
+        "M\xf6" "chtest du die aktuellen Spieleinstellungen@auf der SD "
+        "Card \xfc" "berschreiben?",
+        "Sovrascrivere le impostazioni di gioco@esistenti sulla scheda SD?",
+        "\xbfReemplazar los par\xe1metros del juego existentes en la "
+        "tarjeta SD?",
+        "Skriv \xf6ver nuvarande spelinst\xe4llningar p\xe5 SD-kortet?"
+    } },
+    { 151022, {
+        "Current settings will be overwritten by the game settings on the "
+        "SD Card. Continue?",
+        "Les param\xe8tres actuels seront remplac\xe9s par ceux "
+        "pr\xe9sents sur la carte SD. Continuer ?",
+        "Die aktuellen Einstellungen werden durch die Spieleinstellungen "
+        "auf der SD Card \xfc" "berschrieben. Fortfahren?",
+        "Le impostazioni attuali saranno sostituite dalle impostazioni di "
+        "gioco presenti sulla scheda SD. Continuare?",
+        "Los par\xe1metros actuales ser\xe1n reemplazados por los "
+        "par\xe1metros del juego en la tarjeta SD. \xbf" "Deseas continuar?",
+        "Nuvarande inst\xe4llningar kommer att skrivas \xf6ver av "
+        "spelinst\xe4llningarna p\xe5 ditt SD-kort. Forts\xe4tt?"
+    } },
+    { 151023, {
+        "Create Saved Game on the SD Card?",
+        "Cr\xe9" "er une sauvegarde sur la carte SD ?",
+        "Gespeichertes Spiel auf der SD Card erstellen.",
+        "Creazione del file di salvataggio sulla scheda SD.",
+        "\xbf" "Crear partida guardada en la tarjeta SD?",
+        "Skapa sparad spelomg\xe5ng p\xe5 ditt SD-kort?"
+    } },
+    { 151024, {
+        "Load failed for the SD Card.",
+        "Echec du chargement \xe0 partir de la carte SD.",
+        "Laden von der SD Card fehlgeschlagen.",
+        "Caricamento fallito dalla scheda SD.",
+        "Error de cargado en la tarjeta SD.",
+        "Kunde inte ladda ditt SD-kort."
+    } },
+    { 151025, {
+        "No SD Card detected.",
+        "Aucune carte SD n'a \xe9t\xe9 d\xe9tect\xe9" "e.",
+        "Keine SD Card gefunden.",
+        "Nessuna scheda SD individuata.",
+        "No se ha detectado ninguna tarjeta SD.",
+        "Inget SD-kort hittat."
+    } },
+    { 151027, {
+        "No SD Card detected. Need For Speed: Hot Pursuit 2 requires %2$d "
+        "KB free. Do you want to try again?",
+        "Aucune carte SD n'a \xe9t\xe9 d\xe9tect\xe9" "e. Need For Speed : "
+        "Poursuite Infernale 2 n\xe9" "cessite %2$dKB. Voulez-vous "
+        "r\xe9" "essayer ?",
+        "Keine SD Card gefunden. F\xfcr Need For Speed: Hot Pursuit 2 "
+        "werden %2$d KB freier Speicherplatz ben\xf6tigt. M\xf6" "chtest "
+        "du es noch mal versuchen?",
+        "Nessuna scheda SD rilevata. Need For Speed: Hot Pursuit 2 "
+        "richiede almeno %2$d KB di spazio disponibile. Vuoi riprovare?",
+        "No se ha detectado ninguna tarjeta SD. Need For Speed: Hot "
+        "Pursuit 2 requiere %2$d KB libres. \xbfQuieres intentarlo de "
+        "nuevo?",
+        "Inget SD-kort hittat. Need For Speed: Hot Pursuit 2 kr\xe4ver "
+        "%2$d KB ledigt utrymme. Vill du f\xf6rs\xf6ka igen?"
+    } },
+    { 151101, {
+        "The SD Card is unformatted.",
+        "La carte SD n'est pas format\xe9" "e.",
+        "Die SD Card ist nicht formatiert.",
+        "La scheda SD non \xe8 formattata.",
+        "La tarjeta SD no est\xe1 formateada.",
+        "Ditt SD-kort \xe4r inte formaterat"
+    } },
+    { 152001, {
+        "Do not remove the SD Card. @ @ Unformatting...",
+        "Ne retirez pas la carte SD. @ @ Annulation du formatage en "
+        "cours...",
+        "Die SD Card nicht entfernen. @ @ Formatierung wird "
+        "r\xfc" "ckg\xe4ngig gemacht ...",
+        "Non rimuovere la scheda SD. @ @ Deformattazione in corso...",
+        "No retires la tarjeta SD. @ @ Quitando formato...",
+        "Ta inte ur ditt SD-kort. @ @ Avformaterar..."
+    } },
+    { 800070, {
+        "\x82 \x83 Select SD Card function",
+        "\x82 \x83 Parcourir les options de carte SD",
+        "\x82 \x83 SD Card-Funktion ausw\xe4hlen",
+        "\x82 \x83 seleziona funzione scheda SD",
+        "\x82 \x83 Seleccionar funci\xf3n tarjeta SD",
+        "\x82 \x83 V\xe4lj SD-kort-funktion"
+    } },
+    { 800071, {
+        "\x86 \x80 Activate SD Card function",
+        "\x86 \x80 S\xe9lectionner l'option de carte SD",
+        "\x86 \x80 SD Card-Funktion aktivieren",
+        "\x86 \x80 attiva funzione scheda SD",
+        "\x86 \x80 Activar funci\xf3n tarjeta SD",
+        "\x86 \x80 Aktivera SD-kort-funktion"
+    } },
 };
 
 const char* portlang_get(int32_t languageEnum, int32_t id, size_t* outLen)
@@ -203,4 +510,21 @@ const char* portlang_get(int32_t languageEnum, int32_t id, size_t* outLen)
     if (outLen)
         *outLen = strlen(s);
     return s;
+}
+
+const char* portlang_retail(int32_t languageEnum, int32_t id, size_t* outLen)
+{
+    size_t i;
+
+    if (languageEnum < LANG_EN || languageEnum > LANG_SE)
+        return NULL;
+    for (i = 0; i < sizeof kRetail / sizeof kRetail[0]; i++)
+        if (kRetail[i].id == id) {
+            const char* s = kRetail[i].text[languageEnum];
+
+            if (outLen)
+                *outLen = strlen(s);
+            return s;
+        }
+    return NULL;
 }

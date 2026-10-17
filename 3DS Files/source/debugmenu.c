@@ -31,6 +31,7 @@
 #include "fred.h"
 #include "fredrace.h"
 #include "nfsrewards.h"
+#include "portlang.h"
 #include "race.h"
 #include "raceparams.h"
 #include "track.h"
@@ -826,9 +827,6 @@ static void showScreen(BGameFlow* gf, uint32_t screen, int visible)
 // Yes, No, or B for neither.
 static void askToSave(BGameFlow* gf, const Page* p, int after)
 {
-    static const char kLeave[] = "Save your changes to the card?";
-    static const char kRace[]  =
-        "Save your changes to the card before the race?";
     BPopupConfig cfg;
 
     memset(&cfg, 0, sizeof cfg);
@@ -837,7 +835,10 @@ static void askToSave(BGameFlow* gf, const Page* p, int after)
                        | BPOPUP_BUTTONS_BELOW;
     cfg.parent         = gf->screen;
     cfg.screen         = BPOPUP_SCREEN_MEMCARD;
-    cfg.message        = after == AFTER_RACE ? kRace : kLeave;
+    cfg.message        = portlang_get(gf->currLanguage,
+                                      after == AFTER_RACE
+                                      ? PORTLANG_SAVE_CHANGES_RACE
+                                      : PORTLANG_SAVE_CHANGES, NULL);
     cfg.button[0]      = LANG_YES;
     cfg.button[1]      = LANG_NO;
     cfg.buttonParam[0] = ANSWER_SAVE;

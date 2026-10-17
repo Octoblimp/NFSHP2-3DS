@@ -3327,8 +3327,18 @@ phases.
         Session 86: Save, Load and Autosave on Options, and Quit Race's
         overwrite question after a quick race. A Quit from the pause
         menu leaves without a save, as retail's does.
-  - [ ] The popups say retail's "Memory Card (PS2)" and "MEMORY CARD
+  - [x] The popups say retail's "Memory Card (PS2)" and "MEMORY CARD
         slot 1". The 3DS has an SD card.
+        Done in Session 117: `portlang.c`'s `kRetail` puts the SD Card
+        in 27 retail IDs in the six languages (the card's name, its
+        messages, the Load/Save help lines), with no slot and no reset.
+        The two with the KB take it as `%2$d` (`formatPrompt`). The
+        port's own "Save your changes to the card?" is
+        `PORTLANG_SAVE_CHANGES` in six languages, "SD Card". Checks:
+        langtab_check gives 27 with the port's wording, 0 wrong, in each
+        language. Azahar: the Display walk PASS, its overwrite popup
+        "SD Card", "Overwrite existing game settings on the SD Card?"
+        (docs/formats/language-table.md, "The port's wording").
 53. [x] **The debug menu.** Asked for on 2026-10-12. A panel in the
         main menu, opened by pressing L + R + D-Pad Up together there,
         or by "DebugMenu 1" in nfshp2_config.txt. It starts any track

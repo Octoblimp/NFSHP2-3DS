@@ -115,7 +115,7 @@ unsaved.
 The port's BACK asks first, with autosave on or off (the user's word,
 2026-10-13). If anything differs from the names and genders on entry,
 it holds the move back and opens memcard.c's popup, titled "Save"
-(150000): "Save your changes to the card?". The screen hides under it,
+(150000): "Save your changes to the SD Card?". The screen hides under it,
 as the debug menu's does.
 
 | Answer | What happens |
