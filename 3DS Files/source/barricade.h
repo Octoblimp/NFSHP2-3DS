@@ -76,6 +76,12 @@ void barricademanager_fade(BarricadeManager *b, float t);
 // deleted (as the destructor does) and its slot and timer set back to -1.
 void barricademanager_count_down(BarricadeManager *b, float dt);
 
+// 0x0024f358, the replay's (TASKS 72e-2, copsnap.c): in a section of its
+// own, each barrel's fade timer and then its id, a short.
+struct ReplaySnapshot;
+void barricademanager_do_snapshot(BarricadeManager *b,
+                                  struct ReplaySnapshot *s);
+
 // The smokeables' side, not ported yet.
 //   - 0x0021ef88(id, info): deletes the barrel's smokeable. FindSmokeable
 //     Info(bStringHash("CS_RoadBlock_Barrel")) is found for it each time.

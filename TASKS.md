@@ -4145,9 +4145,16 @@ phases.
             port's: 4839 lines, 0 differ; 76 of 76 mutations caught.
             The 21 other checkers that link the changed files pass
             again.
-          - [ ] 72e-2. tPursuit (0x0022a548) with the roadblock's state
+          - [x] 72e-2. tPursuit (0x0022a548) with the roadblock's state
             machine (0x0022ce60), and the cops: tCop (0x0022d440),
             tPlayerCop (0x0022d7e8) and tAICop (0x0022dd20).
+            **Done in Session 123:** these with the cop manager's
+            pursuit, cop and radar trap pointers, the pursuit's history
+            and its barrels', all from retail in `copsnap.c`; the cops'
+            are slot 32 of their tables. `copsnap_check` runs them
+            beside retail's: 10696 lines, 0 differ; 183 of 183 mutations
+            caught. The 52 other checkers that link the changed files
+            pass again.
           - [ ] 72e-3. tCopManager (0x00223b70): the pursuits, the
             strips and the cops, bound to World's
             `gCopManagerDoSnapshotFn`.

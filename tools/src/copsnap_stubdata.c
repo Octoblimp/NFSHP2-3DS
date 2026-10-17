@@ -3,6 +3,7 @@
 // The data the linked port files name and nothing linked defines,
 // zero.
 
+#include "copmanager.h"
 #include "realtime.h"
 #include "trackroute.h"
 #include "world.h"
@@ -10,4 +11,5 @@
 TrackRouteManager TheTrackRouteManager;
 int32_t WorldLoopCounter;
 int32_t WorldTimer;
+tCopManager *pCopManager;
 World *pCurrentWorld;

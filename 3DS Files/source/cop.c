@@ -1617,18 +1617,6 @@ static void tplayercop_think_entry(void *self)
         gPlayerCopThinkFn((tPlayerCop *)self);
 }
 
-static void taicop_snapshot_entry(void *self)
-{
-    (void)self;
-    unported("tAICop::DoSnapshot (0x0022dd20)");
-}
-
-static void tplayercop_snapshot_entry(void *self)
-{
-    (void)self;
-    unported("tPlayerCop::DoSnapshot (0x0022d7e8)");
-}
-
 static const VtEntry tcop_vt[] = {
     { 0, 0, NULL },
     { 0, 0, (VtFn)tcop_dtor_entry },            //  8  0x0022d418
@@ -1642,7 +1630,7 @@ static const VtEntry tplayercop_vt[] = {
     { 0, 0, (VtFn)tplayercop_dtor_entry },      //  8  0x0022d5b0
     { 0, 0, (VtFn)tplayercop_is_ai_controlled },// 16  0x00230d98
     { 0, 0, (VtFn)tplayercop_think_entry },     // 24  0x0022d5c8
-    { 0, 0, (VtFn)tplayercop_snapshot_entry },  // 32  0x0022d7e8
+    { 0, 0, (VtFn)tplayercop_do_snapshot },     // 32  0x0022d7e8
 };
 
 static const VtEntry taicop_vt[] = {
@@ -1650,7 +1638,7 @@ static const VtEntry taicop_vt[] = {
     { 0, 0, (VtFn)taicop_dtor_entry },          //  8  0x0022dcc0
     { 0, 0, (VtFn)taicop_is_ai_controlled },    // 16  0x00230d60
     { 0, 0, (VtFn)taicop_think_entry },         // 24  0x0022df88
-    { 0, 0, (VtFn)taicop_snapshot_entry },      // 32  0x0022dd20
+    { 0, 0, (VtFn)taicop_do_snapshot },         // 32  0x0022dd20
 };
 
 void cop_install_vtables(void)

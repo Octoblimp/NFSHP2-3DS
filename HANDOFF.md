@@ -25866,3 +25866,65 @@ The 21 other checkers that compile a changed file or header pass again.
 3. Then 72f to 72h, one at a time.
 4. When 72h is committed, the launch checklist the user asked for,
    published, before TASKS 73.
+
+## Session 123, continued -- TASKS 72e-2: the pursuit's and the cops' snapshots
+
+The second of 72e's three slices: the pursuit and the cops, with what
+they call. 72e-3, the cop manager's own, takes them all.
+
+### What is ported
+
+From retail, at retail's address, in `copsnap.c`:
+
+- The cop manager's pointer moves: a pursuit as its id, a signed byte
+  (`0x002245b8`); a cop as its number (`0x00224648`) and a radar trap as
+  its index (`0x002243f8`), each an int stored in one byte. A restore
+  finds each again in `pCopManager`; -1 is none.
+- tPursuit::DoSnapshot (`0x0022a548`), with the history's
+  (`0x0022d180`, only while a player is chased), the roadblock state
+  machine's (`0x0022ce60`, no section; every mode sets its pursuit back)
+  and BarricadeManager's (`0x0024f358`). The chopper moves as a flag; a
+  restore takes the world's `Helicopter` for it.
+- tCop::DoSnapshot (`0x0022d440`): the car, the pursuit, dropped in
+  every mode if it no longer holds the cop (`IsCopInPursuit`) or its id
+  is below 0, then the four logic states.
+- tPlayerCop's (`0x0022d7e8`) and tAICop's (`0x0022dd20`), slot 32 of
+  their tables in `cop.c`, where two stubs that called `unported` were.
+  tAICop's section is named "tCop", as retail's is; a restore gives the
+  radar trap its cop back.
+
+Prototypes are in copmanager.h, pursuit.h, barricade.h and cop.h.
+`docs/formats/replay.md` has every move in a 72e-2 section;
+`docs/formats/cops.md` points to it.
+
+### The checker
+
+`tools/copsnap_check.py` grew the three cops, four pursuits (one gone),
+two roadblocks, the barrels and a world with a chopper. Recorded on both
+sides: World's car pointer, the manager's roadblock pointer (72c's),
+`IsCopInPursuit` (which says what the script set) and DriveTarget's
+snapshot. `copsnap_stubdata.c` now has 5 data symbols, still no
+functions.
+
+- 2789 script lines, 10696 lines, 0 differ.
+- 183 mutations, 183 caught.
+- Source checks hold cop.c's two tables to the new snapshots in slot 32.
+
+### Checkers re-run
+
+The 52 other checkers that compile a changed file or header pass again.
+Three link cop.c, whose tables now name the new snapshots:
+`cop_test.c`, `copmanager_test.c` and `loadertable_copstubs.c` gained
+stand-ins for them that abort if ever called.
+
+### Next
+
+1. 72e-3: tCopManager::DoSnapshot (`0x00223b70`), bound to
+   `gCopManagerDoSnapshotFn`. It verifies three counts, clears the
+   arrays on a restore, moves the pursuit list (deleting and making
+   pursuits, `0x00224560` and `0x002244e0`), calls each pursuit's and
+   each cop's, then the spike strips (made again with tSpikeStrip's
+   constructor, `0x00241308`), and more after `0x00223f8c`.
+2. Then 72f to 72h, one at a time.
+3. When 72h is committed, the launch checklist the user asked for,
+   published, before TASKS 73.

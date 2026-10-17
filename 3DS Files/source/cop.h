@@ -7,8 +7,9 @@
 // through the logic states. So far the constructors and destructors, the
 // small setters, the zone permissions, DisableMyCar, the drive target,
 // tAICop::Think with its transitions, and the limbo, disabled, guard,
-// radar-trap, roadblock and patrol logic are ported; DoSnapshot and the
-// chases' logic are step 12's later slices (docs/formats/cops.md).
+// radar-trap, roadblock and patrol logic are ported; the chases' logic is
+// step 12's later slices (docs/formats/cops.md). The DoSnapshots are the
+// replay's, in copsnap.c (TASKS 72e-2).
 
 #ifndef COP_H
 #define COP_H
@@ -108,6 +109,18 @@ void  taicop_delete(void *p);
 // trap's cop and its own pointer to NULL.
 void taicop_clear_pursuit(tAICop *c);
 void taicop_clear_speed_trap(tAICop *c);
+
+// The replay's DoSnapshots (TASKS 72e-2, copsnap.c). tCop's (0x0022d440),
+// which both call first: the car, the pursuit (cleared when the pursuit
+// no longer holds the cop or has gone, in every mode) and the four logic
+// states' bytes. tPlayerCop's (0x0022d7e8), slot 32: the two previous
+// selections with their timers, and the light. tAICop's (0x0022dd20),
+// slot 32: the radar trap (which gets the cop back on a restore), the
+// roadblock, the timers, the offsets and RouteInfo.
+struct ReplaySnapshot;
+void tcop_do_snapshot(tCop *c, struct ReplaySnapshot *s);
+void tplayercop_do_snapshot(tPlayerCop *c, struct ReplaySnapshot *s);
+void taicop_do_snapshot(tAICop *c, struct ReplaySnapshot *s);
 
 // DisableMyCar(bool), 0x00230ac8: unless it is in limbo or disabled
 // already, wreck the car's damage, let the chased player's radar traps

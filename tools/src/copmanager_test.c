@@ -45,6 +45,25 @@
 int32_t WorldTimer;
 int32_t WorldLoopCounter;
 
+// tPlayerCop's and tAICop's DoSnapshots, slot 32 of their tables
+// (copsnap.c, TASKS 72e-2, checked by tools/copsnap_check.py): in the
+// tables, never called here.
+void tplayercop_do_snapshot(tPlayerCop *c, struct ReplaySnapshot *s)
+{
+    (void)c;
+    (void)s;
+    fprintf(stderr, "tplayercop_do_snapshot reached\n");
+    abort();
+}
+
+void taicop_do_snapshot(tAICop *c, struct ReplaySnapshot *s)
+{
+    (void)c;
+    (void)s;
+    fprintf(stderr, "taicop_do_snapshot reached\n");
+    abort();
+}
+
 static uint32_t fb(float f)
 {
     uint32_t u;

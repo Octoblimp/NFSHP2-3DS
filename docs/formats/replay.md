@@ -19,7 +19,8 @@ The drivers and the AI are 72c's (each class's page,
 `tools/aisnap_check.py`). This page lists 72d's: the race's own
 classes (72d-1), then World's and RaceCoordinator's, which take all of
 them, with the smokeables and the collision bodies (72d-2). Then 72e's,
-the cops: the munitions, the spike strip and the chopper (72e-1).
+the cops: the munitions, the spike strip and the chopper (72e-1); the
+pursuit and the cops (72e-2).
 
 ## How the lists read
 
@@ -364,6 +365,97 @@ World's calls it through `gChopperDoSnapshotFn`, which main.c now binds.
     `TimeUntilNextSalvo` float, `NextLauncher` int 4, `Timeout` and
     `StuckTime` float, `TotalSalvos` int 4.
 
+## 72e-2: the pursuit and the cops
+
+These are in `copsnap.c` too. The cop manager's snapshot (72e-3) calls
+tPursuit's for each pursuit and slot 32 of each cop's table.
+
+### The cop manager's pointers
+
+A pursuit, a cop or a radar trap is moved as a number, and a restore
+finds it again in the manager (`pCopManager`):
+
+- A pursuit (0x002245b8) is its `nPursuitId` as a char 1, or -1 for
+  none. A restore reads it into -1 and takes `PursuitsById` at it, or
+  NULL when it is below 0; it does not look at the pursuit it held.
+- A cop (0x00224648) is its `nCopNumber` as an int 1, or -1; a restore
+  takes `Cops` at it, or NULL.
+- A radar trap (0x002243f8) is its index in `SpeedTraps` as an int 1, or
+  -1; a restore takes that trap, or NULL.
+
+A roadblock's pointer (0x00224358) is 72c's, in `copmanager.c`.
+
+### tPursuit, 0x0022a548, section "tPursuit", with the object
+
+1. `nPursuitId` verify char 1.
+2. `pChasedCar` through World's car pointer.
+3. `pRoadBlock` through the manager's roadblock pointer. While there is
+   one: its `CopSpeaker` uint 4, then its two cops through the cop
+   pointer.
+4. `PrimaryCopSpeaker` and `SecondaryCopSpeaker` uint 4.
+5. `nMaxChaseCops`, `nMaxRoadBlockCops` and `nRoadblockCount` int 4.
+6. The chopper as an int 4, 1 while `pChopper` is set. A restore sets
+   `pChopper` to the world's `Helicopter` when it reads 1, else NULL.
+7. `fChopperAttackTimer` and `fChopperNextAttackTime` float;
+   `ChopperState` data 1.
+8. `nNumCops` int 4, then that many of `Cops` through the cop pointer.
+9. `PursuitState`, `PursuitSubState` and `CurrentLandmark` data 1.
+10. `fPursuitStateTimer`, `fRoadBlockSpawnTimer`,
+    `fRoadBlockDisbandTimer`, `fCatchCarTimer`, `fChaseDirection`,
+    `fChaseDirectionTimer` and the float at 1556, in that order.
+11. `bAlreadyJoined`, `bAlreadyBeenHit` and `bAlreadyCalledForBackup`
+    bool.
+12. `fChasedCarTopSpeed` float; `BehaviourFlags` uint 4;
+    `nHUDPursuitLevel` int 1.
+13. `FarDriveTarget`, then `NearDriveTarget`: DriveTarget's (72c).
+14. While the chased car has a player: the history (tPursuitHistory,
+    0x0022d180), `nCount` int 1, then for each of the 30 its velocity as
+    a vector 2 and its time as a float.
+15. The roadblock state machine (0x0022ce60), with no section: `State`
+    data 1, `fStateTimer` float, `SpeechFlags` and `nRoadBlockCount`
+    int 4. Every mode sets its `pPursuit` back to this pursuit.
+16. The barrels (BarricadeManager, 0x0024f358), a named section
+    "BarricadeManager": for each of the ten, `fFadeTimer` float, then
+    `nBarrel` short 2.
+
+### tCop, 0x0022d440, section "tCop", named end
+
+Both cops' call it first.
+
+1. `pMyCar` through World's car pointer.
+2. `pMyPursuit` through the manager's pursuit pointer. Then, in every
+   mode, the pursuit is dropped if it no longer holds the cop
+   (`IsCopInPursuit`, 0x0022c920) or its id is below 0.
+3. `LogicState`, `LogicSubState`, `DesiredLogicState` and
+   `DesiredLogicSubState` data 1, in that order.
+
+### tPlayerCop, 0x0022d7e8, section "tPlayerCop", with the object
+
+1. tCop's.
+2. For each of the two: `nPrevSelection` int 1, then
+   `fPrevSelectionTimer` float.
+3. `bPrevCopLightState` bool.
+
+Slot 32 of its table.
+
+### tAICop, 0x0022dd20, section "tCop", with the object
+
+Retail names its section as the base's.
+
+1. tCop's.
+2. `pMySpeedTrap` through the manager's radar trap pointer.
+3. `nMyRoadBlockIndex` int 1.
+4. `fSecondsInPhysicsMode` and `fMovementModeSwitchDelay` float;
+   `nDrivingLineIndex` int 4.
+5. `fSubStateTimer`, the two floats at 48, `MyDLOffset`'s x and y, the
+   floats at 64 and 68, and `fFlankSide`, float each.
+6. `RouteInfo`'s route and point through `TheTrackRouteManager`'s
+   pointers, as the chopper's are.
+7. A restore gives the radar trap its cop back (`cop` set to this one).
+8. The float at 32 (the hit grace timer).
+
+Slot 32 of its table.
+
 ## The checker for 72d-1
 
 `tools/racesnap_check.py` runs retail's code beside the port's, on
@@ -491,11 +583,33 @@ the chopper's.
     python tools/copsnap_check.py --stubs
     python tools/copsnap_check.py --mutate [--only a,b]
 
+## The checker for 72e-2
+
+The same checker and harness. These run real on both sides too: the
+three pointers of the manager, the history, the state machine, the
+barrels and the four functions above. Recorded as well: World's plain
+pointer, the manager's roadblock pointer, `IsCopInPursuit` (which says
+what the script set) and DriveTarget's snapshot.
+
+The scenarios cover these cases:
+
+- a cop manager with cops 0, 1 and 4 and pursuits with ids 0, 3, 2 and
+  one gone (-2), the gone one not in `PursuitsById`;
+- pursuits chasing a player and not, with a roadblock and its cops (both,
+  one, none) and without one, a chopper and none, from none to four
+  pointers changed by the restore, and none to two chase cops, some
+  NULL;
+- cops whose pursuit holds them, does not, is gone, and goes before the
+  restore finds it by its id; none at all;
+- AI cops at each radar trap and at none, the trap's cop before and
+  after, routes and points changed by the restore.
+
+The run is 2789 script lines and 10696 output lines; none differ. All
+183 of 183 mutations are caught. Source checks hold cop.c's tPlayerCop
+and tAICop tables to the new snapshots in slot 32.
+
 ## Not yet
 
-- 72e-2: tPursuit's (0x0022a548) with the roadblock's state machine
-  (0x0022ce60), and the cops' (tCop's 0x0022d440, tPlayerCop's
-  0x0022d7e8, tAICop's 0x0022dd20).
 - 72e-3: tCopManager's (0x00223b70), which takes the pursuits, the
   strips and the cops, bound to `gCopManagerDoSnapshotFn`.
 - `FlushClans` (0x001ab650) and `FlushFernShakers` (0x001da1b0): the port

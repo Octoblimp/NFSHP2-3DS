@@ -1,6 +1,7 @@
 // copsnap_test -- the harness of tools/copsnap_check.py (TASKS 72e): the
 // cops' part of a replay snapshot -- DroppedSpikes', Rocket's, tSpikeStrip's
-// and the chopper's DoSnapshots (72e-1) -- over a script.
+// and the chopper's DoSnapshots (72e-1); tPursuit's, tPlayerCop's and
+// tAICop's with all they call in copsnap.c (72e-2) -- over a script.
 //
 // The same shape as worldsnap_test.c, which it copies the ops of:
 // tools/copsnap_check.py writes each record's field table in at the marker
@@ -11,9 +12,11 @@
 // same lines.
 //
 // Recorded here, as the model's stubs print them: Smokeable's snapshot,
-// World's car pointer, the route manager's route and point pointers,
-// TrackPathCoordinate's snapshot, the strip's Init and the chopper's
-// RemoveChopperFromWorld and ClearVariables. What the linked files reach
+// World's car pointer and its plain pointer, the route manager's route and
+// point pointers, TrackPathCoordinate's snapshot, the strip's Init, the
+// chopper's RemoveChopperFromWorld and ClearVariables, the cop manager's
+// roadblock pointer, the pursuit's IsCopInPursuit (which returns what an
+// `incop` op set) and DriveTarget's snapshot. What the linked files reach
 // outside that comes from copsnap_stubs.c and copsnap_stubdata.c, which
 // `copsnap_check.py --stubs` writes; each of those functions stops the run.
 
@@ -23,11 +26,16 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "barricade.h"
+#include "car.h"
 #include "chopper.h"
 #include "collisionbody.h"
+#include "cop.h"
 #include "copmanager.h"
+#include "drivetarget.h"
 #include "munition.h"
 #include "p32.h"
+#include "pursuit.h"
 #include "replay.h"
 #include "smokeable.h"
 #include "spikestrip.h"
@@ -375,6 +383,35 @@ void chopper_clear_variables(struct Chopper *h)
     printf("clearvariables %s %s\n", label(h), where());
 }
 
+void world_do_pointer_snapshot(const World *w, ReplaySnapshot *s,
+                               struct Car **pp)
+{
+    printf("worldptr w=%s s=%s pp=%s %s\n", label(w), snaparg(s), label(pp),
+           where());
+}
+
+void copmanager_do_road_block_pointer_snapshot(tCopManager *m,
+                                               ReplaySnapshot *s,
+                                               tRoadBlock **pp)
+{
+    printf("rbptr m=%s s=%s pp=%s %s\n", label(m), snaparg(s), label(pp),
+           where());
+}
+
+static int32_t incop_ret;
+
+int32_t tpursuit_is_cop_in_pursuit(const tPursuit *p, const tCop *c)
+{
+    printf("incop p=%s c=%s -> %d %s\n", label(p), label(c), (int)incop_ret,
+           where());
+    return incop_ret;
+}
+
+void drivetarget_do_snapshot(DriveTarget *t, ReplaySnapshot *s)
+{
+    SNAPREC("drivetarget", t, s);
+}
+
 // ------------------------------------------------------------------ dumps
 
 static void hex(const uint8_t *p, size_t n)
@@ -499,6 +536,12 @@ static void call(const char *fn, void *p)
         tspikestrip_do_snapshot(p, s);
     else if (!strcmp(fn, "chopper"))
         chopper_do_snapshot(p, s);
+    else if (!strcmp(fn, "pursuit"))
+        tpursuit_do_snapshot(p, s);
+    else if (!strcmp(fn, "playercop"))
+        tplayercop_do_snapshot(p, s);
+    else if (!strcmp(fn, "aicop"))
+        taicop_do_snapshot(p, s);
     else
         die("no function", fn);
 }
@@ -582,6 +625,34 @@ static void op(char **a, int n)
         memcpy(at + f->off, &v, 4);
     } else if (!strcmp(o, "curworld")) {
         pCurrentWorld = addr(a[1]);
+    } else if (!strcmp(o, "copmgr")) {
+        // copmgr|id: pCopManager, its first four radar traps as `idt`
+        // first, so a pointer into one reads as `idt[i]`.
+        char id[32];
+
+        pCopManager = calloc(1, sizeof *pCopManager);
+        snprintf(id, sizeof id, "%st", a[1]);
+        add(id, pCopManager->SpeedTraps, find_class("tSpeedTrap"), 4,
+            sizeof(tSpeedTrap));
+        add(a[1], pCopManager, NULL, 1, sizeof *pCopManager);
+    } else if (!strcmp(o, "mcop")) {
+        pCopManager->Cops[atoi(a[1])] = addr(a[2]);
+    } else if (!strcmp(o, "mpur")) {
+        pCopManager->PursuitsById[atoi(a[1])] = addr(a[2]);
+    } else if (!strcmp(o, "newcar")) {
+        // newcar|id|player: a car whose pPlayer is `player`.
+        struct Car *c = calloc(1, sizeof *c);
+
+        c->pPlayer = addr(a[2]);
+        add(a[1], c, NULL, 1, sizeof *c);
+    } else if (!strcmp(o, "newworld")) {
+        // newworld|id|heli: a world whose Helicopter is `heli`.
+        World *w = calloc(1, sizeof *w);
+
+        w->Helicopter = addr(a[2]);
+        add(a[1], w, NULL, 1, sizeof *w);
+    } else if (!strcmp(o, "incop")) {
+        incop_ret = atoi(a[1]);
     } else if (!strcmp(o, "timer")) {
         WorldTimer = atoi(a[1]);
         WorldLoopCounter = atoi(a[2]);

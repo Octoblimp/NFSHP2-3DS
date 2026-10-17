@@ -3638,6 +3638,11 @@ and so replaced every boot.
      DoSnapshots are retail's since TASKS 72e-1 (Session 123,
      continued), in `copsnap.c`; main.c binds `gChopperDoSnapshotFn`.
      `copsnap_check` runs them against retail.
+   - tPursuit's, tCop's, tPlayerCop's and tAICop's DoSnapshots are
+     retail's since TASKS 72e-2 (Session 123, continued), in
+     `copsnap.c`, with the cop manager's pursuit, cop and radar trap
+     pointers; the cops' are slot 32 of their tables. 72e-3 (the cop
+     manager's own, `0x00223b70`) is next.
 
    **7b, DriveCameraMover::Update, is done** (HANDOFF.md, Session 31,
    continued: the drive camera's Update). `docs/formats/camera.md`,

@@ -127,7 +127,9 @@ retail; only the names moved.
 The tables: tCop's at `0x002bd6e8`, tPlayerCop's at `0x002bd6c0` and
 tAICop's at `0x002bd698`. Slot 8 is the destructor, 16 IsAIControlled,
 24 Think and 32 DoSnapshot. tCop's last three are `__pure_virtual`.
-DoSnapshot still aborts as not ported; nothing in a race reaches it yet.
+DoSnapshot (tPlayerCop's `0x0022d7e8`, tAICop's `0x0022dd20`, both on
+tCop's `0x0022d440`) is in copsnap.c (TASKS 72e-2): [replay.md](replay.md)
+lists its moves, and `tools/copsnap_check.py` checks it.
 
 ## Making the cops
 

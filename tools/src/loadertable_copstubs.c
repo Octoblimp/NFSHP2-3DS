@@ -21,6 +21,7 @@
 #include "collision.h"
 #include "collisionbody.h"
 #include "configitems.h"
+#include "cop.h"
 #include "coputil.h"
 #include "drivetarget.h"
 #include "drivetargetrenderer.h"
@@ -421,4 +422,18 @@ void basecarsound_scale_road_noise(BaseCarSound *s, float f)
 {
     (void)s, (void)f;
     unreached("basecarsound_scale_road_noise");
+}
+
+// The cops' DoSnapshots, slot 32 of cop.c's tables (copsnap.c, TASKS
+// 72e-2).
+void tplayercop_do_snapshot(tPlayerCop *c, struct ReplaySnapshot *s)
+{
+    (void)c, (void)s;
+    unreached("tplayercop_do_snapshot");
+}
+
+void taicop_do_snapshot(tAICop *c, struct ReplaySnapshot *s)
+{
+    (void)c, (void)s;
+    unreached("taicop_do_snapshot");
 }

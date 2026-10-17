@@ -60,6 +60,15 @@ tPursuit *tpursuit_construct(tPursuit *p, int8_t id, struct Car *car);
 // freed back to PursuitSlotPool on flags & 1.
 void tpursuit_destruct(tPursuit *p, int32_t flags);
 
+// DoSnapshot, 0x0022a548, the replay's (TASKS 72e-2, copsnap.c): the
+// pursuit's id verified; the chased car, the roadblock (with its speaker
+// and two cops), the chopper (as a flag, World's on a restore), the cops,
+// the states, the timers and the flags; the two drive targets, the
+// history (a player's chase only), the roadblock's state machine and the
+// barrels. docs/formats/replay.md has every move.
+struct ReplaySnapshot;
+void tpursuit_do_snapshot(tPursuit *p, struct ReplaySnapshot *s);
+
 // SwitchPursuitState, 0x00229fe8: the state, its timer from the table at
 // 0x0031c570 scaled by the race's length, and each state's HUD level,
 // sub-state and behaviours. LEVEL2 and LEVEL3 may call the supervisor;

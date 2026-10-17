@@ -637,6 +637,33 @@ void copmanager_do_road_block_pointer_snapshot(tCopManager *m,
                                                struct ReplaySnapshot *s,
                                                tRoadBlock **pp);
 
+// The other three DoPointerSnapshots (TASKS 72e-2, copsnap.c), -1 for
+// NULL and looked up again on a restore: a pursuit as its nPursuitId, a
+// signed byte (0x002245b8; PursuitsById); a cop as its nCopNumber, an int
+// in one byte (0x00224648; Cops); a speed trap as its index in SpeedTraps,
+// the same (0x002243f8).
+void copmanager_do_pursuit_pointer_snapshot(tCopManager *m,
+                                            struct ReplaySnapshot *s,
+                                            tPursuit **pp);
+void copmanager_do_cop_pointer_snapshot(tCopManager *m,
+                                        struct ReplaySnapshot *s,
+                                        tCop **pp);
+void copmanager_do_speed_trap_pointer_snapshot(tCopManager *m,
+                                               struct ReplaySnapshot *s,
+                                               tSpeedTrap **pp);
+
+// tPursuitHistory::DoSnapshot, 0x0022d180 (72e-2, copsnap.c): the count,
+// then all 30 velocities and times, each velocity before its time.
+void tpursuithistory_do_snapshot(tPursuitHistory *h,
+                                 struct ReplaySnapshot *s);
+
+// tRoadBlockStateMachine::DoSnapshot, 0x0022ce60 (72e-2, copsnap.c), no
+// section: the state's byte, the timer, the speech flags and the count;
+// then pPursuit is `p` in every mode.
+void troadblockstatemachine_do_snapshot(tRoadBlockStateMachine *sm,
+                                        struct ReplaySnapshot *s,
+                                        tPursuit *p);
+
 // tCopManager::GetCopByCar (0x00224f70), the cop driving `c`, and
 // GetCopByChase (0x00224fc8), the cop chasing it. Seams until task 26; a
 // NULL seam finds no cop.
