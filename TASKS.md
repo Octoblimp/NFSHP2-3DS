@@ -3180,6 +3180,28 @@ phases.
           under 22 FPS. In those frames the CPU's ~19 ms and the GPU's
           ~32 ms run one after the other (50.8 ms a frame): TASKS 46's
           "GpuSends 1" is meant to overlap them.
+        - [x] Session 128: the helicopter over the bridge. In bb70171
+          its bombing run (plan 4) came down there on both laps, but
+          `chopper_fire_salvo` was still a stub: the munitions came in
+          105de48 that night. So a run then was the helicopter at
+          bombing height, some 4 m over the deck and inside the truss,
+          with its dust, firing nothing. Today's build fires there, as
+          retail does.
+          - "ForceChopper" had stopped working since TASKS 72e-1. The
+            replay's snapshots (copsnap.c) clear an idle helicopter, its
+            word at 960 too, so the forced one stayed in plan 6 at
+            0 0 0. `forceChopperTick` sets the word again each frame,
+            and "ForceChopper 6" has it follow with no bombing run.
+          - Azahar (AC power, 100% speed), track 44, "ForceChopper 1",
+            three cops, warped to the last stretch by
+            `nfshp2_warp.txt`, gas only: the helicopter came down to
+            bombing height over the bridge and its rocket hit the car on
+            the deck (the fireball, the blast, the flash, then the crash
+            cam at the abutment). The truss, deck and fences drew whole
+            in every shot, with the helicopter among the girders.
+        - [ ] On the 3DS: the user's next race on track 44 with the
+          helicopter, and what the artifact looks like if it is still
+          there (a flash, a gap, a stretched or missing triangle).
 
 48. [x] **The help menu (tHelpMenu).** Found on 2026-10-12 with TASKS
         43. The frontend shows a PS2 Circle and "help" bottom left;

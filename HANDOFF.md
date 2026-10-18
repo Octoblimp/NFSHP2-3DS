@@ -26927,3 +26927,30 @@ host and on the joiner. It has not been run on a 3DS; the friend's next
 wireless test will show it.
 
 `docs/formats/car-select.md` has it ("A Local Wireless race").
+
+## Session 128, continued -- TASKS 47: the bridge before track 44's finish
+
+The user's log of 2026-10-12 (build bb70171) had the police helicopter in
+its bombing run (plan 4) over the steel truss bridge before track 44's
+finish, on both laps, where the artifact showed. In bb70171
+`chopper_fire_salvo` was still a stub (the munitions came in 105de48 that
+night), so the run was the helicopter at bombing height, some 4 m over
+the deck and inside the truss, with its dust, firing nothing. Today's
+build fires there, as retail does.
+
+- **ForceChopper was broken** since TASKS 72e-1: the replay's snapshots
+  (copsnap.c) clear an idle helicopter, its word at 960 too, so the
+  forced helicopter stayed in plan 6 at 0 0 0. `forceChopperTick` in
+  main.c sets the word again each frame. "ForceChopper 6" is new: it
+  follows with no bombing run.
+- **On Azahar** (AC power, 100% speed), track 44, "ForceChopper 1", three
+  cops, warped to the last stretch (`nfshp2_warp.txt`
+  "3 244.7 2027.9 309.5 35200 15"), gas only: the helicopter came down
+  to bombing height over the bridge and its rocket hit the car on the
+  deck. The fireball, blast and flash came, then the crash cam at the
+  abutment. The truss, deck and fences drew whole in every shot, with
+  the helicopter among the girders.
+
+TASKS 47 stays open for the 3DS: the user's next race there with the
+helicopter, and what the artifact looks like if it is still there.
+`docs/formats/munitions.md` has the ForceChopper change.

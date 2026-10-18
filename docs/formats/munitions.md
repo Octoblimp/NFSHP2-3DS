@@ -234,7 +234,12 @@ sends it at once in an R-held (SkipFE) race:
 - `forceChopperTick`, just before World's step, waits 5 seconds and then
   starts a bombing run (Chopper::AttackCar) each time the helicopter has
   been back in PURSUIT for 4 seconds. N picks the row: 1 rockets, 2 and 3
-  the smoke bombs, 4 the spike belt, 5 each in turn.
+  the smoke bombs, 4 the spike belt, 5 each in turn. 6 starts none: the
+  helicopter only follows (TASKS 47's bridge).
+- The replay's snapshots (copsnap.c, TASKS 72e-1) clear an idle
+  helicopter, its word at 960 too, which left the forced one in plan 6
+  at 0 0 0 (Session 128). `forceChopperTick` sets the word again each
+  frame.
 - With no cops there is no cop manager to take the belt's spike strip
   (`DroppedSpikes::Explode` adds it there), so a belt becomes a smoke
   bomb. `SkipFEMaxCops 1` gives the race a cop, and the manager with it.

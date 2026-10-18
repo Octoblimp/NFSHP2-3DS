@@ -6082,7 +6082,8 @@ static void guardNote(FILE* f)
 // take it (its word at 960). Each time it is back in PURSUIT this waits a
 // few seconds and starts a bombing run of the kind the item names. With
 // no cop manager (SkipFEMaxCops 0) a spike belt has no list for its strip
-// (DroppedSpikes::Explode), so the belt becomes a smoke bomb.
+// (DroppedSpikes::Explode), so the belt becomes a smoke bomb. 6 only
+// follows.
 static int32_t eggIsOn(int32_t n)
 {
     return n == EGG_HELICOPTER && g_flow.skipFE && ConfigForceChopper > 0;
@@ -6098,6 +6099,10 @@ static void forceChopperTick(float dt)
 
     if (!eggIsOn(EGG_HELICOPTER) || pCurrentWorld == NULL) return;
     h = pCurrentWorld->Helicopter;
+    // The replay's snapshots clear an idle helicopter, its word at 960
+    // too (copsnap.c, TASKS 72e-1), so the follow is set again.
+    if (h != NULL) h->New960 = 1;
+    if (ConfigForceChopper >= 6) return;
     if (h == NULL || h->CurrentCar == NULL) return;
     if (h != last) {
         last = h;
