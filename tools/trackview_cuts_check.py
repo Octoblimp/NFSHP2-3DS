@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Checks two of TASKS 46's cuts to trackview.c against the code they
+"""Checks three of TASKS 46's cuts to trackview.c against the code they
 replaced.
 
 trackview.c draws through citro3d and does not build on the host, so the
@@ -17,6 +17,10 @@ body from tools/src:
   emptying. trackview_tex_test.inc holds find_texture to the scan from the
   front it replaced over 4 million lookups, with the list filled to its
   end and emptied again.
+- sort: sort_deferred, which sorts the held-back entries' indices and
+  then moves each entry once, where qsort moved the 88-byte entries.
+  trackview_sort_test.inc holds it to qsort of the entries with
+  compare_deferred over 40,000 lists, NaN depths among them.
 
     python tools/trackview_cuts_check.py            the check
     python tools/trackview_cuts_check.py --mutate   and each MUTATIONS edit
@@ -85,6 +89,29 @@ MUTATIONS = [
     ("tex", "find-wraps-short",
      "h = (h + 1) & (TRACKVIEW_TEX_BUCKETS - 1)",
      "h = (h + 1) & (TRACKVIEW_TEX_BUCKETS / 2 - 1)"),
+    # The sort's. Two edits were found equivalent and left out: the
+    # indices started at 1 (every sort leaves order[] as 0, 1, 2, ...,
+    # each place marked once its entry is in, so order[0] is 0), and
+    # order[i] < i taken as placed (a cycle through an earlier place
+    # was moved, and i marked, from that place).
+    ("sort", "compares-itself",
+     "&s_sortBase[*(const uint16_t*)pb]);",
+     "&s_sortBase[*(const uint16_t*)pa]);"),
+    ("sort", "last-left-out",
+     "qsort(order, (size_t)n,",
+     "qsort(order, (size_t)(n ? n - 1 : 0),"),
+    ("sort", "held-from-its-source",
+     "held = v->deferred[i];",
+     "held = v->deferred[order[i]];"),
+    ("sort", "moved-backwards",
+     "v->deferred[j] = v->deferred[k];",
+     "v->deferred[k] = v->deferred[j];"),
+    ("sort", "cycle-not-marked",
+     "            order[j]       = (uint16_t)j;\n        }",
+     "        }"),
+    ("sort", "held-not-put-back",
+     "v->deferred[j] = held;",
+     "v->deferred[j] = v->deferred[i];"),
 ]
 
 
@@ -172,7 +199,26 @@ def tex_program(src, hdr):
     ])
 
 
-PROGRAMS = {"sun": sun_program, "tex": tex_program}
+def sort_program(src, hdr):
+    return "".join([
+        "#include <math.h>\n#include <stdbool.h>\n#include <stdint.h>\n"
+        "#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n",
+        define(hdr, "TRACKVIEW_MAX_DEFERRED"),
+        "typedef union { float m[16]; } C3D_Mtx;\n",
+        block(hdr, "typedef struct {\n    C3D_Mtx     modelView;",
+              "} TrackDeferred;"),
+        "typedef struct {\n"
+        "    TrackDeferred deferred[TRACKVIEW_MAX_DEFERRED];\n"
+        "    int numDeferred;\n} TrackView;\n",
+        func(src, "compare_deferred"),
+        block(src, "static const TrackDeferred* s_sortBase;", ";"),
+        func(src, "compare_deferred_at"),
+        func(src, "sort_deferred"),
+        read(TESTS / "trackview_sort_test.inc"),
+    ])
+
+
+PROGRAMS = {"sun": sun_program, "tex": tex_program, "sort": sort_program}
 
 
 def run(which, src, hdr, quiet=False):

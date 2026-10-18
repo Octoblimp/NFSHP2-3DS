@@ -2511,14 +2511,56 @@ static int compare_deferred(const void* pa, const void* pb)
     return a->seq > b->seq ? -1 : a->seq < b->seq;
 }
 
+// compare_deferred for sort_deferred's indices, into s_sortBase.
+static const TrackDeferred* s_sortBase;
+
+static int compare_deferred_at(const void* pa, const void* pb)
+{
+    return compare_deferred(&s_sortBase[*(const uint16_t*)pa],
+                            &s_sortBase[*(const uint16_t*)pb]);
+}
+
+// The entries in compare_deferred's order, as qsort of the entries left
+// them, for less: qsort sorts their indices, two bytes each, not the
+// entries, 88 (TASKS 46). What qsort compares and moves follows only
+// from the count and the answers, so the indices end in the order the
+// entries did, a NaN depth's too. Then each entry moves once: a cycle of
+// the order at a time, through one held aside.
+static void sort_deferred(TrackView* v)
+{
+    static uint16_t order[TRACKVIEW_MAX_DEFERRED];
+    int             n = v->numDeferred, i;
+
+    for (i = 0; i < n; i++) {
+        order[i] = (uint16_t)i;
+    }
+    s_sortBase = v->deferred;
+    qsort(order, (size_t)n, sizeof order[0], compare_deferred_at);
+    // order[i] is the entry that goes to i; one in place is i.
+    for (i = 0; i < n; i++) {
+        TrackDeferred held;
+        int           j, k;
+
+        if (order[i] == i) {
+            continue;
+        }
+        held = v->deferred[i];
+        for (j = i; (k = order[j]) != i; j = k) {
+            v->deferred[j] = v->deferred[k];
+            order[j]       = (uint16_t)j;
+        }
+        v->deferred[j] = held;
+        order[j]       = (uint16_t)j;
+    }
+}
+
 // With `alpha` false, AttachSolidPolys alone: the unsorted batches draw
 // and the sorted ones stay for a later call. With it true, both lists.
 static void draw_deferred(TrackView* v, bool alpha)
 {
     int i, kept = 0;
 
-    qsort(v->deferred, (size_t)v->numDeferred, sizeof v->deferred[0],
-          compare_deferred);
+    sort_deferred(v);
     for (i = 0; i < v->numDeferred; i++) {
         const TrackDeferred* d = &v->deferred[i];
         TrackSolid*          r;

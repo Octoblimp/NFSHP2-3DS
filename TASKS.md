@@ -3258,6 +3258,14 @@ phases.
             model part's start (`coresample.h`). The device's models stage
             is 10.7 ms for 624 models where it is slow, and nothing yet
             says where in a model that goes.
+          - The held-back list's sort (Session 130, continued): the
+            entries' indices are sorted, not the 88-byte entries, and
+            each entry then moves once (`sort_deferred`). The order is
+            qsort's own; `trackview_cuts_check`'s `sort`: 40,000 lists,
+            0 differ, 6 of 6 mutations caught (`draw-cuts.md`).
+          - Set aside on 2026-10-18 at the user's word, the sort its last
+            cut, for TASKS 60 (the damage effects). The items below wait
+            for the device.
         - [ ] A device log with "CoreSample 1" and "DebugLog 1", through
           the slow stretch: the `samples, models:` lines say which parts
           of a model to cut next.

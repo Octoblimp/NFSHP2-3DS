@@ -1021,6 +1021,37 @@ texture kept as filled, the last step not compared, the fractions not
 kept, the flush left out or halved, the columns, the clamp, the
 rounding and the tiles) are all caught.
 
+### The held-back list's sort
+
+`trackview.c`'s `draw_deferred` draws the batches a view held back for
+the attach loops' order: the scenery's and the cars' alpha batches and
+the cars' own solid list. Each call sorted the whole list first with
+`qsort` and `compare_deferred`, and a `TrackDeferred` is 88 bytes, its
+model-view matrix among them, so every exchange the sort made moved two
+of them. A view sorts three or four times a frame (the cars' chain
+sorts, draws the solid list, keeps the alpha one and sorts it again),
+and the environment's and the mirror's views do the same.
+
+- **Two bytes, not 88.** `sort_deferred` has `qsort` sort the entries'
+  indices with `compare_deferred_at`, which compares the entries they
+  name, and then puts each entry where its index ended, one cycle of the
+  order at a time through one entry held aside: each entry moves once.
+
+**Why nothing changes.** What `qsort` compares and exchanges follows
+from the count and the comparisons' answers alone, never from what an
+element holds, so the indices end in the order the entries did, even
+where a NaN depth makes `compare_deferred` answer against itself.
+`tools/trackview_cuts_check.py`'s `sort` program cuts the three
+functions out of `trackview.c` and holds them to `qsort` of the entries
+(`tools/src/trackview_sort_test.inc`): 40,000 lists of 0 to 1,024
+entries, a frame's seqs shuffled, few orders and texture uses so they
+tie, depths with ties, -0, the infinities and 158,437 NaNs, half of them
+the sorted tail a second call finds, every field compared: 0 differ.
+Its 6 mutations (an entry compared with itself, the last one left out,
+the held one taken from its source, a move made backwards, a cycle's
+places not marked, the held one not put back) are all caught; two more
+were equivalent and are noted in the checker.
+
 ### What is left
 
 - **The device's numbers** for these builds on Alpine Trail's start

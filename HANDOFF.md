@@ -27253,6 +27253,21 @@ Then, read in the code:
   format. The build is clean; it has not run yet, on Azahar or the
   device.
 
-Next: the device log of a race through the slow stretch with
-"CoreSample 1" and "DebugLog 1". Its parts' shares times the models
-stage's milliseconds say what a model costs and where; cut the largest.
+- **The held-back list's sort**, the last cut: the device's cars stage
+  spends 1.6 to 1.9 ms on its lists with four or five cars, 0.4 to 0.9
+  with one, about 20 us a held batch, like the models'. Each
+  `draw_deferred` qsorted the 88-byte entries themselves; now
+  `sort_deferred` sorts their indices and moves each entry once, in
+  qsort's own order (`draw-cuts.md`, "The held-back list's sort").
+  `trackview_cuts_check`: sort 40,000 lists, 0 differ, 6 of 6 mutations
+  caught; sun and tex still 0. The CIA builds clean. Not yet run on
+  Azahar or the device. Most of the lists' time is the draws, not the
+  sort, so this is a small part of it.
+
+TASKS 46 is set aside here, at the user's word (2026-10-18: "Make this
+your last optimization and then move to the next task which will be
+implementing damage effects"). Its open items wait for the device: the
+log with "CoreSample 1" and "DebugLog 1" through the slow stretch, and
+the builds since 7082fa3 played (listen for crackle after 7134c05, look
+at the fog after 0e3c1c6). Next: TASKS 60, the car's particle effects
+(Car::TriggerEffect).
