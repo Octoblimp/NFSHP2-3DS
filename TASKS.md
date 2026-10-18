@@ -3156,6 +3156,35 @@ phases.
             it (Azahar lets it). The GPU now copies them back from the
             linear heap and the readback is logged: 0 of 96,000 words
             differ on Azahar. To run again on the 3DS.
+          - The second try (2026-10-18, build 5679ab6): no crash, and
+            the GPU's copy back read "0 colour and 0 depth words of
+            96000 differ" on the 3DS. The race was Alpine Trail (track
+            42, 2 laps, 3 AI, 4 cops); Coastal Parklands ran only as the
+            attract demo, a few seconds on the grid. 49 timing frames.
+          - Alpine Trail is bound by the CPU, never the GPU. Of 438
+            seconds without a timing frame, 194 were under 28 FPS: in
+            112 the CPU was short (C under 30, G 50 to 150), in 0 the
+            GPU, and in the other 82 the CPU was at its edge (C 30 to
+            35), so some frames missed the vsync. The slow seconds'
+            CPU: world 4.9 ms, draw 20.6 (models 6.3, cars 2.9, mirror
+            2.3, envmap 2.1, cull 1.9, scenery 1.6); up to 30 ms of
+            draw (models 11) on the start straight, x 400 to 700, y
+            1400 to 1500, with the grid. The GPU, citro3d's, 14.6 ms.
+          - The timing frames' own GPU stages, summed: 24.6 ms on
+            average, 41 at most; the models 9.7. Their replays: 8x8
+            textures save 32%, a 1-pixel scissor 50% (the fill), 3
+            vertices a draw 92% (the vertices), RGB8 for RGBA8 6%, no
+            cache clears 2%, alpha test 0 off and unit 1 off nothing.
+            Early depth changes the picture in nearly every replay
+            (">=" exact in 3 of 49, "<=" by some 28,000 pixels), so it
+            is out. With the GPU at half the frame, the next cuts are
+            the CPU's: the draw's per-batch work (580 model draws a
+            frame where it is slow) and the world.
+          - The stutters the user felt were the timing frames: each
+            stops the game for 200 to 340 ms, every 10 s or so. With
+            no timing frame no frame took over 66 ms. So the next runs
+            keep "DebugLog 1" and leave `nfshp2_gputiming.txt` off: the
+            frame lines' C and G say which side is short.
         - [ ] The user's word on the envmap a face a frame.
 
 47. [ ] **A brief artifact on the bridge before the finish line.**

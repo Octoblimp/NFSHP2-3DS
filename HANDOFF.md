@@ -26980,3 +26980,32 @@ frame in a race").
 
 Also: track 44 is Fall Winds at Dawn, not Alpine Trail (GLOBALB's
 TrackInfo table); TASKS 47 says so now (5db02b3).
+
+## Session 128, continued -- the first device timing run (TASKS 46)
+
+The second try on the 3DS (build 5679ab6) did not crash: "the top
+screen's buffers given back by the GPU: 0 colour and 0 depth words of
+96000 differ". The user's race was Alpine Trail (track 42, 2 laps, 3 AI,
+4 cops); Coastal Parklands only ran as the attract demo, a few seconds
+on the grid. `slow_seconds.py` and `gputime_report.py` (scratchpad)
+read the log.
+
+- **Bound by the CPU.** Of 438 seconds without a timing frame, 194 were
+  under 28 FPS. The CPU was short in 112 (C under 30 while G was 50 to
+  150), the GPU in none, and in the other 82 the CPU was at its edge (C
+  30 to 35), so some frames missed the vsync and took 50 ms. The slow
+  seconds' CPU: world 4.9 ms and draw 20.6 (models 6.3, cars 2.9, mirror
+  2.3, envmap 2.1, cull 1.9, scenery 1.6); the start straight with the
+  grid (x 400 to 700, y 1400 to 1500) reached 30 ms of draw, models 11.
+  citro3d's GPU time was 14.6 ms.
+- **The replays** (49 timing frames): the GPU stages sum to 24.6 ms on
+  average (41 at most), the models 9.7. For the models, 8x8 textures
+  save 32%, a 1-pixel scissor 50%, 3 vertices a draw 92%, RGB8 for RGBA8
+  6%, no cache clears 2%. Early depth changes the picture in nearly
+  every replay (">=" exact in 3 of 49), so it is out.
+- **The stutters** were the timing frames: 200 to 340 ms each, every 10
+  s or so. With none, no frame took over 66 ms. The next runs keep
+  "DebugLog 1" without `nfshp2_gputiming.txt`.
+
+So TASKS 46's next cuts are on the CPU: the draw's per-batch work (580
+model draws a frame where it is slow) and the world step.
