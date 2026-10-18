@@ -42,6 +42,12 @@ extern int32_t bchunk_breaks;
 // takes it and does nothing.
 extern void (*gUnportedLoaderFn)(int slot, int unload, uint8_t *chunk);
 
+// Slot 29's LoaderDemoModeReplay and UnloaderDemoModeReplay (0x0013ef70
+// and 0x0013ef98) on TheDemoModeReplay, dmreplay.c's, which main.c binds.
+// NULL leaves the slot unported, to gUnportedLoaderFn.
+extern BChunkLoader gDemoModeReplayLoaderFn;
+extern BChunkLoader gDemoModeReplayUnloaderFn;
+
 // PostLoadFixup's and HotChunksPostLoadFixup's callees that are not
 // ported. NULL does nothing.
 extern void (*gELightUpdateTexturesFn)(void);

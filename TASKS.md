@@ -4286,6 +4286,30 @@ phases.
           - [ ] 72h-2. `DemoModeReplay` with the disc's replays for
             attract mode. The PS2's float rounding is not the 3DS's, so
             these may drift. Measure it then.
+            - [x] 72h-2a. TheDemoModeReplay.
+              Done in Session 125, continued (`docs/formats/replay.md`,
+              72h-2a). `dmreplay.c` is retail's DemoModeReplay
+              (`0x0013ee08` to `0x0013f6c0`): the five files' chunks
+              through slot 29, the file's load, ConsiderLaunching,
+              Launch, the race's parameters from the replay, the demo's
+              snapshots one after another, and the replay screen's
+              editing. main.c binds it to the seams that were waiting.
+              `dmreplay_check` (4154 ops, 0 differ; 106 of 106 mutations
+              caught) passes, and so do loadertable, rcreplay and
+              replayscreen. Nothing sets ActiveFlag yet; a SkipFE race on
+              Azahar ran as before.
+            - [ ] 72h-2b. Attract mode from the title: StartDemoMode
+              (`0x0016ecd8`), BuildDemoTrackList (`0x0016ec10`) and
+              FrontendDatabase::StartDemoMode (`0x00184d48`); the flow's
+              hooks (replayConsiderLaunching, replayLaunch,
+              startDemoMode) and its loading flags;
+              RCStateReplayDemoModeCallback (`0x0014aa38`) and, if the
+              title reaches it, RCStateAIDemoModeCallback (`0x0014a8c0`);
+              DemoModeStatus; the REPLAY folder on the card and in the
+              README. On Azahar: idle on the title, a replay plays, then
+              the title comes back; a button goes to the main menu.
+            - [ ] 72h-2c. The PS2-to-3DS drift: each demo snapshot's
+              end against the next start, or checksums.
 
 73. [ ] **The car's retail pass: where 72b found retail and the port
         apart.** The port's car physics is the demo's code. Porting

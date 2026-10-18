@@ -108,9 +108,11 @@ extern const int32_t ReplayScreenHelpIDs[9];
 //
 // The three words of TheDemoModeReplay (0x002f0960) the screen reads, and
 // TheDemoDiscManager's two timeouts (0x002effe0) that MARK_DEMO writes.
-// TASKS 72h ports the classes around them; until then nothing else sets
-// them, and the screen's demo branches stay asleep.
-extern int32_t DemoModeReplay_WantToBeRecordingSnapshot;           // +20
+// dmreplay.c is TheDemoModeReplay. +20 is retail's own word, set while
+// ERASE_DEMO is held on a demo snapshot; the demo's stabs have no name
+// for it. The demo disc's manager is not ported, so its timeouts are only
+// written.
+extern int32_t DemoModeReplay_WantToBeErasingSnapshot;             // +20
 extern ReplaySnapshot *DemoModeReplay_pCurrentRecordingSnapshot;   // +24
 extern ReplaySnapshot *DemoModeReplay_pCurrentPlayingSnapshot;     // +32
 extern int16_t DemoDiscManager_InactiveTimeout;                    // +30

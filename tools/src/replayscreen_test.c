@@ -624,7 +624,7 @@ static void dump(void)
            label(s->pNisCameraCoordinator));
     printf("words %d %d %d %d %d\n", pReplayManager->PausedFlag,
            pReplayManager->SlowMotionFlag,
-           DemoModeReplay_WantToBeRecordingSnapshot,
+           DemoModeReplay_WantToBeErasingSnapshot,
            DemoDiscManager_InactiveTimeout, DemoDiscManager_TotalTimeout);
 }
 
@@ -740,7 +740,7 @@ int main(int argc, char **argv)
         } else if (!strcmp(op, "snaps")) {
             set_snaps(arg[1]);
         } else if (!strcmp(op, "dmr")) {
-            DemoModeReplay_WantToBeRecordingSnapshot = (int32_t)num(arg[1]);
+            DemoModeReplay_WantToBeErasingSnapshot = (int32_t)num(arg[1]);
             DemoModeReplay_pCurrentRecordingSnapshot =
                 num(arg[2]) ? &snaps[MAX_SNAPS - 1] : NULL;
             DemoModeReplay_pCurrentPlayingSnapshot =

@@ -137,7 +137,7 @@ and "R-TB12" retail's, whose 279 top-level chunks all have a taker.
 | 26 | 27 | Language | `39000` | 8 | 0 | 0 | -- |
 | 27 | 28 | Smokeables | `34026`, `34027` | 16, 1 | 2 | 2 | -- |
 | 28 | 29 | WeatherMan | `34250` | 1 | 1 | 1 | `weatherman.c` |
-| 29 | 30 | DemoModeReplay | `39100`, `39101`, `39102` | 5, 24, 5 | 0 | 0 | -- |
+| 29 | 30 | DemoModeReplay | `39100`, `39101`, `39102` | 5, 24, 5 | 0 | 0 | `dmreplay.c`, through seams ([replay](replay.md), 72h-2a) |
 
 The demo's TRACKB12 has 497 top-level chunks and retail's 279, and every one has a taker.
 
@@ -151,7 +151,9 @@ In the port, a slot marked "--" is only its guard. It takes the same types
 as the image's slot and hands the chunk to `gUnportedLoaderFn(slot, unload,
 chunk)`, which is NULL by default and so does nothing. Slot 1's loader
 falls through to `TopologyTree::Loader` for the four tree types, exactly as
-the image's does.
+the image's does. Slot 29 calls `gDemoModeReplayLoaderFn` and
+`gDemoModeReplayUnloaderFn`, which main.c binds to `dmreplay.c`; with them
+NULL it is its guard, so the checker sees it as unported.
 
 ## LoaderSolidList -- 0x80034000
 

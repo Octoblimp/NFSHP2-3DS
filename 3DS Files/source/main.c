@@ -69,6 +69,7 @@
 #include "camera.h"
 #include "cameracoord.h"
 #include "democam.h"
+#include "dmreplay.h"
 #include "drivecam.h"
 #include "drivetarget.h"
 #include "cammover.h"
@@ -5150,6 +5151,20 @@ static void replayHandleSpecialEvent(const ReplaySpecialEventInfo* e)
               known ? "" : ", unknown");
 }
 
+// FrontendDatabase::StartRace's (0x0018549c): with a demo replay active,
+// the race is the replay's, and its file goes until the track's loading
+// loads it again (TASKS 72h-2a).
+static void demoModeReplayStartRace(void)
+{
+    if (!DemoModeReplayActiveFlag)
+        return;
+    dmreplay_restore_race_parameters_snapshot();
+    dmreplay_unload_resource_file();
+    logPrintf("demo replay: file %d, track %d\n",
+              (int)TheDemoModeReplay.CurrentSnapshotFileNumber,
+              (int)TheRaceParameters.TrackNumber);
+}
+
 // ReplayCheck (configitems.h), the port's own test of the replay (TASKS
 // 72f-2). The race captures as retail's does; this plays two parts of it
 // back and counts what does not come out the same. Round 1 sets the four
@@ -7674,12 +7689,30 @@ int main(int argc, char** argv)
     gSoundMuteFn = raceSoundMute;
     gSoundMuteReplayFn = sndMuteReplay;
     // ReplayScreen (72g-2). Its radial blur stays unbound, as the race's
-    // is (gRadialBlurOnFn); the disc test answers 1, and TheDemoModeReplay's
-    // calls wait for 72h.
+    // is (gRadialBlurOnFn); the disc test answers 1.
     gReplayScreenPlaySampleFn = replayPlaySample;
     gReplayScreenFrontendSoundFn = replayFrontendSound;
     gReplayScreenHelpActiveFn = replayHelpActive;
     gReplayScreenToggleHelpFn = replayToggleHelp;
+    // TheDemoModeReplay (dmreplay.c, TASKS 72h-2a): its static
+    // constructor; slot 29's chunks; the manager's BeginFrame; the replay
+    // screen's demo keys; and, while a demo is active, the track's loading
+    // and unloading and StartRace. Save writes through the PS2's host link
+    // and stays unbound, as does bRefreshTweaker.
+    dmreplay_construct();
+    gDemoModeReplayLoaderFn = dmreplay_loader;
+    gDemoModeReplayUnloaderFn = dmreplay_unloader;
+    gDemoModeReplayServiceFn = dmreplay_service;
+    gDemoModeReplayCanTestFn = dmreplay_can_test_demo_mode;
+    gDemoModeReplayBeginTestFn = dmreplay_begin_demo_mode_test;
+    gDemoModeReplayTestGoesOnFn = dmreplay_test_goes_on;
+    gDemoModeReplayServiceDemoModeFn = dmreplay_service_demo_mode;
+    gDemoModeReplayEndDemoModeFn = dmreplay_end_demo_mode;
+    gDemoModeReplayBeginRecordingFn = dmreplay_begin_recording_snapshot;
+    gDemoModeReplayEndRecordingFn = dmreplay_end_recording_snapshot;
+    gDemoModeReplayLoadFn = dmreplay_load_resource_file;
+    gDemoModeReplayUnloadFn = dmreplay_unload_resource_file;
+    gDemoModeReplayStartRaceFn = demoModeReplayStartRace;
     // The bSamples the race's modules make and play, on gSound.
     gGetInGameSampleFn        = sndGetInGameSample;
     gSampleDeleteFn           = sndSampleDelete;

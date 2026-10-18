@@ -26523,3 +26523,65 @@ differ.
    the PS2-to-3DS float drift measured.
 2. When 72h is committed, publish the launch checklist the user asked
    for, before TASKS 73.
+
+## Session 125, continued -- TASKS 72h-2a: TheDemoModeReplay
+
+Attract mode plays one of five replays from the disc. 72h-2 is split:
+72h-2a is retail's DemoModeReplay object; 72h-2b starts attract mode
+from the title and adds the coordinator's two demo states; 72h-2c
+measures the drift.
+
+### What changed
+
+- New `dmreplay.c` and `dmreplay.h`: retail's DemoModeReplay
+  (`0x0013ee08` to `0x0013f6c0`) on TheDemoModeReplay (`0x002f0960`):
+  - the constructor;
+  - slot 29's loader and unloader for the files' three chunk types;
+  - the filenames, `REPLAY\JUL23\...`;
+  - the resource file's load, unload and callback;
+  - ConsiderLaunching (the demo disc's test left out), Launch and
+    RestoreRaceParametersSnapshot;
+  - BeginDemoMode, ServiceDemoMode, TestGoesOn and EndDemoMode;
+  - Service and the replay screen's editing: recording, erasing, the
+    tweakers. Save writes through the PS2's host link and stays NULL.
+- Retail's object is 64 bytes, and the port splits it: the words other
+  modules read stay in `trackflow.c`, `replayscreen.c` and
+  `replaymgr.c`. The replay screen's +20 was misnamed
+  WantToBeRecordingSnapshot (+16's name) and is
+  `DemoModeReplay_WantToBeErasingSnapshot` now, in the screen, its
+  harness, its checker's mutations and `replay.md`.
+- `bchunkload.c`: slot 29 calls `gDemoModeReplayLoaderFn` and
+  `gDemoModeReplayUnloaderFn`; with them NULL it is its guard, as before.
+- `main.c` runs the constructor and binds slot 29, the manager's Service,
+  the replay screen's seven calls, the track's load and unload, and
+  StartRace's restore-then-unload (`0x0018549c`).
+- New `tools/dmreplay_check.py` and `tools/src/dmreplay_test.c`: 4154
+  ops, 2205 calls, 22082 lines, 0 differ; 106 mutations, all caught.
+
+The five files are in `extracted-retail/REPLAY/JUL23` (gitignored). The
+card has no REPLAY folder yet; 72h-2b copies it and notes it in the
+README.
+
+`docs/formats/replay.md` has a 72h-2a section (the files, the object's
+layout, the functions, the bindings) and a checker section.
+`loader-table.md`'s slot 29 row says `dmreplay.c`.
+
+### On Azahar
+
+Nothing sets ActiveFlag yet. A SkipFE race with the gas held ran as
+before: the replay log and snapshots went on, loops 0 to 429.
+
+### Checkers re-run
+
+`dmreplay` is new and passes. loadertable (demo and retail images),
+rcreplay and replayscreen compile the changed files, and all pass with 0
+differ. Replayscreen's five mutations that name the renamed word are
+caught.
+
+### Next
+
+1. 72h-2b: attract mode from the title, the two demo states, the
+   REPLAY folder on the card.
+2. 72h-2c: the drift measured.
+3. When 72h is committed, publish the launch checklist the user asked
+   for, before TASKS 73.

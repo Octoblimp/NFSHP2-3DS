@@ -898,7 +898,7 @@ only HELP is heard.
 | 107 HIDE_TIMELINE | Swaps the screen for `0xddce04a3` and back; frontend sound 5 |
 | 108 MARK_DEMO | Without a disc in the drive: the demo disc's timeouts to 32767 and a recording begun, or ended on release |
 | 109 TEST_DEMO | When a test can run: begins one, or ends the demo; unpauses |
-| 110 ERASE_DEMO | On a press during a demo snapshot, WantToBeRecordingSnapshot 1; on release, 0 |
+| 110 ERASE_DEMO | On a press during a demo snapshot, TheDemoModeReplay's +20 (`DemoModeReplay_WantToBeErasingSnapshot`) 1; on release, 0 |
 
 In a demo snapshot, PREVIOUS_MARKER and NEXT_MARKER call
 ServiceDemoMode instead.
@@ -930,7 +930,9 @@ These stay NULL:
   (`gRadialBlurOnFn`).
 - The disc test. NULL answers 1, the disc in the drive.
 - TheDemoModeReplay's seven calls, and its three words, which nothing
-  sets yet. Both wait for 72h-2.
+  sets yet. Both wait for 72h-2. (72h-2a binds the calls to
+  `dmreplay.c`; the word at +20 was named WantToBeRecordingSnapshot
+  here, which is +16's name, and is now WantToBeErasingSnapshot.)
 
 ## 72g-3: the instant replay
 
@@ -1242,6 +1244,129 @@ said `replay: special event 2 (1, 0) loop 191`, then `pause: event 2
 (1, 0)`. Twenty seconds into the replay it said `replay: special event 2
 (1, 0) loop 191, replayed`, on the same loop. The page showed Damage On,
 and the run passed.
+
+## 72h-2a: TheDemoModeReplay
+
+`dmreplay.c` is retail's DemoModeReplay (`0x0013ee08` to `0x0013f6c0`) on
+TheDemoModeReplay (`0x002f0960`): the replays attract mode plays. 72h-2 is
+split. 72h-2a is the object. 72h-2b starts attract mode from the title
+and adds the coordinator's two demo states. 72h-2c measures the drift.
+
+### The files
+
+The disc has five, in `REPLAY\JUL23`. Each is a resource file of type 7
+(RESOURCE_FILE_REPLAY): a padding chunk, then three chunk types, all
+slot 29's.
+
+| Chunk | What it is |
+|---|---|
+| `39100` | DemoModeReplayInfo, 80 bytes: version 8, the track, 1, 0, and the author's computer name ("WILLIAM") |
+| `39101` | a ReplaySnapshot: its 344-byte head and its data |
+| `39102` | the bRepeat the race was captured into, cut at its end: a 192-byte head and four channels |
+
+The base names are in a table at `0x002f0948`. GenerateFilename puts
+`REPLAY\` in front of them.
+
+| # | Base name | Track | DEMO_MODE_SNAPSHOTs (loops) |
+|---|---|---|---|
+| 0 | `REPLAY0.BIN` | | not on the disc: the dev kit's |
+| 1 | `JUL23\T33GoldVanquish.bin` | 36 | 294-2360, 3690-4334, 4524-5943, 6282-7278 |
+| 2 | `JUL23\T12YellowSpider.bin` | 12 | 515-3349, 7012-7303 |
+| 3 | `JUL23\T62OrangeF1LM.bin` | 65 | 9360-12530 |
+| 4 | `JUL23\T43GreenM5.bin` | 43 | 1426-4167, 9768-10954 |
+| 5 | `JUL23\T11BlueElise.bin` | 11 | 1053-4033 |
+
+Each file also has one REPLAY_MANAGER_STATE.
+
+### The object
+
+Retail's object is 64 bytes. The demo's stabs name 60 of them, and
+retail put one word in at +20. The port keeps each word that another
+module reads in that module, and the rest in `TheDemoModeReplay`:
+
+| Offset | Field | In the port |
+|---|---|---|
+| +0 | ActiveFlag | `DemoModeReplayActiveFlag`, `trackflow.c` |
+| +4 | LoadingFlag | `TheDemoModeReplay` |
+| +8 | LoadedFlag | `TheDemoModeReplay` |
+| +12 | CurrentSnapshotFileNumber | `TheDemoModeReplay` |
+| +16 | WantToBeRecordingSnapshot | `TheDemoModeReplay` |
+| +20 | retail's own: set while ERASE_DEMO is held | `DemoModeReplay_WantToBeErasingSnapshot`, `replayscreen.c` |
+| +24 | pCurrentRecordingSnapshot | `replayscreen.c` |
+| +28 | PlayingSnapshotNumber | `TheDemoModeReplay` |
+| +32 | pCurrentPlayingSnapshot | `replayscreen.c` |
+| +36 | TweakerSnapshotFileNumber, -1 | `TheDemoModeReplay` |
+| +40 | TweakerSaveSnapshotFile | `TheDemoModeReplay` |
+| +44 | TweakerEraseRecordedSnapshots | `TheDemoModeReplay` |
+| +48 | pInfo | `TheDemoModeReplay` |
+| +52 | pRepeat | `DemoModeReplay_pRepeat`, `replaymgr.c` |
+| +56 | ReplaySnapshotList | `DemoModeReplay_SnapshotList`, `replaymgr.c` |
+
+The replay screen's +20 was called WantToBeRecordingSnapshot, which is
++16's name. It is WantToBeErasingSnapshot now.
+
+### The functions
+
+- The constructor sets the tweaker's file to -1, empties the list and
+  zeroes the rest, except +28.
+- The loader takes the info and the log where they lie. A snapshot is
+  marked MemoryImageLoadedFlag and goes on the list's end. The unloader
+  takes a snapshot off only when it is on the list. Both answer 1 for
+  the three types and 0 for any other.
+- LoadResourceFile sets LoadingFlag and loads the current file with
+  ResourceFileLoadedCallback, which clears LoadingFlag and sets
+  LoadedFlag. UnloadResourceFile, when LoadedFlag is set, unloads every
+  replay resource file and clears LoadedFlag.
+- ConsiderLaunching picks the next file: the first with bRandom(5) + 1,
+  then each in turn; the tweaker's when it is set; and 1 after 5. It
+  answers 0 when the name is empty or the file is not there, and
+  otherwise starts it loading and answers 1. Retail first asks
+  TheDemoDiscManager, whose bActive is 0 on the retail disc; the port
+  leaves that out.
+- Launch sets ActiveFlag when the info is version 8 with New8 1, and
+  otherwise unloads the file.
+- RestoreRaceParametersSnapshot reads TheRaceParameters from the list's
+  first snapshot: InitWithDefaults, then DoSnapshot from the data's
+  start, with ReplayDemoMode set.
+- BeginDemoMode restores REPLAY_MANAGER_STATE and plays the first
+  DEMO_MODE_SNAPSHOT. ServiceDemoMode makes the next one (or the one
+  before) the playing one and posts it to the coordinator as
+  RC_MOVE_REPLAY. TestGoesOn plays the next once the world reaches the
+  playing one's EndLoopTime, and answers 0 when there is none. EndDemoMode
+  clears the playing snapshot, ActiveFlag and the number.
+- The rest is the replay screen's editing, which retail reaches only with
+  its debug keys. Service, each BeginFrame, starts a recording, re-takes
+  the playing snapshot while ERASE_DEMO is held in its first 3 s, and
+  ends the recording at the world's loop. TestGoesOn cuts the playing
+  snapshot while ERASE_DEMO is held: it is deleted when under 2 s long,
+  or ended there in its second half. EndRecordingSnapshot deletes a
+  recording of 30 loops or fewer. EraseRecordedSnapshots deletes them
+  all.
+
+Save and SaveSnapshots write the file through the PS2 dev kit's host link.
+They are not ported, and their seam, `gDemoModeReplaySaveFn`, stays NULL,
+as does bRefreshTweaker's.
+
+Retail reads pInfo, the list's first snapshot, the manager and the
+coordinator with no test. The port takes no info as a bad one, does
+nothing with an empty list, and answers "none" with no manager.
+
+### What main.c binds
+
+- Slot 29's loader and unloader, through `gDemoModeReplayLoaderFn` and
+  `gDemoModeReplayUnloaderFn` in `bchunkload.c`. With them NULL the slot
+  is its guard alone, as before.
+- `gDemoModeReplayServiceFn`, the manager's BeginFrame.
+- The replay screen's seven calls (CanTest, BeginTest, TestGoesOn,
+  ServiceDemoMode, EndDemoMode, BeginRecording, EndRecording).
+- `gDemoModeReplayLoadFn` and `gDemoModeReplayUnloadFn`, the track's
+  loading and unloading.
+- `gDemoModeReplayStartRaceFn`, StartRace's. With ActiveFlag set it
+  restores the race's parameters from the replay and unloads the file,
+  as retail does at `0x0018549c`.
+
+Nothing sets ActiveFlag until 72h-2b, so a normal race does not change.
+On Azahar a SkipFE race ran as before.
 
 ## The checker for 72d-1
 
@@ -1695,6 +1820,51 @@ mutations, all caught.
 
     python tools/pausereplay_check.py
     python tools/pausereplay_check.py --mutate [--only a,b]
+
+## The checker for 72h-2a
+
+`tools/dmreplay_check.py` runs retail's DemoModeReplay beside
+`dmreplay.c`, on `tools/src/dmreplay_test.c`. Retail's Timer::SetTime,
+bSPrintf and bList::TraversebList run under it.
+
+The ReplayManager is a fake on both sides: eight slots, each with a name
+and its four times, in order. Its FindSnapshot, TakeSnapshot (which can
+fail), DeleteSnapshot by name and by snapshot, RestoreSnapshot by name
+and the sort print what they are asked. So do the coordinator's
+PostMessage, RaceParameters' InitWithDefaults and DoSnapshot,
+LoadResourceFile, FindResourceFile and UnloadResourceFile over a count of
+files, bFileExists, bRandom, Save and bRefreshTweaker.
+
+The script covers:
+
+- the constructor over a state with every word set;
+- every filename index over the edges;
+- the loader and unloader over each type and the list's orders;
+- the resource file over the counts;
+- ConsiderLaunching over the files, the tweaker, the draw and the file's
+  presence;
+- Launch over the info;
+- the restore;
+- ServiceDemoMode forward and back, BeginDemoMode and the test over the
+  snapshot mixes;
+- TestGoesOn over the ends, the erase, the lengths and the half-way
+  edges;
+- Service over the recording, the erase's 3 s, a failed take and the
+  tweakers;
+- the recording's 30 loops and the erase;
+- 400 random states with calls.
+
+These differences are made equal by hand. The model keeps
+TheDemoDiscManager's bActive 0, as the retail disc has it. The script
+calls the restore only with a snapshot on the list, and always has a
+manager and a coordinator. Launch with no info reads 0 from low memory,
+which the model zeroes, and so unloads, as the port does.
+
+The run is 4154 ops, 2205 calls and 22082 lines; none differ. 106
+mutations, all caught.
+
+    python tools/dmreplay_check.py
+    python tools/dmreplay_check.py --mutate [--only a,b]
 
 ## Not yet
 

@@ -74,7 +74,7 @@ const int32_t ReplayScreenHelpIDs[9] = {
     802250, 802251, 802252, 802253, 802254, 802255, 802256, 802257, 0,
 };
 
-int32_t DemoModeReplay_WantToBeRecordingSnapshot;
+int32_t DemoModeReplay_WantToBeErasingSnapshot;
 ReplaySnapshot *DemoModeReplay_pCurrentRecordingSnapshot;
 ReplaySnapshot *DemoModeReplay_pCurrentPlayingSnapshot;
 int16_t DemoDiscManager_InactiveTimeout;
@@ -229,7 +229,7 @@ void replayscreen_destroy(ReplayScreen *s, int32_t flags)
         gDemoModeReplayEndRecordingFn(0);
     if (gDemoModeReplayEndDemoModeFn != NULL)
         gDemoModeReplayEndDemoModeFn();
-    DemoModeReplay_WantToBeRecordingSnapshot = 0;
+    DemoModeReplay_WantToBeErasingSnapshot = 0;
     if (flags & 1)
         bFree(s);
 }
@@ -526,7 +526,7 @@ void replayscreen_update(ReplayScreen *s)
     indicator(s->pDemoModeIndicator[1],
               DemoModeReplay_pCurrentRecordingSnapshot != NULL);
     indicator(s->pDemoModeIndicator[2],
-              DemoModeReplay_WantToBeRecordingSnapshot != 0);
+              DemoModeReplay_WantToBeErasingSnapshot != 0);
 
     if (!replayscreen_has_camera_mover(s))
         replayscreen_change_camera_mover(s);
@@ -706,9 +706,9 @@ void replayscreen_joy_handler(ReplayScreen *s, JoystickPort port,
 
     case JOY_EVENT_REPLAY_ERASE_DEMO:
         if (!value)
-            DemoModeReplay_WantToBeRecordingSnapshot = 0;
+            DemoModeReplay_WantToBeErasingSnapshot = 0;
         else if (DemoModeReplay_pCurrentPlayingSnapshot != NULL)
-            DemoModeReplay_WantToBeRecordingSnapshot = 1;
+            DemoModeReplay_WantToBeErasingSnapshot = 1;
         break;
     }
 }

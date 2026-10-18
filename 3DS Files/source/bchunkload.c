@@ -32,6 +32,8 @@
 int32_t bchunk_breaks;
 
 void (*gUnportedLoaderFn)(int slot, int unload, uint8_t *chunk);
+BChunkLoader gDemoModeReplayLoaderFn;
+BChunkLoader gDemoModeReplayUnloaderFn;
 void (*gELightUpdateTexturesFn)(void);
 void (*gAfxUpdateTexturesFn)(void);
 void (*gFlailerPostLoadFixupFn)(void);
@@ -162,8 +164,24 @@ UNPORTED(LoaderEventManager, UnloaderEventManager, 7, 0x80036000u)
 UNPORTED(LoaderFlailerChunk, UnloaderFlailerChunk, 10, 0x80010200u)
 UNPORTED(LoaderAnimations, UnloaderAnimations, 12, 0x80034008u)
 UNPORTED(LoaderLanguage, UnloaderLanguage, 26, 0x00039000u)
-UNPORTED(LoaderDemoModeReplay, UnloaderDemoModeReplay, 29,
+UNPORTED(LoaderDemoModeReplayGuard, UnloaderDemoModeReplayGuard, 29,
          0x00039100u, 0x00039101u, 0x00039102u)
+
+// Slot 29, TheDemoModeReplay's (dmreplay.c), through its seams; the guard
+// alone without them.
+static int LoaderDemoModeReplay(uint8_t *c)
+{
+    if (gDemoModeReplayLoaderFn != NULL)
+        return gDemoModeReplayLoaderFn(c);
+    return LoaderDemoModeReplayGuard(c);
+}
+
+static int UnloaderDemoModeReplay(uint8_t *c)
+{
+    if (gDemoModeReplayUnloaderFn != NULL)
+        return gDemoModeReplayUnloaderFn(c);
+    return UnloaderDemoModeReplayGuard(c);
+}
 
 // --------------------------------------------------------------- tables
 

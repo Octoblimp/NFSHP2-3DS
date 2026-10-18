@@ -1406,11 +1406,11 @@ MUTATIONS = [
       "gDemoModeReplayEndRecordingFn(1);" + NL
       + "    if (gDemoModeReplayEndDemoModeFn"),
     M("dtor-end-demo", "gDemoModeReplayEndDemoModeFn();" + NL
-      + "    DemoModeReplay_WantToBeRecordingSnapshot = 0;",
-      "DemoModeReplay_WantToBeRecordingSnapshot = 0;"),
-    M("dtor-want", "DemoModeReplay_WantToBeRecordingSnapshot = 0;" + NL
+      + "    DemoModeReplay_WantToBeErasingSnapshot = 0;",
+      "DemoModeReplay_WantToBeErasingSnapshot = 0;"),
+    M("dtor-want", "DemoModeReplay_WantToBeErasingSnapshot = 0;" + NL
       + "    if (flags & 1)",
-      "DemoModeReplay_WantToBeRecordingSnapshot = 1;" + NL
+      "DemoModeReplay_WantToBeErasingSnapshot = 1;" + NL
       + "    if (flags & 1)"),
     M("dtor-flags", "if (flags & 1)", "if (flags & 2)"),
     M("mover-free", "m->vtbl->Destroy(m);" + NL + "    bFree(m);",
@@ -1633,8 +1633,8 @@ MUTATIONS = [
       + "              DemoModeReplay_pCurrentRecordingSnapshot != NULL);"),
     M("update-indicator-1", "indicator(s->pDemoModeIndicator[1],",
       "indicator(s->pDemoModeIndicator[2],"),
-    M("update-indicator-2", "DemoModeReplay_WantToBeRecordingSnapshot != 0);",
-      "DemoModeReplay_WantToBeRecordingSnapshot == 1);"),
+    M("update-indicator-2", "DemoModeReplay_WantToBeErasingSnapshot != 0);",
+      "DemoModeReplay_WantToBeErasingSnapshot == 1);"),
     M("update-no-camera", "if (!replayscreen_has_camera_mover(s))",
       "if (0)"),
     M("update-nis-started", "if ((replayscreen_should_watch_nis(s) && s->",
@@ -1759,13 +1759,13 @@ MUTATIONS = [
       "replayscreen_pause(s, 1);" + NL + "        break;" + NL
       + NL + "    case JOY_EVENT_REPLAY_ERASE_DEMO:"),
     M("erase-value", "if (!value)", "if (value != 1)"),
-    M("erase-off", "DemoModeReplay_WantToBeRecordingSnapshot = 0;" + NL
-      + "        else if", "DemoModeReplay_WantToBeRecordingSnapshot = 2;" + NL
+    M("erase-off", "DemoModeReplay_WantToBeErasingSnapshot = 0;" + NL
+      + "        else if", "DemoModeReplay_WantToBeErasingSnapshot = 2;" + NL
       + "        else if"),
     M("erase-playing", "else if (DemoModeReplay_pCurrentPlayingSnapshot != NULL)",
       "else if (DemoModeReplay_pCurrentPlayingSnapshot == NULL)"),
-    M("erase-on", "DemoModeReplay_WantToBeRecordingSnapshot = 1;" + NL
-      + "        break;", "DemoModeReplay_WantToBeRecordingSnapshot = 2;" + NL
+    M("erase-on", "DemoModeReplay_WantToBeErasingSnapshot = 1;" + NL
+      + "        break;", "DemoModeReplay_WantToBeErasingSnapshot = 2;" + NL
       + "        break;"),
 
     # The time's place.

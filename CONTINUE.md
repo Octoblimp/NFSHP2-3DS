@@ -3666,8 +3666,10 @@ and so replaced every boot.
      against retail. Since 72g-5 the replay bar and its help show the
      3DS keys (`replaybar.c`, HELPGLYPH_LAYOUT_SCANNERS). Since 72h-1
      the pause pages' changes are replay special events
-     (`pausereplay.c`), made again when a replay reaches them. Next:
-     72h-2 (DemoModeReplay).
+     (`pausereplay.c`), made again when a replay reaches them. Since
+     72h-2a TheDemoModeReplay is retail's, in `dmreplay.c`, bound to
+     slot 29 and the seams; nothing starts a demo yet. Next: 72h-2b
+     (attract mode from the title).
 
    **7b, DriveCameraMover::Update, is done** (HANDOFF.md, Session 31,
    continued: the drive camera's Update). `docs/formats/camera.md`,
