@@ -4568,10 +4568,20 @@ phases.
         retail's DoSnapshots (72b) showed where retail changed the objects
         they move. `carsnap_check` sets each such field the same on both
         sides, so these are not checked yet:
-        - PhysicsCar's BottomOut: retail's starts the new FlippedTimer
+        - [x] PhysicsCar's BottomOut: retail's starts the new FlippedTimer
           when the body is upside down and asks the Car to reset a second
           later (PleaseResetMeLater). The port's is the demo's, which
           never touches it.
+          Done in Session 133: BottomOut (`0x00137938`) and
+          CheckDampingSuitability (`0x001377d8`) are retail's. A car
+          stopped on its roof or side (up axis' z under 0.1) is put back
+          after a second; a car moving over 0.8 clears the timer. The
+          damping skips a blinking car and one in the air, counts the
+          throttle only with a wheel down, sets the collision body's
+          ActiveCollisionDetection, and the debug bounce comes after it.
+          `physicscar_check` runs both as Python from retail's listings
+          in the demo image, 28 BottomOut and 7 x 882 damping cases, 0
+          differ; 36 mutations, 35 caught, 1 dead in retail too.
         - [x] CarState::CalculateWheelMatrices: retail reads the y offset
           from WheelInfo's word at 24 and lifts the brake matrix. Done by
           TASKS 74 (`OffsetY`).

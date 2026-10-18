@@ -27371,3 +27371,38 @@ launched publicly tonight if it can be.
   before `linearFree`. The only GPU transfer in the game outside
   hangwatch, which waits its own way. The CIA builds clean; the 3DS-only
   code has no host checker. Waits on the user's next 3DS run.
+
+### TASKS 73, slice 1: the flipped car's reset
+
+- `physicscar.c`, `physicscar.h`, `main.c`: BottomOut (`0x00137938`) and
+  CheckDampingSuitability (`0x001377d8`) are retail's. A car stopped dead
+  (the damping's douse) with its up axis' z under 0.1 starts FlippedTimer;
+  a second later it calls Car::PleaseResetMeLater through
+  `gPhysicsCarPleaseResetMeLaterFn` (main.c binds
+  `car_please_reset_me_later`; the checkers that link physicscar.c without
+  carrace.c keep it NULL). Upright clears the timer, and so does a body
+  moving over 0.8 in the other two arms. The douse stops the wheels only
+  with one on the ground. The damping test counts the throttle only with a
+  wheel down and leaves a blinking car alone, and one with no wheel down
+  and nothing touching. Each arm sets the collision body's
+  ActiveCollisionDetection (the douse clears it). The debug bounce comes
+  after the damping, so a car stopped dead keeps it.
+- `physicscar_check.py`: the demo image has the demo's two functions, so
+  the model runs retail's as Python, line for line from the listings, and
+  calls the image's own Wheel::SetState, Car::IsBlinking,
+  ApplyGroundPenaltyImpulse, ApplyImpulse and ComputeAuxiliaries (`nested`
+  keeps the caller's registers). FlippedTimer has no word in the demo's
+  PhysicsCar, so the model keeps it by address. Not in retail mode:
+  `mellowmover_check` runs retail's own.
+- The damping grid runs under 7 states (wheels, NumCollisions, blinking),
+  and BottomOut has 28 cases: the timer's start, unset, young, exactly a
+  second (no reset) and old, the 0.1 and 0.8 edges, damping and the air on
+  the roof, the throttle. The slow ones zero the body's spin: the moving
+  car's 0.25 comes out of the constructor a hair over the douse's 0.25.
+- `dmg-scale` was stale since `TOTAL_SCALE`; it mutates the define now.
+
+physicscar_check: 106 scenarios, 117344 lines, 0 differ. Its 36 damping
+and BottomOut mutations: 35 caught, and `pc-flip-damp-kept` equivalent
+(the damping arm's 0.8 test can't fire under its 0.7 bound, in retail
+too). mellowmover_check 0 differ, and `--demo` 0 differ. carsnap_check
+0 differ. The CIA builds clean.

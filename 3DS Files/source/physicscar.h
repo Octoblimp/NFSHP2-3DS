@@ -108,9 +108,9 @@ typedef struct PhysicsCar {
     float             FrictionBoost;      // 108  retail's 112
     float             YawControlMultiplier; // 112  retail's 116
     // New in retail at 108, and the name is ours: the constructor zeroes
-    // it and retail's BottomOut starts it when the body is upside down,
-    // asking the Car to reset a second later. The demo's BottomOut, the
-    // one here, never touches it; the replay moves it.
+    // it and retail's BottomOut (physicscar_bottom_out, TASKS 73) starts it
+    // when the body is stopped upside down, asking the Car to reset a
+    // second later; the replay moves it.
     Timer             FlippedTimer;       // 116  retail's 108
 } PhysicsCar;                             // 120
 
@@ -175,6 +175,13 @@ void physicscar_install_vtables(void);
 // words of the .sdata -- ControlInputDebugInfo, LinearYawFrictionBoostSlope,
 // TestTorque and TestBrakeTorque -- are left out: no instruction in the
 // image reads them through gp. They are the debug menu's.
+
+// Car::PleaseResetMeLater (carrace.c), which retail's BottomOut asks of a
+// car stopped on its roof. Through a pointer main.c sets, so the checkers
+// that build this file without carrace.c still link; left NULL, the car is
+// not put back.
+typedef void (*PhysicsCarResetFn)(Car *c);
+extern PhysicsCarResetFn gPhysicsCarPleaseResetMeLaterFn;
 
 extern int32_t UseNewSuspensionCalibration; // gp-23356  1
 extern int32_t TriggerBounce;               // gp-23352  0
@@ -272,17 +279,21 @@ void physicscar_calibrate(PhysicsCar *pc);
 // **ResolveForces through the vehicle's vptr**, slot 24.
 void physicscar_compute_auxiliaries(PhysicsCar *pc);
 
-// 0x00135878. Whether the car is still enough to damp: 0 (no), 1 (damp)
-// or 2 (stop dead).
+// Retail's 0x001377d8 (the demo's 0x00135878). Whether the car is still
+// enough to damp: 0 (no), 1 (damp) or 2 (stop dead).
 #define DS_NO_DAMP 0
 #define DS_DAMP    1
 #define DS_DOUSE   2
 int32_t physicscar_check_damping_suitability(PhysicsCar *pc);
 
-// 0x00135970. Penalty impulses for bottomed-out corners, the debug bounce,
-// and the damping CheckDampingSuitability asks for. If any of them fired,
-// UglyTimestepHack is cleared and the system's ComputeAuxiliaries runs
-// again.
+// Retail's 0x00137938 (the demo's 0x00135970). Penalty impulses for
+// bottomed-out corners, the damping CheckDampingSuitability asks for, then
+// the debug bounce. If any of them fired, UglyTimestepHack is cleared and
+// the system's ComputeAuxiliaries runs again. Retail added the rest: a car
+// stopped dead with its up axis under 0.1 of z starts FlippedTimer and asks
+// to be reset once it has lain there a second; a moving one clears the
+// timer. Stopping dead clears the collision body's ActiveCollisionDetection
+// and the other two arms set it; the wheels stop only while one is down.
 //
 // **The image leaves some words uninitialised** and the port zeroes them.
 // The debug bounce's impulse and point are vectors whose fourth lane is

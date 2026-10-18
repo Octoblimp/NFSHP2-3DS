@@ -682,6 +682,13 @@ DAMP_VEC = [(0, 0, 0), (fb(0.25), 0, 0), (B, 0, 0), (0x3f333333, 0, 0),
             (0, fb(0.5), fb(0.4375))]
 DAMP_TILT = [(0, 0), (fb(0.25), 0), (B, 0), (B | 0x80000000, 0),
              (0, B | 0x80000000), (0, fb(-0.25))]
+# Retail's damping test also reads (wheels on the ground, the collision
+# body's NumCollisions, BlinkTimer) -- each grid above runs under each. At
+# WorldTimer DAMP_NOW with BlinkDuration 2, a stamp of 9000 is blinking
+# and 1000 has stopped.
+DAMP_NOW = 10000
+DAMP_STATES = [(4, 0, 0), (0, 0, 0), (0, 1, 0), (1, 0, 0), (4, 0, 9000),
+               (0, 1, 9000), (4, 0, 1000)]
 
 YAW_YAW = [fb(-0.5), fb(-0.25), 0, fb(0.25), 0x3eb2b8c4, 0x3eb2b8c3,
            fb(0.375), fb(1.25)]
@@ -701,17 +708,76 @@ JUMP_WHEELS = [0, 1, 2, 5]
 JUMP_AV = [(0, 0, 0), (fb(0.25), 0, 0), (fb(0.25), fb(0.125), fb(0.1875)),
            (fb(1.0), fb(-0.5), fb(0.75)), (fb(2.5), fb(1.0), fb(-3.0))]
 
-# BottomOut: (name, corners at the bump stop, velocity, trigger, mode)
+# BottomOut, retail's (TASKS 73): (name, corners at the bump stop,
+# velocity, trigger, mode) and then what retail's reads: the wheels on the
+# ground, the collision body's NumCollisions, the body's up axis' z (R.v2.z)
+# or None for the constructor's, FlippedTimer, every wheel's spin (State.w)
+# or None, the throttle, and whether the body's spin is zeroed -- the
+# moving car's 0.25 comes out of the constructor a hair over the 0.25
+# below which retail's test douses, so a slow car still damps unless
+# `still`, which a slow one is by default. WorldTimer is BOTTOM_NOW: a
+# timer stamped 5000
+# ticks before it is 1.25 s old, 4000 exactly the second, which is not over
+# it.
+BOTTOM_NOW = 40000
+ROOF, UP_EDGE, UP_UNDER = fb(-1.0), fb(0.1), fb(0.1) - 1
+SPIN = fb(3.0)
+_V9, _VD, _VS = (fb(9.0), 0, 0), (fb(0.5), 0, 0), (fb(0.125), 0, 0)
+
+
+def bott(name, corners=(), vel=_V9, trig=0, mode=0, wheels=4, coll=0, upz=None,
+       timer=0, spin=None, thr=0, still=None):
+    if still is None:
+        still = int(vel == _VS)
+    return (name, corners, vel, trig, mode, wheels, coll, upz, timer, spin,
+            thr, still)
+
+
 BOTTOM = [
-    ("none", (), (fb(9.0), 0, 0), 0, 0),
-    ("corner0", (0,), (fb(9.0), 0, 0), 0, 0),
-    ("corners13", (1, 3), (fb(9.0), fb(1.0), 0), 0, 0),
-    ("all", (0, 1, 2, 3), (fb(5.0), 0, fb(-2.0)), 0, 0),
-    ("bounce", (), (fb(9.0), 0, 0), 1, 1),
-    ("bounce-ai", (), (fb(9.0), 0, 0), 1, 0),
-    ("damp", (), (fb(0.5), 0, 0), 0, 0),
-    ("douse", (), (fb(0.125), 0, 0), 0, 0),
-    ("douse-corner2", (2,), (fb(0.125), 0, 0), 0, 0),
+    bott("none"),
+    bott("corner0", (0,)),
+    bott("corners13", (1, 3), (fb(9.0), fb(1.0), 0)),
+    bott("all", (0, 1, 2, 3), (fb(5.0), 0, fb(-2.0))),
+    bott("bounce", trig=1, mode=1),
+    bott("bounce-ai", trig=1),
+    bott("damp", vel=_VD),
+    bott("douse", vel=_VS),
+    bott("douse-corner2", (2,), _VS),
+    bott("slow-spinning", vel=_VS, upz=ROOF, timer=BOTTOM_NOW - 5000,
+         spin=SPIN, still=0),
+    # The bounce after the damping: a car stopped dead keeps it.
+    bott("bounce-douse", vel=_VS, trig=1, mode=1),
+    bott("bounce-damp", vel=_VD, trig=1, mode=1),
+    # On its roof, stopped and touching: the timer starts, runs, and past
+    # a second asks for the reset.
+    bott("roof-start", vel=_VS, wheels=0, coll=1, upz=ROOF, spin=SPIN),
+    bott("roof-unset", vel=_VS, wheels=0, coll=1, upz=ROOF,
+       timer=0x7fffffff, spin=SPIN),
+    bott("roof-young", vel=_VS, wheels=0, coll=1, upz=ROOF,
+       timer=BOTTOM_NOW - 3000, spin=SPIN),
+    bott("roof-second", vel=_VS, wheels=0, coll=1, upz=ROOF,
+       timer=BOTTOM_NOW - 4000, spin=SPIN),
+    bott("roof-old", vel=_VS, wheels=0, coll=1, upz=ROOF,
+       timer=BOTTOM_NOW - 5000, spin=SPIN),
+    bott("roof-wheels-down", vel=_VS, wheels=2, upz=ROOF,
+       timer=BOTTOM_NOW - 5000, spin=SPIN),
+    bott("up-edge", vel=_VS, upz=UP_EDGE, timer=BOTTOM_NOW - 5000),
+    bott("up-under", vel=_VS, upz=UP_UNDER, timer=BOTTOM_NOW - 5000),
+    bott("upright-timer", vel=_VS, timer=BOTTOM_NOW - 5000, spin=SPIN),
+    bott("damp-roof", vel=_VD, wheels=0, coll=1, upz=ROOF,
+       timer=BOTTOM_NOW - 5000, spin=SPIN),
+    # Not touching, no wheel down: in the air, so not damped at all, and
+    # the slow body keeps its timer.
+    bott("air", vel=_VS, wheels=0, upz=ROOF, timer=BOTTOM_NOW - 5000,
+       spin=SPIN),
+    bott("fast-timer", timer=BOTTOM_NOW - 5000),
+    bott("fast-edge", vel=(fb(0.8), 0, 0), timer=BOTTOM_NOW - 5000,
+       thr=fb(0.5)),
+    bott("fast-over", vel=(fb(0.8) + 1, 0, 0), timer=BOTTOM_NOW - 5000,
+       thr=fb(0.5)),
+    bott("throttle-slow", vel=_VD, thr=fb(0.5), timer=BOTTOM_NOW - 5000),
+    bott("throttle-air", vel=_VS, thr=fb(0.5), wheels=0, coll=1, upz=ROOF,
+       timer=BOTTOM_NOW - 5000, spin=SPIN),
 ]
 
 BOOSTS = [(fb(1.25), fb(0.3125)), (fb(0.5), 0)]
@@ -895,14 +961,23 @@ def generate(ctis):
     w("static const uint32_t pc_jump_av[][3] = {%s};" % ", ".join(
         "{%s}" % c_u32_list(v) for v in JUMP_AV))
     w("typedef struct PcBottom { const char *name; int n; int corner[4]; "
-      "uint32_t vel[3]; int32_t trigger, mode; } PcBottom;")
+      "uint32_t vel[3]; int32_t trigger, mode, wheels, coll, upz_set; "
+      "uint32_t upz, timer; int32_t spin_set; uint32_t spin, thr; "
+      "int32_t still; } PcBottom;")
+    w("#define PC_BOTTOM_NOW %d" % BOTTOM_NOW)
     w("static const PcBottom pc_bottom[] = {")
-    for name, corners, vel, trig, mode in BOTTOM:
+    for (name, corners, vel, trig, mode, wheels, coll, upz, timer, spin,
+         thr, still) in BOTTOM:
         cs = list(corners) + [0] * (4 - len(corners))
-        w('    {"%s", %d, {%s}, {%s}, %d, %d},'
+        w('    {"%s", %d, {%s}, {%s}, %d, %d, %d, %d, %d, 0x%08xu, 0x%08xu, '
+          '%d, 0x%08xu, 0x%08xu, %d},'
           % (name, len(corners), ", ".join(str(c) for c in cs),
-             c_u32_list(vel), trig, mode))
+             c_u32_list(vel), trig, mode, wheels, coll, upz is not None,
+             upz or 0, timer, spin is not None, spin or 0, thr, still))
     w("};")
+    w("#define PC_DAMP_NOW %d" % DAMP_NOW)
+    w("static const int32_t pc_damp_state[][3] = {%s};" % ", ".join(
+        "{%d, %d, %d}" % st for st in DAMP_STATES))
     w("static const uint32_t pc_boost[][2] = {%s};" % ", ".join(
         "{%s}" % c_u32_list(v) for v in BOOSTS))
     w("static const int32_t pc_locks[] = {%s};"
@@ -1022,6 +1097,21 @@ def retail_wheel_matrices(e):
     e.hook(DEMO_WHEEL_ROW3, lift)
 REALDRIVER_SIZE = 568
 PC_SIZE = 116
+
+# Retail's CheckDampingSuitability (0x001377d8) and BottomOut (0x00137938),
+# which the port's are since TASKS 73. The demo image has the demo's, so
+# the model runs retail's as Python, line for line from the listings, and
+# calls the image's own components for the work they hand off: Car's
+# IsBlinking, Suspension's ApplyGroundPenaltyImpulse, Wheel's SetState,
+# RigidBody's ApplyImpulse and PhysicsSystem's ComputeAuxiliaries. Retail's
+# FlippedTimer has no word in the demo's PhysicsCar, so the model keeps it
+# by the PhysicsCar's address. Its constants: retail's gp-31788 0.3,
+# gp-31784 0.7, the 0.25 built with lui, gp-31776 0.95, gp-31780 and
+# gp-31772 0.8, gp-31768 0.1, gp-31764 the tick, and 1.0 built with lui.
+RT_THROTTLE, RT_SPEED, RT_TIP = 0x3e99999a, 0x3f333333, 0x3e800000
+RT_DAMP, RT_MOVING, RT_UP, RT_TICK = 0x3f733333, 0x3f4ccccd, 0x3dcccccd, \
+    0x3983126f
+CCB_NUMCOLL, CCB_ACTIVE = 18, 19
 
 # CarDriver and Car, which the car reads a handful of words of.
 DRV_STEERING, DRV_THROTTLE, DRV_BRAKE, DRV_EBRAKE = 528, 532, 536, 540
@@ -1151,11 +1241,18 @@ class Model(object):
                "P8bVector3Pb", self.elevation)
         e.stub("GetRoadNoise__FP8bVector211TerrainType", self.road_noise)
 
-        def zero_frame(em):
-            sp = em.reg[29] & M32
-            em.mem[sp - 144:sp] = bytes(144)
-
-        e.hook("BottomOut__10PhysicsCar", zero_frame)
+        # Retail's, in place of the demo's (see RT_THROTTLE). Their
+        # vectors' unstored w lanes are 0 here, as the port has them.
+        # The retail image runs its own.
+        self.flip = {}
+        if not retail:
+            self.vecs = self.zalloc(32)
+            e.stub("CheckDampingSuitability__10PhysicsCar",
+                   lambda em: self.retail_damp(em.reg[4] & M32))
+            e.stub("BottomOut__10PhysicsCar",
+                   lambda em: self.retail_bottom_out(em.reg[4] & M32))
+            e.stub("PleaseResetMeLater__3Car",
+                   lambda em: self.say("reset me"))
 
         # Two components leave a word of stack in a force's w lane, and
         # their ports write 0 there: rigidbody.c and aerodynamics.c say
@@ -1417,6 +1514,120 @@ class Model(object):
         self.raw("dyno", "R", G_SDR, 64)
         self.say("seed %08x" % self.w(G_SEED))
 
+    # ---- retail's damping test and BottomOut (RT_THROTTLE)
+
+    def nested(self, sym, *args, floats=()):
+        """`sym` called from a stub, as its listing's `jal` does, with the
+        caller's registers kept around it. Returns v0 and $f0's bits."""
+        e = self.e
+        keep = (list(e.reg), list(e.fpr), e.hi, e.lo, e.hi1, e.lo1, e.sa,
+                e.fcc, [list(v) for v in e.vf], list(e.acc), e.q, e.i,
+                e.clip, e.limit, e.icount)
+        try:
+            for i, v in enumerate(floats):
+                e.fpr[12 + i] = v
+            v0 = e.call(sym, *args)
+            f0 = e.fpr[0]
+        finally:
+            e.reg[:] = keep[0]
+            e.fpr[:] = keep[1]
+            (e.hi, e.lo, e.hi1, e.lo1, e.sa, e.fcc) = keep[2:8]
+            e.vf[:] = keep[8]
+            e.acc[:] = keep[9]
+            (e.q, e.i, e.clip, e.limit, e.icount) = keep[10:]
+        return v0, f0
+
+    def vlen(self, a):
+        """`vmul.xyz ; vaddy.x ; vaddz.x`, then sqrt.s."""
+        x, y, z = self.f(a), self.f(a + 4), self.f(a + 8)
+        return f32(mipsemu.ieee_sqrt(
+            f32(f32(f32(x * x) + f32(y * y)) + f32(z * z))))
+
+    def wheels_down(self, car):
+        return s32(self.w(car + CAR_STATE
+                          + OFF("CarState", "nWheelsTouchingGround")))
+
+    def retail_damp(self, pc):
+        P = LAYOUT["PhysicsCar"]
+        drv = self.w(pc)
+        car = self.w(pc + P.off("pCar"))
+        wheels = self.wheels_down(car)
+        if fbits_to(RT_THROTTLE) < self.f(drv + DRV_THROTTLE) and wheels > 0:
+            return 0
+        body = self.w(pc + P.off("pBody"))
+        v = self.vlen(body + 144)
+        w = self.vlen(body + 160)
+        if fbits_to(RT_SPEED) < v or fbits_to(RT_SPEED) < w:
+            return 0
+        tip = fbits_to(RT_TIP)
+        if tip < abs(self.f(body + 40)) or tip < abs(self.f(body + 56)):
+            return 0
+        if self.nested("IsBlinking__3Car", car)[0]:
+            return 0
+        ccb = self.w(car + CAR_COLLISIONBODY)
+        if wheels == 0 and self.e.mem[ccb + CCB_NUMCOLL] == 0:
+            return 0
+        if tip < v or tip < w:
+            return 1
+        return 2
+
+    def retail_bottom_out(self, pc):
+        P = LAYOUT["PhysicsCar"]
+        fired = 0
+        for i in range(4):
+            s = self.w(pc + P.off("pSuspension") + 4 * i)
+            if self.f(s + 20) == self.f(self.w(s + 12) + 20):
+                fired = 1
+                _v0, m = self.nested(
+                    "ApplyGroundPenaltyImpulse__10Suspension", s)
+                a = self.w(pc + P.off("State")) + 752 + 4 * i
+                self.put(a, f_to_bits(f32(self.f(a) + fbits_to(m))))
+        case = self.retail_damp(pc)
+        body = self.w(pc + P.off("pBody"))
+        car = self.w(pc + P.off("pCar"))
+        ccb = self.w(car + CAR_COLLISIONBODY)
+        wheels = [self.w(pc + P.off("pWheel") + 4 * i) for i in range(4)]
+        now = self.w(G_WORLDTIMER)
+        if case == 1:
+            k = fbits_to(RT_DAMP)
+            for a in range(body + 96, body + 128, 4):
+                self.put(a, f_to_bits(f32(self.f(a) * k)))
+            for wh in wheels:
+                self.nested("SetState__5Wheelf", wh,
+                            floats=(f_to_bits(f32(self.f(wh + 32) * k)),))
+            fired = 1
+        if case in (0, 1):
+            if fbits_to(RT_MOVING) < self.vlen(body + 144):
+                self.flip[pc] = 0
+            self.e.mem[ccb + CCB_ACTIVE] = 1
+        elif case == 2:
+            self.e.mem[body + 96:body + 128] = bytes(32)
+            if self.wheels_down(car) > 0:
+                for wh in wheels:
+                    self.nested("SetState__5Wheelf", wh, floats=(0,))
+            fired = 1
+            if self.f(body + 72) < fbits_to(RT_UP):
+                t = self.flip.get(pc, 0)
+                if t == 0 or t == 0x7fffffff:
+                    self.flip[pc] = now
+                elif 1.0 < f32(f32(float(s32(now - t))) * fbits_to(RT_TICK)):
+                    self.nested("PleaseResetMeLater__3Car", car)
+            else:
+                self.flip[pc] = 0
+            self.e.mem[ccb + CCB_ACTIVE] = 0
+        if self.w(G_TRIGGER) and self.w(car + CAR_CONTROLMODE) == 1:
+            v = self.vecs
+            self.e.mem[v:v + 32] = bytes(32)
+            self.put(v + 8, fb(25.0))
+            fired = 1
+            self.put(G_TRIGGER, 0)
+            self.nested("ApplyImpulse__9RigidBodyP8bVector3T1", body, v,
+                        v + 16)
+        if fired:
+            self.put(G_UGLY, 0)
+            self.nested("ComputeAuxiliaries__13PhysicsSystem",
+                        pc + P.off("Vehicle"))
+
     # ---- calls
 
     def call(self, sym, *args, floats=()):
@@ -1472,6 +1683,7 @@ class Model(object):
     def build(self, s):
         e = self.e
         self.reset_globals(s)
+        self.flip = {}
         cti = self.cti = e.alloc(1376, 64)
         e.write(cti, self.ctis[s.car] + bytes(8))
         self.put(cti + OFF_CTI_CONTROL + 28, fb(s.extreme))
@@ -1683,7 +1895,19 @@ class Model(object):
         self.say("-- damp")
         body = self.comp("pBody")
         R = OFF("RigidBody", "State", "R")
+        ccb = self.w(self.car + CAR_COLLISIONBODY)
         n = 0
+        self.put(G_WORLDTIMER, DAMP_NOW)
+        self.put(self.car + CAR_BLINKDURATION, fb(2.0))
+        for wheels, coll, blink in DAMP_STATES:
+            self.put(self.car + CAR_STATE
+                     + OFF("CarState", "nWheelsTouchingGround"), wheels)
+            self.e.mem[ccb + CCB_NUMCOLL] = coll
+            self.put(self.car + CAR_BLINKTIMER, blink)
+            n = self.damp_grid(body, R, n)
+        self.teardown()
+
+    def damp_grid(self, body, R, n):
         for t in DAMP_THR:
             for v in DAMP_VEC:
                 for av in DAMP_VEC:
@@ -1700,25 +1924,41 @@ class Model(object):
                                       self.pc)
                         self.say("damp %d %d" % (n, r))
                         n += 1
-        self.teardown()
+        return n
 
     def s_bottom(self):
-        for name, corners, vel, trig, mode in BOTTOM:
-            s = Scen("bottom-" + name, **mv(ctrl=mode))
+        for (name, corners, vel, trig, mode, wheels, coll, upz, timer, spin,
+             thr, still) in BOTTOM:
+            s = Scen("bottom-" + name, **mv(ctrl=mode, wtimer=BOTTOM_NOW))
             self.build(s)
             self.after_ctor(s)
             body = self.comp("pBody")
             for i in range(3):
                 self.put(body + OFF("RigidBody", "Velocity") + 4 * i, vel[i])
-            self.put(self.drv + DRV_THROTTLE, 0)
+                if still:
+                    self.put(body + OFF("RigidBody", "AngularVelocity")
+                             + 4 * i, 0)
+            self.put(self.drv + DRV_THROTTLE, thr)
             for c in corners:
                 sa = self.comp("pSuspension", c)
                 si = self.w(sa + OFF("Suspension", "SI"))
                 self.put(sa + OFF("Suspension", "State"), self.w(si + 20))
+            self.put(self.car + CAR_STATE
+                     + OFF("CarState", "nWheelsTouchingGround"), wheels)
+            ccb = self.w(self.car + CAR_COLLISIONBODY)
+            self.e.mem[ccb + CCB_NUMCOLL] = coll
+            if upz is not None:
+                self.put(body + OFF("RigidBody", "State", "R") + 40, upz)
+            if spin is not None:
+                for i in range(4):
+                    self.put(self.comp("pWheel", i) + 32, spin)
+            self.flip[self.pc] = timer
             self.put(G_TRIGGER, trig)
             self.put(G_UGLY, fb(1.0))
             self.call("BottomOut__10PhysicsCar", self.pc)
             self.dump_all("bottom " + name)
+            self.say("flip timer=%08x acd=%d" % (self.flip.get(self.pc, 0),
+                                                 self.e.mem[ccb + CCB_ACTIVE]))
             self.teardown()
 
     def s_yaw(self):
@@ -2097,8 +2337,24 @@ MUTATIONS = [
 
     # -- the damping test and BottomOut ---------------------------------------
     ("pc-damp-throttle-le", PCC,
-     "    if (PC_DAMP_THROTTLE < pc->Mover.Driver->Throttle)",
-     "    if (PC_DAMP_THROTTLE <= pc->Mover.Driver->Throttle)"),
+     "    if (PC_DAMP_THROTTLE < pc->Mover.Driver->Throttle && wheels > 0)",
+     "    if (PC_DAMP_THROTTLE <= pc->Mover.Driver->Throttle && wheels > 0)"),
+    # Retail's (TASKS 73): the throttle counts only with a wheel down, a
+    # blinking car and one in the air are left alone.
+    ("pc-damp-throttle-airborne", PCC,
+     "    if (PC_DAMP_THROTTLE < pc->Mover.Driver->Throttle && wheels > 0)",
+     "    if (PC_DAMP_THROTTLE < pc->Mover.Driver->Throttle)"),
+    ("pc-damp-blink-ignored", PCC,
+     "    if (car_is_blinking(car))\n        return DS_NO_DAMP;\n",
+     "    (void)car_is_blinking(car);\n"),
+    ("pc-damp-air-ignored", PCC,
+     "    if (wheels == 0\n"
+     "        && car->pDynamicCollisionBody->Dynamic.Body.NumCollisions == 0)",
+     "    if (0)"),
+    ("pc-damp-air-no-touch", PCC,
+     "    if (wheels == 0\n"
+     "        && car->pDynamicCollisionBody->Dynamic.Body.NumCollisions == 0)",
+     "    if (wheels == 0)"),
     ("pc-damp-spin-ignored", PCC,
      "    if (PC_DAMP_SPEED < v || PC_DAMP_SPEED < w)",
      "    if (PC_DAMP_SPEED < v)"),
@@ -2148,6 +2404,61 @@ MUTATIONS = [
     ("pc-bounce-size", PCC,
      "        bVector4 j  = { 0.0f, 0.0f, 25.0f, 0.0f };",
      "        bVector4 j  = { 0.0f, 0.0f, 20.0f, 0.0f };"),
+    # Retail's FlippedTimer and ActiveCollisionDetection (TASKS 73).
+    ("pc-flip-up-le", PCC,
+     "        if (pc->pBody->State.R.v2.z < PC_FLIP_UP) {",
+     "        if (pc->pBody->State.R.v2.z <= PC_FLIP_UP) {"),
+    ("pc-flip-up-y", PCC,
+     "        if (pc->pBody->State.R.v2.z < PC_FLIP_UP) {",
+     "        if (pc->pBody->State.R.v1.z < PC_FLIP_UP) {"),
+    ("pc-flip-second-le", PCC,
+     "            else if (1.0f < (float)",
+     "            else if (1.0f <= (float)"),
+    ("pc-flip-half-second", PCC,
+     "            else if (1.0f < (float)",
+     "            else if (0.5f < (float)"),
+    ("pc-flip-restamped", PCC,
+     "            if (!timer_is_valid(&pc->FlippedTimer))",
+     "            if (1)"),
+    ("pc-flip-never-reset", PCC,
+     "                gPhysicsCarPleaseResetMeLaterFn(pc->pCar);",
+     "                (void)0;"),
+    ("pc-flip-upright-kept", PCC,
+     "        } else {\n"
+     "            pc->FlippedTimer.PackedTime = 0;\n"
+     "        }",
+     "        }"),
+    ("pc-flip-moving-le", PCC,
+     "    return PC_FLIP_SPEED < sqrtf(len2(&pc->pBody->Velocity));",
+     "    return PC_FLIP_SPEED <= sqrtf(len2(&pc->pBody->Velocity));"),
+    ("pc-flip-moving-spin", PCC,
+     "    return PC_FLIP_SPEED < sqrtf(len2(&pc->pBody->Velocity));",
+     "    return PC_FLIP_SPEED < sqrtf(len2(&pc->pBody->AngularVelocity));"),
+    ("pc-flip-damp-kept", PCC,
+     "        fired = 1;\n"
+     "        if (flip_moving(pc))\n"
+     "            pc->FlippedTimer.PackedTime = 0;",
+     "        fired = 1;"),
+    ("pc-douse-wheels-always", PCC,
+     "        if (pc->pCar->State.nWheelsTouchingGround > 0)\n"
+     "            for (i = 0; i < 4; i++)",
+     "        for (i = 0; i < 4; i++)"),
+    ("pc-acd-douse-on", PCC,
+     "            = 0;\n"
+     "        break;",
+     "            = 1;\n"
+     "        break;"),
+    ("pc-acd-nodamp-off", PCC,
+     "        if (flip_moving(pc))\n"
+     "            pc->FlippedTimer.PackedTime = 0;\n"
+     "        pc->pCar->pDynamicCollisionBody->Dynamic.Body.ActiveCollisionDetection\n"
+     "            = 1;\n"
+     "        break;\n"
+     "    case DS_DAMP:",
+     "        if (flip_moving(pc))\n"
+     "            pc->FlippedTimer.PackedTime = 0;\n"
+     "        break;\n"
+     "    case DS_DAMP:"),
 
     # -- YawFrictionBoost -----------------------------------------------------
     ("pc-yaw-tilt-signed", PCC,
@@ -2874,8 +3185,8 @@ MUTATIONS = [
      "    if (RaceParametersDamageEnabled == 0)",
      "    if (RaceParametersDamageEnabled != 1)"),
     ("dmg-scale", CDMC,
-     "CompressedTotalDamage * 0.000244140625f;",
-     "CompressedTotalDamage * 0.00048828125f;"),
+     "#define TOTAL_SCALE     0.000244140625f",
+     "#define TOTAL_SCALE     0.00048828125f"),
     ("dmg-signed-half", CDMC,
      "    return (float)(int32_t)b->CompressedTotalDamage",
      "    return (float)(int16_t)b->CompressedTotalDamage"),
@@ -2887,6 +3198,11 @@ MUTATIONS = [
 # Each of these changes nothing the shipped code can see, for the reason
 # beside it, checked against the image.
 EQUIVALENT = {
+    "pc-flip-damp-kept":
+        "Retail's damping arm (0x00137a50) tests the Velocity against "
+        "0.8 too, but the damping test returned DAMP only for a Velocity "
+        "no longer than 0.7, and nothing between recomputes it: the "
+        "timer's clear there never runs. A NaN length douses instead.",
     "pc-dtor-vehicle-vt-not-restored":
         "~PhysicsSystem stores PHYSICSSYSTEM_VTABLE on entry, and nothing "
         "between the steering's destructor and the aerodynamics' delete "

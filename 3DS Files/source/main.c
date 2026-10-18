@@ -7980,6 +7980,9 @@ int main(int argc, char** argv)
     gInitTerrainEffectEmittersFn  = init_terrain_effect_emitters;
     gCloseTerrainEffectEmittersFn = close_terrain_effect_emitters;
     gTerrainEffectTriggerFn       = terrainEffectTrigger;
+    // TASKS 73: retail's BottomOut asks for a car that has lain on its
+    // roof a second to be put back on the road.
+    gPhysicsCarPleaseResetMeLaterFn = car_please_reset_me_later;
 
     // elInit, and eLight.obj's two calls the solids and the cars make
     // through seams: elGetLightMaterial, which eFixUpTables uses to fill

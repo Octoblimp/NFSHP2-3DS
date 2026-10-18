@@ -713,15 +713,18 @@ static void s_tables(void)
     }
 }
 
-static void s_damp(void)
+// Car::PleaseResetMeLater, which retail's BottomOut calls for a car a
+// second on its roof (TASKS 73); the model's stub says the same.
+static void reset_me(Car *c)
 {
-    PcScen s = moving("damp");
-    RigidBody *rb;
-    int t, v, a, k, i, n = 0;
+    (void)c;
+    printf("reset me\n");
+}
 
-    build(&s);
-    printf("-- damp\n");
-    rb = g_pc->pBody;
+static int damp_grid(RigidBody *rb, int n)
+{
+    int t, v, a, k, i;
+
     for (t = 0; t < PC_N(pc_damp_thr); t++)
         for (v = 0; v < PC_N(pc_damp_vec); v++)
             for (a = 0; a < PC_N(pc_damp_vec); a++)
@@ -739,6 +742,25 @@ static void s_damp(void)
                            (int)physicscar_check_damping_suitability(g_pc));
                     n++;
                 }
+    return n;
+}
+
+static void s_damp(void)
+{
+    PcScen s = moving("damp");
+    int d, n = 0;
+
+    build(&s);
+    printf("-- damp\n");
+    WorldTimer = PC_DAMP_NOW;
+    g_car->BlinkDuration = 2.0f;
+    for (d = 0; d < PC_N(pc_damp_state); d++) {
+        g_car->State.nWheelsTouchingGround = pc_damp_state[d][0];
+        g_car->pDynamicCollisionBody->Dynamic.Body.NumCollisions =
+            (int8_t)pc_damp_state[d][1];
+        g_car->BlinkTimer = pc_damp_state[d][2];
+        n = damp_grid(g_pc->pBody, n);
+    }
     teardown(0, 0);
 }
 
@@ -752,24 +774,42 @@ static void s_bottom(void)
         PcScen s = moving(NULL);
         float *vel;
 
+        CarCollisionBody *ccb;
+
         snprintf(name, sizeof name, "bottom-%s", c->name);
         s.name = name;
         s.ctrl = c->mode;
+        s.wtimer = PC_BOTTOM_NOW;
         build(&s);
         after_ctor(&s);
         vel = &g_pc->pBody->Velocity.x;
-        for (i = 0; i < 3; i++)
+        for (i = 0; i < 3; i++) {
             vel[i] = fb(c->vel[i]);
-        g_drv->Throttle = 0.0f;
+            if (c->still)
+                (&g_pc->pBody->AngularVelocity.x)[i] = 0.0f;
+        }
+        g_drv->Throttle = fb(c->thr);
         for (i = 0; i < c->n; i++) {
             Suspension *sp = g_pc->pSuspension[c->corner[i]];
             sp->State.z = sp->SI->BumpStop[0];
         }
+        g_car->State.nWheelsTouchingGround = c->wheels;
+        ccb = g_car->pDynamicCollisionBody;
+        ccb->Dynamic.Body.NumCollisions = (int8_t)c->coll;
+        if (c->upz_set)
+            g_pc->pBody->State.R.v2.z = fb(c->upz);
+        if (c->spin_set)
+            for (i = 0; i < 4; i++)
+                g_pc->pWheel[i]->State.w = fb(c->spin);
+        g_pc->FlippedTimer.PackedTime = c->timer;
         TriggerBounce = c->trigger;
         gUglyTimestepHack = 1.0f;
         physicscar_bottom_out(g_pc);
         snprintf(name, sizeof name, "bottom %s", c->name);
         dump_all(name);
+        printf("flip timer=%08x acd=%d\n",
+               (unsigned)g_pc->FlippedTimer.PackedTime,
+               (int)ccb->Dynamic.Body.ActiveCollisionDetection);
         teardown(0, 0);
     }
 }
@@ -987,6 +1027,7 @@ int main(void)
     gWheelTopologyOfCarStateFn = topology_of;
     gWheelMaybeMakeSkidsFn = fake_skids;
     pCurrentRace = (Race *)(void *)g_race;
+    gPhysicsCarPleaseResetMeLaterFn = reset_me;
 
     s_static();
     s_tables();

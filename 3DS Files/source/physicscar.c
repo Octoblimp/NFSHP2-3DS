@@ -21,6 +21,8 @@
 
 // ------------------------------------------------------------ the tuning
 
+PhysicsCarResetFn gPhysicsCarPleaseResetMeLaterFn;
+
 int32_t UseNewSuspensionCalibration = 1;       // 0x003230b4  00000001
 int32_t TriggerBounce               = 0;       // 0x003230b8
 float   LowSpeedYawBoost            = 0.0f;    // 0x003230c0
@@ -95,6 +97,12 @@ static bVector2 JumpStabilizationGraph[3];
 #define PC_DAMAGE_DERATE      0.03f               // gp-31828  3cf5c28f
 #define PC_DYNO_STOPPED       0.8f                // gp-31812  3f4ccccd
 #define PC_DYNO_QUARTER_MILE  400.5f              // gp-31796  43c84000
+
+// Retail's BottomOut (0x00137938): a car whose up axis has under 0.1 of z
+// is on its roof or side, and one moving faster than 0.8 is not resting
+// there. The second is retail's gp-31780 and gp-31772, the first gp-31768.
+#define PC_FLIP_SPEED         0.8f                // retail gp-31780  3f4ccccd
+#define PC_FLIP_UP            0.1f                // retail gp-31768  3dcccccd
 
 void physicscar_static_init(void)
 {
@@ -321,12 +329,20 @@ static float len2(const bVector4 *v)
     return (v->x * v->x + v->y * v->y) + v->z * v->z;
 }
 
+// Retail's, 0x001377d8 (the demo's 0x00135878). The throttle lets a car
+// alone only while a wheel is down to drive it; with none down it is tested
+// as one coasting. And two tests are new before the damping: a blinking
+// car, just put back on the road, is let alone, and one with no wheel down
+// is damped only while its body touches something -- lying on its roof,
+// not in the air.
 int32_t physicscar_check_damping_suitability(PhysicsCar *pc)
 {
     const RigidBody *rb;
+    Car *car = pc->pCar;
+    int32_t wheels = car->State.nWheelsTouchingGround;
     float v, w;
 
-    if (PC_DAMP_THROTTLE < pc->Mover.Driver->Throttle)
+    if (PC_DAMP_THROTTLE < pc->Mover.Driver->Throttle && wheels > 0)
         return DS_NO_DAMP;
 
     rb = pc->pBody;
@@ -339,9 +355,22 @@ int32_t physicscar_check_damping_suitability(PhysicsCar *pc)
     if (0.25f < fabsf(rb->State.R.v0.z) || 0.25f < fabsf(rb->State.R.v1.z))
         return DS_NO_DAMP;
 
+    if (car_is_blinking(car))
+        return DS_NO_DAMP;
+    if (wheels == 0
+        && car->pDynamicCollisionBody->Dynamic.Body.NumCollisions == 0)
+        return DS_NO_DAMP;
+
     if (0.25f < v || 0.25f < w)
         return DS_DAMP;
     return DS_DOUSE;
+}
+
+// Whether the body moves faster than a car lying on its roof: its Velocity,
+// the auxiliaries' from before this BottomOut's damping.
+static int32_t flip_moving(const PhysicsCar *pc)
+{
+    return PC_FLIP_SPEED < sqrtf(len2(&pc->pBody->Velocity));
 }
 
 void physicscar_bottom_out(PhysicsCar *pc)
@@ -359,17 +388,13 @@ void physicscar_bottom_out(PhysicsCar *pc)
         }
     }
 
-    // The debug bounce: 25 up, at the centre of mass. The image stores
-    // three lanes of each vector and leaves the fourth to the stack.
-    if (TriggerBounce && pc->pCar->TheControlMode == 1) {
-        bVector4 at = { 0.0f, 0.0f, 0.0f, 0.0f };
-        bVector4 j  = { 0.0f, 0.0f, 25.0f, 0.0f };
-        fired = 1;
-        TriggerBounce = 0;
-        rigidbody_apply_impulse(pc->pBody, &j, &at);
-    }
-
     switch (physicscar_check_damping_suitability(pc)) {
+    case DS_NO_DAMP:
+        if (flip_moving(pc))
+            pc->FlippedTimer.PackedTime = 0;
+        pc->pCar->pDynamicCollisionBody->Dynamic.Body.ActiveCollisionDetection
+            = 1;
+        break;
     case DS_DAMP: {
         float k = PC_DAMP_FACTOR;
         RigidBody *rb = pc->pBody;
@@ -381,6 +406,10 @@ void physicscar_bottom_out(PhysicsCar *pc)
         for (i = 0; i < 4; i++)
             wheel_set_state_w(pc->pWheel[i], pc->pWheel[i]->State.w * k);
         fired = 1;
+        if (flip_moving(pc))
+            pc->FlippedTimer.PackedTime = 0;
+        pc->pCar->pDynamicCollisionBody->Dynamic.Body.ActiveCollisionDetection
+            = 1;
         break;
     }
     case DS_DOUSE: {
@@ -388,13 +417,41 @@ void physicscar_bottom_out(PhysicsCar *pc)
         bVector4 zero = { 0.0f, 0.0f, 0.0f, 0.0f };
         pc->pBody->State.P = zero;
         pc->pBody->State.L = zero;
-        for (i = 0; i < 4; i++)
-            wheel_set_state_w(pc->pWheel[i], 0.0f);
+        if (pc->pCar->State.nWheelsTouchingGround > 0)
+            for (i = 0; i < 4; i++)
+                wheel_set_state_w(pc->pWheel[i], 0.0f);
         fired = 1;
+        // On its roof or its side: a second of lying there and the car
+        // asks to be put back on the road.
+        if (pc->pBody->State.R.v2.z < PC_FLIP_UP) {
+            if (!timer_is_valid(&pc->FlippedTimer))
+                pc->FlippedTimer.PackedTime = (uint32_t)WorldTimer;
+            else if (1.0f < (float)(int32_t)((uint32_t)WorldTimer
+                                              - pc->FlippedTimer.PackedTime)
+                                * PC_TICK
+                     && gPhysicsCarPleaseResetMeLaterFn != NULL)
+                gPhysicsCarPleaseResetMeLaterFn(pc->pCar);
+        } else {
+            pc->FlippedTimer.PackedTime = 0;
+        }
+        pc->pCar->pDynamicCollisionBody->Dynamic.Body.ActiveCollisionDetection
+            = 0;
         break;
     }
     default:
         break;
+    }
+
+    // The debug bounce: 25 up, at the centre of mass, after the damping in
+    // retail (the demo's came before it, and a car stopped dead lost it).
+    // The image stores three lanes of each vector and leaves the fourth to
+    // the stack.
+    if (TriggerBounce && pc->pCar->TheControlMode == 1) {
+        bVector4 at = { 0.0f, 0.0f, 0.0f, 0.0f };
+        bVector4 j  = { 0.0f, 0.0f, 25.0f, 0.0f };
+        fired = 1;
+        TriggerBounce = 0;
+        rigidbody_apply_impulse(pc->pBody, &j, &at);
     }
 
     if (fired) {
