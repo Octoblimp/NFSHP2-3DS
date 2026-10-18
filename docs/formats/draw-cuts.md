@@ -650,8 +650,15 @@ VRAM, and a race's textures leave less: track 11's leave 512 KB.
 
 - Now, when VRAM has no room, the replays borrow the top screen's own
   buffers. They are the same size and formats, in the same banks. What
-  the buffers hold is kept on the heap and put back after
+  the buffers hold is kept in the linear heap and put back after
   (`hangwatch.c`, `borrow_top` and `give_back`).
+- The GPU puts them back (`GX_TextureCopy`, as `texpack.c` fills a VRAM
+  texture). The CPU may read VRAM but not write it: the first device run
+  (2026-10-18, Coastal Parklands' countdown) stopped on a permission
+  fault in `give_back`'s `memcpy` into the top screen's colour buffer,
+  at 0x1f000000. Azahar lets the write through. `give_back` reads the
+  buffers back and logs how many words differ, the first time and after
+  only when some do; on Azahar it was 0 of 96,000 each.
 - The sprites' stage, "the sun and the scenery's list", is replayed
   too.
 - There are two more ways:

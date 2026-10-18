@@ -3147,6 +3147,15 @@ phases.
           (`sdmc:/nfshp2_gputiming.txt`, `DebugLog 1`). Its replays
           decide the next cuts: fill, the cost of each draw, the
           textures, and early depth.
+          - The first try (2026-10-18, Coastal Parklands, build 03ffcaf)
+            stopped at the countdown with an ARM11 data abort: a
+            permission fault writing 0x1f000008, in `give_back`'s
+            `memcpy` into the top screen's colour buffer. Track 11
+            leaves no 768 KB of VRAM, so the replays borrow the top
+            screen's buffers, and the CPU may read VRAM but not write
+            it (Azahar lets it). The GPU now copies them back from the
+            linear heap and the readback is logged: 0 of 96,000 words
+            differ on Azahar. To run again on the 3DS.
         - [ ] The user's word on the envmap a face a frame.
 
 47. [ ] **A brief artifact on the bridge before the finish line.**

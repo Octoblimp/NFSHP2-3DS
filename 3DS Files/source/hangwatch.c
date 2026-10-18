@@ -320,14 +320,38 @@ void hangwatch_gpu_top(void *colour, void *depth)
     s_topDepth  = (u32 *)depth;
 }
 
-// The top screen's buffers as they were before the replays.
+// The top screen's buffers as they were before the replays. The CPU reads
+// VRAM but may not write it: on the device the write is a permission fault
+// (Coastal Parklands' countdown, 2026-10-18), which Azahar lets through. So
+// the GPU copies them back from the linear heap, as texpack.c fills a VRAM
+// texture.
 static void give_back(void)
 {
+    static bool checked;
+    unsigned    colour = 0, depth = 0;
+    u32         i;
+
     if (!s_borrowed) return;
-    memcpy(s_offColour, s_kept, OFF_WORDS * 4);
-    memcpy(s_offDepth, s_kept + OFF_WORDS, OFF_WORDS * 4);
-    GSPGPU_FlushDataCache(s_offColour, OFF_WORDS * 4);
-    GSPGPU_FlushDataCache(s_offDepth, OFF_WORDS * 4);
+    GSPGPU_FlushDataCache(s_kept, OFF_WORDS * 8);
+    GX_TextureCopy(s_kept, 0, s_offColour, 0, OFF_WORDS * 4, 8);
+    GX_TextureCopy(s_kept + OFF_WORDS, 0, s_offDepth, 0, OFF_WORDS * 4, 8);
+    if (!wait_queue(true, NULL)) {
+        if (!s_broken) stuck("the top screen's buffers", "given back");
+        return;
+    }
+    // Read back, as differ() reads: said the first time, and after only
+    // when a word is not what was kept.
+    GSPGPU_InvalidateDataCache(s_offColour, OFF_WORDS * 4);
+    GSPGPU_InvalidateDataCache(s_offDepth, OFF_WORDS * 4);
+    for (i = 0; i < OFF_WORDS; i++) {
+        if (s_offColour[i] != s_kept[i]) colour++;
+        if (s_offDepth[i] != s_kept[OFF_WORDS + i]) depth++;
+    }
+    if (!checked || colour || depth)
+        s_log("gpu time: the top screen's buffers given back by the GPU: "
+              "%u colour and %u depth words of %u differ", colour, depth,
+              (unsigned)OFF_WORDS);
+    checked = true;
 }
 
 static bool borrow_top(void)
@@ -336,7 +360,7 @@ static bool borrow_top(void)
     if (s_offDepth && !s_borrowed) vramFree(s_offDepth);
     s_offColour = s_offDepth = NULL;
     if (!s_topColour || !s_topDepth) return false;
-    if (!s_kept) s_kept = (u32 *)malloc(OFF_WORDS * 8);
+    if (!s_kept) s_kept = (u32 *)linearAlloc(OFF_WORDS * 8);
     if (!s_kept) return false;
     s_offColour = s_topColour;
     s_offDepth  = s_topDepth;

@@ -26954,3 +26954,29 @@ build fires there, as retail does.
 TASKS 47 stays open for the 3DS: the user's next race there with the
 helicopter, and what the artifact looks like if it is still there.
 `docs/formats/munitions.md` has the ForceChopper change.
+
+## Session 128, continued -- the timing run's crash on the 3DS
+
+The user's first timing run on the 3DS (Coastal Parklands, with
+`sdmc:/nfshp2_gputiming.txt` and "DebugLog 1", build 03ffcaf) stopped at
+the 3-2-1 countdown with an ARM11 crash. The Luma dump: a data abort,
+DFSR 0x80d (a write, a permission fault), FAR 0x1f000008, pc in
+`memcpy` with r0 = 0x1f000000 and r2 = 384,000 (one 400x240 RGBA8
+buffer), called from `give_back` in hangwatch.c.
+
+Track 11's textures leave no 768 KB of VRAM, so the timing replays
+borrow the top screen's buffers and put what they held back after.
+The CPU may read VRAM, which the earlier runs did, but not write it, and
+`give_back` put it back with `memcpy`. Azahar lets the write through.
+
+Now the kept copy is in the linear heap and the GPU puts it back
+(`GX_TextureCopy`, as texpack.c fills a VRAM texture). `give_back`
+reads the buffers back and logs how many words differ, the first time
+and then only when some do. On Azahar (AC power, 100% speed), track 11
+with three AI and two cops, gas only: the replays borrowed the buffers,
+"0 colour and 0 depth words of 96000 differ", and two timing frames ran
+with all their replays. `docs/formats/draw-cuts.md` has it ("The timing
+frame in a race").
+
+Also: track 44 is Fall Winds at Dawn, not Alpine Trail (GLOBALB's
+TrackInfo table); TASKS 47 says so now (5db02b3).
