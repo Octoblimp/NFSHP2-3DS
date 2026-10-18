@@ -27091,3 +27091,33 @@ Left on the third profile: `bTickerFromSystemTick` (4.6%, more than its
 multiplies explain), `vt_slot` and `scenery_classify_aabb` (2.9% each),
 `memset`, and threadguard's `scan` (1.7%, a diagnostic: the user's
 call). Then the device's numbers.
+
+## Session 130 -- the scenery's boxes (TASKS 46)
+
+A fourth profile of Alpine Trail's start (953 samples) put
+`scenery_classify_aabb` first among the game's own functions, at 5.0%:
+2.6 from `scenery_draw_a_scenery`, 2.4 from `scenery_tree_cull`.
+
+- **An early answer** (`scenerycull.c`). The box test keeps the OR and
+  the AND of its corners' clip flags as it builds them. Once some corner
+  is out and no plane has every corner so far out, the box is across
+  and the rest are not built. Each corner is still the listing's sum.
+- **The box last.** `scenery_draw_a_scenery` now tests the exclude
+  flags, the size on the screen and the LOD before the box. They only
+  read and return, so a piece that fails one is not drawn whatever its
+  box.
+- **`tools/scenerycull_check.py`** against retail: none of 46,687 lines
+  differ. Its box-test mutations are rewritten for the new code; 149 of
+  150 are caught, and `facade-z` is equivalent as before.
+
+On Azahar, seconds 2 to 5 of the start straight: the cull 2.6 ms from
+3.05, the draw 32.2 from 32.4. The cull is 2.1 from 2.5 over the whole
+race, but the two runs' races went different ways after second 6, so
+their later seconds do not compare. The race-start shot is the same to
+the pixel (`docs/formats/draw-cuts.md`, "The scenery's boxes").
+
+Left on the fourth profile: `vt_slot` (2.7%, already bucketed: the call
+count), `memset` and `physicscar_iterate_forces` (2.5% each),
+`bTickerFromSystemTick` (2.5%, Azahar's charge for the SVC before it),
+threadguard's `scan` (2.5%, the user's call). Then the race phase after
+the finish, and the device's numbers.

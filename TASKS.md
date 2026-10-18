@@ -3215,6 +3215,15 @@ phases.
             2 to 8: scenery 1.1 ms from 2.9, cars 5.9 from 8.6, the draw
             31.0 from 36.6. Over the whole race, 6 seconds under 28 FPS
             from 13. The picture is the same to the pixel.
+          - The scenery's boxes (Session 130): a fourth profile put
+            `scenery_classify_aabb` first among the game's functions
+            (5.0%). It now answers "across" as soon as the corners so
+            far say so, and `scenery_draw_a_scenery` tests a piece's
+            box only once it would be drawn. `tools/scenerycull_check.py`
+            holds it to retail (none of 46,687 lines differ, 149 of 150
+            mutations caught, 1 equivalent as before). On Azahar's start
+            straight the cull takes 2.6 ms from 3.05 and the draw 32.2
+            from 32.4; the picture is the same to the pixel.
           - Found in the device log: after the finish, in the post-race
             and the instant replay (rc 7 and 4), the race phase takes
             13.5 ms a frame on average and up to 34, so 13 of those 40

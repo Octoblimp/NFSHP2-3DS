@@ -916,6 +916,57 @@ The sun's change shows nothing in the envmap stage on Azahar, where
 `floorf` is cheap. On the 3DS it is a libm call, and is not measured
 yet.
 
+### The scenery's boxes
+
+A fourth profile (953 samples at 5 a second, its ELF kept) put
+`scenery_classify_aabb` first among the game's own functions, at 5.0%:
+2.6 called from `scenery_draw_a_scenery` and 2.4 from
+`scenery_tree_cull`. `scenery_draw_a_scenery` itself was another 2.6%.
+Each view's cull runs it, the envmap's active faces included.
+
+- **An early answer.** The box test builds its eight corners in clip
+  space and gives 2 when every corner is inside, 0 when one plane has
+  every corner outside it, and 1 otherwise. It now keeps the OR and the
+  AND of the corners' flags as it goes. Once some corner is outside a
+  plane and no plane has every corner so far outside it, the box is
+  across: more corners can only add to the OR and take from the AND, so
+  the answer is 1 and the rest are not built. Each corner is still the
+  listing's sum (`c2` is `c1 + ey`, the same adds as `(c0 + ex) + ey`).
+  Boxes inside or outside still take all eight.
+- **The box last.** `scenery_draw_a_scenery` classified a piece's box
+  before its other tests: the exclude flags, its size on the screen and
+  the LOD with a model for that size. Those only read and return, so a
+  piece that fails one is not drawn whatever its box. The box now waits
+  until the piece would be drawn.
+
+**Why nothing changes.** `tools/scenerycull_check.py` holds the port to
+the retail ELF run in `mipsemu.py`, `ClassifyAABB` (0x0010b940) on inside,
+across and outside boxes, NaN, infinity, -0 and random matrices among
+them: 9 scenarios, 46,687 lines, none differ. Its 10 box-test mutations
+were rewritten for the new code (the AND and the OR, the first corner,
+a top corner left out, a 2 from the bottom face alone, and others), and
+all 150 of its mutations are caught but `facade-z`, equivalent as
+before. The race-start shot matches the baseline's to the pixel; only
+Azahar's title and status bars differ.
+
+**On Azahar**, the same race. Seconds 2 to 5, in the same place on the
+start straight in both runs, in ms:
+
+| | after the textures and the sun | and these |
+|---|---|---|
+| cull | 3.05 | 2.58 |
+| models | 12.5 | 12.5 |
+| the draw | 32.4 | 32.2 |
+| citro3d's CPU | 32.0 | 31.8 |
+| FPS | 20.0 | 20.0 |
+
+The cull is about 0.5 ms lower in each of those seconds, and 2.1 ms
+from 2.5 over the whole race. After second 6 the two races went
+different ways: at 26 seconds the baseline's car was 4th and this one's
+1st, in another part of the track. From there the draw follows what the
+camera saw (seconds 42 and 43: the models 11.2 ms here, 6.8 there), so
+the whole race's draw and slow seconds do not compare.
+
 ### What is left
 
 - **The device's numbers** for these builds on Alpine Trail's start
@@ -926,14 +977,16 @@ yet.
   ran at 20 FPS. Not looked at yet.
 - **The world step** (4.9 ms on the device before these cuts) and
   **the cars** (2.9).
-- **The third profile's next functions**, by their own time (its ELF
+- **The fourth profile's next functions**, by their own time (its ELF
   is kept beside its samples, as each profile's should be):
-  - `bTickerFromSystemTick` (4.6%), more than its few multiplies
-    explain;
-  - `vt_slot` (2.9%) and `scenery_classify_aabb` (2.9%: 1.9 under
-    `scenery_draw_a_scenery`, 1.0 under `scenery_tree_cull`);
-  - `memset` (2.3%);
-  - `scan` (1.7%), `threadguard.c`'s: the tripwire over the audio
+  - `vt_slot` (2.7%), already through its buckets: what is left is how
+    often the physics and the AI call it;
+  - `memset` (2.5%) and `physicscar_iterate_forces` (2.5%);
+  - `bTickerFromSystemTick` (2.5%). Azahar's samples land where its
+    compiled blocks start, so the `svcGetSystemTick` before it is
+    counted here. The reads are retail's stopwatches in the physics,
+    kept so the checks count them as retail does;
+  - `scan` (2.5%), `threadguard.c`'s: the tripwire over the audio
     workers' stacks from the race-end crash hunt of 2026-10-11. It is a
     diagnostic, not the game's code, so whether it stays on is the
     user's call.

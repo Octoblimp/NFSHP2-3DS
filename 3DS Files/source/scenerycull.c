@@ -68,18 +68,33 @@ static void vscale(bVector4 *o, const bVector4 *row, float s)
     o->w = row->w * s;
 }
 
+// A corner's flags into the OR and the AND of those so far: whether the
+// box is across already. Some corner is outside a plane and no plane has
+// every corner so far outside it, and more corners can only add to the
+// first and take from the second.
+static int corner_across(const bVector4 *c, uint32_t *any, uint32_t *all)
+{
+    uint32_t f = clipw(c);
+
+    *any |= f;
+    *all &= f;
+    return *any != 0 && *all == 0;
+}
+
 // The corners are built from the transformed minimum and the three
 // transformed edges, in the listing's order: the four of the bottom face
-// (min, +dx, +dx+dy, +dy), then each of them +dz. The two faces are read
-// out of the clip register separately, and both must be clear for a 2.
+// (min, +dx, +dx+dy, +dy), then each of them +dz, each with the listing's
+// adds. A 2 needs every corner clear, and a 0 a plane every corner is
+// outside; a box found across is 1 with the corners left unbuilt (TASKS
+// 46), since the rest cannot change it.
 int32_t scenery_classify_aabb(const bVector4 *min, const bVector4 *max,
                               const bMatrix4 *clip)
 {
-    bVector4 c0, c1, c2, c3, ex, ey, ez;
+    bVector4 c0, c1, c2, c3, ex, ey, ez, top;
     float dx = max->x - min->x;
     float dy = max->y - min->y;
     float dz = max->z - min->z;
-    uint32_t lo, hi, all;
+    uint32_t any, all;
 
     c0.x = ((clip->v0.x * min->x + clip->v1.x * min->y)
             + clip->v2.x * min->z) + clip->v3.x;
@@ -93,24 +108,32 @@ int32_t scenery_classify_aabb(const bVector4 *min, const bVector4 *max,
     vscale(&ey, &clip->v1, dy);
     vscale(&ez, &clip->v2, dz);
 
+    any = all = clipw(&c0);     // one corner is never across
     vadd(&c1, &c0, &ex);
-    vadd(&c2, &c0, &ex);
-    vadd(&c2, &c2, &ey);
+    if (corner_across(&c1, &any, &all))
+        return 1;
+    vadd(&c2, &c1, &ey);        // (c0 + ex) + ey
+    if (corner_across(&c2, &any, &all))
+        return 1;
     vadd(&c3, &c0, &ey);
-    lo = (clipw(&c0) << 18) | (clipw(&c1) << 12) | (clipw(&c2) << 6)
-         | clipw(&c3);
+    if (corner_across(&c3, &any, &all))
+        return 1;
 
-    vadd(&c0, &c0, &ez);
-    vadd(&c1, &c1, &ez);
-    vadd(&c2, &c2, &ez);
-    vadd(&c3, &c3, &ez);
-    hi = (clipw(&c0) << 18) | (clipw(&c1) << 12) | (clipw(&c2) << 6)
-         | clipw(&c3);
+    vadd(&top, &c0, &ez);
+    if (corner_across(&top, &any, &all))
+        return 1;
+    vadd(&top, &c1, &ez);
+    if (corner_across(&top, &any, &all))
+        return 1;
+    vadd(&top, &c2, &ez);
+    if (corner_across(&top, &any, &all))
+        return 1;
+    vadd(&top, &c3, &ez);
+    if (corner_across(&top, &any, &all))
+        return 1;
 
-    if (lo == 0 && hi == 0)
+    if (any == 0)
         return 2;
-    all = lo & (lo >> 6) & (lo >> 12) & (lo >> 18)
-          & hi & (hi >> 6) & (hi >> 12) & (hi >> 18) & 0x3f;
     return all == 0;
 }
 
@@ -172,12 +195,10 @@ void scenery_draw_a_scenery(ScenerySectionHeader *h, int32_t index,
     float dx, dy, dz, r, dot;
     int32_t size, k, lod;
 
-    if (cls == 1) {
-        cls = classify_box(&s->BBox, ci);
-        if (cls == 0)
-            return;
-    }
-
+    // The listing classifies the box first. Every test up to the matrix
+    // only reads and returns, so the box waits until the piece would be
+    // drawn (TASKS 46): one excluded, too small or with no model for its
+    // size is not drawn whatever the box.
     info = &h->pSceneryInfo[s->SceneryInfoNumber];
     if ((int32_t)s->ExcludeFlags & ci->ExcludeFlags & 0xff)
         return;
@@ -218,6 +239,12 @@ void scenery_draw_a_scenery(ScenerySectionHeader *h, int32_t index,
     }
     if (model == NULL)
         return;
+
+    if (cls == 1) {
+        cls = classify_box(&s->BBox, ci);
+        if (cls == 0)
+            return;
+    }
 
     if (s->ExcludeFlags & SCENERY_DRAW_IN_PLACE) {
         add_draw_info(ci, model, cls, NULL);
