@@ -1263,6 +1263,22 @@ static void scenario_vtable(void)
     m = dispatch_mark(0x00111110u, 8, &d);
     printf("  X+8 beside Y -> %d delta %d\n", m, d);
 
+    // Two addresses vt_bucket puts in the last bucket: the second goes on
+    // round to the first, and each is still found as itself.
+    vt_install(0x00300730u, a, 3);
+    vt_install(0x00300bb0u, c, 2);
+    m = dispatch_mark(0x00300730u, 16, &d);
+    printf("  Z+16 -> %d delta %d\n", m, d);
+    m = dispatch_mark(0x00300bb0u, 8, &d);
+    printf("  W+8 -> %d delta %d\n", m, d);
+
+    // After a reset an address installed again is a new table, found
+    // through its bucket like any other.
+    vt_reset();
+    vt_install(0x00111110u, c, 2);
+    m = dispatch_mark(0x00111110u, 8, &d);
+    printf("  X+8 after a reset -> %d delta %d\n", m, d);
+
     // vt_this is `obj + delta` in bytes, whatever obj's type.
     {
         VtEntry e;

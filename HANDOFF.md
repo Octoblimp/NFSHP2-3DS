@@ -27037,3 +27037,28 @@ picture. The cluster change shows nothing on Azahar; on the 3DS it is
 unmeasured. Next: the device's numbers, then the world step. Also
 found: the post-race and instant replay's race phase takes 13.5 ms a
 frame on the 3DS (up to 34).
+
+## Session 128, continued -- the ticker and the vtables (TASKS 46)
+
+A second profile (888 samples at 5 a second) put `vt_slot` at 6.4% of
+the samples by its own time, and `bGetTicker`'s 64-bit divisions at
+5.4%.
+
+- **`vt_slot`** looks the vtable up in 256 open-addressed buckets
+  instead of searching the list (`vtable.c`), with the same refusals.
+  `car_check.py`'s `[vtable]` scenario now has two addresses in one
+  bucket and an install after a reset; 14 of 14 vtable mutations are
+  caught.
+- **`bGetTicker`**'s divisions by 268,111,856 are multiplies by the
+  reciprocal plus one correction (`bticker.c`).
+  `bTickerFromSystemTick` is on every build so that the new
+  `tools/bticker_check.py` can hold it to the old division: 106,027,970
+  ticks, none differ, 6 of 6 mutations caught.
+
+On Azahar the world step is 2.8 ms from 3.4, with the same picture.
+
+**Keep each profile's ELF beside its samples.** A rebuild moves the
+addresses, and this profile's `scan` (2.3%) can no longer be told apart.
+
+Next: `scenery_classify_aabb`, `trackview_read_depth`'s `floorf`, and
+the device's numbers.

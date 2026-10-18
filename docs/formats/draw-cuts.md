@@ -795,12 +795,72 @@ Azahar beyond the noise, for two reasons:
 
 What it saves on the 3DS is not measured yet.
 
+### The ticker and the vtables
+
+A second profile of the same start, after those cuts, took 888 samples
+at 5 a second. Two of the world step's helpers came next, by their own
+time:
+
+| function | samples |
+|---|---|
+| `vt_slot` | 6.4% |
+| `__udivmoddi4` and `__aeabi_uldivmod`, called by `bGetTicker` | 5.4% |
+
+- **`vt_slot`** (`vtable.c`) finds a port entry from a vtable's image
+  address. It searched the sixty-odd tables from the front, and the
+  physics and the AI dispatch through it many times a car a frame. It
+  now looks the address up in 256 open-addressed buckets. Its refusals
+  are the same: a missing table, a misaligned or out-of-range slot, or
+  an empty entry still abort with the same message.
+- **`bGetTicker`** (`bticker.c`) scales the ARM11's tick to the EE's
+  294.912 MHz with two 64-bit divisions by 268,111,856. The ARM11 has
+  no divide instruction, and libgcc's 64-bit one is a loop. The
+  physics' stopwatches read the ticker several times a car a step.
+  Each division is now a multiply by the reciprocal, rounded down,
+  then one correction step (`div_3ds_hz`). The reciprocal's error times
+  a tick is under one, so the multiply comes out at most one short.
+
+**Why nothing changes.**
+
+- **The ticks**: `tools/bticker_check.py` runs `bTickerFromSystemTick`
+  beside the old division over 106,027,970 ticks: random ones of every
+  size, a year of uptime, each second's edges, the top of the range,
+  and each step of the remainder. None differ. It catches its 6
+  mutations.
+- **The vtables**: `car_check.py` gives the same transcript, its eight
+  refusals included. Its `[vtable]` scenario now also has two addresses
+  that share the last bucket, and a table installed again after a
+  reset. It catches its 14 vtable mutations, four of them new.
+  `cardriver_check.py`, `aidriver_check.py` and `aisnap_check.py` give
+  the same output.
+- **The race-start shot** matches the baseline's to the pixel; only
+  Azahar's title and status bars differ.
+
+**On Azahar**, the same race, seconds 2 to 8, in ms:
+
+| | after the per-batch cuts | and these |
+|---|---|---|
+| the world step | 3.4 | 2.8 |
+| the draw | 37.0 | 36.6 |
+| citro3d's CPU | 36.6 | 36.2 |
+| FPS | 20.0 | 20.0 |
+
+The world step is 18% cheaper.
+
 ### What is left
 
-- **The device's numbers** for this build on Alpine Trail's start
+- **The device's numbers** for these builds on Alpine Trail's start
   straight, with "DebugLog 1" and no `nfshp2_gputiming.txt`.
 - **After the finish, the race phase.** In the device log's post-race
   and instant replay (rc 7 and 4) it took 13.5 ms a frame on average
   over 40 s, and up to 34 ms. 13 of the 40 seconds were over 15 ms and
   ran at 20 FPS. Not looked at yet.
-- **The world step** (4.9 ms on the device) and **the cars** (2.9).
+- **The world step** (4.9 ms on the device before these cuts) and
+  **the cars** (2.9).
+- **The second profile's next functions**:
+  - `scenery_classify_aabb` (2.6%);
+  - `scan` (2.3%): `threadguard.c`'s or `texsrc.c`'s, which the
+    report cannot tell apart, since a rebuild wrote over the profile's
+    ELF. Keep each profile's ELF beside its samples;
+  - `floorf` under `trackview_read_depth` (1.9%);
+  - `memset` (1.9%).

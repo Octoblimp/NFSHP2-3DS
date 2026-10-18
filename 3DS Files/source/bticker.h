@@ -56,4 +56,9 @@ uint32_t bGetFixTickerDifference(uint32_t from, uint32_t to);
 typedef uint32_t (*bTickerSourceFn)(void);
 void bSetTickerSource(bTickerSourceFn fn);
 
+// Not in the image. The 3DS's system tick `t` as bGetTicker gives it:
+// t * 294912000 / 268111856 rounded down, in 32 bits. On every build, so
+// the host can check it against the division.
+uint32_t bTickerFromSystemTick(uint64_t t);
+
 #endif

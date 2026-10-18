@@ -1136,6 +1136,9 @@ def model_slice2():
     emit("  X+16 after replace -> 2 delta 16")
     emit("  Y+8 -> 3 delta 0")
     emit("  X+8 beside Y -> 2 delta 0")
+    emit("  Z+16 -> 1 delta -8")
+    emit("  W+8 -> 3 delta 0")
+    emit("  X+8 after a reset -> 3 delta 0")
     emit("  this -8 -> 24")
     emit("  this +24 -> 56")
 
@@ -2398,8 +2401,8 @@ MUTATIONS = [
 
     # -- the registry -------------------------------------------------------
     ("vt-count-inclusive", VTC,
-     "k >= vt_tables[i].count",
-     "k > vt_tables[i].count"),
+     "k >= t->count",
+     "k > t->count"),
     ("vt-slot-zero-ok", VTC,
      "k <= 0 ||",
      "k < 0 ||"),
@@ -2407,7 +2410,7 @@ MUTATIONS = [
      "slot % 8 != 0 || ",
      ""),
     ("vt-null-fn-ok", VTC,
-     NL + "            || !vt_tables[i].entries[k].fn)",
+     " || !t->entries[k].fn)",
      ")"),
     ("vt-install-appends", VTC,
      "    for (i = 0; i < vt_count; i++) {" + NL +
@@ -2417,6 +2420,21 @@ MUTATIONS = [
     ("vt-reset-keeps", VTC,
      "    vt_count = 0;",
      "    (void)vt_count;"),
+    # The buckets: the scenario's Z and W share the last one.
+    ("vt-reset-keeps-buckets", VTC,
+     "    memset(vt_buckets, 0, sizeof vt_buckets);",
+     ""),
+    ("vt-install-overwrites", VTC,
+     "    vt_count++;" + NL +
+     "    for (h = vt_bucket(image); vt_buckets[h] != 0;",
+     "    vt_count++;" + NL +
+     "    for (h = vt_bucket(image); 0;"),
+    ("vt-bucket-holds-index", VTC,
+     "vt_buckets[h] = (uint8_t)vt_count;",
+     "vt_buckets[h] = (uint8_t)(vt_count - 1);"),
+    ("vt-probe-stops", VTC,
+     "            continue;",
+     "            break;"),
     ("vt-full-early", VTC,
      "    if (vt_count == VT_MAX) {",
      "    if (vt_count == VT_MAX - 1) {"),

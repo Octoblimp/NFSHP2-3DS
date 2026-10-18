@@ -3195,6 +3195,14 @@ phases.
             from 39.8; the picture is the same to the pixel
             (`docs/formats/draw-cuts.md`). Still to do: the device's
             numbers for it, and the world step.
+          - The ticker and the vtables (Session 128): a second profile
+            put `vt_slot`'s search from the front next (6.4%), then
+            `bGetTicker`'s two 64-bit divisions (5.4%; the ARM11 has no
+            divide). `vt_slot` now looks the address up in buckets. The
+            divisions are multiplies by the reciprocal with one
+            correction, the same ticks on 106 million host checks
+            (`tools/bticker_check.py`). On Azahar the world step takes
+            2.8 ms from 3.4; the picture is the same to the pixel.
           - Found in the device log: after the finish, in the post-race
             and the instant replay (rc 7 and 4), the race phase takes
             13.5 ms a frame on average and up to 34, so 13 of those 40
