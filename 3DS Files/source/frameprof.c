@@ -23,6 +23,7 @@ void frameprof_reset(FrameProf *fp)
 
 void frameprof_begin_draw(uint32_t sync, uint32_t gpu, uint32_t draw)
 {
+    CoreSampleStage = CS_STAGE_CULL;
     memset(&FrameProfDraw, 0, sizeof FrameProfDraw);
     FrameProfDraw.sync = sync;
     FrameProfDraw.gpu = gpu;

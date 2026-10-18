@@ -87,6 +87,7 @@
 #include <stdint.h>
 
 #include "bticker.h"
+#include "coresample.h"
 #include "mainloop.h"
 
 enum {
@@ -170,7 +171,11 @@ extern FrameProfTicks FrameProfDraw;
 // and clears it.
 extern uint32_t FrameProfReplayWait;
 
-#define FRAMEPROF_STAMP(stage) (FrameProfDraw.end[(stage)] = bGetTicker())
+// A stage's end is the next one's start, for the sampler too
+// (coresample.h): the bottom screen's ends in the submit.
+#define FRAMEPROF_STAMP(stage)                                            \
+    (CoreSampleStage = (uint8_t)(CS_STAGE_CULL + 1 + (stage)),            \
+     FrameProfDraw.end[(stage)] = bGetTicker())
 
 // A car part's ticks since `*since`, which moves on to now.
 #define FRAMEPROF_CAR_PART(part, since)                                   \

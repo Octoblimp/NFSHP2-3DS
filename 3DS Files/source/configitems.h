@@ -202,6 +202,12 @@ extern int32_t ConfigDemoReplays;           // 0
 // 10 ms on the game's core, were 1.7 to 2.5% of Azahar's race profiles.
 extern int32_t ConfigThreadGuard;           // 0
 
+// The port's own: "CoreSample 1" has a thread on the third core sample
+// where the draw is, and the log a line of the stages' and the models'
+// parts' shares each second after the frame's (coresample.h, TASKS 46).
+// Needs "DebugLog 1" for the log. Off by default (2026-10-18).
+extern int32_t ConfigCoreSample;            // 0
+
 typedef void (*ConfigItemsLogFn)(const char *line);
 
 // Applies `text` (NUL-terminated), each word as it is read; SkipFE goes

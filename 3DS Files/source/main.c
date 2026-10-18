@@ -153,6 +153,7 @@
 #include "capture.h"
 #include "hangwatch.h"
 #include "threadguard.h"
+#include "coresample.h"
 #include "heapcfg.h"
 #include "helisheet.h"
 #include "helpmenu.h"
@@ -7445,13 +7446,19 @@ int main(int argc, char** argv)
     if (ConfigThreadGuard)
         threadguard_enable();
     threadguard_note = guardNote;
+    // Where the draw's time goes, sampled from the third core, for
+    // "CoreSample 1" only (coresample.h).
+    if (ConfigCoreSample)
+        coresample_start(logLine);
     // exit() frees the heap, and the stacks of the threads that made it
     // with it, before it ends the process: a watcher that woke in between
     // pushed onto unmapped memory, Luma's data abort on closing from HOME
     // or powering off (crash_dump_00000002 and 3, 2026-10-12). atexit runs
-    // last first: the guard, the watchdog, then the log's writer above.
+    // last first: the sampler, the guard, the watchdog, then the log's
+    // writer above.
     atexit(hangwatch_stop);
     atexit(threadguard_stop);
+    atexit(coresample_stop);
 
     // bMalloc's, before its first block (bmem.h): the pool's top from the
     // linear heap, the large blocks' names for the heap's map, and a
@@ -9252,6 +9259,7 @@ int main(int argc, char** argv)
             // eDisplayFrame times into WaitBufferSwapTime. VifTime is the
             // GPU's last frame, on the same scale (frame-profiler.md).
             uint32_t syncTick = bGetTicker();
+            CoreSampleStage = CS_STAGE_WAITS;
             frameMark("C3D_FrameSync: the vertical blank");
             if (g_track.attached && C3D_FrameCounter(0) == lastSync)
                 C3D_FrameSync();
@@ -9397,6 +9405,7 @@ int main(int argc, char** argv)
             hangwatch_gpu_sends_end();
             C3D_FrameEnd(0);
             hangwatch_gpu_frame_end();
+            CoreSampleStage = CS_STAGE_OTHER;
             // eDisplayFrame's end (0x00113fd0), its packets sent: FrameEffects,
             // car select's nebula, a sixtieth of a second on (gp-32668) each
             // frame drawn, the race's as well.
@@ -9428,8 +9437,11 @@ int main(int argc, char** argv)
                     frameprof_add(&prof, &MainLoopTiming,
                                   C3D_GetProcessingTime(),
                                   C3D_GetDrawingTime());
-                    if (frameprof_line(&prof, line, sizeof line))
+                    if (frameprof_line(&prof, line, sizeof line)) {
                         logLine("%s", line);
+                        if (coresample_line(line, sizeof line))
+                            logLine("%s", line);
+                    }
                     jbLineTick = MainLoopTiming.LimitFrameRate;
                     jbLineDecode = decode;
                     jbLineRead = read;

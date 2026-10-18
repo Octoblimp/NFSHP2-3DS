@@ -27225,3 +27225,34 @@ Then, read in the code:
   10 ms on the game's core. Off, `threadguard_watch` watches nothing, so
   its thread never starts, `threadguard_check` returns at once and the
   audio workers wait 10 ms on their own, as before the guard.
+- **A parallel scenery cull** (the player's and mirror's views on the
+  third core while the main thread culls and draws the envmap) was
+  weighed and set aside. The device's "cull" stage (2.6 ms where it is
+  slow) is the sun's read-back and the views' matrices as well as the
+  cull, and the cull shares the frame memory and the draw-info table
+  with the envmap's views: matching the one-thread cull exactly where
+  either runs out would need the envmap drawn after the join, which
+  leaves only the culls themselves to overlap.
+- **The models stage** is the largest: 10.7 ms for 624 models and
+  1,394 batches a frame in the slow seconds, 17 us a model, and 2 to 5
+  ms in the seconds at 30 FPS. Azahar's is as long, but its GPU runs
+  inside the stage's send, so its profiles cannot say where the device's
+  time goes. Read in the code, a model's CPU work (the solid's lookup,
+  its table, two matrix products, the cull planes, six uniforms, and
+  per batch the flags, the pass, the cluster tests and the draw) comes
+  to well under 17 us, so the device spends it somewhere reading does
+  not show.
+- **The sampler**, so the device can say: `coresample.c`, "CoreSample 1"
+  (off by default). The game's thread stores a byte at each draw stage's
+  start and at each part of a model's draw (`render_model`,
+  `georender.c`, the sends); a thread on the third core counts the pairs
+  every 200 us, and with "DebugLog 1" each second's frame lines are
+  followed by `samples:` (each stage's share) and `samples, models:`
+  (each part's share of the models stage), and the same for the envmap,
+  scenery and cars stages. `frame-profiler.md`, "The sampler", has the
+  format. The build is clean; it has not run yet, on Azahar or the
+  device.
+
+Next: the device log of a race through the slow stretch with
+"CoreSample 1" and "DebugLog 1". Its parts' shares times the models
+stage's milliseconds say what a model costs and where; cut the largest.

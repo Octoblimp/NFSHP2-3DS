@@ -373,3 +373,41 @@ next device log's `sends:` line says: a slow second with the flush high
 and the kernel doing it would put the wait in the kernel's flush. Azahar
 does no cache work for the call (its `FlushProcessDataCache` returns
 success), so it cannot tell.
+
+## The sampler (TASKS 46, Session 130)
+
+The stages say how long the models take, not where in a model the time
+goes: 10.7 ms for 624 models and 1,394 batches a frame in the device's
+slow seconds (2026-10-18 log), 17 us a model. Azahar's numbers are no
+guide here. Its models stage is as long, 12.5 ms for 620, but its GPU
+runs inside the send that ends the stage, and its sampling profiles were
+of a start with few models. A system tick read is an SVC, so timing a
+model's parts would cost several a model.
+
+So `coresample.c` samples. The game's thread stores a byte where each
+part starts: `CoreSampleStage` at the waits, at `frameprof_begin_draw`,
+at each `FRAMEPROF_STAMP` (the next stage's start) and after
+`C3D_FrameEnd`; `CoreSamplePart` in `render_model` (the solid, the
+matrix, the batches, a lit batch's lighting), in `georender.c` (the
+bind, `set_model`, a batch's pass and combiner, its clusters, the draw)
+and in `hangwatch_gpu_send`. A part runs until the next one starts, and
+the draws set none again at their ends. A thread on the third core reads
+the two bytes every 200 us and counts each pair, so the game's core does
+nothing more than the stores.
+
+"CoreSample 1" in `nfshp2_config.txt` starts the thread (off by
+default), and with "DebugLog 1" each second's frame lines are followed
+by two more:
+
+    samples: 4870; stages other 12.1% waits 20.3% cull 7.0% ...
+    samples, models: none 3.1% solid 9.0% matrix 2.2% batches 8.0% ...
+
+- **stages:** each stage's share of the second's samples. "other" is
+  outside the draw: the main loop's phases and the draw's prep.
+- **samples, stage:** for the envmap, models, scenery and cars stages,
+  each part's share of that stage's samples: times the stage's
+  milliseconds, the part's. "none" is the stage's own code, the models'
+  loop over the cull's list among it.
+
+On an Old 3DS, or if the thread cannot be made, the log says "no third
+core, no samples" and there are no sample lines.

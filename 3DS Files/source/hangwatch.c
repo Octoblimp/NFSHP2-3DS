@@ -810,6 +810,7 @@ void hangwatch_gpu_send(void)
     uint32_t t0, t1, t2;
 
     if (!s_sendsOn || !C3Di_SplitFrame(&list, &words)) return;
+    CoreSamplePart = CS_PART_SEND;
     // The flush after the split, as time_stage has it: the split writes
     // the list's FINALIZE. All the heap, for the vertices written since.
     t0 = bGetTicker();
@@ -825,6 +826,7 @@ void hangwatch_gpu_send(void)
     FrameProfDraw.sendQueue += t2 - t1;
     if (t2 - t0 > FrameProfDraw.sendWorst)
         FrameProfDraw.sendWorst = t2 - t0;
+    CoreSamplePart = CS_PART_NONE;
 }
 
 void hangwatch_gpu_sends_end(void)

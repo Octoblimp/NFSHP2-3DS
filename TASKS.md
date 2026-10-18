@@ -3252,6 +3252,15 @@ phases.
             crash it was made for was fixed the day it was found (399d67e).
             Off, nothing is watched and the audio workers wait 10 ms on
             their own, as before it.
+          - The sampler (Session 130, continued): "CoreSample 1" has a
+            thread on the third core count where the draw is every 200 us,
+            from bytes the game's thread stores at each stage's and each
+            model part's start (`coresample.h`). The device's models stage
+            is 10.7 ms for 624 models where it is slow, and nothing yet
+            says where in a model that goes.
+        - [ ] A device log with "CoreSample 1" and "DebugLog 1", through
+          the slow stretch: the `samples, models:` lines say which parts
+          of a model to cut next.
         - [ ] The user's word on the envmap a face a frame.
 
 47. [ ] **A brief artifact on the bridge before the finish line.**

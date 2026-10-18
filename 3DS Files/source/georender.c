@@ -11,6 +11,7 @@
 #include "capture.h"
 #include "c3dwrap.h"
 #include "configitems.h"
+#include "coresample.h"
 #include "geofold_shbin.h"
 #include "geosolid_shbin.h"
 #include "geocull.h"
@@ -399,6 +400,7 @@ static void bind_buffer(const void* vbo)
 // register.
 static void bind_mesh(const GeoMesh* mesh)
 {
+    CoreSamplePart = CS_PART_BIND;
     if (!s_run.bound
         || !same_bits(&s_run.projection, &s_projection, sizeof s_projection)) {
         float lightClr[4], ambientClr[4];
@@ -446,6 +448,7 @@ static void alpha_test(bool on, int ref)
 static void issue(GPU_Primitive_t prim, int first, int count,
                   const uint16_t* ibo)
 {
+    CoreSamplePart = CS_PART_DRAW;
     if (ibo != NULL) {
         C3D_DrawElements(prim, count, C3D_UNSIGNED_SHORT, ibo + first);
     } else {
@@ -589,6 +592,7 @@ static bool draw_shown(const GeoMesh* mesh, const GeoBatch* b,
     unsigned          across;
     int               n, i;
 
+    CoreSamplePart = CS_PART_CULL;
     if (mesh->clusters == NULL || !ConfigClusterCull) {
         draw_prims(GPU_TRIANGLES, b->first, b->count, mesh->ibo, tex, what);
         return true;
@@ -777,6 +781,7 @@ static void set_model(int mvp, int fogModel, int light,
     float p[4][4], mv[4][4], l[3] = { 0.0f, 0.0f, 0.0f };
     int   i;
 
+    CoreSamplePart = CS_PART_MODEL;
     for (i = 0; i < 4; i++) {
         p[i][0]  = projection->r[i].x;
         p[i][1]  = projection->r[i].y;
@@ -982,6 +987,7 @@ void georender_draw_mask(const GeoMesh* mesh, const GeoTexture* textures,
         if (!(mask & ((uint64_t)1 << i)) || b->count <= 0) {
             continue;
         }
+        CoreSamplePart = CS_PART_PASS;
         gt   = batch_texture(b, textures, numTextures);
         pass = gt ? gt->pass : opaque;
         if (!set || !same_pass(pass, last)) {
@@ -993,6 +999,7 @@ void georender_draw_mask(const GeoMesh* mesh, const GeoTexture* textures,
     }
     s_run.passSet = s_run.on && set;
     s_run.pass    = last;
+    CoreSamplePart = CS_PART_NONE;
 }
 
 void georender_set_zwrite(bool on)
@@ -1017,6 +1024,7 @@ static void bind_lit(const GeoMesh* mesh, const GeoLighting* L)
     float fog[4];
     int   i;
 
+    CoreSamplePart = CS_PART_BIND;
     s_run.bound = false;
     s_run.mvSet = false;
     s_run.uvSet = false;
@@ -1033,6 +1041,7 @@ static void bind_lit(const GeoMesh* mesh, const GeoLighting* L)
     fog_row(&s_projection, fog);
     set_model(s_lMvp, s_lFogModel, -1, &s_projection, &s_modelView, fog,
               s_lightVec);
+    CoreSamplePart = CS_PART_LIT;
     for (i = 0; i < 3; i++) {
         c3d_unif_vec(s_lLightDir + i, L->lightDir[i]);
         c3d_unif_vec(s_lDifClr + i,   L->difClr[i]);
@@ -1073,6 +1082,7 @@ void georender_draw_lit(const GeoMesh* mesh, const GeoTexture* textures,
     // and the combiner go only when they differ from the last batch's.
     if (L->lit) {
         bind_lit(mesh, L);
+        CoreSamplePart = CS_PART_PASS;
         pass = gt ? gt->pass : opaque;
         if (!s_run.passSet || !same_pass(pass, s_run.pass)) {
             set_pass(pass);
@@ -1089,6 +1099,7 @@ void georender_draw_lit(const GeoMesh* mesh, const GeoTexture* textures,
     sphere = s_envOverride ? s_envOverride
            : georender_envmap_ready() ? &s_sphereTex : NULL;
     if (!L->env || !sphere) {
+        CoreSamplePart = CS_PART_NONE;
         return;
     }
 
@@ -1099,6 +1110,7 @@ void georender_draw_lit(const GeoMesh* mesh, const GeoTexture* textures,
     if (!L->lit) {
         bind_lit(mesh, L);
     }
+    CoreSamplePart = CS_PART_LIT;
     c3d_unif_bool(s_lEnvPass,  true);
     c3d_unif_bool(s_lGlossEnv, L->gloss);
     C3D_TexBind(0, (C3D_Tex*)sphere);
@@ -1131,6 +1143,7 @@ void georender_draw_lit(const GeoMesh* mesh, const GeoTexture* textures,
     if (drawn) {
         s_run.bufSet = s_run.on;
     }
+    CoreSamplePart = CS_PART_NONE;
 }
 
 // --------------------------------------------------- the environment map

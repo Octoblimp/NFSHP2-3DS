@@ -29,6 +29,7 @@
 #include "frameprof.h"
 #include "gamedata.h"
 #include "capture.h"
+#include "coresample.h"
 #include "hangwatch.h"
 #include "scenery.h"
 #include "sky.h"
@@ -1421,6 +1422,7 @@ static void draw_lit_batch(TrackView* v, int solid, int batch,
     uint32_t    words = gpuCmdBufOffset;
     GeoLighting L;
 
+    CoreSamplePart = CS_PART_LIT;
     lighting_for(&L, (const eLightContext*)light, &v->solid[solid],
                  r->mesh.batch[batch].lightMaterial, f);
     georender_draw_lit(&r->mesh, r->slot,
@@ -1500,19 +1502,26 @@ static void render_model(eModel* m, bMatrix4* matrix, void* light,
     if (!v || m->Solid == NULL) {
         return;
     }
+    // Where the model's time goes, for the sampler (coresample.h): each
+    // part's start, and none once the model is done.
+    CoreSamplePart = CS_PART_SOLID;
     words = gpuCmdBufOffset;
     i = model_solid(v, m);
     if (i < 0) {
+        CoreSamplePart = CS_PART_NONE;
         return;
     }
     r = &v->info[i];
     if (gpuCmdBufSize - gpuCmdBufOffset < CMDBUF_GUARD_WORDS) {
         v->cmdSkipped++;
+        CoreSamplePart = CS_PART_NONE;
         return;
     }
+    CoreSamplePart = CS_PART_MATRIX;
     eMulMatrix(&localView, matrix, s_worldView);
     to_c3d(&localView, &mv);
     numTextures = r->slot ? v->solid[i].numTextures : 0;
+    CoreSamplePart = CS_PART_BATCHES;
     for (b = 0; b < r->mesh.numBatches && b < GEO_MAX_BATCHES; b++) {
         const GeoBatch* gb = &r->mesh.batch[b];
         int             k  = gb->texture;
@@ -1579,6 +1588,7 @@ static void render_model(eModel* m, bMatrix4* matrix, void* light,
                      matrix == &eMathIdentityMatrix ? "*" : "");
         }
     }
+    CoreSamplePart = CS_PART_NONE;
 }
 
 // ---------------------------------------------------------------- preparing
