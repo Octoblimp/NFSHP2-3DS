@@ -4197,7 +4197,7 @@ phases.
             sections failed. A career race ran to its end and back to
             the tree. The 190 checkers that link the changed files pass
             again.
-        - [ ] 72g. The replay states (`RCSTATE_INSTANT_REPLAY`,
+        - [x] 72g. The replay states (`RCSTATE_INSTANT_REPLAY`,
           `RCSTATE_AUTO_REPLAY`) and `ReplayScreen` (its timeline, camera
           modes and buttons). This brings the pause menu's View Replay
           and the post-race's highlights.

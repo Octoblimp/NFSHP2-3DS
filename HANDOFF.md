@@ -26778,12 +26778,41 @@ back at 202 s. One of the thirteen race shots was the demo camera
 looking up from inside a car's cabin; nothing here touched the
 cameras.
 
+### The launch checklist
+
+The checklist the user asked for once TASKS 72 was done is published:
+https://claude.ai/artifact/FSkKKgsuBHgx5Tgu79Bd1p (the page is private to the user). Its verdict
+is "not yet":
+
+- All six blockers of 2026-10-16 are closed (b56e268, 69, 71, 48, 52,
+  and 59's stereo 3D taken out), and so are 70, 72 but for 72h-2c,
+  and 74.
+- Fix before launch: 46 (30 FPS at track 11's fire and the desert's
+  end), 64 (the road's blink), 65 (the FPS dip), 47 (the bridge), 67
+  (Select Car's icons) and 60 (Car::TriggerEffect).
+- Retail passes queued: 73, 72h-2c, 75.
+- On a real 3DS: a full playthrough of the latest CIA (replays, attract
+  mode and the AI pass have only run on Azahar), track 31's corner for
+  64 and 65, track 44's bridge with and without ClusterCull, track 11
+  and the desert, Select Car's row, wireless with the switch off (62),
+  Audio Mode, and an Old 3DS's boot message if there is one.
+- Packaging: ship `3DS Files/NFSHP2-3DS.cia` (the root's copy is from
+  2026-10-15), decide the banner (make_banner.py's from the disc, or
+  the placeholder), a README for players (its Status still says Phase
+  2), the data steps from an empty folder, the version, a LICENSE, a
+  tag and a clean tree, the legal risk (the user's call), and a sweep
+  of TASKS.md's stale open boxes (4525's Jukebox screen is 71b's).
+- Can wait: 37f (with the checksum difference at frame 1809), 61, 50.
+
+TASKS 72g is ticked in TASKS.md; its slices were all done.
+
 ### Next
 
-1. The launch checklist, as an Artifact. TASKS 72 is done but for 72h-2c,
-   which waits on TASKS 73.
-2. TASKS 73, the car's retail pass. It now also lists
+1. TASKS 73, the car's retail pass. It now also lists
    gMaxDownShiftOver (retail's 1.2, the port's 1.1) and the other
    demo-derived car functions retail changed.
-3. 72h-2c, the drift.
-4. TASKS 75, the non-AI demo-cited functions retail changed.
+2. 72h-2c, the drift.
+3. TASKS 75, the non-AI demo-cited functions retail changed.
+4. Republish the launch checklist (the scratchpad's
+   launch_checklist.html, or the URL from another session) as items
+   close.

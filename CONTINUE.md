@@ -3676,9 +3676,11 @@ and so replaced every boot.
      (`docs/formats/replay.md`, 72h-2b). TASKS 74 (Session 127), the
      AI's retail pass, is done: MellowMover and
      CarState::CalculateWheelMatrices are retail's, and Be A Cop's
-     reset direction is bound (TASKS.md, 74). Next: the launch
-     checklist, as an Artifact (TASKS 72 is done but for 72h-2c, which
-     waits on TASKS 73), then TASKS 73, then 72h-2c.
+     reset direction is bound (TASKS.md, 74). The launch checklist is
+     published (https://claude.ai/artifact/FSkKKgsuBHgx5Tgu79Bd1p,
+     HANDOFF.md Session 127): not yet, with 46, 64, 65, 47, 67 and 60
+     open and tests due on the user's 3DS. Next: TASKS 73, then 72h-2c,
+     then TASKS 75.
 
    **7b, DriveCameraMover::Update, is done** (HANDOFF.md, Session 31,
    continued: the drive camera's Update). `docs/formats/camera.md`,
