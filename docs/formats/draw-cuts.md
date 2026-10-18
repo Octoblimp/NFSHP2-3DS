@@ -681,3 +681,126 @@ VRAM, and a race's textures leave less: track 11's leave 512 KB.
   It also shows whether early depth is exact on the PICA, and what it
   saves.
 - **The envmap a face a frame**, the user's call.
+
+## TASKS 46: the draw's per-batch work (Session 128, continued)
+
+The first device run (6dd7060) found Alpine Trail bound by the CPU, with
+the models the biggest share of its draw. A sampling profile of the same
+race's start on Azahar showed where a batch's CPU time goes:
+
+- `gdbprof.py` (scratchpad) stops Azahar through its GDB stub, reads
+  the registers and 1 KB of the stack, and lets it go on.
+- `gdbprof_report.py` maps the samples to the ELF's functions.
+- At 100 stops a second Azahar stutters badly; the user saw it
+  ("HOLY ITS DYING"). Next time: 5 a second, and say so first.
+
+Of 1,552 samples, 12% were Azahar's own GPU work
+(`svcSendSyncRequest`) and 6% waits. The next ten, by their own time:
+
+| function | samples |
+|---|---|
+| `geocull_box` | 5.8% |
+| `memcpy` | 5.3% |
+| `__wrap_C3D_UpdateUniforms` | 4.1% |
+| `__wrap_GPUCMD_Add` | 4.0% |
+| `C3D_UpdateUniforms` | 3.2% |
+| `set_model` | 2.9% |
+| `c3d_unif_vec` | 2.0% |
+| `memcmp` | 1.9% |
+| `memset` | 1.7% |
+| `GPUCMD_Add` | 1.6% |
+
+Most of it is a model's matrices. Each model sends its mvp, fog and
+light rows as float uniforms. They go through citro3d's walk of the 96
+dirty bytes, one at a time, and libctru's `GPUCMD_Add`. The 64-byte
+matrices are also compared and copied through newlib's `memcmp` and
+`memcpy` calls.
+
+### The cuts
+
+- **The float uniforms, sent by the port** (`c3dwrap.c`,
+  `send_floats`). citro3d 1.7.1's `C3D_UpdateUniforms`, disassembled,
+  does this for each run of dirty float registers:
+  - it writes the run's first register to `FLOATUNIFORM_CONFIG`, and
+    the run's words to `FLOATUNIFORM_DATA` as one `GPUCMD_Add`;
+  - it clears the run's dirty bytes;
+  - it marks the run "ever dirty", in a table of `uniforms.o`'s own,
+    so that `C3Di_DirtyUniforms` (after the HOME menu) sends it again.
+
+  `send_floats` scans the dirty bytes a word at a time and writes the
+  same words into the command buffer itself, the padding word too,
+  with no calls. `s_ever` is its own "ever dirty" table, which
+  `__wrap_C3Di_DirtyUniforms` adds after citro3d's. The shader's
+  constants, the integers and the bools are still citro3d's to send. So
+  is a run of more than 64 registers.
+- **The self-check.** The first 64 sends go both ways:
+  - `send_floats`'s words are kept;
+  - the buffer and the flags are put back, and citro3d's function
+    runs;
+  - the two are compared word for word.
+
+  One that differs leaves the floats to citro3d for good. The log says
+  `c3d: float uniforms sent here (64 sends matched citro3d's)`, or
+  `citro3d's (send N of M words differs ...)`.
+- **The draws' templates** are copied as two blocks the compiler moves
+  with `ldm` and `stm`. A copy over 64 bytes was a `memcpy` call.
+- **The matrices' compares** (`c3d_unif_set`, `bind_mesh`,
+  `set_model`): memcmp's equality, the same bits, as a word loop with
+  no call.
+- **The clusters** (`geocull.c`):
+  - each plane's far and near corner is found once, in
+    `geocull_planes`, not for each box;
+  - a batch's clusters are tested only against the planes the batch's
+    box is across (`geocull_box_in`).
+
+  A box inside another is wholly inside every plane the other is
+  wholly inside. The products and sums round monotonically, so a
+  cluster's near corner cannot come out below its batch's.
+
+**Why the picture is the same.**
+
+- The float words are citro3d's own, checked word for word in each run.
+- The compares are memcmp's equality.
+- The clusters' verdicts are the old ones:
+  - A host comparison with the old `geocull.c` (scratchpad
+    `cull46/same.c`, 200,000 random views): 927,451 boxes have the same
+    verdict, and 603,073 clusters tested against their batch's planes
+    alone match the test against all four.
+  - `tools/geocull_check.py` gives the same counts as before: of 5,524
+    clusters 1,383 out, 3,730 across and 411 in, with 24% of the
+    triangles left unsent. It catches its 10 mutations, two of them
+    new.
+- The race-start shots match the baseline's to the pixel; only
+  Azahar's status bar differs.
+
+**On Azahar**: Alpine Trail (track 42, 3 AI, 4 cops), gas only. The
+means of seconds 2 to 8 after the attach, in ms:
+
+| | before | the uniforms and copies | and the clusters |
+|---|---|---|---|
+| models | 14.4 | 12.5 | 12.6 |
+| mirror | 3.6 | 3.3 | 3.3 |
+| envmap | 2.4 | 2.3 | 2.2 |
+| the draw | 39.8 | 37.3 | 37.0 |
+| citro3d's CPU | 39.3 | 36.9 | 36.6 |
+| FPS | 19.8 | 20.0 | 20.0 |
+
+The models are 13% cheaper. The clusters' change shows nothing on
+Azahar beyond the noise, for two reasons:
+
+- Most tests are the batches' own, which still try all four planes.
+- Azahar's JIT does not charge for the VFP's flag transfers (`vmrs`).
+  The change takes those from 11 a box to 3, plus 2 for each plane a
+  cluster is tested against.
+
+What it saves on the 3DS is not measured yet.
+
+### What is left
+
+- **The device's numbers** for this build on Alpine Trail's start
+  straight, with "DebugLog 1" and no `nfshp2_gputiming.txt`.
+- **After the finish, the race phase.** In the device log's post-race
+  and instant replay (rc 7 and 4) it took 13.5 ms a frame on average
+  over 40 s, and up to 34 ms. 13 of the 40 seconds were over 15 ms and
+  ran at 20 FPS. Not looked at yet.
+- **The world step** (4.9 ms on the device) and **the cars** (2.9).

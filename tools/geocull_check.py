@@ -309,9 +309,12 @@ def check(exe, shbin, quiet=False):
 
 MUTATIONS = [
     ("no-margin", "#define GEOCULL_MARGIN 2e-4f", "#define GEOCULL_MARGIN 0.0f"),
-    ("far-is-near", "far  += p[k] * box->hi[k];", "far  += p[k] * box->lo[k];"),
+    ("far-is-near", "far  += p[k] * c[f[k]];", "far  += p[k] * c[n[k]];"),
+    ("far-corner-flipped", "out->farAt[i][j]  = (uint8_t)(up ? 3 + j : j);",
+     "out->farAt[i][j]  = (uint8_t)(up ? j : 3 + j);"),
     ("z-for-w", "out->pl[i][j]  = mvp[3][j]", "out->pl[i][j]  = mvp[2][j]"),
-    ("no-near-test", "res = GEOCULL_PART;", "res = GEOCULL_IN;"),
+    ("no-near-test", "part |= 1u << i;", "part |= 0;"),
+    ("across-wrong-plane", "part |= 1u << i;", "part |= 1u << (i ^ 1);"),
     ("cluster-skips-first", "int first = (c - 1) * GEO_CLUSTER_INDICES;",
      "int first = (c - 1) * GEO_CLUSTER_INDICES + 1;"),
     ("union-lo-only", "box_add(&out[0], out[c].hi);", ""),

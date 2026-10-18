@@ -1,6 +1,8 @@
 // The clusters' boxes and their test against the view (geocull.h).
 
 #include <math.h>
+#include <stdbool.h>
+#include <stddef.h>
 
 #include "geocull.h"
 
@@ -20,14 +22,27 @@ void geocull_planes(const float mvp[4][4], GeoCullPlanes* out)
             out->pl[i][j]  = mvp[3][j] + sign[i] * mvp[row[i]][j];
             out->mag[i][j] = fabsf(mvp[3][j]) + fabsf(mvp[row[i]][j]);
         }
+        // The corner furthest along the plane's normal, and the nearest.
+        for (j = 0; j < 3; j++) {
+            bool up = out->pl[i][j] >= 0.0f;
+
+            out->farAt[i][j]  = (uint8_t)(up ? 3 + j : j);
+            out->nearAt[i][j] = (uint8_t)(up ? j : 3 + j);
+        }
     }
 }
 
-int geocull_box(const GeoCullPlanes* planes, const GeoCluster* box)
+// A box's six floats, lo then hi, which farAt and nearAt index.
+_Static_assert(offsetof(GeoCluster, hi) == 3 * sizeof(float)
+               && sizeof(GeoCluster) == 6 * sizeof(float), "GeoCluster");
+
+int geocull_box_in(const GeoCullPlanes* planes, const GeoCluster* box,
+                   unsigned mask, unsigned* across)
 {
-    float a[3];
-    int   res = GEOCULL_IN;
-    int   i, k;
+    const float* c    = (const float*)box;
+    unsigned     part = 0;
+    float        a[3];
+    int          i, k;
 
     // The largest size of each coordinate in the box, for the margin.
     for (k = 0; k < 3; k++) {
@@ -37,21 +52,20 @@ int geocull_box(const GeoCullPlanes* planes, const GeoCluster* box)
         a[k] = lo > hi ? lo : hi;
     }
     for (i = 0; i < 4; i++) {
-        const float* p   = planes->pl[i];
-        const float* m   = planes->mag[i];
-        float        far = p[3];
-        float        near = p[3];
-        float        margin;
+        const float*   p    = planes->pl[i];
+        const float*   m    = planes->mag[i];
+        const uint8_t* f    = planes->farAt[i];
+        const uint8_t* n    = planes->nearAt[i];
+        float          far  = p[3];
+        float          near = p[3];
+        float          margin;
 
-        // The corner furthest along the plane's normal, and the nearest.
+        if (!(mask >> i & 1u)) {
+            continue;
+        }
         for (k = 0; k < 3; k++) {
-            if (p[k] >= 0.0f) {
-                far  += p[k] * box->hi[k];
-                near += p[k] * box->lo[k];
-            } else {
-                far  += p[k] * box->lo[k];
-                near += p[k] * box->hi[k];
-            }
+            far  += p[k] * c[f[k]];
+            near += p[k] * c[n[k]];
         }
         margin = GEOCULL_MARGIN * (m[0] * a[0] + m[1] * a[1] + m[2] * a[2]
                                    + m[3]);
@@ -59,10 +73,18 @@ int geocull_box(const GeoCullPlanes* planes, const GeoCluster* box)
             return GEOCULL_OUT;
         }
         if (!(near >= 0.0f)) {
-            res = GEOCULL_PART;
+            part |= 1u << i;
         }
     }
-    return res;
+    if (across != NULL) {
+        *across = part;
+    }
+    return part ? GEOCULL_PART : GEOCULL_IN;
+}
+
+int geocull_box(const GeoCullPlanes* planes, const GeoCluster* box)
+{
+    return geocull_box_in(planes, box, GEOCULL_ALL, NULL);
 }
 
 int geocull_count(int count)

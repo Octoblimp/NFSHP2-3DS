@@ -3185,6 +3185,20 @@ phases.
             no timing frame no frame took over 66 ms. So the next runs
             keep "DebugLog 1" and leave `nfshp2_gputiming.txt` off: the
             frame lines' C and G say which side is short.
+          - The draw's per-batch work (Session 128): Azahar's samples of
+            Alpine Trail's start put a model's matrices first. The port
+            now sends the float uniforms itself (citro3d's words,
+            checked word for word over the first 64 sends) and copies
+            and compares them with no calls. A batch's clusters are
+            tested only against the planes the batch is across. On
+            Azahar the models take 12.5 ms from 14.4 and the draw 37.0
+            from 39.8; the picture is the same to the pixel
+            (`docs/formats/draw-cuts.md`). Still to do: the device's
+            numbers for it, and the world step.
+          - Found in the device log: after the finish, in the post-race
+            and the instant replay (rc 7 and 4), the race phase takes
+            13.5 ms a frame on average and up to 34, so 13 of those 40
+            seconds ran at 20 FPS.
         - [ ] The user's word on the envmap a face a frame.
 
 47. [ ] **A brief artifact on the bridge before the finish line.**

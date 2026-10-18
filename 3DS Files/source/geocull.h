@@ -35,10 +35,14 @@ typedef struct {
 
 // The view's side planes, x >= -w, x <= w, y >= -w and y <= w: w's row of
 // the matrix plus or minus x's or y's, each with the size of its terms for
-// the rounding's margin.
+// the rounding's margin. And for each plane the box corner furthest along
+// its normal and the nearest, as each coordinate's place among a box's six
+// floats, lo then hi: the plane's signs, found once and not for each box.
 typedef struct {
-    float pl[4][4];
-    float mag[4][4];            // |w's row| + |x's or y's|
+    float   pl[4][4];
+    float   mag[4][4];          // |w's row| + |x's or y's|
+    uint8_t farAt[4][3];        // k + 3, hi, where pl[i][k] >= 0, else k
+    uint8_t nearAt[4][3];       // the other
 } GeoCullPlanes;
 
 enum {
@@ -47,10 +51,21 @@ enum {
     GEOCULL_IN                  // inside every plane
 };
 
+#define GEOCULL_ALL 0xFu        // every plane, for geocull_box_in's mask
+
 // `mvp` as geosolid_model makes it: the projection times the model-view.
 void geocull_planes(const float mvp[4][4], GeoCullPlanes* out);
 
 int geocull_box(const GeoCullPlanes* planes, const GeoCluster* box);
+
+// geocull_box against only the planes in `mask`, bit i for plane i, and
+// unless it is OUT, in `*across` (if not NULL) the planes the box is not
+// wholly inside. A box within another is wholly inside every plane the
+// other is (the products and sums round monotonically), so a batch's
+// clusters, which its box holds, need testing only against the batch's
+// `across`: they come out as against all four.
+int geocull_box_in(const GeoCullPlanes* planes, const GeoCluster* box,
+                   unsigned mask, unsigned* across);
 
 // How many boxes a batch of `count` indices has: its own, then one for
 // each GEO_CLUSTER_INDICES of them. None for an empty batch.

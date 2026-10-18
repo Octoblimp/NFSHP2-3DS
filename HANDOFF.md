@@ -27009,3 +27009,31 @@ read the log.
 
 So TASKS 46's next cuts are on the CPU: the draw's per-batch work (580
 model draws a frame where it is slow) and the world step.
+
+## Session 128, continued -- the draw's per-batch work (TASKS 46)
+
+A sampling profile of Alpine Trail's start on Azahar (`gdbprof.py` and
+`gdbprof_report.py` in the scratchpad, through Azahar's GDB stub) put
+the models' matrices first: citro3d's float-uniform walk and
+`GPUCMD_Add`, `memcpy`, `memcmp` and the cluster tests. At 100 stops a
+second Azahar stutters, which alarmed the user; sample 5 a second, and
+say so first.
+
+- **The float uniforms** go out through `send_floats` in `c3dwrap.c`:
+  the same words citro3d writes, with no calls. The first 64 sends are
+  made both ways and compared; the log says
+  `c3d: float uniforms sent here (64 sends matched citro3d's)`.
+- **The copies and compares**: the draw templates as two block copies,
+  and memcmp's equality as inline word loops (`c3d_unif_set`,
+  `bind_mesh`, `set_model`).
+- **The clusters**: each plane's corners are found once, and a batch's
+  clusters are tested only against the planes the batch is across
+  (`geocull_box_in`). Old and new give the same verdicts on 927,451
+  random boxes. `geocull_check.py` gives the same counts and catches
+  10 of 10 mutations.
+
+On Azahar: models 14.4 to 12.5 ms, the draw 39.8 to 37.0, and the same
+picture. The cluster change shows nothing on Azahar; on the 3DS it is
+unmeasured. Next: the device's numbers, then the world step. Also
+found: the post-race and instant replay's race phase takes 13.5 ms a
+frame on the 3DS (up to 34).

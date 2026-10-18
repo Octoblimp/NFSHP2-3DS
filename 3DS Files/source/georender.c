@@ -168,6 +168,26 @@ static bool              s_mirrorDrawn;
 static void free_envmap(void);
 static void free_mirror(void);
 static void fog_row(const C3D_Mtx* projection, float row[4]);
+
+typedef uint32_t __attribute__((may_alias)) GeoWord;
+
+// memcmp's equality, the bits, for `bytes` a multiple of four: a word at a
+// time and with no call, since a run asks it of each model's matrices
+// (TASKS 46). newlib's memcmp is a call and a loop either way.
+static inline bool same_bits(const void* a, const void* b, size_t bytes)
+{
+    const GeoWord* x = (const GeoWord*)a;
+    const GeoWord* y = (const GeoWord*)b;
+    size_t         i;
+
+    for (i = 0; i < bytes / 4; i++) {
+        if (x[i] != y[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
 // The view's side planes in the space of the model set_model set last,
 // which every mesh draws in: the batches' clusters are tested against them
 // (geocull.h).
@@ -380,7 +400,7 @@ static void bind_buffer(const void* vbo)
 static void bind_mesh(const GeoMesh* mesh)
 {
     if (!s_run.bound
-        || memcmp(&s_run.projection, &s_projection, sizeof s_projection)) {
+        || !same_bits(&s_run.projection, &s_projection, sizeof s_projection)) {
         float lightClr[4], ambientClr[4];
 
         C3D_BindProgram(&s_program);
@@ -400,7 +420,7 @@ static void bind_mesh(const GeoMesh* mesh)
 
     bind_buffer(mesh->vbo);
     if (!s_run.mvSet
-        || memcmp(&s_run.modelView, &s_modelView, sizeof s_modelView)) {
+        || !same_bits(&s_run.modelView, &s_modelView, sizeof s_modelView)) {
         float fog[4];
 
         fog_row(&s_projection, fog);
@@ -555,8 +575,10 @@ static void set_combiner(const GeoTexture* gt, int uvScale, bool gs,
 
 // A mesh's batch, less what the view cannot show (geocull.h): whole when
 // its box is inside the view, not at all when it is outside, and otherwise
-// each run of its clusters that are not outside as a draw. Whether anything
-// was drawn: citro3d sends the buffers with a draw, and until one has gone
+// each run of its clusters that are not outside as a draw. The clusters
+// are tested only against the planes the batch's box is across, the rest
+// holding them wholly (geocull_box_in). Whether anything was drawn:
+// citro3d sends the buffers with a draw, and until one has gone
 // bind_buffer cannot move them by their one register.
 static bool draw_shown(const GeoMesh* mesh, const GeoBatch* b,
                        const C3D_Tex* tex, const char* what)
@@ -564,6 +586,7 @@ static bool draw_shown(const GeoMesh* mesh, const GeoBatch* b,
     const GeoCluster* k;
     bool              drawn = false;
     int               start = -1;
+    unsigned          across;
     int               n, i;
 
     if (mesh->clusters == NULL || !ConfigClusterCull) {
@@ -571,7 +594,7 @@ static bool draw_shown(const GeoMesh* mesh, const GeoBatch* b,
         return true;
     }
     k = mesh->clusters + b->cluster;
-    switch (geocull_box(&s_cull, k)) {
+    switch (geocull_box_in(&s_cull, k, GEOCULL_ALL, &across)) {
     case GEOCULL_OUT:
         return false;
     case GEOCULL_IN:
@@ -582,7 +605,9 @@ static bool draw_shown(const GeoMesh* mesh, const GeoBatch* b,
     for (i = 0; i <= n; i++) {
         int first, end;
 
-        if (i < n && geocull_box(&s_cull, &k[1 + i]) != GEOCULL_OUT) {
+        if (i < n
+            && geocull_box_in(&s_cull, &k[1 + i], across, NULL)
+               != GEOCULL_OUT) {
             if (start < 0) {
                 start = i;
             }
@@ -765,9 +790,9 @@ static void set_model(int mvp, int fogModel, int light,
     if (lightVec != NULL) {
         memcpy(l, lightVec, sizeof l);
     }
-    if (!c.valid || memcmp(c.p, p, sizeof p) || memcmp(c.mv, mv, sizeof mv)
-        || memcmp(c.fog, fog, sizeof c.fog)
-        || memcmp(c.light, l, sizeof l)) {
+    if (!c.valid || !same_bits(c.mv, mv, sizeof mv)
+        || !same_bits(c.p, p, sizeof p) || !same_bits(c.fog, fog, sizeof c.fog)
+        || !same_bits(c.light, l, sizeof l)) {
         geosolid_model((const float(*)[4])p, (const float(*)[4])mv, fog, l,
                        &c.out);
         geocull_planes((const float(*)[4])c.out.mvp, &s_cull);

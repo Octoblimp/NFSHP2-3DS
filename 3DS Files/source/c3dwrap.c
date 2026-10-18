@@ -18,6 +18,24 @@
 // What goes to the GPU is what citro3d sent: its function sends it, with
 // the same flags, whenever it has anything to send.
 //
+// Then the float uniforms themselves (TASKS 46). A model changes its mvp,
+// fog and light rows, so nearly a thousand draws a frame find some dirty,
+// and citro3d's walk sends them: a byte at a time over all 96 flags, two
+// GPUCMD_Add calls a run, newlib's word-at-a-time memcpy and two memsets.
+// Azahar's samples put that walk and its calls at about a fifth of the
+// models' time. send_floats sends the same words itself: for each run of
+// dirty registers, FLOATUNIFORM_CONFIG with the run's first in 32-bit
+// mode, then the run's words to FLOATUNIFORM_DATA as one GPUCMD_Add
+// writes them, its padding word too. The flags are cleared as citro3d
+// clears them. citro3d also marks what it sent "ever dirty", in a table
+// of uniforms.o's own, so that C3Di_DirtyUniforms (after the HOME menu)
+// marks it dirty again; s_ever keeps that for what is sent here, and
+// __wrap_C3Di_DirtyUniforms marks it too. Whatever else is dirty -- the
+// shader's constants, an integer or the bools -- is citro3d's to send, as
+// before, after the floats as its own function orders them. The first 64
+// sends go both ways, and one that differs leaves the floats to citro3d
+// (check_floats; the log says "c3d: float uniforms sent here").
+//
 // Two more, for the race's lit batches and strips (step 13b-5), which set
 // the same program and uniforms again for every draw:
 //   * __wrap_C3D_BindProgram does nothing for the program citro3d has
@@ -109,6 +127,37 @@ static shaderProgram_s* s_program;
 static uint32_t s_known[(C3D_FVUNIF_COUNT + 31) / 32];
 static uint16_t s_boolKnown;
 
+// The float registers send_floats has sent, by shader type, which citro3d
+// would have marked ever dirty.
+static uint32_t s_ever[2][(C3D_FVUNIF_COUNT + 31) / 32];
+
+// The first FLOAT_CHECKS sends with floats in them are sent both ways and
+// compared: send_floats's words, then citro3d's in their place. One that
+// differs leaves the floats to citro3d for good. The log says which
+// (main.c hands it over after C3D_Init, before any draw).
+#define FLOAT_CHECKS 64
+#define FLOAT_WORDS  (C3D_FVUNIF_COUNT * 4 + C3D_FVUNIF_COUNT / 2 * 4)
+static int  s_floatChecks;
+static bool s_floatsOff;
+static u32  s_floatSent[FLOAT_WORDS];
+static void (*s_log)(const char* fmt, ...);
+
+// Blocks of command words, which the compiler copies with ldm and stm. A
+// copy of more than 64 bytes at once is a call to newlib's memcpy, which
+// goes a word at a time.
+typedef struct {
+    u32 w[4];
+} __attribute__((may_alias)) Words4;
+typedef struct {
+    u32 w[6];
+} __attribute__((may_alias)) Words6;
+typedef struct {
+    u32 w[14];
+} __attribute__((may_alias)) Words14;
+typedef struct {
+    u32 w[16];
+} __attribute__((may_alias)) Words16;
+
 static bool any_set(const bool* flags, int n)
 {
     uint32_t acc = 0;
@@ -126,6 +175,136 @@ static bool any_set(const bool* flags, int n)
     return acc != 0;
 }
 
+static u32* room(u32 n);
+
+// The dirty float uniforms of shader type `t` sent as C3D_UpdateUniforms
+// sends them, and their flags cleared. false, with nothing sent or cleared,
+// where citro3d's should send them: flags off a word boundary, a run past
+// one write's 256 words (GPUCMD_Add splits it), or no room (GPUCMD_Add
+// stops the app). No loop here is a memset or memcpy call.
+__attribute__((optimize("no-tree-loop-distribute-patterns")))
+static bool send_floats(int t)
+{
+    bool*            dirty = C3D_FVUnifDirty[t];
+    u32_alias*       dw    = (u32_alias*)dirty;
+    u32              reg   = t ? GPUREG_GSH_FLOATUNIFORM_CONFIG
+                               : GPUREG_VSH_FLOATUNIFORM_CONFIG;
+    uint8_t          first[C3D_FVUNIF_COUNT / 2];
+    uint8_t          count[C3D_FVUNIF_COUNT / 2];
+    int              runs = 0, i = 0, r;
+    u32              words = 0;
+    u32*             w;
+
+    if ((uintptr_t)dirty & 3) {
+        return false;
+    }
+    // The runs, as citro3d's walk finds them: a run ends at a clear flag,
+    // so the next starts past it.
+    while (i < C3D_FVUNIF_COUNT) {
+        int j;
+
+        if ((i & 3) == 0 && dw[i >> 2] == 0) {
+            i += 4;
+            continue;
+        }
+        if (!dirty[i]) {
+            i++;
+            continue;
+        }
+        for (j = i + 1; j < C3D_FVUNIF_COUNT && dirty[j]; j++) {
+        }
+        if (j - i > 64) {
+            return false;
+        }
+        first[runs] = (uint8_t)i;
+        count[runs] = (uint8_t)(j - i);
+        runs++;
+        words += 4 * (u32)(j - i) + 4;
+        i = j + 1;
+    }
+    if (runs == 0) {
+        return true;
+    }
+    w = room(words);
+    if (w == NULL) {
+        return false;
+    }
+    for (r = 0; r < runs; r++) {
+        const u32_alias* src = (const u32_alias*)&C3D_FVUnif[t][first[r]];
+        u32              n   = 4 * (u32)count[r];
+        u32              k;
+        int              id, end = first[r] + count[r];
+
+        // GPUCMD_AddWrite of the config, then GPUCMD_AddWrites of the
+        // data: its first word, the header with the count less one, the
+        // rest, and a zero after an odd count.
+        w[0] = 0x80000000u | first[r];
+        w[1] = GPUCMD_HEADER(0, 0xF, reg);
+        w[2] = src[0];
+        w[3] = GPUCMD_HEADER(0, 0xF, reg + 1) | ((n - 1) << 20);
+        for (k = 1; k + 4 <= n; k += 4) {
+            *(Words4*)(w + 3 + k) = *(const Words4*)(src + k);
+        }
+        w[3 + k] = src[k];
+        w[4 + k] = src[k + 1];
+        w[5 + k] = src[k + 2];
+        w[3 + n] = 0;
+        w += n + 4;
+        // Every dirty flag is in a run, so the words the run spans clear.
+        for (id = first[r] >> 2; id <= (end - 1) >> 2; id++) {
+            dw[id] = 0;
+        }
+        for (id = first[r]; id < end; id++) {
+            s_ever[t][id >> 5] |= 1u << (id & 31);
+        }
+    }
+    gpuCmdBufOffset += words;
+    return true;
+}
+
+// A send with only floats dirty, both ways: send_floats's words kept and
+// taken back, the flags put back as they were, and citro3d's sent in their
+// place, which stay.
+static void check_floats(GPU_SHADER_TYPE type, int t)
+{
+    bool     dirty[C3D_FVUNIF_COUNT];
+    uint32_t ever[(C3D_FVUNIF_COUNT + 31) / 32];
+    u32      at = gpuCmdBufOffset, n;
+    bool     same;
+
+    memcpy(dirty, C3D_FVUnifDirty[t], sizeof dirty);
+    memcpy(ever, s_ever[t], sizeof ever);
+    if (!send_floats(t)) {
+        __real_C3D_UpdateUniforms(type);
+        return;
+    }
+    n = gpuCmdBufOffset - at;
+    if (n == 0) {
+        return;
+    }
+    memcpy(s_floatSent, gpuCmdBuf + at, n * sizeof *s_floatSent);
+    gpuCmdBufOffset = at;
+    memcpy(C3D_FVUnifDirty[t], dirty, sizeof dirty);
+    memcpy(s_ever[t], ever, sizeof ever);
+    __real_C3D_UpdateUniforms(type);
+    same = gpuCmdBufOffset - at == n
+           && memcmp(gpuCmdBuf + at, s_floatSent, n * sizeof *s_floatSent)
+                  == 0;
+    s_floatChecks++;
+    if (!same) {
+        s_floatsOff = true;
+        if (s_log) {
+            s_log("c3d: float uniforms citro3d's (send %d of %u words "
+                  "differs, %u from citro3d)",
+                  s_floatChecks, (unsigned)n,
+                  (unsigned)(gpuCmdBufOffset - at));
+        }
+    } else if (s_floatChecks == FLOAT_CHECKS && s_log) {
+        s_log("c3d: float uniforms sent here (%d sends matched citro3d's)",
+              FLOAT_CHECKS);
+    }
+}
+
 void __wrap_C3D_UpdateUniforms(GPU_SHADER_TYPE type)
 {
     int t = type == GPU_GEOMETRY_SHADER ? 1 : 0;
@@ -135,13 +314,25 @@ void __wrap_C3D_UpdateUniforms(GPU_SHADER_TYPE type)
     if (t == 1 && s_program != NULL && s_program->geometryShader == NULL) {
         return;
     }
-    if (!s_constants[t] && !C3D_BoolUnifsDirty[t]
-        && !any_set(C3D_IVUnifDirty[t], C3D_IVUNIF_COUNT)
-        && !any_set(C3D_FVUnifDirty[t], C3D_FVUNIF_COUNT)) {
+    if (s_constants[t] || s_floatsOff) {
+        s_constants[t] = false;
+        __real_C3D_UpdateUniforms(type);
         return;
     }
-    s_constants[t] = false;
-    __real_C3D_UpdateUniforms(type);
+    if (s_floatChecks < FLOAT_CHECKS && !C3D_BoolUnifsDirty[t]
+        && !any_set(C3D_IVUnifDirty[t], C3D_IVUNIF_COUNT)) {
+        check_floats(type, t);
+        return;
+    }
+    if (!send_floats(t)) {
+        __real_C3D_UpdateUniforms(type);
+        return;
+    }
+    // The floats are clean now, so citro3d's sends only these.
+    if (C3D_BoolUnifsDirty[t]
+        || any_set(C3D_IVUnifDirty[t], C3D_IVUNIF_COUNT)) {
+        __real_C3D_UpdateUniforms(type);
+    }
 }
 
 void __wrap_C3Di_LoadShaderUniforms(shaderInstance_s* si)
@@ -189,9 +380,15 @@ void c3d_unif_set(int id, float x, float y, float z, float w)
     v.y = y;
     v.z = z;
     v.w = w;
-    if (known(id)
-        && memcmp(&C3D_FVUnif[GPU_VERTEX_SHADER][id], &v, sizeof v) == 0) {
-        return;
+    // memcmp's equality, the bits, without its call.
+    if (known(id)) {
+        const u32_alias* a =
+            (const u32_alias*)&C3D_FVUnif[GPU_VERTEX_SHADER][id];
+        const u32_alias* b = (const u32_alias*)&v;
+
+        if (a[0] == b[0] && a[1] == b[1] && a[2] == b[2] && a[3] == b[3]) {
+            return;
+        }
     }
     C3D_FVUnifSet(GPU_VERTEX_SHADER, id, x, y, z, w);
     s_known[id >> 5] |= 1u << (id & 31);
@@ -239,8 +436,17 @@ void c3d_unif_bool(int id, bool on)
 
 void __wrap_C3Di_DirtyUniforms(GPU_SHADER_TYPE type)
 {
-    s_constants[type == GPU_GEOMETRY_SHADER ? 1 : 0] = true;
+    int t = type == GPU_GEOMETRY_SHADER ? 1 : 0;
+    int id;
+
+    s_constants[t] = true;
     __real_C3Di_DirtyUniforms(type);
+    // What citro3d's table would hold of what send_floats sent.
+    for (id = 0; id < C3D_FVUNIF_COUNT; id++) {
+        if (s_ever[t][id >> 5] >> (id & 31) & 1u) {
+            C3D_FVUnifDirty[t][id] = true;
+        }
+    }
 }
 
 // ------------------------------------------------------------- the draws
@@ -289,7 +495,6 @@ static const u32 s_arrayWords[22] = {
 enum { LEAN_UNKNOWN, LEAN_ON, LEAN_OFF };
 static uint8_t s_leanElements;
 static uint8_t s_leanArrays;
-static void (*s_log)(const char* fmt, ...);
 
 void c3d_lean_log(void (*fn)(const char* fmt, ...))
 {
@@ -370,7 +575,8 @@ void __wrap_C3D_DrawElements(GPU_Primitive_t primitive, int count, int type,
         __real_C3D_DrawElements(primitive, count, type, indices);
         return;
     }
-    memcpy(w, s_elementWords, sizeof s_elementWords);
+    *(Words16*)w        = *(const Words16*)s_elementWords;
+    *(Words14*)(w + 16) = *(const Words14*)(s_elementWords + 16);
     w[4] = (pa - base) | ((u32)type << 31);
     w[6] = (u32)count;
     gpuCmdBufOffset += 30;
@@ -405,7 +611,8 @@ void __wrap_C3D_DrawArrays(GPU_Primitive_t primitive, int first, int size)
         __real_C3D_DrawArrays(primitive, first, size);
         return;
     }
-    memcpy(w, s_arrayWords, sizeof s_arrayWords);
+    *(Words16*)w       = *(const Words16*)s_arrayWords;
+    *(Words6*)(w + 16) = *(const Words6*)(s_arrayWords + 16);
     w[0] = (u32)primitive;
     w[6] = (u32)size;
     w[8] = (u32)first;

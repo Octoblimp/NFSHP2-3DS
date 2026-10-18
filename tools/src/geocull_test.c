@@ -8,7 +8,10 @@
 //                                  skip), and `count` indices in decimal:
 //                                  K, the boxes' number, then each box's
 //                                  lo, hi and geocull_box against the last
-//                                  P's planes
+//                                  P's planes: the batch's against all
+//                                  four, its clusters', unless it is OUT,
+//                                  only against those it is across, as
+//                                  the draw tests them
 //
 //     geocull_test < script.txt > out.txt
 
@@ -71,7 +74,8 @@ int main(void)
             put(&planes.mag[0][0], 16);
             printf("\n");
         } else if (strcmp(cmd, "K") == 0) {
-            int         nv, count, n, i;
+            int         nv, count, n, i, batch = GEOCULL_OUT;
+            unsigned    across = 0;
             float*      pos;
             uint16_t*   idx;
             GeoCluster* box;
@@ -100,11 +104,21 @@ int main(void)
             n = geocull_build(pos, STRIDE, idx, count, box);
             printf("K %d", n);
             for (i = 0; i < n; i++) {
+                int v;
+
+                if (i == 0) {
+                    v = batch = geocull_box_in(&planes, &box[0], GEOCULL_ALL,
+                                               &across);
+                } else if (batch != GEOCULL_OUT) {
+                    v = geocull_box_in(&planes, &box[i], across, NULL);
+                } else {
+                    v = geocull_box(&planes, &box[i]);
+                }
                 printf(" ");
                 put(box[i].lo, 3);
                 printf(" ");
                 put(box[i].hi, 3);
-                printf(" %d", geocull_box(&planes, &box[i]));
+                printf(" %d", v);
             }
             printf("\n");
             free(pos);
