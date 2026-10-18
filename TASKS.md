@@ -4585,8 +4585,17 @@ phases.
         - [x] CarState::CalculateWheelMatrices: retail reads the y offset
           from WheelInfo's word at 24 and lifts the brake matrix. Done by
           TASKS 74 (`OffsetY`).
-        - DriveTrain's gMaxDownShiftOver is 1.2 in retail's data;
+        - [x] DriveTrain's gMaxDownShiftOver is 1.2 in retail's data;
           `drivetrain.c` has the demo's 1.1. Found by TASKS 74.
+          Done in Session 133, with the rest of retail's SetDesiredGear
+          (`0x0018bce0`): in sport shift, with the asked-for gear in, an
+          engine sagging under idle + 100 in second or above drops a gear
+          and hands back the automatic. And a port bug, the demo's too:
+          the crawl arm is first gear's alone (`slti 3`), where the port
+          (and drivetrain_check's hand model) had first and second, so
+          an automatic in second with the throttle open never dropped to
+          first. Both images run in mipsemu agree. drivetrain_check 0
+          differ, its 10 new mutations caught.
         - Other demo-derived functions retail changed (TASKS 74's list):
           Car::FinishMovement, Car::TriggerEvents, Car::CalcForceParameters,
           PhysicsCar::Move, World::GetTimestep, DriveTrain::SetDesiredGear,

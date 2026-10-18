@@ -61,7 +61,8 @@ int32_t gGearShiftMethod        = 1;
 float   gLimitedSlip            = 0.349999994f;    // 0x3eb33333
 float   gClutchLimiter          = 300.0f;          // 0x43960000
 float   gClutchMatchedThreshold = 50.0f;           // 0x42480000
-float   gMaxDownShiftOver       = 1.10000002f;     // 0x3f8ccccd
+// Retail's word (gp-20524, 0x003308c4): the demo's was 1.1, 0x3f8ccccd.
+float   gMaxDownShiftOver       = 1.20000005f;     // 0x3f99999a
 
 // ----------------------------------------------------------- the free one
 
@@ -618,10 +619,10 @@ Gear drivetrain_set_desired_gear(DriveTrain *d, Gear g)
         e = d->pEngine;
         rpm = e->State.w * DRIVETRAIN_RADS_TO_RPM;
 
-        if (current < THIRD_GEAR) {
-            // First and second have no table down point. With the
-            // throttle nearly shut they drop out just above idle, and
-            // with it open they never drop out at all.
+        if (current < SECOND_GEAR) {
+            // First has no table down point (`slti 3`, under second).
+            // With the throttle nearly shut it drops out just above idle,
+            // and with it open it never drops out at all.
             if (e->Throttle < K_SHIFT_THROTTLE)
                 down = e->EI->IdleRPM + K_CRAWL_OVER_IDLE;
             else
@@ -666,7 +667,7 @@ Gear drivetrain_set_desired_gear(DriveTrain *d, Gear g)
     current = d->CurrentGear;
     rpm = e->State.w * DRIVETRAIN_RADS_TO_RPM;
 
-    if (current < THIRD_GEAR) {
+    if (current < SECOND_GEAR) {
         if (e->Throttle < K_SHIFT_THROTTLE)
             down = e->EI->IdleRPM + K_CRAWL_OVER_IDLE;
         else
@@ -709,7 +710,7 @@ Gear drivetrain_set_desired_gear(DriveTrain *d, Gear g)
         // ordering held. Ported because the image has it, and argued in
         // docs/formats/car-drivetrain.md rather than deleted.
         if (rpm < e->EI->IdleRPM + K_CRAWL_OVER_IDLE
-                && !(current < THIRD_GEAR)) {
+                && !(current < SECOND_GEAR)) {
             d->DesiredGear = current - 1;
             return AUTOMATIC;
         }
@@ -726,6 +727,15 @@ Gear drivetrain_set_desired_gear(DriveTrain *d, Gear g)
     if (d->PreviousGear < current
             && e->EI->MaxRPM - K_LIMITER_MARGIN < rpm)
         return AUTOMATIC;
+
+    // Retail's (0x0018bff4, TASKS 73): or if the engine has sagged to just
+    // over idle in second or above -- one gear down, and the automatic
+    // again.
+    if (rpm < e->EI->IdleRPM + K_CRAWL_OVER_IDLE
+            && !(current < SECOND_GEAR)) {
+        d->DesiredGear = current - 1;
+        return AUTOMATIC;
+    }
 
     return g;
 }

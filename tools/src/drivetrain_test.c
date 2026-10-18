@@ -1318,9 +1318,19 @@ static void s_sport_shift(void)
     };
     static const float limw[4] = { 760.0f, 400.0f, 760.0f, 720.0f };
     static const float overs[2] = { 1.1f, 0.4f };
+    // Retail's sag test: 94.2477036 is exactly 900 RPM, IdleRPM + 100.
+    static const struct { Gear gear; float w; Gear prev; float hold; } sag[7] = {
+        { FOURTH_GEAR, 80.0f, FOURTH_GEAR, 0.0f },
+        { FOURTH_GEAR, 94.2477036f, FOURTH_GEAR, 0.0f },
+        { FOURTH_GEAR, 94.0f, FOURTH_GEAR, 0.0f },
+        { SECOND_GEAR, 80.0f, SECOND_GEAR, 0.0f },
+        { FIRST_GEAR, 80.0f, FIRST_GEAR, 0.0f },
+        { FOURTH_GEAR, 80.0f, THIRD_GEAR, 0.0f },
+        { FOURTH_GEAR, 80.0f, FOURTH_GEAR, 11.0f },
+    };
     Rig r;
     Gear got;
-    int i;
+    int i, k;
 
     reset_globals();
 
@@ -1368,17 +1378,19 @@ static void s_sport_shift(void)
                gname(r.d.SportGear), (double)r.d.GearHoldTime);
     }
 
-    for (i = 0; i < 2; i++) {
-        rig_make(&r, 1.0f, 6, crawlt[i], 70.0f, 0.0f, 0, 0);
-        r.d.CurrentGear = SECOND_GEAR;
-        r.d.DesiredGear = SECOND_GEAR;
-        r.d.SportGear = FIRST_GEAR;
-        r.d.CurrentClutchState = CLUTCH_ENGAGED;
-        got = drivetrain_set_desired_gear(&r.d, SPORT_SHIFT);
-        printf("ss crawl t %.9g -> %s desired %s sport %s\n",
-               (double)crawlt[i], gname(got), gname(r.d.DesiredGear),
-               gname(r.d.SportGear));
-    }
+    // First crawls; second takes the ratio (`slti 3`).
+    for (k = FIRST_GEAR; k <= SECOND_GEAR; k++)
+        for (i = 0; i < 2; i++) {
+            rig_make(&r, 1.0f, 6, crawlt[i], 70.0f, 0.0f, 0, 0);
+            r.d.CurrentGear = k;
+            r.d.DesiredGear = k;
+            r.d.SportGear = k - 1;
+            r.d.CurrentClutchState = CLUTCH_ENGAGED;
+            got = drivetrain_set_desired_gear(&r.d, SPORT_SHIFT);
+            printf("ss crawl %s t %.9g -> %s desired %s sport %s\n",
+                   gname(k), (double)crawlt[i], gname(got),
+                   gname(r.d.DesiredGear), gname(r.d.SportGear));
+        }
 
     for (i = 0; i < 3; i++) {
         rig_make(&r, 1.0f, 6, 0.0f, 400.0f, 0.0f, 0, 0);
@@ -1407,15 +1419,15 @@ static void s_sport_shift(void)
                (double)(r.ei.MaxRPM - 300.0f));
     }
 
-    // The refusal test sat on exactly. In second the down point is
+    // The refusal test sat on exactly. In first the down point is
     // IdleRPM + 100 = 900 whole, and 94.2477036 is the one float whose
     // product with the object's rads-to-RPM constant is exactly 900. So
     // `down < rpm` is false and `down <= rpm` is true: a refusal puts the
-    // request back at second, letting it through drops to first.
+    // request back at first, letting it through drops to neutral.
     rig_make(&r, 1.0f, 6, 0.0f, 94.2477036f, 0.0f, 0, 0);
-    r.d.CurrentGear = SECOND_GEAR;
-    r.d.DesiredGear = SECOND_GEAR;
-    r.d.SportGear = FIRST_GEAR;
+    r.d.CurrentGear = FIRST_GEAR;
+    r.d.DesiredGear = FIRST_GEAR;
+    r.d.SportGear = NEUTRAL;
     r.d.CurrentClutchState = CLUTCH_ENGAGED;
     r.d.GearHoldTime = 2.0f;
     got = drivetrain_set_desired_gear(&r.d, SPORT_SHIFT);
@@ -1423,6 +1435,23 @@ static void s_sport_shift(void)
            gname(got), gname(r.d.DesiredGear), gname(r.d.SportGear),
            (double)r.d.GearHoldTime,
            (double)(r.e.State.w * DRIVETRAIN_RADS_TO_RPM));
+
+    // Retail's sag test (TASKS 73), after the hold and the limiter.
+    for (i = 0; i < 7; i++) {
+        rig_make(&r, 1.0f, 6, 0.0f, sag[i].w, 0.0f, 0, 0);
+        r.d.CurrentGear = sag[i].gear;
+        r.d.DesiredGear = sag[i].gear;
+        r.d.SportGear = sag[i].gear;
+        r.d.PreviousGear = sag[i].prev;
+        r.d.CurrentClutchState = CLUTCH_ENGAGED;
+        r.d.GearHoldTime = sag[i].hold - WorldTimeElapsed;
+        got = drivetrain_set_desired_gear(&r.d, SPORT_SHIFT);
+        printf("ss sag %s w %.9g prev %s hold %.9g -> %s desired %s "
+               "(rpm %.9g)\n",
+               gname(sag[i].gear), (double)sag[i].w, gname(sag[i].prev),
+               (double)sag[i].hold, gname(got), gname(r.d.DesiredGear),
+               (double)(sag[i].w * DRIVETRAIN_RADS_TO_RPM));
+    }
 
     for (i = 0; i < 2; i++) {
         gMaxDownShiftOver = overs[i];

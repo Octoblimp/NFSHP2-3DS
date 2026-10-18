@@ -27406,3 +27406,28 @@ and BottomOut mutations: 35 caught, and `pc-flip-damp-kept` equivalent
 (the damping arm's 0.8 test can't fire under its 0.7 bound, in retail
 too). mellowmover_check 0 differ, and `--demo` 0 differ. carsnap_check
 0 differ. The CIA builds clean.
+
+### TASKS 73, slice 2: the gearbox
+
+- `drivetrain.c`: gMaxDownShiftOver is retail's 1.2 (gp-20524,
+  `0x003308c4`; the demo's 1.1). Retail's SetDesiredGear (`0x0018bce0`)
+  adds one test to the sport shift: with the asked-for gear in, past the
+  ten-second hold and the limiter, an engine under IdleRPM + 100 in second
+  or above drops one gear and returns AUTOMATIC.
+- A port bug, in the demo's code too: the crawl arm (the down point just
+  over idle, or none with the throttle open) is `slti 3` on CurrentGear,
+  first gear alone. The port had `current < THIRD_GEAR`, first and second,
+  and drivetrain_check's hand model carried the same misreading, so it
+  agreed. In the game: an automatic car slowed in second with the throttle
+  open never dropped to first. Settled by running both images'
+  SetDesiredGear in mipsemu (scratchpad `sdg_emu.py`): second with the
+  throttle open drops to first in both, and retail's sag test fires in
+  fourth and second and not in first.
+- `drivetrain_check.py` reads gMaxDownShiftOver from the retail image.
+  The sport crawl and refuse-exact scenarios moved to first; `ss sag` has
+  7 cases (900 RPM exactly, second, first, after an upshift, past the
+  hold). 10 new or repointed mutations, all caught.
+
+drivetrain_check 18 scenarios, 507 lines, 0 differ. physicscar,
+realdriver, realcontroller, carsnap, mellowmover, carinfo, drivingchoice,
+loadertable, nearbycar and physcomp 0 differ. The CIA builds clean.

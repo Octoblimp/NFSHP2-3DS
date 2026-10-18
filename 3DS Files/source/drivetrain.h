@@ -154,7 +154,7 @@ extern int32_t gGearShiftMethod;        // 0x0032397c  1
 extern float   gLimitedSlip;            // 0x00323980  0.35
 extern float   gClutchLimiter;          // 0x00323984  300.0
 extern float   gClutchMatchedThreshold; // 0x00323988  50.0
-extern float   gMaxDownShiftOver;       // 0x0032398c  1.1
+extern float   gMaxDownShiftOver;       // 0x0032398c  retail's 1.2
 
 // WorldTimeElapsed, 0x00323d00, is not DriveTrain's. The clock object owns
 // it (realtime.h, through engine.h), and this object only adds it to

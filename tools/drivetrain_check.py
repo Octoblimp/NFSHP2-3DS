@@ -97,6 +97,8 @@ import hostbuild
 import bmath_check as BM
 import bvector_check as BV
 import engine_check as EN          # its Table and its Engine
+import mipsdis
+import retaildis
 
 ROOT = Path(__file__).resolve().parent.parent
 NL = chr(10)
@@ -194,7 +196,10 @@ G_GEAR_SHIFT_METHOD = elf_i(0x0032397C)
 G_LIMITED_SLIP = elf_f(0x00323980)
 G_CLUTCH_LIMITER = elf_f(0x00323984)
 G_CLUTCH_MATCHED_THRESHOLD = elf_f(0x00323988)
-G_MAX_DOWN_SHIFT_OVER = elf_f(0x0032398C)
+# Retail's word, gp-20524 at 0x003308c4, which retail's SetDesiredGear
+# (0x0018bce0) reads: 1.2, where the demo's 0x0032398c holds 1.1 (TASKS 73).
+G_MAX_DOWN_SHIFT_OVER = struct.unpack(
+    "<f", mipsdis.Elf(str(retaildis.RETAIL)).read(0x003308C4, 4))[0]
 
 # 0x00323d00, the frame loop's, not this object's.
 G_WORLD_TIME_ELAPSED = elf_f(0x00323D00)
@@ -775,7 +780,8 @@ def set_desired_gear(d, g):
         e = d.pEngine
         rpm = fmul(e.w, K_RADS_TO_RPM_AUTO)
 
-        if current < THIRD_GEAR:
+        # `slti v0,a3,3`: under SECOND_GEAR, first alone.
+        if current < SECOND_GEAR:
             if e.Throttle < K_CRAWL_THROTTLE_AUTO:
                 down = fadd(e.EI.IdleRPM, K_CRAWL_OVER_IDLE)
             else:
@@ -816,7 +822,7 @@ def set_desired_gear(d, g):
     current = d.CurrentGear
     rpm = fmul(e.w, K_RADS_TO_RPM_SPORT)
 
-    if current < THIRD_GEAR:
+    if current < SECOND_GEAR:
         if e.Throttle < K_CRAWL_THROTTLE_SPORT:
             down = fadd(e.EI.IdleRPM, K_CRAWL_OVER_IDLE)
         else:
@@ -848,7 +854,7 @@ def set_desired_gear(d, g):
         # 0x00183b94, unreachable. Kept so that the model and the port
         # have the same shape and a mutation on it can be argued.
         if (rpm < fadd(e.EI.IdleRPM, K_CRAWL_OVER_IDLE)
-                and not (current < THIRD_GEAR)):
+                and not (current < SECOND_GEAR)):
             d.DesiredGear = current - 1
             return AUTOMATIC
 
@@ -859,6 +865,14 @@ def set_desired_gear(d, g):
 
     if (d.PreviousGear < current
             and fsub(e.EI.MaxRPM, K_LIMITER_MARGIN) < rpm):
+        return AUTOMATIC
+
+    # Retail's, 0x0018bff4 (TASKS 73): the limiter test's either failure
+    # falls through to the sag test, which shares the unreachable arm's
+    # tail at 0x0018c014.
+    if (rpm < fadd(e.EI.IdleRPM, K_CRAWL_OVER_IDLE)
+            and not (current < SECOND_GEAR)):
+        d.DesiredGear = current - 1
         return AUTOMATIC
 
     return g
@@ -1848,8 +1862,9 @@ def s_automatic():
                 g9(d.ShiftDownRPM[gear]), g9(fmul(f32(w),
                                                   K_RADS_TO_RPM_AUTO))))
 
-    # First and second have no table point: with the throttle nearly shut
-    # they drop out just above idle, and with it open they never do.
+    # First has no table point: with the throttle nearly shut it drops
+    # out just above idle, and with it open it never does. Second reads
+    # the table like the gears above it (`slti 3`).
     for gear in (FIRST_GEAR, SECOND_GEAR):
         for throttle in (0.1, 0.2, 0.9):
             d, e, wheels, cs, dti, ei = make_rig(1.0, throttle=throttle,
@@ -1955,17 +1970,19 @@ def s_sport_shift():
              % (g9(f32(w)), gname(r), gname(d.DesiredGear),
                 gname(d.SportGear), g9(d.GearHoldTime)))
 
-    # In first and second the down test is the crawl one, not the ratio.
-    for throttle in (0.1, 0.9):
-        d, e, wheels, cs, dti, ei = make_rig(1.0, throttle=throttle, w=70.0)
-        d.CurrentGear = SECOND_GEAR
-        d.DesiredGear = SECOND_GEAR
-        d.SportGear = FIRST_GEAR
-        d.CurrentClutchState = CLUTCH_ENGAGED
-        r = set_desired_gear(d, SPORT_SHIFT)
-        emit("ss crawl t %s -> %s desired %s sport %s"
-             % (g9(f32(throttle)), gname(r), gname(d.DesiredGear),
-                gname(d.SportGear)))
+    # In first the down test is the crawl one; second takes the ratio.
+    for gear in (FIRST_GEAR, SECOND_GEAR):
+        for throttle in (0.1, 0.9):
+            d, e, wheels, cs, dti, ei = make_rig(1.0, throttle=throttle,
+                                                 w=70.0)
+            d.CurrentGear = gear
+            d.DesiredGear = gear
+            d.SportGear = gear - 1
+            d.CurrentClutchState = CLUTCH_ENGAGED
+            r = set_desired_gear(d, SPORT_SHIFT)
+            emit("ss crawl %s t %s -> %s desired %s sport %s"
+                 % (gname(gear), g9(f32(throttle)), gname(r),
+                    gname(d.DesiredGear), gname(d.SportGear)))
 
     # The requested gear is in: hand back AUTOMATIC after ten seconds.
     for t, hold in enumerate((9.9, 10.0, 10.1)):
@@ -2000,23 +2017,46 @@ def s_sport_shift():
 
     # The refusal test sat on exactly.
     #
-    # In second the down point is IdleRPM + 100 = 900 whole, and
+    # In first the down point is IdleRPM + 100 = 900 whole, and
     # 94.2477036 is the one float whose product with the object's own
     # rads-to-RPM constant is exactly 900. (It is one float: the two
     # either side of it land an ulp away.) So `down < rpm` is false and
     # `down <= rpm` is true, and the gear that comes out says which the
-    # image wrote -- a refusal puts the request back at second, and
-    # letting it through drops to first.
+    # image wrote -- a refusal puts the request back at first, and
+    # letting it through drops to neutral.
     d, e, wheels, cs, dti, ei = make_rig(1.0, w=94.2477036)
-    d.CurrentGear = SECOND_GEAR
-    d.DesiredGear = SECOND_GEAR
-    d.SportGear = FIRST_GEAR
+    d.CurrentGear = FIRST_GEAR
+    d.DesiredGear = FIRST_GEAR
+    d.SportGear = NEUTRAL
     d.CurrentClutchState = CLUTCH_ENGAGED
     d.GearHoldTime = f32(2.0)
     r = set_desired_gear(d, SPORT_SHIFT)
     emit("ss refuse-exact -> %s desired %s sport %s hold %s (rpm %s)"
          % (gname(r), gname(d.DesiredGear), gname(d.SportGear),
             g9(d.GearHoldTime), g9(fmul(e.w, K_RADS_TO_RPM_SPORT))))
+
+    # Retail's sag test, with the requested gear in: under IdleRPM + 100
+    # (900) in second or above is one down and AUTOMATIC. 94.2477036 is
+    # exactly 900 again. It comes after the hold and the limiter.
+    for gear, w, prev, hold in ((FOURTH_GEAR, 80.0, FOURTH_GEAR, 0.0),
+                                (FOURTH_GEAR, 94.2477036, FOURTH_GEAR, 0.0),
+                                (FOURTH_GEAR, 94.0, FOURTH_GEAR, 0.0),
+                                (SECOND_GEAR, 80.0, SECOND_GEAR, 0.0),
+                                (FIRST_GEAR, 80.0, FIRST_GEAR, 0.0),
+                                (FOURTH_GEAR, 80.0, THIRD_GEAR, 0.0),
+                                (FOURTH_GEAR, 80.0, FOURTH_GEAR, 11.0)):
+        d, e, wheels, cs, dti, ei = make_rig(1.0, w=w)
+        d.CurrentGear = gear
+        d.DesiredGear = gear
+        d.SportGear = gear
+        d.PreviousGear = prev
+        d.CurrentClutchState = CLUTCH_ENGAGED
+        d.GearHoldTime = fsub(f32(hold), G["WorldTimeElapsed"])
+        r = set_desired_gear(d, SPORT_SHIFT)
+        emit("ss sag %s w %s prev %s hold %s -> %s desired %s (rpm %s)"
+             % (gname(gear), g9(f32(w)), gname(prev), g9(f32(hold)),
+                gname(r), gname(d.DesiredGear),
+                g9(fmul(f32(w), K_RADS_TO_RPM_SPORT))))
 
     # gMaxDownShiftOver moves the sport downshift test.
     for over in (1.1, 0.4):
@@ -2655,11 +2695,11 @@ MUTATIONS = [
      + "            return g;" + NL + NL + "        e = d->pEngine;",
      "        if (0)" + NL + "            return g;" + NL + NL
      + "        e = d->pEngine;"),
-    ("au-crawl-in-third", DC,
+    ("au-crawl-in-second", DC,
+     "        if (current < SECOND_GEAR) {" + NL
+     + "            // First has no table down point",
      "        if (current < THIRD_GEAR) {" + NL
-     + "            // First and second have no table down point. With the",
-     "        if (current < FOURTH_GEAR) {" + NL
-     + "            // First and second have no table down point. With the"),
+     + "            // First has no table down point"),
     ("au-crawl-open-throttle", DC,
      "            if (e->Throttle < K_SHIFT_THROTTLE)" + NL
      + "                down = e->EI->IdleRPM + K_CRAWL_OVER_IDLE;" + NL
@@ -2690,9 +2730,9 @@ MUTATIONS = [
      "        if (rpm <= down && !(current < FIRST_GEAR))"),
     ("au-rads-not-converted", DC,
      "        rpm = e->State.w * DRIVETRAIN_RADS_TO_RPM;" + NL + NL
-     + "        if (current < THIRD_GEAR) {",
+     + "        if (current < SECOND_GEAR) {",
      "        rpm = e->State.w;" + NL + NL
-     + "        if (current < THIRD_GEAR) {"),
+     + "        if (current < SECOND_GEAR) {"),
 
     # -- SetDesiredGear, SPORT_SHIFT -----------------------------------
     ("ss-hold-not-accumulated", DC,
@@ -2740,6 +2780,47 @@ MUTATIONS = [
      "        if (d->DesiredGear < d->SportGear) {" + NL
      + "            d->GearHoldTime = 0.0f;" + NL
      + "            d->DesiredGear = current - 1;"),
+    ("ss-crawl-in-second", DC,
+     "    if (current < SECOND_GEAR) {" + NL
+     + "        if (e->Throttle < K_SHIFT_THROTTLE)",
+     "    if (current < THIRD_GEAR) {" + NL
+     + "        if (e->Throttle < K_SHIFT_THROTTLE)"),
+    ("ss-max-down-demo", DC,
+     "float   gMaxDownShiftOver       = 1.20000005f;",
+     "float   gMaxDownShiftOver       = 1.10000002f;"),
+    ("ss-sag-missing", DC,
+     "    if (rpm < e->EI->IdleRPM + K_CRAWL_OVER_IDLE" + NL
+     + "            && !(current < SECOND_GEAR)) {" + NL
+     + "        d->DesiredGear = current - 1;",
+     "    if (0" + NL
+     + "            && !(current < SECOND_GEAR)) {" + NL
+     + "        d->DesiredGear = current - 1;"),
+    ("ss-sag-inclusive", DC,
+     "    if (rpm < e->EI->IdleRPM + K_CRAWL_OVER_IDLE" + NL
+     + "            && !(current < SECOND_GEAR)) {" + NL
+     + "        d->DesiredGear = current - 1;",
+     "    if (rpm <= e->EI->IdleRPM + K_CRAWL_OVER_IDLE" + NL
+     + "            && !(current < SECOND_GEAR)) {" + NL
+     + "        d->DesiredGear = current - 1;"),
+    ("ss-sag-in-first", DC,
+     "    if (rpm < e->EI->IdleRPM + K_CRAWL_OVER_IDLE" + NL
+     + "            && !(current < SECOND_GEAR)) {" + NL
+     + "        d->DesiredGear = current - 1;",
+     "    if (rpm < e->EI->IdleRPM + K_CRAWL_OVER_IDLE" + NL
+     + "            && !(current < FIRST_GEAR)) {" + NL
+     + "        d->DesiredGear = current - 1;"),
+    ("ss-sag-keeps-sport", DC,
+     "        d->DesiredGear = current - 1;" + NL
+     + "        return AUTOMATIC;" + NL + "    }" + NL + NL
+     + "    return g;" + NL + "}",
+     "        d->DesiredGear = current - 1;" + NL
+     + "        return g;" + NL + "    }" + NL + NL
+     + "    return g;" + NL + "}"),
+    ("ss-sag-before-limiter", DC,
+     "    // ...or immediately, if they have shifted up into the limiter.",
+     "    if (rpm < e->EI->IdleRPM + K_CRAWL_OVER_IDLE)" + NL
+     + "        return AUTOMATIC;" + NL + NL
+     + "    // ...or immediately, if they have shifted up into the limiter."),
     ("ss-hold-threshold", DC, "    if (K_SPORT_HOLD < d->GearHoldTime)",
      "    if (K_SPORT_HOLD * 0.5f < d->GearHoldTime)"),
     ("ss-hold-inclusive", DC, "    if (K_SPORT_HOLD < d->GearHoldTime)",
@@ -2811,7 +2892,7 @@ MUTATIONS = [
      "float   gClutchMatchedThreshold = 50.0f;",
      "float   gClutchMatchedThreshold = 25.0f;"),
     ("g-max-down-shift-over", DC,
-     "float   gMaxDownShiftOver       = 1.10000002f;",
+     "float   gMaxDownShiftOver       = 1.20000005f;",
      "float   gMaxDownShiftOver       = 1.0f;"),
     # WorldTimeElapsed's initial value is realtime.c's now, and
     # realtime_check's rt-init-welapsed; the harness here defines its own.
