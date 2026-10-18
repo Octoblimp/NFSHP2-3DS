@@ -3163,9 +3163,10 @@ phases.
         there, as TASKS 45 had.
         - The user's log came on 2026-10-12 (`3DS Files/nfshp2_debug.txt`,
           config "DebugLog 1", so the clusters were on). Two Quick
-          Races: track 44 (Alpine, 2 laps) and then track 21. On track
-          44 the laps end at about frames 13,649 and 26,918, at the same
-          place. In the 20 s before each, the sun's glare is drawn (its
+          Races: track 44 (Fall Winds at Dawn, 2 laps) and then track
+          21 (Desert Heat). On track 44 the laps end at about frames
+          13,649 and 26,918, at the same place. In the 20 s before
+          each, the sun's glare is drawn (its
           4 quads, TASKS 45's change) and the police helicopter is over
           the player on the bridge, about 4 m above the deck (plan 4),
           with its dust on. The log is once a second, so a brief
