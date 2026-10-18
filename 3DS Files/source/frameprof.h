@@ -22,6 +22,11 @@
 // port's draw, in C3D_FrameSync. It and the wait for the GPU (citro3d's in
 // C3D_FrameBegin) are timed apart and taken out of the draw.
 //
+// A replay's frame waits too: World::GetTimestep spins until the frame is
+// as long as the step the capture logged, so the replay plays at the
+// race's own rate, a race at 20 FPS replaying at 20. That third wait is
+// timed apart and taken out of the race phase.
+//
 // The draw is split further, by FrameProfDraw's ticks, which main.c and
 // trackview.c stamp with FRAMEPROF_STAMP at each stage's end:
 //
@@ -66,7 +71,7 @@
 // and the rest as before. Their line follows the cars'.
 //
 // A line has the frame rate, the mean frame and the longest, each phase's
-// mean in milliseconds, the draw's stages, the two waits, citro3d's own two
+// mean in milliseconds, the draw's stages, the three waits, citro3d's own two
 // times (the CPU's from C3D_FrameBegin to C3D_FrameEnd, and the GPU's), and
 // retail's two rates from CalculateFrameRate. The milliseconds are the EE
 // tick's exactly, 294912 to the millisecond, and not bGetTickerDifference's,
@@ -93,6 +98,7 @@ enum {
     FRAMEPROF_DRAW,
     FRAMEPROF_VSYNC,
     FRAMEPROF_GPU_WAIT,
+    FRAMEPROF_REPLAY_WAIT,
     FRAMEPROF_LOADS,
     FRAMEPROF_PHASES
 };
@@ -157,6 +163,12 @@ typedef struct FrameProfTicks {
 } FrameProfTicks;
 
 extern FrameProfTicks FrameProfDraw;
+
+// The replay's wait in this frame's race phase, EE ticks: World::
+// GetTimestep spinning until the frame is as long as the step the capture
+// logged. main.c sets it; frameprof_add takes it out of the race phase
+// and clears it.
+extern uint32_t FrameProfReplayWait;
 
 #define FRAMEPROF_STAMP(stage) (FrameProfDraw.end[(stage)] = bGetTicker())
 

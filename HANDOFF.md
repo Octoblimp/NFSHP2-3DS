@@ -27137,3 +27137,29 @@ reaches the finish. The next step is to profile the replay:
 replay's two shots), with `gdbprof.py --period 0.2 --wait-log
 ...\nfshp2_debug.txt --wait-for "race: rc 4,"` started once the run's
 log is fresh. Not run yet.
+
+## Session 130, continued -- the replay is paced, not slow (TASKS 46)
+
+At the user's word, no more long Azahar runs: the replay's race phase
+was read in the code instead, against the device log.
+
+- **What the 20 to 34 ms is.** In a replay `world_get_timestep`
+  (`worldstep.c`, World::GetTimestep) reads the step the capture logged
+  and spins until the frame is that long (`MAX_TIME_TO_WASTE`, 0.3 s at
+  most, with the last frame's wait carried). It is called inside the
+  race phase, before the events. So a replay plays at the race's own
+  rate: the device's View Replay ran at 20, 20, 20, 22, 23, ... 30 FPS,
+  the race's own rates at the same places. The world (2.8 ms) and the
+  draw (10 to 14) were light; the spin filled the rest. The post-race's
+  highlights (rc 7) are replays too, hence its 3 to 12 ms.
+- **Not cut.** The spin is retail's, and without it the replay would
+  play fast. A 30 FPS replay needs a 30 FPS race.
+- **The frame line** (`frameprof.c`) now times the spin apart: `main.c`
+  reads the ticker either side of `world_get_timestep` in a replaying
+  frame (`FrameProfReplayWait`, cleared at each frame's top), and
+  `frameprof_add` takes it out of "race" and logs it as the third wait,
+  "waits: vsync X, gpu Y, replay Z". `frame-profiler.md` and
+  `draw-cuts.md` say so. The build is clean; nothing on screen changes.
+
+Next: the fourth profile's functions (`vt_slot`'s callers, `memset`,
+`physicscar_iterate_forces`), read from the saved profile on the host.

@@ -3226,11 +3226,14 @@ phases.
             from 32.4; the picture is the same to the pixel.
           - Found in the device log: after the finish, in the post-race
             and the instant replay (rc 7 and 4), the race phase takes
-            13.5 ms a frame on average and up to 34, so 13 of those 40
-            seconds ran at 20 FPS. The worst is the End Game Menu's View
-            Replay (rc 4): 20 to 42 ms a frame in the race phase alone.
-            Next: profile it on Azahar through `run_azahar_career.ps1
-            -Race -ViewReplay -ReplaySeconds 60` (HANDOFF Session 130).
+            13.5 ms a frame on average and up to 34. Not a cost (Session
+            130, continued): in a replay World::GetTimestep spins until
+            the frame is as long as the step the capture logged, so a
+            replay plays at the race's own rate. The device's View
+            Replay matches its race second by second, 20 FPS where the
+            race ran at 20. A faster race makes a faster replay; the
+            spin stays. The frame line now times it apart ("waits: ...
+            replay") and takes it out of "race".
         - [ ] The user's word on the envmap a face a frame.
 
 47. [ ] **A brief artifact on the bridge before the finish line.**

@@ -6178,8 +6178,13 @@ static void raceFrame(void)
                 GenerateJoyEvents();
                 MainLoopTiming.GenerateJoyEvents = bGetTicker();
             } else {
+                // A replay's step spins out the frame to the step the
+                // capture logged; frameprof times that wait apart.
+                uint32_t spin = bGetTicker();
                 float step = world_get_timestep(w);
 
+                if (pReplayManager->ReplayingFlag)
+                    FrameProfReplayWait = bGetTicker() - spin;
                 PrepareWorldTimestep(step);
                 GenerateJoyEvents();
                 MainLoopTiming.GenerateJoyEvents = bGetTicker();
@@ -8920,6 +8925,7 @@ int main(int argc, char** argv)
 
     while (hangwatch_main_loop()) {
         MainLoopTiming.StartTime = bGetTicker();
+        FrameProfReplayWait = 0;
         hidScanInput();
         u32 kDown = hidKeysDown();
         // The Circle Pad moves through the menus as the D-pad does (TASKS

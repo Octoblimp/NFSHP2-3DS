@@ -971,10 +971,19 @@ the whole race's draw and slow seconds do not compare.
 
 - **The device's numbers** for these builds on Alpine Trail's start
   straight, with "DebugLog 1" and no `nfshp2_gputiming.txt`.
-- **After the finish, the race phase.** In the device log's post-race
-  and instant replay (rc 7 and 4) it took 13.5 ms a frame on average
-  over 40 s, and up to 34 ms. 13 of the 40 seconds were over 15 ms and
-  ran at 20 FPS. Not looked at yet.
+- **After the finish, the race phase: not a cost.** In the device log's
+  post-race and instant replay (rc 7 and 4) it took 13.5 ms a frame on
+  average over 40 s, and up to 34 ms. That is retail's pacing, not
+  work. In a replay `world_get_timestep` (`worldstep.c`, World::
+  GetTimestep) takes the step the capture logged and spins until the
+  frame is that long, `MAX_TIME_TO_WASTE` (0.3 s) at most. So a replay
+  plays at the race's own rate: a stretch the race ran at 20 FPS
+  replays at 20, whatever the replay's own work. The device's View
+  Replay matches its race second by second (20, 20, 20, 22, 23, ... 30
+  FPS both). Cutting the spin would play the replay fast, so the way to
+  a 30 FPS replay is a 30 FPS race. Since then the frame line times the
+  spin apart, as "replay" in its waits, and takes it out of "race"
+  (`frameprof.h`).
 - **The world step** (4.9 ms on the device before these cuts) and
   **the cars** (2.9).
 - **The fourth profile's next functions**, by their own time (its ELF

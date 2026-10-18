@@ -14,6 +14,7 @@
 #define FRAMEPROF_SUBMIT        (FRAMEPROF_STAMPED + 1)
 
 FrameProfTicks FrameProfDraw;
+uint32_t FrameProfReplayWait;
 
 void frameprof_reset(FrameProf *fp)
 {
@@ -39,7 +40,10 @@ void frameprof_add(FrameProf *fp, const MainLoopTimingStats *t,
     fp->phase[FRAMEPROF_SOUND]    += t->UpdateSound - t->StartTime;
     fp->phase[FRAMEPROF_FLOW]     += t->ServiceGameFlow - t->UpdateSound;
     fp->phase[FRAMEPROF_RACE]     += t->GenerateJoyEvents
-                                     - t->ServiceGameFlow;
+                                     - t->ServiceGameFlow
+                                     - FrameProfReplayWait;
+    fp->phase[FRAMEPROF_REPLAY_WAIT] += FrameProfReplayWait;
+    FrameProfReplayWait = 0;
     fp->phase[FRAMEPROF_WORLD]    += t->WorldDoTimestep
                                      - t->GenerateJoyEvents;
     fp->phase[FRAMEPROF_CAMERAS]  += t->UpdateCameraMovers
@@ -113,7 +117,8 @@ bool frameprof_line(FrameProf *fp, char *buf, size_t n)
              "draw: prep %.1f, cull %.1f, envmap %.1f, mirror %.1f, sky %.1f, "
              "models %.1f, scenery %.1f, cars %.1f, hud %.1f, bottom %.1f, "
              "submit %.1f; "
-             "waits: vsync %.1f, gpu %.1f; jukebox: decode %.2f, "
+             "waits: vsync %.1f, gpu %.1f, replay %.1f; "
+             "jukebox: decode %.2f, "
              "read %.2f; citro3d cpu %.1f, gpu %.1f; "
              "C %d fps, G %d fps",
              fp->frames / secs, mean_ms(fp, fp->total),
@@ -138,6 +143,7 @@ bool frameprof_line(FrameProf *fp, char *buf, size_t n)
              mean_ms(fp, fp->stage[FRAMEPROF_SUBMIT]),
              mean_ms(fp, fp->phase[FRAMEPROF_VSYNC]),
              mean_ms(fp, fp->phase[FRAMEPROF_GPU_WAIT]),
+             mean_ms(fp, fp->phase[FRAMEPROF_REPLAY_WAIT]),
              mean_ms(fp, fp->jukeboxDecode),
              mean_ms(fp, fp->jukeboxRead),
              (double)(fp->c3dCpuMs / fp->frames),

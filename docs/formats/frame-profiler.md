@@ -125,14 +125,16 @@ Each second of a race, `frameprof` logs a line (wrapped here):
     frame: 20.0 fps, 50.1 ms, worst 50.8; sound 0.0, flow 0.0, race 0.1,
     world 1.9, cameras 0.1, draw 45.2, loads 0.0; draw: prep 0.0, cull
     2.3, envmap 8.9, sky 0.8, models 16.4, scenery 1.8, cars 4.5, hud 4.7,
-    bottom 5.4, submit 0.3; waits: vsync 2.8, gpu 0.0; jukebox: decode
-    0.00, read 0.00; citro3d cpu 44.8, gpu 0.8; C 20 fps, G 1362 fps
+    bottom 5.4, submit 0.3; waits: vsync 2.8, gpu 0.0, replay 0.0;
+    jukebox: decode 0.00, read 0.00; citro3d cpu 44.8, gpu 0.8; C 20 fps,
+    G 1362 fps
 
 - The frame rate, the mean frame and the longest.
 - Each phase's mean in milliseconds:
   - sound: the jukebox and the sample's callbacks;
   - flow: the clocks, the pads, the flow and the menus (bgf_frame);
-  - race: the coordinator, the flow's second service and the events;
+  - race: the coordinator, the flow's second service and the events,
+    less a replay's wait;
   - world: World::DoTimestep;
   - cameras: the players and the camera movers;
   - draw: the CPU's side of the draw, less the two waits;
@@ -160,7 +162,13 @@ Each second of a race, `frameprof` logs a line (wrapped here):
   `scenery_stuff_scenery`, so it timed the models' render, and the cull
   itself was inside "envmap". 13b-3 stamps the cull's end in
   `begin_frame` and names the old stage "models".
-- The two waits.
+- The three waits. Since TASKS 46 the third is a replay's: in a
+  replay World::GetTimestep spins until the frame is as long as the
+  step the capture logged, `MAX_TIME_TO_WASTE` (0.3 s) at most, so
+  the replay plays at the race's own rate. A stretch the race ran at
+  20 FPS replays at 20 FPS whatever the replay's own work. Before,
+  the spin was in "race", which read 20 to 34 ms in the device's
+  View Replay while the world and the draw were light.
 - The jukebox's worker (since 13b-3): the milliseconds it spent
   decoding, and reading the card, while the frame ran. The worker
   preempts the game on core 0, so this time is also inside whichever
