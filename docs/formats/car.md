@@ -564,6 +564,9 @@ to get wrong:
   axis (`BodyMatrix` row 0, `Car+144` and `+148`) dotted with the route
   point's direction in the ground plane, and `0 < dot` means right way. A
   car exactly across the road is facing the wrong way, and so is a NaN.
+  No route point answers 0 (retail's `0x0013343c`, `beq v1,zero` with
+  `v0 = 0` in the slot). The demo's `0x001318b8` has no test, and the
+  port's copy of it faulted on the device as a replay ended (2026-10-18).
 - **`UpdateHeadlightsAndHorn`** (retail's `0x00134198`) skips player cars
   entirely. The request is on, off, second on from the stamp. During the
   *off* phase `lit` is `WantTwoHonksAndOrBlinks == 0` (`sltiu a0,v0,1`),

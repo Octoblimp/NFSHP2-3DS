@@ -1216,6 +1216,13 @@ def model_slice2():
             # mul.s 144*12; mul.s 148*16; add.s; c.lt.s 0, dot
             dot = fadd(fmul(fw[0], dr[0]), fmul(fw[1], dr[1]))
             emit("    -> %d" % (0 if 0.0 < dot else 1))
+    # Retail's 0x0013343c: beq v1,zero with v0 = 0 in the delay slot, so no
+    # route point answers 0 before a load. The demo's 0x001318b8 had no
+    # test, and the port's copy of it faulted on the device.
+    for fi in range(len(fwds)):
+        emit("  fwd %d no point" % fi)
+        emit("    GetCurrentRoutePoint(%s)" % ctl[0])
+        emit("    -> 0")
 
     # -- headlights ---------------------------------------------------------
     # Retail's 0x00134198.
@@ -2276,6 +2283,11 @@ MUTATIONS = [
     ("collide-no-delta", CC,
      "    return ((VtBoolFn)e->fn)(vt_this(b, e)) != 0;",
      "    return ((VtBoolFn)e->fn)(b) != 0;"),
+    ("wrongway-no-null-test", CC,
+     "    if (rp == NULL)" + NL + "        return 0;" + NL, ""),
+    ("wrongway-null-answers-1", CC,
+     "    if (rp == NULL)" + NL + "        return 0;",
+     "    if (rp == NULL)" + NL + "        return 1;"),
     ("wrongway-le", CC,
      "    return (0.0f < dot) ? 0 : 1;",
      "    return (0.0f <= dot) ? 0 : 1;"),
@@ -2283,8 +2295,8 @@ MUTATIONS = [
      "    const bVector4 *fwd = &c->State.BodyMatrix.v0;",
      "    const bVector4 *fwd = &c->State.BodyMatrix.v1;"),
     ("wrongway-crossed", CC,
-     "    float dot = fwd->x * rp->Direction.x + fwd->y * rp->Direction.y;",
-     "    float dot = fwd->x * rp->Direction.y + fwd->y * rp->Direction.x;"),
+     "    dot = fwd->x * rp->Direction.x + fwd->y * rp->Direction.y;",
+     "    dot = fwd->x * rp->Direction.y + fwd->y * rp->Direction.x;"),
 
     ("lights-player-too", CC,
      "    if (c->pPlayer)" + NL + "        return;" + NL + NL +

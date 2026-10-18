@@ -3723,10 +3723,11 @@ phases.
           `bStringHash` and `~bTList<AcidEmitter>`. Over 513 ops (329
           emitter triggers, 92 groups, every list) 0 differ. Of its 56
           mutations, 54 are caught and 2 are equivalent and noted.
-        - [ ] Seen on the device: glass when a light, window or mirror
+        - [x] Seen on the device: glass when a light, window or mirror
           breaks, steam and smoke from a hurt car, a blown tire's burst,
           smoke and dirt from the wheels, and sparks where cars hit or
           scrape. Watch the frame rate where the particles are thick.
+          The user, 2026-10-18: "your new thing worked great".
 61. [ ] **Cops and racers in one wireless race.** Asked for on 2026-10-14,
         for later or next: over task 37's local wireless, one or more
         players drive cops and the others race, all in the same race.

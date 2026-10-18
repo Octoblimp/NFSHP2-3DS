@@ -535,7 +535,7 @@ TrackRoutePoint *car_get_route_point(Car *c, int find);  // 0x00131770
 float    car_get_amount_out_of_bounds(Car *c);           // 0x001317a0
 void     car_update_sound(Car *c);                       // 0x00133480
 int32_t  car_is_collideable(Car *c);                     // 0x001316a0
-int32_t  car_is_facing_wrong_way(Car *c);                // 0x001318b8
+int32_t  car_is_facing_wrong_way(Car *c);        // retail 0x00133420
 void     car_update_headlights_and_horn(Car *c); // retail 0x00134198
 
 // The borrowed fields, second helping.

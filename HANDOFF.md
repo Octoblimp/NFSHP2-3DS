@@ -27306,3 +27306,27 @@ particles a car's bursts make, all of which were skipped.
 
 Next: the device run for TASKS 60's open item, and TASKS 46's device
 items, which still wait.
+
+## Session 132 -- a crash as a replay ends
+
+The user ran e757ba6 on their 3DS: TASKS 60's particles "worked great".
+It then crashed right after a replay finished, a new crash.
+
+- **The dump** (`crash_dump_00000000.dmp`): a data abort reading
+  address 0x10, with pc in `car_is_facing_wrong_way` just after its call
+  to the controller's GetCurrentRoutePoint, and r0 = 0. The route point was
+  NULL, and +16 is its `Direction.y`.
+- **The cause.** The port's function was the demo's (`0x001318b8`), which
+  reads through the route point with no test. Retail's `0x00133420` tests
+  it first (`beq v1,zero` at `0x0013343c`) and answers 0. IsFacingWrongWay
+  is the one caller that passes find = 0, so a controller is not asked
+  to find where it is first, and an AICarController whose driving
+  location has no route point hands back NULL. The highlight cameras
+  (`democam.c`, retail `0x0019aad8`) ask it once a replay ends.
+- **The fix.** `car.c` tests it as retail does. `tools/car_check.py` adds
+  seven no-point cases (the model answers 0 after the call) and two
+  mutations, both caught: dropping the test crashes the harness, and
+  answering 1 differs. 58 scenarios, 5290 lines, 0 differ;
+  `democam_check` 0 differ. The CIA builds clean.
+
+Next: the user's device run of the fix, and TASKS 46's device items.

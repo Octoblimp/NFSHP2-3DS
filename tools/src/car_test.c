@@ -1008,6 +1008,7 @@ static TrackRoute        g_route;
 static TrackRoutePoint   g_rp;
 
 static float   g_oob;
+static int32_t g_no_point;
 static int32_t g_enabled;
 static int32_t g_honking;
 static int     g_swap_driver;
@@ -1074,7 +1075,7 @@ static TrackRoutePoint *fk_route_point(void *self, int find)
     (void)find;
     name_of(self, b, sizeof b);
     printf("    GetCurrentRoutePoint(%s)\n", b);
-    return &g_rp;
+    return g_no_point ? NULL : &g_rp;
 }
 
 static float fk_oob(void *self)
@@ -1208,6 +1209,7 @@ static void fresh2(void)
     g_car.pBaseCarSound = (BaseCarSound *)&g_sound;
     g_car.pDynamicCollisionBody = &g_body;
     g_oob = 0.0f;
+    g_no_point = 0;
     g_enabled = 0;
     g_honking = 0;
     g_swap_driver = 0;
@@ -1491,6 +1493,16 @@ static void scenario_wrong_way(void)
             printf("  fwd %d dir %d\n", f, d);
             printf("    -> %d\n", (int)car_is_facing_wrong_way(&g_car));
         }
+    }
+    // No route point, from a controller that has none: every forward axis,
+    // the backwards one too, answers 0.
+    for (f = 0; f < 7; f++) {
+        fresh2();
+        g_no_point = 1;
+        g_car.State.BodyMatrix.v0.x = kFwd[f][0];
+        g_car.State.BodyMatrix.v0.y = kFwd[f][1];
+        printf("  fwd %d no point\n", f);
+        printf("    -> %d\n", (int)car_is_facing_wrong_way(&g_car));
     }
 }
 

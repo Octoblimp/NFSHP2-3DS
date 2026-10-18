@@ -673,9 +673,13 @@ int32_t car_is_collideable(Car *c)
     return ((VtBoolFn)e->fn)(vt_this(b, e)) != 0;
 }
 
-// 0x001318b8. The car's forward axis against the route's direction, in the
-// ground plane only: BodyMatrix row 0 is Car+144 and Car+148, and the route
-// point's Direction is at +12 and +16.
+// Retail's 0x00133420 (the demo's 0x001318b8). The car's forward axis
+// against the route's direction, in the ground plane only: BodyMatrix row 0
+// is Car+144 and Car+148, and the route point's Direction is at +12 and +16.
+//
+// No route point is not the wrong way: 0x0013343c answers 0 before any
+// load. The demo read through it; the device hit one with none as a replay
+// ended and the highlight cameras looked for a shot.
 //
 // Wrong way is "not strictly positive", so a car exactly across the road --
 // and a NaN -- is facing the wrong way.
@@ -683,8 +687,11 @@ int32_t car_is_facing_wrong_way(Car *c)
 {
     TrackRoutePoint *rp = car_get_route_point(c, 0);
     const bVector4 *fwd = &c->State.BodyMatrix.v0;
-    float dot = fwd->x * rp->Direction.x + fwd->y * rp->Direction.y;
+    float dot;
 
+    if (rp == NULL)
+        return 0;
+    dot = fwd->x * rp->Direction.x + fwd->y * rp->Direction.y;
     return (0.0f < dot) ? 0 : 1;
 }
 
