@@ -16,7 +16,10 @@ cops' own IsAIControlled under it. Then GetRadarDetectorIntensity
 (0x002274a8), the HUD's radar, with the cops' IsAIControlled as shipped
 and IsCarInFront (0x00133898) and CompareDistances (0x00208598) stubbed:
 the first answers by the car asked about, the second by its second
-distance's bits, both scripted. bATan and bToPolar run as shipped. The harness (tools/src/copmanager_test.c) runs
+distance's bits, both scripted. bATan and bToPolar run as shipped. Then
+GetResetDirection (0x00228ae8), Be A Cop's reset, with the same
+IsCarInFront and Car::GetRoutePoint (0x001332d8) stubbed, a point by
+the car asked about, scripted. The harness (tools/src/copmanager_test.c) runs
 copmgr.c, copmanager.c, vtable.c and bmath.c and prints the same lines.
 
 **The stubs**, logged and answered by the same rule on both sides:
@@ -115,6 +118,8 @@ F_ADDDAMAGE = 0x001d83d0
 F_RADAR = 0x002274a8                    # GetRadarDetectorIntensity
 S_INFRONT = 0x00133898                  # Car::IsCarInFront
 S_COMPARE = 0x00208598                  # TrackPathManager::CompareDistances
+F_RESETDIR = 0x00228ae8                 # GetResetDirection
+S_ROUTEPT = 0x001332d8                  # Car::GetRoutePoint
 
 S_MALLOC = 0x002577c0
 S_DELETE = 0x00114e98
@@ -201,6 +206,7 @@ RP_FIELDS = {"TrackDirection": 12, "AIDemoMode": 24, "TimeTrialTime": 36,
 CAR_SIZE = 2304
 CAR_INDEX, CAR_PLAYER, CAR_MODE, CAR_POS, CAR_DAMAGE = 8, 24, 32, 96, 2120
 CAR_DAT = 2036                          # its distance round the track
+CAR_FWD = 144                           # State.BodyMatrix.v0
 BODY_SIZE = 352
 BODY_NCOLL, BODY_CAR = 18, 256
 NCARS = 6
@@ -475,6 +481,7 @@ def script(chunks, made):
     s += thinks(m["order"])
     s += spawns()
     s += radars()
+    s += resets()
     return s
 
 
@@ -1050,6 +1057,60 @@ def radars():
     return s
 
 
+def resets():
+    """GetResetDirection (TASKS 74): the player's cop C0 in A1, chasing
+    A2 in U0."""
+    def car(k, x, y):
+        return "car|%d|%d|1|%s|%s" % (k, k, F(x), F(y))
+
+    def fwd(k, x, y):
+        return "fwd|%d|%s|%s" % (k, F(x), F(y))
+
+    d = ["resetdir"]
+    s = track(0) + [car(1, 0.0, 0.0), car(2, 30.0, 40.0), fwd(1, 1.0, 0.0)]
+    s += points([(0.0, 0.0, 1.0, 0.0, 5.0, 5.0),
+                 (0.0, 0.0, -0.6, 0.8, 5.0, 5.0),
+                 (0.0, 0.0, 0.0, 1.0, 5.0, 5.0)])
+    # No player's cop, then one with no pursuit.
+    s += ["copn|0", "copidx|-1"] + d
+    s += ["cop|0|player", "copcar|0|1", "copn|1", "copidx|0", "copp|0|-1"]
+    s += d
+    s += ["pursuit|0|0", "chase|0|2", "copp|0|0"]
+    # Far: IsCarInFront's answer, any not 0 the cop ahead.
+    for f in (0, 1, -1, 2):
+        s += ["front|1|%d" % f] + d
+    # The distance in the plane against 20: far is IsCarInFront's -1.0,
+    # near the route point's 1.0.
+    s += ["front|1|1", "rpt|1|0"]
+    for x, y in ((12.0, 16.0), (12.000002, 16.0), (20.000002, 0.0),
+                 (19.999998, 0.0), (0.0, -20.000002), (-12.0, -16.0),
+                 (0.0, 0.0), (float("nan"), 0.0), (float("inf"), 0.0),
+                 (float("-inf"), 0.0), (1e30, 1e30), (14.142135, 14.142135),
+                 (14.142136, 14.142136), (-3.5, 7.25)):
+        s += [car(2, x, y)] + d
+    # Near: the cop's car's way against its route point's, or none.
+    s += [car(2, 3.0, 4.0), "rpt|1|-1"] + d + ["rpt|1|0"]
+    for p, x, y in ((0, 1.0, 0.0), (0, -1.0, 0.0), (0, 0.0, 1.0),
+                    (0, -0.0, 1.0), (0, -0.0, -1.0), (0, -1e-30, 0.0),
+                    (0, float("nan"), 0.0), (0, float("-inf"), 0.0),
+                    (1, 0.6, 0.8), (1, 0.8, 0.6), (1, 0.8, -0.6),
+                    (1, -0.6, -0.8), (2, 1.0, 0.0), (2, 0.0, -1.0),
+                    (2, 0.7, -0.0001), (2, -0.7071068, 0.7071068)):
+        s += ["rpt|1|%d" % p, fwd(1, x, y)] + d
+    # The cop's car off the origin: the difference is the chased car's
+    # less the cop's.
+    s += [car(1, 100.0, -50.0), car(2, 110.0, -40.0), fwd(1, 1.0, 0.0)]
+    s += d + [car(2, 120.0, -30.0)] + d + ["front|1|0"] + d
+    # A second cop, the player's: C1 in A3, in the same chase.
+    s += ["cop|1|player", "copcar|1|3", "copp|1|0", "copn|2", "copidx|1",
+          car(3, 200.0, 0.0), "front|3|0"] + d + ["front|3|1"] + d
+    s += [car(3, 25.0, 35.0), fwd(3, 0.0, -1.0), "rpt|3|2"] + d
+    s += ["rpt|3|-1"] + d + ["chase|0|1", car(1, 26.0, 36.0)] + d
+    s += ["copidx|0"] + d
+    s += ["cleanup"]
+    return s
+
+
 # =================================================================== model
 
 class Model(object):
@@ -1155,6 +1216,9 @@ class Model(object):
         for a, fn in ((S_INFRONT, self.s_infront),
                       (S_COMPARE, self.s_compare)):
             e.stub(a, fn)
+        # The reset direction's (TASKS 74).
+        self.routept = {}
+        e.stub(S_ROUTEPT, self.s_routept)
         # InitSpeedTrapStructures never sets its route search's result
         # (sp+768) before the first search, and reads the point back
         # whether or not one was found: on a first miss retail reads
@@ -1453,6 +1517,14 @@ class Model(object):
         self.emit("  infront %s %s %d -> %d" % (
             self.sym(em.reg[4]), self.sym(other), em.reg[6] & 0xffff, v))
         return v & M32
+
+    def s_routept(self, em):
+        car = em.reg[4] & M32
+        k = self.routept.get(self.cars.index(car), -1)
+        v = self.pts + PT_SIZE * k if k >= 0 else 0
+        self.emit("  routept %s %d -> %s" % (
+            self.sym(car), s32(em.reg[5]), self.sym(v)))
+        return v
 
     def s_compare(self, em):
         a, b = em.fpr[12] & M32, em.fpr[13] & M32
@@ -1760,6 +1832,15 @@ class Model(object):
             e.call(F_RADAR, m, self.cars[k], self.flag, limit=200000)
             self.emit("radar A%d -> %08x flag %d" % (
                 k, e.fpr[0] & M32, s32(e.u32(self.flag))))
+        elif o == "fwd":
+            c = self.cars[int(a[1])]
+            e.put32(c + CAR_FWD, v(2))
+            e.put32(c + CAR_FWD + 4, v(3))
+        elif o == "rpt":
+            self.routept[int(a[1])] = int(a[2])
+        elif o == "resetdir":
+            e.call(F_RESETDIR, m, limit=200000)
+            self.emit("resetdir -> %08x" % (e.fpr[0] & M32))
         elif o == "dmg":
             self.emit("dmg %s" % " ".join(
                 "%08x" % e.u32(m + 10420 + 4 * k) for k in range(14)))
@@ -3038,6 +3119,47 @@ MUTATIONS = [
      "                *flag = roadblock;\n                nearest = dist;",
      "                nearest = dist;\n            }\n            if (counts) {\n"
      "                *flag = roadblock;"),
+    # ---- GetResetDirection (TASKS 74)
+    ("rs_none_minus", C,
+     "    if (cop == NULL || (pu = cop->pMyPursuit) == NULL)\n"
+     "        return 1.0f;",
+     "    if (cop == NULL || (pu = cop->pMyPursuit) == NULL)\n"
+     "        return -1.0f;"),
+    ("rs_first_cop", C,
+     "    tCop            *cop = copmanager_get_player_cop(m);",
+     "    tCop            *cop = m->nNumCops > 0 ? m->Cops[0] : NULL;"),
+    ("rs_dy_x", C,
+     "    dy = chased->State.Position.y - mine->State.Position.y;",
+     "    dy = chased->State.Position.x - mine->State.Position.y;"),
+    ("rs_far_le", C, "    if (20.0f < sqrtf(", "    if (20.0f <= sqrtf("),
+    ("rs_far_nan", C, "    if (20.0f < sqrtf(dx * dx + dy * dy))",
+     "    if (!(sqrtf(dx * dx + dy * dy) <= 20.0f))"),
+    ("rs_far_squared", C, "    if (20.0f < sqrtf(dx * dx + dy * dy))",
+     "    if (20.0f < dx * dx + dy * dy)"),
+    ("rs_front_swap", C, "car_is_car_in_front(chased, mine, 16384)",
+     "car_is_car_in_front(mine, chased, 16384)"),
+    ("rs_front_angle", C, "car_is_car_in_front(chased, mine, 16384)",
+     "car_is_car_in_front(chased, mine, 8192)"),
+    ("rs_front_sense", C, "16384) ? -1.0f : 1.0f;", "16384) ? 1.0f : -1.0f;"),
+    ("rs_demo_flag", C, "    point = car_get_route_point(mine, 1);",
+     "    point = car_get_route_point(mine, 0);"),
+    ("rs_chased_point", C, "    point = car_get_route_point(mine, 1);",
+     "    point = car_get_route_point(chased, 1);"),
+    ("rs_nopoint_minus", C,
+     "    if (point == NULL)\n        return 1.0f;",
+     "    if (point == NULL)\n        return -1.0f;"),
+    ("rs_dot_le", C, "        < 0.0f)\n        return -1.0f;\n    return 1.0f;",
+     "        <= 0.0f)\n        return -1.0f;\n    return 1.0f;"),
+    ("rs_dot_y_x", C,
+     "            + mine->State.BodyMatrix.v0.y * point->Direction.y\n",
+     "            + mine->State.BodyMatrix.v0.y * point->Direction.x\n"),
+    ("rs_dot_no_y", C,
+     "            + mine->State.BodyMatrix.v0.y * point->Direction.y\n", ""),
+    ("rs_dot_chased", C,
+     "    if (mine->State.BodyMatrix.v0.x * point->Direction.x\n"
+     "            + mine->State.BodyMatrix.v0.y * point->Direction.y\n",
+     "    if (chased->State.BodyMatrix.v0.x * point->Direction.x\n"
+     "            + chased->State.BodyMatrix.v0.y * point->Direction.y\n"),
 ]
 
 EQUIVALENT = {

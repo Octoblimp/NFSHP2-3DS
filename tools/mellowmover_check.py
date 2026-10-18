@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Cross-check mellowmover -- MellowMover.obj but its two DoSnapshots,
-which aisnap_check checks -- against the image itself, run in mipsemu.
+which aisnap_check checks -- against retail's image, run in mipsemu.
 
     3DS Files/source/mellowmover.{c,h}   Mellovator: the constructor and
                                          destructor, Calibrate, the state
@@ -22,8 +22,18 @@ Mellovator -- one component that is four wheel speeds, four springs and a
 tyre model -- and an Aerodynamics, in a PhysicsSystem; the four Wheels are
 there to be drawn and skidded with, and nothing integrates them.
 
-The oracle and the machinery are physicscar_check's, imported rather than
-copied: the header parse and the check of every offset against mdebug, the
+**The oracle is retail** (SLES_507.31, through retail_model) since TASKS
+74, which found four changes from the demo in retail's MellowMover.obj
+(0x00219628 .. 0x0021b910) and ported them: the force-feedback table's
+first y is 0.3 (the demo's 0.4); the constructor zeroes gUglyTimestepHack
+before it builds the Mellovator; Move brakes with max(Brake, EBrake / 2);
+and UpdateCar draws each wheel no higher than its axle's
+MaxRenderingCompression. Under it CarState::CalculateWheelMatrices(int)
+is retail's too (see carstate.c). The scenarios c0-ebrake* and c0-mrc-*
+are there for them. Retail's layouts are physicscar_check's RETAIL_FIELD
+and the Car and DriverInfo offsets below.
+
+The machinery is physicscar_check's, imported rather than copied: the header parse and the check of every offset against mdebug, the
 generated dump functions and field tables, the CTI records, the emulator's
 stubs -- the allocator, the ticker, the terrain plane, the skids -- and its
 hooks, and the diff. See physicscar_check for what each one is and why.
@@ -63,7 +73,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hostbuild
 import physicscar_check as pcc
-from mipsemu import M32, f32, s32
+from mipsemu import M32, f32, fbits_to, s32
 from physicscar_check import LAYOUT, OFF, fb, hexw
 
 ROOT = pcc.ROOT
@@ -94,17 +104,19 @@ def layout_problems():
 
 
 # `#define MV_NAME  <literal>f  // gp-N  <hex>`: the literal, the word the
-# comment claims and the word in the image's pool must be one number. Two
+# comment claims and the word in retail's pool must be one number. Two
 # of them were not -- a BAM_TO_RAD typed a digit short and a HALF_PI taken
 # for the nearest float -- and each moved bSin's truncated angle by one.
+# The offsets are retail's gp's; one word differs from the demo's pool,
+# the force feedback's first point.
 LIT4 = re.compile(r"#define\s+(MV_\w+)\s+([-0-9.eE+]+)f\s*//\s*gp-(\d+)\s+"
                   r"([0-9a-f]{8})")
 
 
 def constant_problems():
-    from mipsemu import Emu
-    e = Emu(ieee=True)
-    gp = e.reg[28]
+    import retail_model
+    e = retail_model.RetailEmu(ieee=True)
+    gp = retail_model.RETAIL_GP
     out = []
     text = (ROOT / MMC).read_text(encoding="utf-8")
     found = LIT4.findall(text)
@@ -145,6 +157,7 @@ SCEN_FIELDS = [
     ("ntouch", "int", 4),           # the first n WheelTouchingGround, and n
     ("thr", "f", 0.0),              # the driver's
     ("brk", "f", 0.0),
+    ("ebrk", "f", 0.0),
     ("steer", "int", 0),
     ("dgear", "int", -1),           # AUTOMATIC
     ("draft", "f", 0.0),            # Car.DraftFactor
@@ -180,14 +193,18 @@ INVERTED = [1.0, 0.0, 0.0,
 TILT_BACK = [-x if i % 3 < 2 else x for i, x in enumerate(TILT)]
 
 # The records the scenarios drive. physicscar_check's four, then CAR 34, the
-# first of the five shipped cars whose two final drives differ, then two
+# first of the five shipped cars whose two final drives differ, then three
 # made from CAR 0 by changing a field no shipped record varies: a centre of
-# gravity off the centreline (no record has one), and a droop stop far
-# enough down that the -100 a wheel on its side is given is not the only
-# answer below it.
+# gravity off the centreline (no record has one), a droop stop far enough
+# down that the -100 a wheel on its side is given is not the only answer
+# below it, and a MaxRenderingCompression every wheel passes -- the front's
+# just above the axle's rest, the rear's below its droop stop -- for
+# retail's clamp in UpdateCar (the shipped 0.05 and 0.07 are rarely met).
 CTI_COG_Y = 276                    # CenterOfGravity.y
 CTI_DROOP = (584, 616)             # Suspension[i].BumpStop[1]
-C34, C0_COGY, C0_DROOP = 4, 5, 6
+CTI_MRC = (588, 620)               # Suspension[i].MaxRenderingCompression
+MRC = (0.0078125, -0.25)
+C34, C0_COGY, C0_DROOP, C0_MRC = 4, 5, 6, 7
 
 
 def cti_records():
@@ -197,7 +214,10 @@ def cti_records():
     droop = bytearray(recs[0])
     for o in CTI_DROOP:
         struct.pack_into("<f", droop, o, -2.0)
-    return recs + [bytes(cogy), bytes(droop)]
+    mrc = bytearray(recs[0])
+    for o, v in zip(CTI_MRC, MRC):
+        struct.pack_into("<f", mrc, o, v)
+    return recs + [bytes(cogy), bytes(droop), bytes(mrc)]
 
 
 # A Corvette on the plane at 15 m/s, yawed 36.87 degrees, its wheels
@@ -220,6 +240,14 @@ SCENARIOS = [
     Scen("c65-move", **mv(car=2, pos=(4.5, -2.25, 0.55))),
     Scen("c1-move", **mv(car=3)),
     Scen("c33-brake", **mv(car=1, thr=0.0, brk=0.5)),
+    # Retail's e-brake: half of it brakes, unless the brake is harder.
+    Scen("c0-ebrake", **mv(thr=0.0, ebrk=1.0)),
+    Scen("c0-ebrake-over", **mv(thr=0.0, brk=0.25, ebrk=0.75)),
+    Scen("c33-ebrake-under", **mv(car=1, thr=0.0, brk=0.75, ebrk=1.0)),
+    Scen("c65-ebrake-lock", **mv(car=2, pos=(4.5, -2.25, 0.55),
+                                 vel=(4.0, 3.0, 0.0),
+                                 ww=(15.0, 15.0, 14.0, 14.0), fwd=5.0,
+                                 thr=0.0, brk=0.5, ebrk=1.0)),
     # A hard brake under 30 rad/s locks: the wheels stop dead, and a
     # locked wheel holds against the slope.
     Scen("c65-lock", **mv(car=2, pos=(4.5, -2.25, 0.55), vel=(4.0, 3.0, 0.0),
@@ -266,6 +294,11 @@ SCENARIOS = [
     # The drive and the engine speed take the second final drive.
     Scen("c34-move", **mv(car=C34)),
     Scen("c0-cogy-move", **mv(car=C0_COGY)),
+    # Every drawn wheel held at its axle's MaxRenderingCompression, moving
+    # and dropped onto the stops.
+    Scen("c0-mrc-move", **mv(car=C0_MRC)),
+    Scen("c0-mrc-bottom", car=C0_MRC, pos=(0.0, 0.0, 0.3),
+         vel=(0.0, 0.0, -2.0)),
     # On its side, low enough that one rear wheel is between its stops
     # and the front beside it is past the upper one; the cosine is 0.084.
     Scen("c0-rolled-down", pos=(0.0, 0.0, 0.72), mat=ROLLED, ntouch=1),
@@ -452,6 +485,9 @@ def generate(ctis):
 
 # ================================================================= the model
 
+# The model is retail's image (pcc.Model with retail=True). The addresses
+# here are the demo's, which e.data and e.code move to retail's; the one
+# that is inside a function retail changed is retail's own.
 GP = pcc.GP
 G_MELLOVATOR_POOL = GP - 23380
 G_MELLOWMOVER_POOL = GP - 23376
@@ -465,7 +501,53 @@ G_FEEDBACK = 0x00324a38            # MellowForceFeedbackGraph
 G_JUMP = 0x00324a48                # MellowJumpStabilization
 
 SINIT = 0x00208420
-JUMP_U_W = 0x00206f8c              # `lqc2 vf1,48(sp)`, u's three stores done
+# `lqc2 vf1,48(sp)`, u's three stores done: the demo's 0x00206f8c, at the
+# same offset in retail's JumpStabilizer (0x0021a040), which differs only
+# in two offsets and a nop at its end.
+RETAIL_JUMP_U_W = 0x0021a1ac
+DEMO_JUMP_U_W = 0x00206f8c
+
+# The demo's MellowMover with retail's four changes, for a check whose
+# oracle is the demo image (carmode_check, and --demo here, which must
+# agree with the retail run line for line). Each hook does what retail's
+# instructions do at the same point:
+#   the static initialiser's MellowForceFeedbackData[0].y is 0.3;
+#   the constructor zeroes gUglyTimestepHack before the Mellovator's
+#     bOMalloc (retail's 0x00219628, in that jal's delay slot);
+#   Move stores max.s(Brake, EBrake * 0.5) (0x00219da4 .. 0x00219db8),
+#     where the demo's stores Brake (a0 the Mellovator, v0 the driver);
+#   UpdateCar's SetState gets no more than the axle's
+#     MaxRenderingCompression (0x00219bec .. 0x00219bfc): the demo has the
+#     CTI in a2, i * 4 in s3 and the compression in $f14 at its jal.
+DEMO_FEEDBACK_Y0 = 0x0032785c      # MellowForceFeedbackData[0].y
+DEMO_CTOR_MELLOVATOR = 0x00206500
+DEMO_MOVE_BRAKE = 0x00206b98       # after `swc1 $f0,300(a0)`
+DEMO_UPDATE_SETSTATE = 0x00206a04
+MV_BRAKE = 300                     # Mellovator.Brake
+CTI_MRC_FRONT = 588                # Suspension[0].MaxRenderingCompression
+
+
+def retail_mellow(e):
+    e.put32(DEMO_FEEDBACK_Y0, fb(0.3))
+
+    def ugly(em):
+        em.put32(G_UGLY, 0)
+
+    def brake(em):
+        mv, drv = em.reg[4] & M32, em.reg[2] & M32
+        b = em.u32(drv + DRV_BRAKE)
+        h = fb(fbits_to(em.u32(drv + DRV_EBRAKE)) * 0.5)
+        em.put32(mv + MV_BRAKE, h if fbits_to(b) < fbits_to(h) else b)
+
+    def mrc(em):
+        i = (em.reg[19] & M32) // 4
+        m = em.u32((em.reg[6] & M32) + CTI_MRC_FRONT + 32 * (i // 2))
+        if fbits_to(m) < fbits_to(em.fpr[14]):
+            em.fpr[14] = m
+
+    e.hook(DEMO_CTOR_MELLOVATOR, ugly)
+    e.hook(DEMO_MOVE_BRAKE, brake)
+    e.hook(DEMO_UPDATE_SETSTATE, mrc)
 
 VT_MELLOVATOR = 0x0029f2c8
 VT_MELLOWMOVER = 0x0029f330
@@ -476,13 +558,22 @@ TABLE_SYM = {
     VT_MELLOWMOVER_VEHICLE: "_vt$11MellowMover$14PhysicsVehicle",
 }
 
-CAR_SIZE = pcc.CAR_SIZE
+# Retail's Car, by carsnap_check's CAR_MAP: DraftFactor and
+# RenderingEnabled moved, and its DriverInfo keeps the type at 8, where
+# Car::ShouldVisualEffectsBeGenerated (0x00135e18) reads it. The demo's
+# are physicscar_check's.
+CAR_SIZE = 2224
+CAR_STATE, CAR_MYDRIVER = pcc.CAR_STATE, pcc.CAR_MYDRIVER
+CAR_DRAFT = 1112
+CAR_RENDERING = 1192
+DRIVERINFO_TYPE = 8
+RETAIL_CAR = (CAR_SIZE, CAR_DRAFT, CAR_RENDERING, DRIVERINFO_TYPE)
+DEMO_CAR = (pcc.CAR_SIZE, pcc.CAR_DRAFT, pcc.CAR_RENDERING,
+            pcc.DRIVERINFO_TYPE)
 DRIVER_SIZE = pcc.DRIVER_SIZE
-CAR_STATE, CAR_DRAFT, CAR_MYDRIVER = pcc.CAR_STATE, pcc.CAR_DRAFT, pcc.CAR_MYDRIVER
-CAR_RENDERING = pcc.CAR_RENDERING
-DRIVERINFO_TYPE = pcc.DRIVERINFO_TYPE
 DRV_STEERING, DRV_THROTTLE, DRV_BRAKE = (pcc.DRV_STEERING, pcc.DRV_THROTTLE,
                                          pcc.DRV_BRAKE)
+DRV_EBRAKE = pcc.DRV_EBRAKE
 DRV_DESIREDGEAR = pcc.DRV_DESIREDGEAR
 
 # The Mellovator's table, in bytes.
@@ -503,22 +594,32 @@ SYM = {
 
 
 class Model(pcc.Model):
-    def __init__(self, ctis):
-        pcc.Model.__init__(self, ctis)
+    def __init__(self, ctis, retail=True):
+        pcc.Model.__init__(self, ctis, retail=retail)
         e = self.e
+        (self.car_size, self.car_draft, self.car_rendering,
+         self.di_type) = RETAIL_CAR if retail else DEMO_CAR
         self.mm = 0
         self.cs2 = 0
         self.inuse += [0, 0]
         for i, a in ((7, G_MELLOVATOR_POOL), (8, G_MELLOWMOVER_POOL)):
             base = pcc.POOL_BASE + 0x100 * i
-            e.put32(a, base)
+            e.put32(e.data(a), base)
             self.pool_of[base] = i
+        self.g_newcal = e.data(G_USENEWCAL)
+        self.g_ugly = e.data(G_UGLY)
+        self.g_gpi = e.data(G_GPI)
+        self.g_maxi = e.data(G_MAXI)
+        self.g_feedback = e.data(G_FEEDBACK)
+        self.g_jump = e.data(G_JUMP)
 
         def zero_u_w(em):
             em.put32((em.reg[29] & M32) + 60, 0)
 
-        e.hook(JUMP_U_W, zero_u_w)
-        e.call(SINIT)
+        e.hook(RETAIL_JUMP_U_W if retail else DEMO_JUMP_U_W, zero_u_w)
+        e.call(e.code(SINIT))
+        if not retail:
+            retail_mellow(e)
         # The race is racing, as the harness's is; nothing here reads it.
         self.put(self.race, 4)
 
@@ -535,7 +636,7 @@ class Model(pcc.Model):
         o = []
         if self.car:
             o.append(("cs", self.car + CAR_STATE, "CarState"))
-            o.append(("car", self.car, CAR_SIZE))
+            o.append(("car", self.car, self.car_size))
         if self.cs2:
             o.append(("cs2", self.cs2, "CarState"))
         if self.drv:
@@ -561,8 +662,8 @@ class Model(pcc.Model):
 
     def globals(self):
         self.say("globals ugly=%08x gpi=%08x maxi=%08x newcal=%d tick=%d" % (
-            self.w(G_UGLY), self.w(G_GPI), self.w(G_MAXI),
-            s32(self.w(G_USENEWCAL)), self.tick))
+            self.w(self.g_ugly), self.w(self.g_gpi), self.w(self.g_maxi),
+            s32(self.w(self.g_newcal)), self.tick))
 
     def pools(self):
         self.say("pools " + " ".join("%s=%d" % (n, c)
@@ -600,53 +701,54 @@ class Model(pcc.Model):
 
     def build(self, s):
         e = self.e
-        self.put(G_USENEWCAL, s.newcal)
-        self.pf(G_UGLY, 1.0)
+        self.put(self.g_newcal, s.newcal)
+        self.pf(self.g_ugly, 1.0)
         self.tick = 0
         cti = self.cti = e.alloc(1376, 64)
         e.write(cti, self.ctis[s.car] + bytes(8))
-        car = self.car = self.zalloc(CAR_SIZE)
+        car = self.car = self.zalloc(self.car_size)
         drv = self.drv = self.zalloc(DRIVER_SIZE)
         di = self.zalloc(20)
-        self.put(di + DRIVERINFO_TYPE, s.dtype)
+        self.put(di + self.di_type, s.dtype)
         self.put(car + CAR_MYDRIVER, di)
-        self.pf(car + CAR_DRAFT, s.draft)
-        e.mem[car + CAR_RENDERING] = s.render & 0xff
+        self.pf(car + self.car_draft, s.draft)
+        e.mem[car + self.car_rendering] = s.render & 0xff
 
         cs = car + CAR_STATE
-        L = LAYOUT["CarState"]
-        self.put(cs + L.off("pCarInfo"), cti)
-        self.put(cs + L.off("pTopologyCoordinate"), pcc.TOPO)
+        o = self.cso
+        self.put(cs + o("pCarInfo"), cti)
+        self.put(cs + o("pTopologyCoordinate"), pcc.TOPO)
         for i in range(3):
-            self.pf(cs + L.off("Position") + 4 * i, s.pos[i])
-            self.pf(cs + L.off("Velocity") + 4 * i, s.vel[i])
-            self.pf(cs + L.off("AngularVelocity") + 4 * i, s.avel[i])
+            self.pf(cs + o("Position") + 4 * i, s.pos[i])
+            self.pf(cs + o("Velocity") + 4 * i, s.vel[i])
+            self.pf(cs + o("AngularVelocity") + 4 * i, s.avel[i])
             for j in range(3):
-                self.pf(cs + L.off("BodyMatrix") + 16 * i + 4 * j,
+                self.pf(cs + o("BodyMatrix") + 16 * i + 4 * j,
                         s.mat[3 * i + j])
-        self.pf(cs + L.off("BodyMatrix") + 60, 1.0)
+        self.pf(cs + o("BodyMatrix") + 60, 1.0)
         for i in range(4):
-            self.pf(cs + L.off("WheelAngle") + 4 * i, s.wa)
-            self.pf(cs + L.off("WheelAngularVelocity") + 4 * i, s.ww[i])
-            e.mem[cs + L.off("WheelTouchingGround") + i] = int(i < s.ntouch)
-        self.put(cs + L.off("nWheelsTouchingGround"), s.ntouch)
-        self.pf(cs + L.off("ForwardSpeed"), s.fwd)
-        self.put(cs + L.off("DriverMode"), s.dmode)
-        self.pf(cs + L.off("BoostFactor"), s.boostf)
+            self.pf(cs + o("WheelAngle") + 4 * i, s.wa)
+            self.pf(cs + o("WheelAngularVelocity") + 4 * i, s.ww[i])
+            e.mem[cs + o("WheelTouchingGround") + i] = int(i < s.ntouch)
+        self.put(cs + o("nWheelsTouchingGround"), s.ntouch)
+        self.pf(cs + o("ForwardSpeed"), s.fwd)
+        self.put(cs + o("DriverMode"), s.dmode)
+        self.pf(cs + o("BoostFactor"), s.boostf)
 
         e.mem[drv + DRV_STEERING:drv + DRV_STEERING + 2] = struct.pack(
             "<H", s.steer)
         self.pf(drv + DRV_THROTTLE, s.thr)
         self.pf(drv + DRV_BRAKE, s.brk)
+        self.pf(drv + DRV_EBRAKE, s.ebrk)
         self.put(drv + DRV_DESIREDGEAR, s.dgear)
 
         self.cs2 = 0
         arg = cs
         if s.apart:
-            n = L.size
+            n = self.tsize("CarState")
             arg = self.cs2 = self.zalloc(n)
             e.mem[arg:arg + n] = e.read(cs, n)
-            self.pf(arg + L.off("ForwardSpeed"), s.fwd2)
+            self.pf(arg + o("ForwardSpeed"), s.fwd2)
 
         self.say("== " + s.name)
         mm = self.call(SYM["new"], 64) & M32
@@ -663,8 +765,9 @@ class Model(pcc.Model):
                        OFF("PhysicsSystem", "_vtable"), 8, flags)
         if not flags & 1:
             self.say("dtor mover.vt=%08x vehicle.vt=%08x" % (
-                self.w(mm + OFF("MellowMover", "Mover", "_vtable")),
-                self.w(mm + OFF("MellowMover", "Vehicle", "_vtable"))))
+                self.vt(self.w(mm + OFF("MellowMover", "Mover", "_vtable"))),
+                self.vt(self.w(mm + OFF("MellowMover", "Vehicle",
+                                        "_vtable")))))
             self.call(SYM["delete"], mm)
         self.mm = 0
         self.pools()
@@ -689,21 +792,22 @@ class Model(pcc.Model):
 
     def s_static(self):
         self.say("== static")
-        for nm, g in (("MellowForceFeedbackGraph", G_FEEDBACK),
-                      ("MellowJumpStabilization", G_JUMP)):
+        for nm, g in (("MellowForceFeedbackGraph", self.g_feedback),
+                      ("MellowJumpStabilization", self.g_jump)):
             pts, n = self.w(g), s32(self.w(g + 4))
             self.say("%s %d %s" % (nm, n, hexw([self.w(pts + 4 * i)
                                                 for i in range(2 * n)])))
         self.say("MaxiMellowTimeStep %08x gGroundPenaltyImpulse %08x"
-                 % (self.w(G_MAXI), self.w(G_GPI)))
+                 % (self.w(self.g_maxi), self.w(self.g_gpi)))
 
     def s_tables(self):
         self.say("== tables")
         vehicle = OFF("MellowMover", "Vehicle")
-        for nm, vt in (("Mellovator", VT_MELLOVATOR),
-                       ("MellowMover", VT_MELLOWMOVER),
-                       ("MellowMover$Vehicle", VT_MELLOWMOVER_VEHICLE)):
-            n = self.e.elf.syms[TABLE_SYM[vt]][1] // 8
+        for nm, demo_vt in (("Mellovator", VT_MELLOVATOR),
+                            ("MellowMover", VT_MELLOWMOVER),
+                            ("MellowMover$Vehicle", VT_MELLOWMOVER_VEHICLE)):
+            vt = self.e.data(demo_vt)
+            n = self.e.elf.syms[TABLE_SYM[demo_vt]][1] // 8
             cells = ["n=%d" % n]
             for i in range(n):
                 delta = struct.unpack("<h", self.e.read(vt + 8 * i, 2))[0]
@@ -835,23 +939,22 @@ class Model(pcc.Model):
                     self.e.fpr[0] & M32))
                 self.dump("RigidBody", "body", body)
                 self.raw("cs", "WheelBottomOutMagnitude",
-                         cs + LAYOUT["CarState"].off("WheelBottomOutMagnitude"),
-                         16)
+                         cs + self.cso("WheelBottomOutMagnitude"), 16)
         self.teardown()
 
     def s_jump(self):
         self.build(Scen("jump"))
         body = self.comp("pBody")
-        L = LAYOUT["CarState"]
+        o = self.cso
         cs = self.car + CAR_STATE
         for n in JUMP_N:
             for mat in JUMP_MAT:
                 for v in JUMP_VEL:
-                    self.put(cs + L.off("nWheelsTouchingGround"), n)
+                    self.put(cs + o("nWheelsTouchingGround"), n)
                     for i in range(3):
-                        self.pf(cs + L.off("Velocity") + 4 * i, v[i])
+                        self.pf(cs + o("Velocity") + 4 * i, v[i])
                         for j in range(3):
-                            self.pf(cs + L.off("BodyMatrix") + 16 * i + 4 * j,
+                            self.pf(cs + o("BodyMatrix") + 16 * i + 4 * j,
                                     mat[3 * i + j])
                         self.pf(body + OFF("RigidBody", "AngularVelocity")
                                 + 4 * i, JUMP_AV[i])
@@ -866,13 +969,12 @@ class Model(pcc.Model):
 
     def s_boost(self):
         self.build(Scen("boost", boostf=1.25, draft=0.2))
-        L = LAYOUT["CarState"]
         cs = self.car + CAR_STATE
         for f in BOOST_F:
             for md in BOOST_MODE:
                 for fwd in BOOST_FWD:
-                    self.put(cs + L.off("DriverMode"), md)
-                    self.pf(cs + L.off("ForwardSpeed"), fwd)
+                    self.put(cs + self.cso("DriverMode"), md)
+                    self.pf(cs + self.cso("ForwardSpeed"), fwd)
                     self.call(SYM["boost"], self.mm, floats=[fb(f)])
                     a, b = self.comp("pAerodynamics"), self.comp("pBody")
                     self.say("boost f=%08x mode=%d fwd=%08x -> aero=%08x %08x "
@@ -978,7 +1080,7 @@ class Model(pcc.Model):
         self.teardown(0, "mover")
         # A freed slot keeps all but its first word, so the Mellovator's
         # vptr is the last destructor's.
-        self.say("freed mv.vt=%08x" % self.w(mvp + MV_VT))
+        self.say("freed mv.vt=%08x" % self.vt(self.w(mvp + MV_VT)))
         self.build(Scen("dtor-vehicle-1"))
         self.teardown(1, "vehicle")
         self.build(Scen("dtor-vehicle-0"))
@@ -990,7 +1092,7 @@ class Model(pcc.Model):
         self.call("__10MellovatorP11CarTypeInfoP9RigidBodyP18TopologyCoordinate",
                   p, self.cti, self.comp("pBody"), pcc.TOPO)
         self.vcall(p, MV_VT, 8, 0)
-        self.say("mellovator dtor 0 vt=%08x" % self.w(p + MV_VT))
+        self.say("mellovator dtor 0 vt=%08x" % self.vt(self.w(p + MV_VT)))
         self.pools()
         self.call("__dl__10MellovatorPv", p)
         self.pools()
@@ -1012,8 +1114,8 @@ class Model(pcc.Model):
         return self.out
 
 
-def model(ctis=None):
-    return Model(ctis or cti_records()).run()
+def model(ctis=None, retail=True):
+    return Model(ctis or cti_records(), retail=retail).run()
 
 
 # ================================================================ the build
@@ -1035,6 +1137,9 @@ MUTATIONS = [
     ("mm-sinit-feedback-y0", MMC,
      "    MellowForceFeedbackData[0].y = MV_FEEDBACK_Y0;",
      "    MellowForceFeedbackData[0].y = 0.5f;"),
+    ("mm-sinit-feedback-demo", MMC,
+     "    MellowForceFeedbackData[0].y = MV_FEEDBACK_Y0;",
+     "    MellowForceFeedbackData[0].y = 0.4f;"),
     ("mm-sinit-feedback-x1", MMC,
      "    MellowForceFeedbackData[1].x = 20.0f;",
      "    MellowForceFeedbackData[1].x = 10.0f;"),
@@ -1906,8 +2011,8 @@ MUTATIONS = [
      "                                       m->State.ww[i],\n",
      "                                       m->State.ww[0],\n"),
     ("mm-uc-no-travel", MMC,
-     "                                       m->SuspensionPosition[i]);",
-     "                                       0.0f);"),
+     "        susp = m->SuspensionPosition[i];",
+     "        susp = 0.0f;"),
     ("mm-uc-always-touching", MMC,
      "                                           (int8_t)m->TouchingGround[i]);",
      "                                           (int8_t)1);"),
@@ -2077,8 +2182,25 @@ MUTATIONS = [
      "    m->Throttle     = d->Throttle;",
      "    m->Throttle     = 0.0f;"),
     ("mm-move-brake", MMC,
-     "    m->Brake        = d->Brake;",
+     "    m->Brake        = max_s(d->Brake, d->EBrake * 0.5f);",
      "    m->Brake        = 0.0f;"),
+    # Retail's three changes to the mover (TASKS 74), each put back to the
+    # demo's, and two near misses.
+    ("mm-move-no-ebrake", MMC,
+     "    m->Brake        = max_s(d->Brake, d->EBrake * 0.5f);",
+     "    m->Brake        = d->Brake;"),
+    ("mm-move-ebrake-full", MMC,
+     "    m->Brake        = max_s(d->Brake, d->EBrake * 0.5f);",
+     "    m->Brake        = max_s(d->Brake, d->EBrake);"),
+    ("mm-ctor-ugly-kept", MMC,
+     "    gUglyTimestepHack = 0.0f;\n    mm->pMellovator",
+     "    mm->pMellovator"),
+    ("mm-update-no-mrc", MMC,
+     "        if (mrc < susp)\n            susp = mrc;",
+     "        (void)mrc;"),
+    ("mm-update-mrc-floor", MMC,
+     "        if (mrc < susp)\n            susp = mrc;",
+     "        if (mrc > susp)\n            susp = mrc;"),
     ("mm-move-ground-effect", MMC,
      "    a->GroundEffect = (float)cs->nWheelsTouchingGround * 0.25f;",
      "    a->GroundEffect = (float)cs->nWheelsTouchingGround * 0.5f;"),
@@ -2254,6 +2376,8 @@ def main():
     ap.add_argument("--only", metavar="NAME,...",
                     help="with --mutate, only these mutations")
     ap.add_argument("--dump", metavar="PREFIX")
+    ap.add_argument("--demo", action="store_true",
+                    help="the demo image, with retail's changes hooked in")
     args = ap.parse_args()
 
     probs = layout_problems()
@@ -2269,7 +2393,7 @@ def main():
         sys.exit(mutate_pass(args.only.split(",") if args.only else None))
 
     ctis = cti_records()
-    lines = model(ctis)
+    lines = model(ctis, retail=not args.demo)
     with tempfile.TemporaryDirectory() as tmp:
         exe = build_harness(tmp, ctis)
         out = Path(tmp) / "harness.txt"

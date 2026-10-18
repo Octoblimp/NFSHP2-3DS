@@ -1680,6 +1680,7 @@ static void build_setstate_fixture(void)
         g_sinfo.Wheels[i].Radius = 0.32f + 0.01f * (float)i;
         g_sinfo.Wheels[i].Width = 0.21f;
         g_sinfo.Wheels[i].WheelNumber = i;
+        g_sinfo.Wheels[i].OffsetY = (i & 1) ? 0.03f : -0.02f;
     }
 
     for (i = 0; i < 4; i++)

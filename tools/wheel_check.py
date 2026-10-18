@@ -2130,6 +2130,7 @@ class SWI(object):
         self.Radius = fadd(f32(0.32), fmul(f32(0.01), f32(i)))
         self.Width = f32(0.21)
         self.WheelNumber = i
+        self.OffsetY = f32(0.03) if (i & 1) else f32(-0.02)
 
 
 SWI_ALL = [SWI(i) for i in range(4)]
@@ -2154,7 +2155,7 @@ def setstate_state():
     for i in range(4):
         wi = SWI_ALL[i]
         info.Wheels[i] = dict(x=wi.PositionX, y=wi.PositionY,
-                              z=wi.PositionZ, r=wi.Radius)
+                              z=wi.PositionZ, r=wi.Radius, oy=wi.OffsetY)
     cs.pCarInfo = info
     cs.pTopologyCoordinate = TOPOLOGY
     cs.ForwardSpeed = f32(20.0)

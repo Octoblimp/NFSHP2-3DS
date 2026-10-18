@@ -30,29 +30,30 @@ static bVector2 MellowJumpStabilizationGraph[3];
 // 0x00313c60. Each wheel's partner across its axle.
 static const int32_t SwayBarTable[4] = { 1, 0, 3, 2 };
 
-// The .lit4 constants, gp-27792 .. gp-27724. HALF_PI is not the float
-// nearest pi/2 but the one above it, and a one-ulp slip in either of the
-// angle constants moves a wheel's heading far enough to move bSin's
-// truncated angle by one: tools/mellowmover_check.py reads every one of
-// these back out of the pool.
-#define MV_MS_TO_MPH          2.237f              // gp-27792  400f2b02
-#define MV_HIGH_SPEED_FRICTION 0.7f               // gp-27788  3f333333
-#define MV_UPRIGHT            0.1f                // gp-27784  3dcccccd
-#define MV_GRAVITY            9.8f                // gp-27780  411ccccd
-#define MV_IDLE_THROTTLE      0.05f               // gp-27776  3d4ccccd
-#define MV_SPIN_SCALE         124.99999237060547f // gp-27772  42f9ffff
-#define MV_LOCK_BRAKE         0.95f               // gp-27768  3f733333
-#define MV_UNLOCK_BRAKE       0.2f                // gp-27764  3e4ccccd
-#define MV_RADS_TO_RPM_HALF   4.774652004241943f  // gp-27760  4098c9f3, 15/pi
-#define MV_MIN_COS            0.001f              // gp-27756  3a83126f
-#define MV_MIN_DT             0.0001f             // gp-27752  38d1b717
-#define MV_BAM_TO_RAD         9.58738019107841e-05f // gp-27748 38c90fdb
-#define MV_HALF_PI            1.5707964897155762f // gp-27744  3fc90fdc
-#define MV_SLIP_KNEE          0.05f               // gp-27740  3d4ccccd
-#define MV_HOLD_BRAKE         0.4f                // gp-27736  3ecccccd
-#define MV_HOLD_SPEED         0.1f                // gp-27732  3dcccccd
-#define MV_FEEDBACK_Y0        0.4f                // gp-27728  3ecccccd
-#define MV_JUMP_KNEE          0.1f                // gp-27724  3dcccccd
+// The .lit4 constants, retail's gp-27316 .. gp-27248 (the demo's gp-27792
+// .. gp-27724). HALF_PI is not the float nearest pi/2 but the one above it,
+// and a one-ulp slip in either of the angle constants moves a wheel's
+// heading far enough to move bSin's truncated angle by one:
+// tools/mellowmover_check.py reads every one of these back out of the
+// pool. FEEDBACK_Y0 is the one retail changed: the demo's is 0.4.
+#define MV_MS_TO_MPH          2.237f              // gp-27316  400f2b02
+#define MV_HIGH_SPEED_FRICTION 0.7f               // gp-27312  3f333333
+#define MV_UPRIGHT            0.1f                // gp-27308  3dcccccd
+#define MV_GRAVITY            9.8f                // gp-27304  411ccccd
+#define MV_IDLE_THROTTLE      0.05f               // gp-27300  3d4ccccd
+#define MV_SPIN_SCALE         124.99999237060547f // gp-27296  42f9ffff
+#define MV_LOCK_BRAKE         0.95f               // gp-27292  3f733333
+#define MV_UNLOCK_BRAKE       0.2f                // gp-27288  3e4ccccd
+#define MV_RADS_TO_RPM_HALF   4.774652004241943f  // gp-27284  4098c9f3, 15/pi
+#define MV_MIN_COS            0.001f              // gp-27280  3a83126f
+#define MV_MIN_DT             0.0001f             // gp-27276  38d1b717
+#define MV_BAM_TO_RAD         9.58738019107841e-05f // gp-27272 38c90fdb
+#define MV_HALF_PI            1.5707964897155762f // gp-27268  3fc90fdc
+#define MV_SLIP_KNEE          0.05f               // gp-27264  3d4ccccd
+#define MV_HOLD_BRAKE         0.4f                // gp-27260  3ecccccd
+#define MV_HOLD_SPEED         0.1f                // gp-27256  3dcccccd
+#define MV_FEEDBACK_Y0        0.3f                // gp-27252  3e99999a
+#define MV_JUMP_KNEE          0.1f                // gp-27248  3dcccccd
 
 void mellowmover_static_init(void)
 {
@@ -685,6 +686,9 @@ MellowMover *mellowmover_init(MellowMover *mm, Car *car,
     mm->pBody = rigidbody_init(rigidbody_new(), &mm->CTI->Body);
     physicssystem_add_component(&mm->Vehicle, (PhysicsComponent *)mm->pBody);
 
+    // Retail's (0x00219628, in the delay slot of the Mellovator's bOMalloc).
+    // The demo leaves the last mover's step here.
+    gUglyTimestepHack = 0.0f;
     mm->pMellovator = mellovator_init(mellovator_new(), mm->CTI, mm->pBody,
                                       cs->pTopologyCoordinate);
     physicssystem_add_component(&mm->Vehicle,
@@ -801,7 +805,7 @@ void mellowmover_update_car(MellowMover *mm, float dt)
     for (i = 0; i < 4; i++) {
         Mellovator *m = mm->pMellovator;
         Wheel *w = mm->pWheels[i];
-        float angle, steer;
+        float angle, steer, mrc, susp;
 
         // Nothing integrates these wheels, so the angle is advanced here by
         // the Mellovator's speed over the whole frame. The steering goes
@@ -811,10 +815,17 @@ void mellowmover_update_car(MellowMover *mm, float dt)
         steer = 0.0f;
         if (w->WI->WheelNumber < 2)
             steer = (float)mm->Mover.Driver->Steering;
+
+        // Retail draws the wheel no further up than its axle's
+        // MaxRenderingCompression (`c.lt.s ; bc1tl mov.s`, 0x00219b20);
+        // the demo passes the Mellovator's compression as it is.
+        susp = m->SuspensionPosition[i];
+        mrc = mm->CTI->Suspension[i / 2].MaxRenderingCompression;
+        if (mrc < susp)
+            susp = mrc;
         wheel_set_state_from_car_state(w, cs, (void *)mm->CTI, angle,
                                        m->State.ww[i],
-                                       (uint16_t)ee_trunc_w(steer),
-                                       m->SuspensionPosition[i]);
+                                       (uint16_t)ee_trunc_w(steer), susp);
         carstate_set_wheel_touching_ground(cs, i,
                                            (int8_t)m->TouchingGround[i]);
 
@@ -961,7 +972,9 @@ float mellowmover_move(MellowMover *mm, float dt)
     cs = mm->State;
     a  = mm->pAerodynamics;
     m->Throttle     = d->Throttle;
-    m->Brake        = d->Brake;
+    // Retail's `max.s` (0x00219d90): the e-brake brakes a mellow car at
+    // half strength. The demo takes Brake alone.
+    m->Brake        = max_s(d->Brake, d->EBrake * 0.5f);
     a->GroundEffect = (float)cs->nWheelsTouchingGround * 0.25f;
     m->Steering     = d->Steering;
     m->DesiredGear  = d->DesiredGear;

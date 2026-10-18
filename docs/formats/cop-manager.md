@@ -185,6 +185,30 @@ MonitorImpact (`0x00228310`):
 Retail reads the player's cop as `Cops[nPlayerCopIndex]` with no test of
 -1; the port finds none.
 
+## The reset direction (TASKS 74)
+
+When Be A Cop's player resets, RealDriver turns the cop's car the way
+GetResetDirection (`0x00228ae8`) says: 1.0 along the route, -1.0
+against it. Until TASKS 74 the port left the seam
+`gCopManagerGetResetDirectionFn` unbound, so a reset cop always faced
+along the route. `main.c` now binds `copmgr.c`'s
+`copmanager_get_reset_direction`.
+
+- With no player's cop, or one with no pursuit, it is 1.0.
+- **More than 20 m** in the plane from the chased car: -1.0 when the
+  cop is ahead of it, by `IsCarInFront(chased, cop's car, 16384)`, a
+  quarter turn either side of the chased car's nose; else 1.0. The cop
+  then faces back at a car it has got ahead of.
+- **Within 20 m** (a NaN distance counts as within): the cop's car's
+  route point, `GetRoutePoint(car, 1)`; with none, 1.0. Else -1.0 when
+  the car's x axis points against the point's direction (their dot
+  product in the plane under 0), else 1.0. The cop keeps the way it
+  was going.
+
+The demo's (`0x00214740`) is the same but for the route point, which it
+asks for with no flag (retail's GetRoutePoint gained it). The chased car
+and the cop's car are read with no test.
+
 ## Think (12f)
 
 World's step calls GlobalCopThink every frame (`gGlobalCopThinkFn`,
@@ -517,7 +541,15 @@ that print their arguments. SetSpeedTrap and FindCopForSpeedTrap run
 for real, and the cars' moves and resets print.
 
 The cops' Think, the pursuits' Update and the other seams are logging
-stand-ins on both sides. 87402 operations, 33602 lines, 0 differ.
+stand-ins on both sides.
+
+TASKS 74 adds GetResetDirection: no player's cop, then one with no
+pursuit; IsCarInFront's four answers; the distance either side of 20,
+exactly 20, NaN and the infinities; no route point; and the dot product
+at 0, -0, a tiny negative, NaN and both signs on three route points,
+with a second player's cop and a chase moved to another car.
+Car::GetRoutePoint is a stand-in that prints its flag. 16 mutations, all
+caught. 87815 operations, 34862 lines, 0 differ.
 
 `--mutate` runs out of the tree through `mutpar`: 363 mutations, 358
 caught, and five equivalent:

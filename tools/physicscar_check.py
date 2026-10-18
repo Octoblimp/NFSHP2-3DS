@@ -113,6 +113,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hostbuild
 import mipsemu
+import retail_model
 from mipsemu import Emu, M32, M64, f32, fbits_to, f_to_bits, s32
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -204,6 +205,28 @@ LINKS = {"pNext", "pPrev"}
 # demo has padding or after its fields. Neither checked against mdebug nor
 # dumped: the demo code these checkers run never writes them.
 RETAIL_ONLY = {("CarState", "DistanceMoved"), ("PhysicsCar", "FlippedTimer")}
+
+# A model on the retail image (Model(retail=True)) reads and writes these
+# records at retail's offsets: the port's comment offset below the first
+# field retail moved, and this table's from there on (carsnap_check's rows).
+# Every other record a retail model dumps is laid out as the demo's.
+RETAIL_MOVED = {"CarState": 876}
+RETAIL_FIELD = {
+    ("CarState", "DistanceMoved"): 876,
+    ("CarState", "TractionUsage"): 880, ("CarState", "SkidLeft"): 884,
+    ("CarState", "SkidRight"): 888,
+    ("CarState", "nWheelsTouchingGround"): 892,
+    ("CarState", "ForwardSpeed"): 896,
+    ("CarState", "VelocityMagnitude"): 900,
+    ("CarState", "CurrentGear"): 904, ("CarState", "Throttle"): 908,
+    ("CarState", "RPM"): 912, ("CarState", "RedLineSyncRPM"): 916,
+    ("CarState", "ClutchEngaged"): 920, ("CarState", "DriverMode"): 924,
+    ("CarState", "BoostFactor"): 928, ("CarState", "BurnOutState"): 932,
+    ("CarState", "BurnOutTime"): 936, ("CarState", "BurnOutTraction"): 940,
+    ("CarState", "BurnOutAllow"): 944,
+    ("CarState", "RelCoordMatrix"): 960, ("CarState", "MatrixValid"): 1024,
+}
+RETAIL_SIZE = {"CarState": 1040}
 
 FIELD_RE = re.compile(
     r"^\s*(?:const\s+)?(?:struct\s+)?(\w+)\s*(\*?)\s*(?:const\s+)?(\w+)\s*"
@@ -951,6 +974,10 @@ TICK = 0.00025                     # a Timer tick, in seconds
 # RigidBody's damping tables, Wheel's tables and Aerodynamics', and Car's,
 # for the post-collision yaw profile Move reads.
 SINITS = [0x00137438, 0x00193d20, 0x0019b558, 0x001a4de8, 0x001347c0]
+# Retail's bmatrix.o has one more: it puts the (0, 0, 0, 1) that
+# bMulMatrix(bVector3 *, ...) adds to its point at 0x00320a60, where the
+# demo's builds the 1 on the stack. The demo has no twin to map it from.
+RETAIL_BMATRIX_SINIT = 0x0025afa8
 
 CAR_SIZE = 2016
 DRIVER_SIZE = 560
@@ -968,6 +995,31 @@ def retail_clear(e):
     def store(em):
         em.mem[(em.reg[16] & M32) + 516] = 0xff
     e.hook(DEMO_CLEAR_TAIL, store)
+
+
+# The port's CarState::CalculateWheelMatrices(int) is retail's since TASKS
+# 74 (0x001c0d78). Its BrakeMatrix gets the suspension lift on z as the
+# WheelMatrix does, and both get the WheelInfo's word 24 (OffsetY) on y.
+# The demo's (0x001b6d10) has built both row 3s on the stack by 0x001b6de8,
+# with the record in s0 and the wheel in s1: the hook makes the three adds
+# retail makes there, each a single add.s of the same two words.
+DEMO_WHEEL_ROW3 = 0x001b6de8
+
+
+def retail_wheel_matrices(e):
+    def add(em, a, b):
+        em.put32(a, f_to_bits(fbits_to(em.u32(a)) + fbits_to(b)))
+
+    def lift(em):
+        sp = em.reg[29] & M32
+        cs = em.reg[16] & M32
+        wheel = s32(em.reg[17])
+        susp = em.u32(cs + 768 + 4 * wheel)
+        oy = em.u32(em.u32(cs) + 288 + 32 * wheel + 24)
+        add(em, sp + 120, susp)     # BrakeMatrix.v3.z
+        add(em, sp + 116, oy)       # BrakeMatrix.v3.y
+        add(em, sp + 52, oy)        # WheelMatrix.v3.y
+    e.hook(DEMO_WHEEL_ROW3, lift)
 REALDRIVER_SIZE = 568
 PC_SIZE = 116
 
@@ -1020,8 +1072,15 @@ def hexw(ws):
 
 
 class Model(object):
-    def __init__(self, ctis):
-        e = self.e = Emu(ieee=True, eediv=True)
+    """The demo image, or with `retail` SLES_507.31 under the demo's names:
+    every address below goes through e.code / e.data, which the demo's Emu
+    answers with the address itself, and the records RETAIL_MOVED names
+    are read at retail's offsets. physicscar_check's own model is the
+    demo's; mellowmover_check's is retail's."""
+
+    def __init__(self, ctis, retail=False):
+        self.retail = retail
+        e = self.e = retail_model.emu(retail, ieee=True, eediv=True)
         e.stub_bware()
         self.out = []
         self.ctis = ctis
@@ -1030,8 +1089,17 @@ class Model(object):
         self.inuse = [0] * len(POOLS)
         self.pool_of = {}
         for i, off in enumerate(POOL_SLOT):
-            e.put32(GP + off, POOL_BASE + 0x100 * i)
+            e.put32(e.data(GP + off), POOL_BASE + 0x100 * i)
             self.pool_of[POOL_BASE + 0x100 * i] = i
+        # retail vtable -> the demo's, which the port's vptrs hold
+        self.vt_demo = {}
+        if retail:
+            for name, (a, _sz) in e.map.demo.syms.items():
+                if name.startswith("_vt$"):
+                    try:
+                        self.vt_demo[e.data(a)] = a
+                    except mipsemu.MipsError:
+                        pass
 
         def omalloc(em):
             pool = em.reg[4] & M32
@@ -1103,9 +1171,9 @@ class Model(object):
         # RigidBody::ComputeAuxiliaries: sp+204 is the w of the quad that
         # zeroes both accumulators and then carries gravity; sp+220 is the
         # w of gravity's point of application.
-        e.hook(RB_AUX_JUNK, zero_words(204, 220))
+        e.hook(e.code(RB_AUX_JUNK), zero_words(204, 220))
         # Aerodynamics::ResolveForces: sp+28 is the drag point's w.
-        e.hook(AERO_DRAG_JUNK, zero_words(28))
+        e.hook(e.code(AERO_DRAG_JUNK), zero_words(28))
 
         # PhysicsSystem::IntegrateEuler: the derivative array is the first
         # 560 bytes of the frame, and the port clears it (physicssystem.c).
@@ -1113,22 +1181,29 @@ class Model(object):
             sp = em.reg[29] & M32
             em.mem[sp:sp + 560] = bytes(560)
 
-        e.hook(EULER_FRAME, zero_derivative)
+        e.hook(e.code(EULER_FRAME), zero_derivative)
 
         # Move's brake stand builds a quad on the stack from three stores
         # and a fourth word nothing wrote, and stores all four in the
-        # body's momentum; the port writes 0 there too.
-        e.hook(BRAKE_STAND_P, zero_words(12))
+        # body's momentum; the port writes 0 there too. Retail changed
+        # PhysicsCar::Move (TASKS 73), so no offset maps, and no retail
+        # model runs it yet.
+        if not retail:
+            e.hook(BRAKE_STAND_P, zero_words(12))
+            retail_wheel_matrices(e)
 
         e.stub(WHEEL_SKIDS, self.skids)
         self.race = e.alloc(16, 16)
         e.mem[self.race:self.race + 16] = bytes(16)
-        e.put32(G_RACE, self.race)
+        e.put32(e.data(G_RACE), self.race)
 
         for a in SINITS:
-            e.call(a)
+            e.call(e.code(a))
+        if retail:
+            e.call(RETAIL_BMATRIX_SINIT)
+        terrain = e.data(TERRAIN_TABLE)
         for i, (st, dy, ro) in enumerate(TERRAIN):
-            a = TERRAIN_TABLE + TT_STRIDE * i
+            a = terrain + TT_STRIDE * i
             e.put32(a + TT_STATIC, st)
             e.put32(a + TT_DYNAMIC, dy)
             e.put32(a + TT_ROLLING, ro)
@@ -1211,17 +1286,42 @@ class Model(object):
                     o.append((nm, a, t))
         return o
 
+    def foff(self, t, f):
+        """The image's offset of field `f` of record `t`."""
+        if not self.retail or t not in RETAIL_MOVED:
+            return f.off
+        r = RETAIL_FIELD.get((t, f.name))
+        if r is not None:
+            return r
+        if f.off >= RETAIL_MOVED[t] and f.kind not in ("pad", "skip"):
+            raise mipsemu.MipsError("no retail offset for %s.%s" % (t, f.name))
+        return f.off
+
+    def cso(self, name):
+        """A CarState field's offset in the image."""
+        return self.foff("CarState", LAYOUT["CarState"].by[name])
+
+    def tsize(self, t):
+        if self.retail and t in RETAIL_SIZE:
+            return RETAIL_SIZE[t]
+        return LAYOUT[t].size
+
+    def vt(self, v):
+        """A vptr as the port spells it: the demo's table."""
+        return self.vt_demo.get(v, v)
+
     def label(self, p):
         if p == 0:
             return "null"
         for nm, base, t in self.objects():
-            size = LAYOUT[t].size if isinstance(t, str) else t
+            size = self.tsize(t) if isinstance(t, str) else t
             if base <= p < base + size:
                 off = p - base
                 if isinstance(t, str):
                     for f in LAYOUT[t].fields:
-                        if f.kind != "pad" and f.off <= off < f.off + f.size:
-                            return "%s.%s+%d" % (nm, f.name, off - f.off)
+                        fo = self.foff(t, f)
+                        if f.kind != "pad" and fo <= off < fo + f.size:
+                            return "%s.%s+%d" % (nm, f.name, off - fo)
                 return "%s+%d" % (nm, off)
         return "?"
 
@@ -1242,18 +1342,22 @@ class Model(object):
 
     def dump(self, t, pfx, a):
         for f in LAYOUT[t].fields:
-            if f.kind == "raw":
-                self.raw(pfx, f.name, a + f.off, f.size)
+            fa = a + self.foff(t, f)
+            if f.kind == "raw" and f.name == "_vtable" and f.size == 4 and \
+                    self.retail:
+                self.say("%s.%s = %08x" % (pfx, f.name, self.vt(self.w(fa))))
+            elif f.kind == "raw":
+                self.raw(pfx, f.name, fa, f.size)
             elif f.kind == "ptr":
                 if f.dim:
                     for i in range(f.dim):
                         self.say("%s.%s[%d] -> %s" % (
-                            pfx, f.name, i, self.label(self.w(a + f.off + 4 * i))))
+                            pfx, f.name, i, self.label(self.w(fa + 4 * i))))
                 else:
                     self.say("%s.%s -> %s" % (pfx, f.name,
-                                              self.label(self.w(a + f.off))))
+                                              self.label(self.w(fa))))
             elif f.kind == "nest":
-                self.dump(f.ctype, pfx + "." + f.name, a + f.off)
+                self.dump(f.ctype, pfx + "." + f.name, fa)
 
     def globals(self):
         self.say("globals ugly=%08x trigger=%d counter=%d resolve=%08x "

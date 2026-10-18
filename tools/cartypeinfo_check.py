@@ -142,6 +142,7 @@ NESTED_SIZE = [
 # host shows up as a differing offset.
 NESTED_OFF = [
     ("Wheels[2].Radius", 288 + 2 * 32 + 12),
+    ("Wheels[3].OffsetY", 288 + 3 * 32 + 24),
     ("Tires[1].ForceScale", 416 + 32 + 8),
     ("Body.InertiaTensor", 480 + 16),
     ("Suspension[1].Damping1", 560 + 32 + 8 + 4),
@@ -173,7 +174,6 @@ ARRAY_SIZE = [
     ("LocationProb", 20),
     ("AvailableSkins", 10),
     ("Dummy", 6),
-    ("WheelInfo.Padding", 8),
     ("TireInfo.dummy", 12),
     ("SuspensionInfo.Damping", 8),
     ("SuspensionInfo.BumpStop", 8),

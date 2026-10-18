@@ -52,6 +52,12 @@
 
 // 32 bytes. Position is three bare floats, not a bVector3 -- there is no
 // pad, which is why Radius lands at 12. carstate.h says the same.
+//
+// OffsetY is the demo's first Padding word. Retail's
+// CarState::CalculateWheelMatrices (0x001c0d78) adds it to both wheel
+// matrices' y, and GLOBALB fills it: signed against PositionY, it pulls
+// each wheel of the first 49 records 1 to 7 cm in, and is 0 in the last
+// 15. The demo's code never reads it. OffsetY is the port's name.
 typedef struct WheelInfo {
     float   PositionX;   //  0
     float   PositionY;   //  4
@@ -59,7 +65,8 @@ typedef struct WheelInfo {
     float   Radius;      // 12
     float   Width;       // 16
     int32_t WheelNumber; // 20
-    float   Padding[2];  // 24
+    float   OffsetY;     // 24
+    float   Padding;     // 28
 } WheelInfo;
 
 // 32 bytes. Two of these in CarTypeInfo -- front and rear.

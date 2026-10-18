@@ -65,6 +65,9 @@ static void scenario_layout(void)
     printf("noff %-24s %zu\n", "Wheels[2].Radius",
            offsetof(CarTypeInfo, Wheels) + 2 * sizeof(WheelInfo)
                + offsetof(WheelInfo, Radius));
+    printf("noff %-24s %zu\n", "Wheels[3].OffsetY",
+           offsetof(CarTypeInfo, Wheels) + 3 * sizeof(WheelInfo)
+               + offsetof(WheelInfo, OffsetY));
     printf("noff %-24s %zu\n", "Tires[1].ForceScale",
            offsetof(CarTypeInfo, Tires) + sizeof(TireInfo)
                + offsetof(TireInfo, ForceScale));
@@ -102,7 +105,6 @@ static void scenario_layout(void)
 #undef ARR
 #define NARR(t, f) printf("arr %-28s %zu\n", #t "." #f, \
                           sizeof(((t *)0)->f))
-    NARR(WheelInfo, Padding);
     NARR(TireInfo, dummy);
     NARR(SuspensionInfo, Damping);
     NARR(SuspensionInfo, BumpStop);

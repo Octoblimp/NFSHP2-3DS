@@ -82,7 +82,7 @@ static float bf(uint32_t u)
 
 // ------------------------------------------------------------ the names
 
-#define MAX_NAMES  512
+#define MAX_NAMES  1024
 #define MAX_CHUNKS 64
 
 static struct {
@@ -415,11 +415,17 @@ TrackRoute *car_get_route(Car *c, int find)
     return NULL;
 }
 
+// The reset direction's (TASKS 74): a point by the car asked about, 1 on
+// for P0, 0 for none.
+static int routept[NCARS];
+
 TrackRoutePoint *car_get_route_point(Car *c, int find)
 {
-    (void)c; (void)find;
-    unreached("car_get_route_point");
-    return NULL;
+    int              k = routept[c - cars] - 1;
+    TrackRoutePoint *p = k >= 0 ? &pts[k] : NULL;
+
+    printf("  routept %s %d -> %s\n", sym(c), find, sym(p));
+    return p;
 }
 
 void ai_get_next_route_point(NearestRoutePointInfo *info)
@@ -1364,6 +1370,15 @@ static void op(char **a, int na)
         if (pCopManager != NULL)
             copmgr_car_impact(pCopManager, &bodies[k], bf(num(a[2])));
         printf("impact A%d %08x\n", k, num(a[2]));
+    } else if (!strcmp(o, "fwd")) {
+        Car *c = &cars[atoi(a[1])];
+
+        c->State.BodyMatrix.v0.x = bf(num(a[2]));
+        c->State.BodyMatrix.v0.y = bf(num(a[3]));
+    } else if (!strcmp(o, "rpt")) {
+        routept[atoi(a[1])] = atoi(a[2]) + 1;
+    } else if (!strcmp(o, "resetdir")) {
+        printf("resetdir -> %08x\n", fb(copmanager_get_reset_direction(m)));
     } else if (!strcmp(o, "dmg")) {
         printf("dmg ");
         hexwords(m->fCarDamage, 14);

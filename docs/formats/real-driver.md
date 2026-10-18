@@ -195,7 +195,7 @@ dot product of the body's x axis with the path direction on the ground
 plane, neither term below zero, capped at `RollingResetSpeed`. The port
 writes `max.s` / `min.s` out as the EE defines them, so a zero keeps its
 sign. A cop car (`UsageType` 1) with a cop manager faces the way
-`GetResetDirection` says; any other car faces 1.0. Then
+`GetResetDirection` says (`cop-manager.md`); any other car faces 1.0. Then
 `Car::ResetToRoutePoint` (flag 1) runs, then `Player::PlayerSelectedReset`.
 
 **The horn button** starts or stops the horn through the vtable, and a
@@ -239,7 +239,7 @@ of 1.0. None of the fourteen feeds the physics.
 | `RadialBlurOn` / `Off` / `Alpha` | 0x0010dc80 .. 0x0010dd38 | 27 |
 | `ReplayManager::RegisterInterestingEvent` | 0x0013c290 | 29 |
 | `Player::RerouteJoyEvent`, `IsAllowedToReset`, `PlayerSelectedReset` | 0x001721b8, 0x0017aab8, 0x0017ab08 | 26 |
-| `tCopManager::GetResetDirection`, `BeACopToggleSirenAndLights` | 0x00214740, 0x00214610 | 26 |
+| `tCopManager::GetResetDirection`, `BeACopToggleSirenAndLights` | retail's 0x00228ae8, 0x002289b8 (the demo's 0x00214740, 0x00214610) | 26, bound by 74 and 12m-1 |
 | `Car::ResetToRoutePoint` | 0x00131480 | 26 |
 | `BaseCarSound::StartHonkHorn` / `StopHonkHorn` | 0x00185330, 0x00185370 | 29 |
 

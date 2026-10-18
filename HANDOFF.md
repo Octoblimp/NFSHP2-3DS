@@ -26685,3 +26685,105 @@ differ. `carsnap` has the stand-in's three cars and six mutations: 106 of
 2. 72h-2c, the drift, which waits on TASKS 73's car physics.
 3. When 72h is committed, publish the launch checklist the user asked
    for, before TASKS 73.
+
+## Session 127 -- TASKS 74: the AI's retail pass
+
+The user asked for it on 2026-10-17: "I think the AI in general is
+somewhat stupid sometimes, would double-check that it matches the retail
+code as well". The AI's decisions were retail's already: every AI action,
+driver and route function that retail changed and the port needs was
+ported from retail, constants included (AIActionIJustGotHitScore is
+retail's 400). Retail differs from the port in three places, all ported
+now: the far cars' mover, the wheel matrices, and Be A Cop's reset
+direction.
+
+### How it was checked
+
+`out/retail_syms.txt` marks each demo function retail changed. For the
+AI's classes (the actions, the drivers, the car controllers, the routes,
+the cops, the pursuits, the movers) that is 327 functions. The port cites
+retail's address for 275 of them, both for 21 and the demo's alone for
+23; 28 cite neither. Each of the last 51 was read beside retail's
+(`retail_match.py --diff`):
+
+- RealDriver's 19 are the player's input, not the AI (TASKS 73's list).
+- DriveTarget's GetFirstPoint and BlendWithCurrentAcceleration and
+  TrackedController::Think change only field offsets.
+- tCopManager's, tPursuit's and CopMover's accessors change only field
+  offsets. GetDifficultyLevel, GetChaseDirection and GetChopperState are
+  retail_match pairing a two-instruction accessor with a neighbour's name.
+- CopDriver::CollisionAvoidance, tCopManager's IsSpeedTrapNeeded and
+  FindSuitableSpeedTrap, and tPursuit's ConsiderForcingAIPullover,
+  AreCarsRacing and IsRacingWithMe are dead in retail: no jal and no data
+  word reaches them.
+- MellowMover and GetResetDirection changed, below.
+
+`tools/retail_consts.py` (new) compares what retail_match masks: at each
+call, built float, gp load and address taken in a paired function, the
+value retail's uses against the demo's. It found the AI's constants equal
+and MellowMover's feedback word apart. The non-AI functions it and the
+citation count found are TASKS 75.
+
+### What changed
+
+- `mellowmover.c`, `mellowmover.h`: retail's four changes
+  (`docs/formats/mellow-mover.md`, "Retail's changes"). The
+  force-feedback graph starts at (0, 0.3). The constructor zeroes
+  gUglyTimestepHack, so a new car's first suspension velocity no longer
+  divides by another car's step. Move brakes with
+  `max(Brake, EBrake * 0.5)`: the demo's ignored a mellow car's e-brake.
+  UpdateCar draws a wheel no higher than its axle's
+  MaxRenderingCompression.
+- `carstate.c`, `cartypeinfo.h`: CarState::CalculateWheelMatrices is
+  retail's (`0x001c0d78`). The BrakeMatrix lifts with the suspension as
+  the WheelMatrix does, and both add WheelInfo's word 24, now `OffsetY`.
+  Retail's data pulls each wheel of the first 49 records 1 to 7 cm in.
+  This is on every mover.
+- `copmgr.c`, `copmgr.h`, `main.c`: tCopManager::GetResetDirection
+  (`0x00228ae8`). Its seam was never bound, so a Be A Cop reset always
+  faced along the route. Retail's faces back at a chased car the cop has
+  got more than 20 m ahead of, and within 20 m keeps the way the cop's
+  car points against its route point (`docs/formats/cop-manager.md`).
+- `mellowmover_check.py` runs retail's image now. `physicscar_check`'s
+  Model can read retail's (`retail=True`), and the demo-image checkers get
+  retail's behaviour from hooks: `retail_wheel_matrices` and
+  `retail_mellow`. `mellowmover_check --demo` runs the demo image with
+  the hooks and agrees with the retail run line for line.
+- `copmanager_check.py` runs GetResetDirection, with Car::GetRoutePoint
+  scripted, and its harness has twice the names.
+
+### Checkers re-run
+
+- mellowmover: 45 scenarios, 64984 lines, 0 differ, and `--demo` 0
+  differ; 352 mutations, 347 caught, 5 equivalent (six new, all caught).
+- copmanager: 87815 ops, 34862 lines, 0 differ; GetResetDirection's 16
+  mutations, all caught.
+- carstate: 10 scenarios, 0 differ; 67 mutations, 60 caught, 7
+  equivalent. physicscar: 106 scenarios, 102908 lines, 0 differ (1328
+  differ without the hook).
+- cartypeinfo, wheel, carmode, copmover, copdriver, trafficcar,
+  realdriver, realcontroller, car, cardriver, drivetarget, drivetrain,
+  engine, physcomp, suspension, track, carsnap, aidriver, cop, playercop,
+  trafficdriver, spikestrip, careffects, rendercars, lockhash,
+  psychodriver, pullover, nearbycar, carrender, carrenderinfo, carinfo:
+  0 differ.
+
+### On Azahar
+
+`tools/run_azahar_attract.ps1` (no keys): PASS. Thirty seconds at rest
+on the title started the AI demo, at 30 FPS and 100% speed under the
+Demo overlay. The AI cars held their lines through the bends, and
+their wheels sat in the arches. The demo ran out and the title came
+back at 202 s. One of the thirteen race shots was the demo camera
+looking up from inside a car's cabin; nothing here touched the
+cameras.
+
+### Next
+
+1. The launch checklist, as an Artifact. TASKS 72 is done but for 72h-2c,
+   which waits on TASKS 73.
+2. TASKS 73, the car's retail pass. It now also lists
+   gMaxDownShiftOver (retail's 1.2, the port's 1.1) and the other
+   demo-derived car functions retail changed.
+3. 72h-2c, the drift.
+4. TASKS 75, the non-AI demo-cited functions retail changed.

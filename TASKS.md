@@ -4336,8 +4336,21 @@ phases.
           when the body is upside down and asks the Car to reset a second
           later (PleaseResetMeLater). The port's is the demo's, which
           never touches it.
-        - CarState::CalculateWheelMatrices: retail reads the y offset from
-          WheelInfo's word at 24 and lifts the brake matrix.
+        - [x] CarState::CalculateWheelMatrices: retail reads the y offset
+          from WheelInfo's word at 24 and lifts the brake matrix. Done by
+          TASKS 74 (`OffsetY`).
+        - DriveTrain's gMaxDownShiftOver is 1.2 in retail's data;
+          `drivetrain.c` has the demo's 1.1. Found by TASKS 74.
+        - Other demo-derived functions retail changed (TASKS 74's list):
+          Car::FinishMovement, Car::TriggerEvents, Car::CalcForceParameters,
+          PhysicsCar::Move, World::GetTimestep, DriveTrain::SetDesiredGear,
+          Wheel's GuessGroundForce and FinalizeGroundForce, InitSkids,
+          CarCollisionBody::AddDamage, FindWaferNormal and the
+          RectPolyhedron constructor. Retail's TerrainTypeInfoTable has
+          another layout.
+        - RealDriver's changed functions, the player's input (the joy
+          handlers, DoSteering, DoThrottleBrakeReverse, NitroAvailable):
+          the port's are the demo's.
         - CarState's layout: retail adds DistanceMoved after Odometer, and
           the fields from TractionUsage to BurnOutAllow move on by 4. The
           port keeps the demo's layout, with DistanceMoved in the padding.
@@ -4348,7 +4361,7 @@ phases.
         disc's demo replays need it (72h-2b): they miss the checksum from
         their first frame on the 3DS.
 
-74. [ ] **The AI's retail pass.** Asked for on 2026-10-17, during 72h-2b:
+74. [x] **The AI's retail pass.** Asked for on 2026-10-17, during 72h-2b:
         "I think the AI in general is somewhat stupid sometimes, would
         double-check that it matches the retail code as well". The AI
         was ported from the demo's image, like the car physics (TASKS
@@ -4357,6 +4370,51 @@ phases.
         (the AI car controllers, the drivers, the routes and the
         actions), each changed function read beside the port's. It comes
         right after 72h-2b (done), before 72h-2c.
+        Done in Session 127. Of the 327 changed functions in the AI's
+        classes, the port already followed retail's in 275. The AI's
+        decisions and their constants were retail's already. Of the
+        rest:
+        - MellowMover, the far cars' mover, is retail's now
+          (`docs/formats/mellow-mover.md`). The force-feedback graph
+          starts at 0.3. The constructor zeroes gUglyTimestepHack. Move
+          brakes with half the e-brake too. UpdateCar draws a wheel no
+          higher than its axle's MaxRenderingCompression.
+        - CarState::CalculateWheelMatrices is retail's. The brake matrix
+          lifts with the suspension, and WheelInfo's word 24 (`OffsetY`)
+          pulls each wheel 1 to 7 cm in, on every mover.
+        - tCopManager::GetResetDirection (`0x00228ae8`) was never bound,
+          so a Be A Cop reset always faced along the route. It is ported
+          (`copmgr.c`, `docs/formats/cop-manager.md`).
+        - The others change only field offsets, or retail_match paired a
+          tiny accessor with the wrong name. RealDriver's are the
+          player's input (TASKS 73).
+        - CopDriver::CollisionAvoidance, tCopManager's IsSpeedTrapNeeded
+          and FindSuitableSpeedTrap, and tPursuit's
+          ConsiderForcingAIPullover, AreCarsRacing and IsRacingWithMe are
+          dead in retail: no jal or data word reaches them.
+        mellowmover_check runs retail's image now (45 scenarios, 0
+        differ; 352 mutations, 347 caught, 5 equivalent), and `--demo`
+        with the four changes hooked in agrees with it. copmanager_check
+        has GetResetDirection (34862 lines, 0 differ; 16 of 16
+        mutations caught). carstate, physicscar, cartypeinfo, wheel,
+        carmode and 29 more checkers pass with 0 differ.
+
+75. [ ] **The rest of the demo-cited functions retail changed.** TASKS
+        74's citation check found, outside the AI, functions the port
+        cites only by the demo's address whose retail bodies change a
+        value, not just an offset:
+        - eView's SetupWorldLightContext and CreateViewMatricies, and
+          SetupSceneryCullInfo;
+        - joyevent's GetJoyEventName,
+          DetermineAvailableJoystickConfigurations, FindScannerConfig (two),
+          GetJoystickButtonName and ChooseDeadZoneAndHysterysis;
+        - cEditText::EnterEditTextMode, NisManager::EnableOverrideRendering,
+          the DroppedSpikes constructor, tDisplayOptionsChangeManager::Start
+          and bMatrixToQuaternion;
+        - 37 changed functions the port cites by neither address, mostly
+          the frontend, the debug menus and the editors.
+        A paired literal can be an alignment artefact, so each needs
+        reading beside the port's. It comes after TASKS 73.
 
 ### The retail frontend
 

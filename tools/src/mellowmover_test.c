@@ -403,6 +403,7 @@ static void build(const MmScen *s)
     g_drv->Steering = (uint16_t)s->steer;
     g_drv->Throttle = fb(s->thr);
     g_drv->Brake = fb(s->brk);
+    g_drv->EBrake = fb(s->ebrk);
     g_drv->DesiredGear = s->dgear;
 
     g_cs2 = NULL;

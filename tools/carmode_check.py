@@ -1136,7 +1136,8 @@ def generate(cti):
 
 class Model(mmc.Model):
     def __init__(self, cti, poison=None):
-        mmc.Model.__init__(self, [cti])
+        # The demo image, with retail's MellowMover changes hooked in.
+        mmc.Model.__init__(self, [cti], retail=False)
         e = self.e
         self.inuse.append(0)
         base = pcc.POOL_BASE + 0x100 * 9

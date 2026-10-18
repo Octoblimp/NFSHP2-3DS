@@ -387,9 +387,10 @@ void carstate_set_wheel_terrain(CarState *s, int wheel, TerrainType t)
         s->CrossedWheelTerrain[wheel] = t;
 }
 
-// 0x001b6d10. WheelMatrix gets spin, steering and the suspension lift;
-// BrakeMatrix gets steering only, at the unlifted hub. Wheels 0 and 1 are
-// the steering pair.
+// Retail's, 0x001c0d78 (the demo's is 0x001b6d10). WheelMatrix gets spin
+// and steering, BrakeMatrix steering only; wheels 0 and 1 are the steering
+// pair. Both get the suspension lift and the WheelInfo's OffsetY. The
+// demo's leaves BrakeMatrix at the unlifted hub and reads no OffsetY.
 //
 // The two matrices start from eIdentity, not bIdentity -- the same result
 // by a different route, and the original calls the eMath one here and the
@@ -420,12 +421,12 @@ void carstate_calculate_wheel_matrices_one(CarState *s, int wheel)
     // Both row 3s come off the same quadword load, so the fourth lane is
     // WheelInfo.Radius for exactly as long as it takes to overwrite it.
     bm.v3.x = wi->PositionX;
-    bm.v3.y = wi->PositionY;
-    bm.v3.z = wi->PositionZ;
+    bm.v3.y = wi->PositionY + wi->OffsetY;
+    bm.v3.z = wi->PositionZ + s->WheelSuspensionHeight[wheel];
     bm.v3.w = 1.0f;
 
     wm.v3.x = wi->PositionX;
-    wm.v3.y = wi->PositionY;
+    wm.v3.y = wi->PositionY + wi->OffsetY;
     wm.v3.z = wi->PositionZ + s->WheelSuspensionHeight[wheel];
     wm.v3.w = 1.0f;
 

@@ -256,6 +256,7 @@ static void make_info(void)
     static const float py[4] = { 2.75f,  2.75f, -2.25f, -2.25f };
     static const float pz[4] = { 0.375f, 0.4375f, 0.5f, 0.5625f };
     static const float rad[4] = { 0.3f, 0.31f, 0.32f, 0.33f };
+    static const float oy[4] = { -0.01f, 0.03f, 0.07f, -0.05f };
     int i;
 
     memset(&g_info, 0, sizeof g_info);
@@ -272,6 +273,7 @@ static void make_info(void)
         g_info.Wheels[i].Radius     = rad[i];
         g_info.Wheels[i].Width      = 0.2f;
         g_info.Wheels[i].WheelNumber = i;
+        g_info.Wheels[i].OffsetY    = oy[i];
     }
 }
 

@@ -6,8 +6,10 @@ Mellovator it drives. The two `DoSnapshot`s came with the replay, TASKS
 and table layout it shares.
 
 Ported to `3DS Files/source/mellowmover.{c,h}`. Cross-checked by
-`tools/mellowmover_check.py` against `tools/src/mellowmover_test.c`, with
-the shipped image as the oracle.
+`tools/mellowmover_check.py` against `tools/src/mellowmover_test.c`. The
+oracle is retail's image since TASKS 74 (retail's object is 0x00219628 ..
+0x0021b910). The addresses below are the demo's; retail's four changes
+are in [Retail's changes](#retails-changes-tasks-74).
 
 ## The shape of it
 
@@ -383,10 +385,46 @@ The port writes zero there, and the checker's model zeroes sp+60 to match.
 ## The static initialiser
 
 0x00208420, `_GLOBAL_$I$MellowForceFeedbackGraph`. It builds
-MellowForceFeedbackGraph from (0, 0.4) and (20, 0.5), and
+MellowForceFeedbackGraph from (0, 0.4) and (20, 0.5) (retail's (0, 0.3)), and
 MellowJumpStabilization from (0, 0), (0.1, 0) and (2, 20). The second
 graph's data sits at 0x00313c48 in .data; the initialiser overwrites every
 word of it.
+
+## Retail's changes (TASKS 74)
+
+The demo's MellowMover.obj and retail's are the same instruction for
+instruction but in four places, all ported:
+
+- **The force-feedback graph** starts at (0, 0.3), not (0, 0.4). Retail's
+  .lit4 word gp-27252 is 0x3e99999a.
+- **The constructor zeroes gUglyTimestepHack** before it builds the
+  Mellovator (0x00219628, in the delay slot of that bOMalloc). The demo
+  leaves the last mover's step there, so a new car's first suspension
+  velocity divided by another car's step.
+- **Move brakes with the e-brake too**: the Mellovator's Brake is
+  `max.s(Brake, EBrake * 0.5)` (0x00219da4 .. 0x00219db8). The demo's takes
+  Brake alone, so the e-brake did nothing to a mellow car.
+- **UpdateCar draws each wheel no higher than its axle's
+  MaxRenderingCompression** (CTI + 588 + 32 * (i / 2), `c.lt.s ; bc1tl
+  mov.s`, 0x00219bec .. 0x00219bfc). The demo's passes the Mellovator's
+  compression as it is, and a hard landing pushed the tyre into the arch.
+
+Under UpdateCar, CarState::CalculateWheelMatrices(int) changed too (retail
+0x001c0d78, the demo's 0x001b6d10). Retail's lifts the BrakeMatrix with the
+suspension as it does the WheelMatrix, and adds WheelInfo's word 24
+(`OffsetY` in the port) to both matrices' y. Retail's car data fills that
+word: it pulls each wheel of the first 49 records 1 to 7 cm in, and is 0 in
+the last 15. The demo's lifts only the WheelMatrix and reads no word 24.
+The port's `carstate.c` is retail's, so the brake calipers now follow the
+wheel and the wheels sit where retail's do, on every mover.
+
+The checkers whose oracle is the demo image get retail's behaviour through
+hooks that do what retail's instructions do at the same point:
+`physicscar_check.retail_wheel_matrices` (on 0x001b6de8) and
+`mellowmover_check.retail_mellow` (the feedback word, 0x00206500,
+0x00206b98 and 0x00206a04). `mellowmover_check --demo` runs the demo image
+with them and must agree with the retail run line for line. It does, and
+each hook taken out alone breaks between 90 and 17,118 lines.
 
 ## What the checker found
 
@@ -412,13 +450,17 @@ divides by zero any scenario reaches. `vrsqrt` was already spelled with
 
 ## What the checker covers
 
-`tools/mellowmover_check.py` runs MellowMover.obj itself in mipsemu, the
-way `physicscar_check` runs PhysicsCar. It covers the constructor, Move
-and its sub-steps, the three tables and the direct calls, on a
-Car, a RealDriver and a CarTypeInfo laid out in emulated memory. The
-harness, `tools/src/mellowmover_test.c`, runs the port on the same
-records. Both print every field of every object the mover owns: 39
-scenarios, 56,080 lines, 0 differ.
+`tools/mellowmover_check.py` runs retail's MellowMover.obj itself in
+mipsemu, the way `physicscar_check` runs PhysicsCar. It covers the
+constructor, Move and its sub-steps, the three tables and the direct
+calls, on a Car, a RealDriver and a CarTypeInfo laid out in emulated
+memory, at retail's offsets. The harness, `tools/src/mellowmover_test.c`,
+runs the port on the same records. Both print every field of every object
+the mover owns: 45 scenarios, 64,984 lines, 0 differ, on retail's image and
+on the demo's with the hooks (`--demo`). The six scenarios TASKS 74 added
+are the e-brake's four (`c0-ebrake`, `c0-ebrake-over`, `c33-ebrake-under`,
+`c65-ebrake-lock`) and two on a car 0 whose MaxRenderingCompression every
+wheel passes (`c0-mrc-move`, `c0-mrc-bottom`).
 
 ### Records the shipped data does not have
 
@@ -468,8 +510,11 @@ two calibrations are the same.
 
 ### The mutation pass
 
-346 mutations, 341 caught, 5 equivalent, 0 unexplained. The first pass
-left 28 alive. Twenty-three were holes in the scenarios, closed by the
+352 mutations, 347 caught, 5 equivalent, 0 unexplained, against
+retail's image since TASKS 74. Its six new ones (no e-brake, the full
+e-brake, gUglyTimestepHack kept, no MaxRenderingCompression clamp, the
+clamp as a floor, and the demo's feedback point) are all caught. The
+first pass left 28 alive. Twenty-three were holes in the scenarios, closed by the
 records and setups above. Five are equivalent, each for a reason
 checked in the image:
 

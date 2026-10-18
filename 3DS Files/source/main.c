@@ -8395,6 +8395,9 @@ int main(int argc, char** argv)
     gPlayerCopThinkFn = tplayercop_think;
     gCopManagerBeACopToggleSirenAndLightsFn =
         copmanager_be_a_cop_toggle_siren_and_lights;
+    // Which way the player cop faces when reset (TASKS 74): at the
+    // chased car, or along the route (copmgr.h).
+    gCopManagerGetResetDirectionFn = copmanager_get_reset_direction;
     // And the manager's side (12m-2): the clock and its end, the
     // dispatch's call and the wrecked cars.
     gCopManagerBeACopThinkFn = copmanager_be_a_cop_think;

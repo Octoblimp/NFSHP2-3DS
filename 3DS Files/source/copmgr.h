@@ -129,6 +129,16 @@ float copmanager_get_radar_detector_intensity(tCopManager *m,
                                               struct Car *car,
                                               int32_t *flag);
 
+// GetResetDirection, 0x00228ae8: which way Be A Cop's player cop faces
+// when reset, 1.0 along the route and -1.0 against it (realdriver.h's
+// gCopManagerGetResetDirectionFn). With no player cop, or one with no
+// pursuit, 1.0. More than 20 m from the chased car in the plane, -1.0
+// when IsCarInFront (16384) of the chased car says the cop is ahead of
+// it; within 20, -1.0 when the cop's car points against its route point
+// (GetRoutePoint with retail's flag 1), and 1.0 with no point. The
+// chased car and the cop's car are read with no test.
+float copmanager_get_reset_direction(tCopManager *m);
+
 // fDisablingImpactMagnitudeTable, 0x0031c560: by nDifficultyLevel, the
 // hit that disables an AI cop's car or wrecks Be A Cop's suspect.
 extern float fDisablingImpactMagnitudeTable[3];

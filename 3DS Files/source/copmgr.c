@@ -530,6 +530,34 @@ float copmanager_get_radar_detector_intensity(tCopManager *m, Car *car,
     return intensity;
 }
 
+// Retail's GetResetDirection, 0x00228ae8. The demo's (0x00214740) is
+// the same but for the route point, which it asks for with no flag.
+float copmanager_get_reset_direction(tCopManager *m)
+{
+    tCop            *cop = copmanager_get_player_cop(m);
+    tPursuit        *pu;
+    Car             *chased, *mine;
+    TrackRoutePoint *point;
+    float            dx, dy;
+
+    if (cop == NULL || (pu = cop->pMyPursuit) == NULL)
+        return 1.0f;
+    chased = pu->pChasedCar;
+    mine = cop->pMyCar;
+    dx = chased->State.Position.x - mine->State.Position.x;
+    dy = chased->State.Position.y - mine->State.Position.y;
+    if (20.0f < sqrtf(dx * dx + dy * dy))
+        return car_is_car_in_front(chased, mine, 16384) ? -1.0f : 1.0f;
+    point = car_get_route_point(mine, 1);
+    if (point == NULL)
+        return 1.0f;
+    if (mine->State.BodyMatrix.v0.x * point->Direction.x
+            + mine->State.BodyMatrix.v0.y * point->Direction.y
+        < 0.0f)
+        return -1.0f;
+    return 1.0f;
+}
+
 void (*gCarDamageRepairAllFn)(void *damage);
 
 void copmanager_reset_all_damage(tCopManager *m, Car *car)

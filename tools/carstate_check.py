@@ -193,7 +193,7 @@ class Info(object):
     def __init__(self):
         self.CenterOfGravity = [f32(0.0)] * 4
         self.Wheels = [dict(x=f32(0.0), y=f32(0.0), z=f32(0.0),
-                            r=f32(0.0)) for _ in range(4)]
+                            r=f32(0.0), oy=f32(0.0)) for _ in range(4)]
 
 
 # ---------------------------------------------------------- the object
@@ -407,9 +407,11 @@ def set_wheel_terrain(s, wheel, t):
 
 
 def calculate_wheel_matrices_one(s, wheel):
-    """0x001b6d10. The wheel matrix gets spin, steering and the suspension
-    lift; the brake matrix gets steering only, at the unlifted hub. Wheels 0
-    and 1 steer."""
+    """Retail's, 0x001c0d78 (the demo's is 0x001b6d10). The wheel matrix
+    gets spin and steering, the brake matrix steering only; wheels 0 and 1
+    steer. Both get the suspension lift on z and the WheelInfo's word 24
+    (OffsetY) on y, where the demo's lifts only the wheel matrix and reads
+    no word 24."""
     wm = emath_check.mat_identity()
     bm = emath_check.mat_identity()
 
@@ -425,10 +427,13 @@ def calculate_wheel_matrices_one(s, wheel):
 
     wi = s.pCarInfo.Wheels[wheel]
 
-    bm[12], bm[13], bm[14], bm[15] = wi["x"], wi["y"], wi["z"], f32(1.0)
+    bm[12] = wi["x"]
+    bm[13] = fadd(wi["y"], wi["oy"])
+    bm[14] = fadd(wi["z"], s.WheelSuspensionHeight[wheel])
+    bm[15] = f32(1.0)
 
     wm[12] = wi["x"]
-    wm[13] = wi["y"]
+    wm[13] = fadd(wi["y"], wi["oy"])
     wm[14] = fadd(wi["z"], s.WheelSuspensionHeight[wheel])
     wm[15] = f32(1.0)
 
@@ -520,10 +525,11 @@ def make_info():
     py = [f32(2.75), f32(2.75), f32(-2.25), f32(-2.25)]
     pz = [f32(0.375), f32(0.4375), f32(0.5), f32(0.5625)]
     rad = [f32(0.3), f32(0.31), f32(0.32), f32(0.33)]
+    oy = [f32(-0.01), f32(0.03), f32(0.07), f32(-0.05)]
 
     info.CenterOfGravity = [f32(0.125), f32(-0.0625), f32(0.75), f32(0.0)]
     for i in range(4):
-        info.Wheels[i] = dict(x=px[i], y=py[i], z=pz[i], r=rad[i])
+        info.Wheels[i] = dict(x=px[i], y=py[i], z=pz[i], r=rad[i], oy=oy[i])
     return info
 
 
@@ -1175,9 +1181,18 @@ MUTATIONS = [
     ("wheel-brake-gets-spin", CS,
      "    eRotateY(&wm, &wm, spin);",
      "    eRotateY(&wm, &wm, spin);" + NL + "    eRotateY(&bm, &bm, spin);"),
-    ("wheel-susp-on-brake", CS,
-     "    bm.v3.z = wi->PositionZ;",
-     "    bm.v3.z = wi->PositionZ + s->WheelSuspensionHeight[wheel];"),
+    ("wheel-brake-unlifted", CS,
+     "    bm.v3.z = wi->PositionZ + s->WheelSuspensionHeight[wheel];",
+     "    bm.v3.z = wi->PositionZ;"),
+    ("wheel-brake-no-offset", CS,
+     "    bm.v3.y = wi->PositionY + wi->OffsetY;",
+     "    bm.v3.y = wi->PositionY;"),
+    ("wheel-no-offset", CS,
+     "    wm.v3.y = wi->PositionY + wi->OffsetY;",
+     "    wm.v3.y = wi->PositionY;"),
+    ("wheel-offset-subtracts", CS,
+     "    wm.v3.y = wi->PositionY + wi->OffsetY;",
+     "    wm.v3.y = wi->PositionY - wi->OffsetY;"),
     ("wheel-no-susp", CS,
      "    wm.v3.z = wi->PositionZ + s->WheelSuspensionHeight[wheel];",
      "    wm.v3.z = wi->PositionZ;"),

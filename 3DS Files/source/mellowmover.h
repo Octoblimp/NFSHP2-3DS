@@ -23,6 +23,21 @@
 // 0x0021a3d8) are the replay's, since TASKS 72c. The Mellovator's is in no
 // table: MellowMover's calls it directly.
 //
+// The addresses below are the demo's. Retail's MellowMover.obj is at
+// 0x00219628 .. 0x0021b910: the ctor 0x00219628, dtor 0x002197f0,
+// Calibrate 0x00219978, InitializeStateFromCar 0x002199c8, UpdateCar
+// 0x00219a60, Move 0x00219d38, ComputeAuxiliaries 0x00219ed8, ResolveForces
+// 0x00219f50, SetBoost 0x00219f98, JumpStabilizer 0x0021a040; the
+// Mellovator's ctor 0x0021a268, Calibrate 0x0021a5c0, GetDerivative
+// 0x0021a680, ComputeAuxiliaries 0x0021a8c8, ComputeSuspensionForces
+// 0x0021ab10, GetGroundHeightAndWheelPos 0x0021add8, ResolveForces
+// 0x0021aed8 and BottomOut 0x0021b498; the static init 0x0021b640. Retail
+// changed four things, all ported (TASKS 74): the ctor zeroes
+// gUglyTimestepHack before the Mellovator's allocation; UpdateCar draws no
+// wheel above its axle's MaxRenderingCompression; Move brakes with
+// max(Brake, EBrake * 0.5); and the force-feedback graph starts at 0.3, not
+// 0.4. Everything else is the demo's instruction for instruction.
+//
 // See docs/formats/mellow-mover.md.
 
 #ifndef MELLOWMOVER_H
