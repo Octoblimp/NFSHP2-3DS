@@ -815,3 +815,37 @@ The run is clean: no unmapped reads, and the flow leaves the main loop.
 
 Not done here: the spotlights (dead code, above) and the frontend's
 other eModels. TRACK*_MINI is the track select's.
+
+## A Local Wireless race (TASKS 67)
+
+A Local Wireless race has `Fred.NumPlayerCars` 2 for its consoles. The
+host's setup sets it (Players reads Local Wireless), and so does a
+client's `lobbyStarted` in main.c. Each console still has one player,
+who chooses on "Select Car", the one-player screen (`lobby.h`'s
+`LOBBY_NEXT_SCREEN`).
+
+Retail's 2 means two pads. Until Session 128, car select took it that
+way here, and ran the two-player selector on the one-player screen. A
+friend's photo from a 3DS (2026-10-15) showed it:
+- the thumbnail row's base was 395, the two-player one, not 377, so each
+  icon stood 18 pixels right of its box, half an icon;
+- the camera was the two-player one;
+- there was no orbit and no nebula, and the help, logo and badge were
+  the two-player ones.
+
+`consolePlayers()` in `bcarsel.c` is the players choosing at this
+console. It is `Fred.NumPlayerCars`, but 1 when the `wirelessRace` hook
+says so (main.c's `netrace_active`, from the lobby's Start until the
+link goes down). These read it:
+- the preload;
+- the help;
+- which selector a message belongs to;
+- ActivateCarSelector and DeactivateCarSelector, and the two-player
+  flag they give the selector;
+- SetSelectedCars;
+- the per-pad press filter.
+
+So a wireless console's car select is the one-player one, done at the
+handling. `netrace_car_chosen` and `netrace_host_start` then take the
+car through the `changeToScreen` and `startRace` hooks, as before.
+carsel_check leaves the hook NULL, which is retail's.

@@ -3769,7 +3769,7 @@ phases.
           title in FBI: "It worked perfectly!" (2026-10-15). The badge
           turns in front of the still oval, the siren plays, the icon
           and title are new.
-67. [ ] **Select Car's car icons are off their boxes.** Reported on
+67. [x] **Select Car's car icons are off their boxes.** Reported on
         2026-10-15: a friend testing multiplayer on a 3DS photographed
         it, on the build before Session 112 (the CIA with the working
         graphics, 80b7324). The user: "its not aligned to the box". In
@@ -3787,6 +3787,30 @@ phases.
           `docs/formats/car-select.md`).
         - Compare with retail: the user's PCSX2 photos of the retail
           frontend (2026-09-28) and `carsel_check`.
+        - [x] Session 128: the layout, in a wireless race only. A Local
+          Wireless race has `Fred.NumPlayerCars` 2 for its consoles (the
+          host's setup, whose Players reads Local Wireless, and a
+          client's `lobbyStarted`), and car select took 2 for retail's
+          two pads: on "Select Car", the one-player screen, it ran the
+          two-player selector. That row's base is 395 where one
+          player's is 377, so the icons stood 18 pixels right of their
+          boxes, half an icon, as in the photo. The same selector had
+          the two-player camera (the car close, from behind, as in the
+          photo), no orbit, no nebula, and the two-player help and
+          logos. From the main menu the row was right.
+          - `bcarsel.c`'s `consolePlayers()` is 1 in a wireless race
+            (the new `wirelessRace` hook, main.c's `netrace_active`),
+            and every two-player check in car select reads it.
+          - carsel_check passes: 8366 ops, 513647 lines, 0 differ (the
+            hook is NULL there, retail's).
+          - On Azahar (AC power, 100% speed),
+            `run_azahar_lobby.ps1 -Consoles 2`: both copies reached
+            Select Car from the lobby, and each showed the one-player
+            selector. The car stands whole and side on under the
+            nebula, and the highlight box sits edge to edge on the
+            Speedster's icon, on the host and on the joiner.
+          - Not run on a 3DS. The friend's next wireless test will show
+            it; it is on the launch checklist's hardware list.
 
 68. [x] **The main menu's order, and scrolling.** Asked for on
         2026-10-15: "I also want scrolling up and down implemented on

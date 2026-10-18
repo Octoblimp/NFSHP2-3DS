@@ -166,6 +166,10 @@ typedef struct BCarSelHooks {
     // 0x0016caa8: the screen list's per-pad press filter, on while two
     // players choose at once.
     void (*setPerPortJoy)(void* user, int on);
+    // The port's: 1 in a Local Wireless race, whose Fred.NumPlayerCars is
+    // 2 for its consoles though each has one player, on the one-player
+    // screen (TASKS 67). NULL is retail's, never.
+    int (*wirelessRace)(void* user);
     // FlailerScreenList::StopMovie, from SelectCarScreen's constructor.
     void (*stopMovie)(void* user);
 

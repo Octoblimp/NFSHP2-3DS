@@ -26896,3 +26896,34 @@ it:
 
 TASKS 65 is closed. Track 31's corner is still on the launch checklist's
 list for a real 3DS.
+
+## Session 128, continued -- TASKS 67: Select Car's icons in a wireless race
+
+The friend's photo of 2026-10-15 was of a Local Wireless race's car
+select. Such a race has `Fred.NumPlayerCars` 2 for its consoles: the
+host's setup sets it (Players reads Local Wireless) and so does a
+client's `lobbyStarted` (main.c). Car select took 2 for retail's two
+pads, so on "Select Car", the one-player screen, it ran the two-player
+selector:
+
+- **The icon row** used the two-player base, 395, where one player's is
+  377. The icons stood 18 pixels right of their boxes, half an icon.
+- **The camera** was the two-player one: the car close, from behind, as
+  in the photo.
+- **The rest**: no orbit, no nebula, the two-player help, logos and
+  badge, and the preload took player 1's car too.
+
+`bcarsel.c`'s `consolePlayers()` is now 1 in a wireless race, from a new
+hook, `wirelessRace` (main.c's `netrace_active`). Every two-player check
+in car select reads it. A wireless race still has its 2 everywhere else
+(the race, the sounds, the cops). carsel_check passes (0 of 513647 lines
+differ; the hook is NULL there, retail's).
+
+On Azahar (AC power, 100% speed), `run_azahar_lobby.ps1 -Consoles 2`:
+both copies reached Select Car from the lobby, and each showed the
+one-player selector. The car stands whole and side on under the nebula,
+and the highlight box sits edge to edge on the Speedster's icon, on the
+host and on the joiner. It has not been run on a 3DS; the friend's next
+wireless test will show it.
+
+`docs/formats/car-select.md` has it ("A Local Wireless race").

@@ -4142,6 +4142,13 @@ static void hookCarSelChangeToScreen(void* user, const char* name, int push)
     bgf_change_to_screen(&g_flow, name, push);
 }
 
+// A wireless race's car select is the one-player one (TASKS 67).
+static int hookCarSelWirelessRace(void* user)
+{
+    (void)user;
+    return netrace_active();
+}
+
 // FrontendDatabase::StartRace, for the single race and the championship.
 // A wireless race's host builds it once every car is in (netrace.c); a
 // client's car select that starts a race straight away sends its car.
@@ -8712,6 +8719,7 @@ int main(int argc, char** argv)
     carselHooks.soundEnabled       = hookCarSelSoundEnabled;
     carselHooks.language           = hookCarSelLanguage;
     carselHooks.stopMovie          = hookCarSelStopMovie;
+    carselHooks.wirelessRace       = hookCarSelWirelessRace;
     carselHooks.trace              = hookTrace;
     bcarsel_init(&g_carsel, &carselHooks);
 

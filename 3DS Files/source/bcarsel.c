@@ -27,6 +27,19 @@ int32_t AllCarsAvailableInCarSelectScreen;
 
 static BCarSel* g_m;
 
+// The players choosing at this console: Fred.NumPlayerCars, whose 2 is
+// retail's two pads and the two-player car select. A Local Wireless race
+// has 2 too, for its consoles (main.c's lobbyStarted and the setup's
+// Players), but one player a console, on "Select Car": its car select is
+// the one-player one (TASKS 67), with that screen's thumbnails, camera,
+// orbit, nebula, help and logos.
+static int32_t consolePlayers(void)
+{
+    const BCarSelHooks* h = g_m ? &g_m->hooks : NULL;
+    if (h && h->wirelessRace && h->wirelessRace(h->user)) return 1;
+    return Fred.NumPlayerCars;
+}
+
 // The objects on the car select screens, by NameHash (or GroupHash).
 #define OBJ_FADE_A         0x0015678fu   // group: out as orbit comes in
 #define OBJ_FADE_B         0x036e80bfu   // group: in with orbit
@@ -444,7 +457,7 @@ void bcarsel_preload(void)
 
     if (!g_m) return;
     h = &g_m->hooks;
-    for (i = 0; i < Fred.NumPlayerCars && i < 2; i++) {
+    for (i = 0; i < consolePlayers() && i < 2; i++) {
         int32_t type;
         bcarsel_set_init(&set, h, &Fred.FrontendPlayers[i],
                          i == 0 && Fred.GameType == GAME_TYPE_BE_A_COP);
@@ -998,7 +1011,7 @@ static void adjustHelp(CarSelector* c)
 {
     const BCarSelHooks* h   = c->hooks;
     int32_t             gt  = Fred.GameType;
-    int32_t             npc = Fred.NumPlayerCars;
+    int32_t             npc = consolePlayers();
 
     if (c->mode == c->chooseMode) {
         if (gt == 8) {
@@ -1733,7 +1746,7 @@ static CarSelector     s_selectors[BCARSEL_MAX_SELECTORS];
 // Which selector a message belongs to: the pad's, with two players.
 static int selectorIndex(const BScreenCallbackData* data)
 {
-    return Fred.NumPlayerCars == 2 ? data->port != 0 : 0;
+    return consolePlayers() == 2 ? data->port != 0 : 0;
 }
 
 // The constructor (0x00198420).
@@ -1754,7 +1767,7 @@ static void screenActivate(SelectCarScreen* p, BScreenCallbackData* data)
     FrontendPlayerInfo*  player;
     int                  idx = 0;
 
-    if (Fred.NumPlayerCars == 2) {
+    if (consolePlayers() == 2) {
         if (data->port == -1) return;
         idx = data->port != 0;
     }
@@ -1762,7 +1775,7 @@ static void screenActivate(SelectCarScreen* p, BScreenCallbackData* data)
     bcarsel_set_init(&set, h, player,
                      idx == 0 && Fred.GameType == GAME_TYPE_BE_A_COP);
     if (!set.current) return;
-    selInit(&s_selectors[idx], h, data->port, Fred.NumPlayerCars == 2,
+    selInit(&s_selectors[idx], h, data->port, consolePlayers() == 2,
             idx ? 2 : 1, data->itemHash, &set, player->AccumulatedPoints);
     p->selectors[idx] = &s_selectors[idx];
     p->count++;
@@ -1772,7 +1785,7 @@ static void screenActivate(SelectCarScreen* p, BScreenCallbackData* data)
 static void screenDeactivate(SelectCarScreen* p, BScreenCallbackData* data)
 {
     int idx = 0;
-    if (Fred.NumPlayerCars == 2) {
+    if (consolePlayers() == 2) {
         if (data->port == -1) return;
         idx = data->port != 0;
     }
@@ -1787,7 +1800,7 @@ static void screenDeactivate(SelectCarScreen* p, BScreenCallbackData* data)
 static void screenSetSelectedCars(SelectCarScreen* p)
 {
     int32_t i;
-    for (i = 0; i < Fred.NumPlayerCars && i < BCARSEL_MAX_SELECTORS; i++) {
+    for (i = 0; i < consolePlayers() && i < BCARSEL_MAX_SELECTORS; i++) {
         CarSelector*        c = p->selectors[i];
         FrontendPlayerInfo* player;
         VisibleCar*         car;
@@ -1866,7 +1879,7 @@ void bcarsel_screen_callback(BGameFlow* gf, BScreenMessage msg,
         case BMSG_SCREEN_ACTIVATE:
             if (!g_m->screen) g_m->screen = screenNew();
             screenActivate(g_m->screen, data);
-            if (Fred.NumPlayerCars == 2 && h->setPerPortJoy)
+            if (consolePlayers() == 2 && h->setPerPortJoy)
                 h->setPerPortJoy(h->user, 1);
             break;
         case BMSG_SCREEN_UNACTIVATE:
@@ -1883,7 +1896,7 @@ void bcarsel_screen_callback(BGameFlow* gf, BScreenMessage msg,
                 g_m->screen = NULL;
             }
             if (soundEnabled(h)) speechFade(h, 0.2f);
-            if (Fred.NumPlayerCars == 2 && h->setPerPortJoy)
+            if (consolePlayers() == 2 && h->setPerPortJoy)
                 h->setPerPortJoy(h->user, 0);
             break;
         case BMSG_SCREEN_BACK_BUTTON:
