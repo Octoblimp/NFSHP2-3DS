@@ -415,6 +415,27 @@ int32_t rc_state_auto_replay_callback(RaceCoordinator *rc, RCMessage msg,
     return 0;
 }
 
+// rcdemo.c's two, likewise.
+int32_t rc_state_ai_demo_mode_callback(RaceCoordinator *rc, RCMessage msg,
+                                       int32_t param)
+{
+    (void)rc;
+    (void)msg;
+    (void)param;
+    printf("  ai demo never\n");
+    return 0;
+}
+
+int32_t rc_state_replay_demo_mode_callback(RaceCoordinator *rc,
+                                           RCMessage msg, int32_t param)
+{
+    (void)rc;
+    (void)msg;
+    (void)param;
+    printf("  replay demo never\n");
+    return 0;
+}
+
 void racecoordinator_init_for_race(RaceCoordinator *rc)
 {
     printf("  initforrace %s\n", nm(rc));

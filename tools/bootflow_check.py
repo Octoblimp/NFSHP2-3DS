@@ -1910,11 +1910,10 @@ class RetailMainMenu(object):
       - jukebox Start(1), "jukebox 1".
     Stubbed silently, because the port owes them:
       - FrontendDatabase::MakeChallengeCarsAvailable and
-        RaceParameters::InitWithDefaults;
-      - ConsiderStartDemoMode in OnTick. StartDemoMode has no race in the
-        port yet, so all it could do there is stop the menu's movie. Without
-        this stub, half a minute on the main menu would start attract mode
-        here and not in the port; `menuidle` spends forty seconds there.
+        RaceParameters::InitWithDefaults.
+    ConsiderStartDemoMode in OnTick runs, with the title's stubs for what
+    it calls (TASKS 72h-2b): `menuidle` spends forty seconds on the main
+    menu, and attract mode starts there.
     tHelpMenu::IsActive answers 0: no help menu is ported. The rest of
     OnTick shows the Easter egg group only once TheEasterEggs' +4 is set,
     and nothing sets it here, as nothing hands it the pad. Were it reached,
@@ -1992,6 +1991,15 @@ class RetailMainMenu(object):
             f.say("slide in %08x %08x %.1f"
                   % (arg(1), self.top_left_obj, e.f(12)))
 
+        def replay_consider(_e):
+            launching = f.replay_consider()
+            f.say("replay consider %d" % launching)
+            return launching
+
+        def replay_launch(_e):
+            f.say("replay launch")
+            e.put32(DEMO_REPLAY + 8, 0)
+
         def add_items(_e):                 # SelectionSet::AddItems
             # IndicatorMode is SelectionSet's +144.
             f.say("sel items %08x mode %d %s"
@@ -2008,7 +2016,6 @@ class RetailMainMenu(object):
             0x002488b0,                    # ~tHighlightAnimation
             0x001b9ae0,                    # ~tSlideInAnimation
             0x0016e120, 0x0016e168,        # SelectionSet, ~
-            0x0016ed50,                    # ConsiderStartDemoMode
         )
         stubs = {addr: (lambda _e: None) for addr in silent}
         stubs.update({
@@ -2042,11 +2049,20 @@ class RetailMainMenu(object):
             0x001b9ae8: top_left_y,
             0x002494e8: new_text,
             0x0016e270: lambda _e: f.say("bracket %08x" % arg(1)),
+            # ConsiderStartDemoMode's calls, as the title's are.
+            0x0012eaf0: lambda _e: 0,
+            0x0013f120: replay_consider,
+            0x0013f1c0: replay_launch,
+            0x0016d0a0: lambda _e: f.movie.stop(),
+            0x0016ec10: lambda _e: e.put32(NUM_DEMO_TRACKS, 1),
+            0x00184d48: lambda _e: f.say("attract"),
         })
         for addr, fn in stubs.items():
             e.stub(addr, fn)
         # GetPopupActiveState runs, on the list RetailAutoload keeps.
         e.stubs.pop(0x0016ce00, None)
+        # StartDemoMode's entry, the port's trace line
+        e.hook(0x0016ecd8, lambda _e: f.say("demo mode"))
 
     def callback(self, msg, data):
         e, f = self.e, self.flow

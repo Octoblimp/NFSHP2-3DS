@@ -26585,3 +26585,103 @@ caught.
 2. 72h-2c: the drift measured.
 3. When 72h is committed, publish the launch checklist the user asked
    for, before TASKS 73.
+
+## Session 126 -- TASKS 72h-2b: attract mode
+
+Half a minute idle on the title at rest, or on the main menu, starts a
+demo, as retail's does. It is the AI's race: four AI cars, up to four
+cops, roadblocks, spikes and the helicopter, no player, for two minutes,
+under the Demo overlay. Then the game goes back to the title. A skips a
+demo to the main menu. The disc's replays are ported but do not play by
+default: on the 3DS they drift from their first frame.
+
+### What changed
+
+- New `demomode.c` and `demomode.h`: frontend.cpp's BuildDemoTrackList
+  (`0x0016ec10`) and StartDemoMode (`0x0016ecd8`), and
+  FrontendDatabase::StartDemoMode (`0x00184d48`), which writes
+  TheRaceParameters for the AI demo and tail-jumps to StartRace.
+- New `rcdemo.c` and `rcdemo.h`: RCStateAIDemoModeCallback (`0x0014a8c0`)
+  and RCStateReplayDemoModeCallback (`0x0014aa38`). `rcstates.c`'s table
+  has every entry set now.
+- `gameflow.c`: mainMenuTick calls ConsiderStartDemoMode, as retail's
+  OnTick does. main.c binds the flow's three hooks
+  (replayConsiderLaunching, replayLaunch, startDemoMode),
+  `gDemoModeStartRaceFn`, and copies TheDemoModeReplay's two flags and
+  `Fred.DemoModeStatus` into the flow before each pass.
+- "DemoReplays" (configitems.h, the port's own, 0 by default): with it 0,
+  the replayConsiderLaunching hook answers "none" and every demo is the
+  AI's. "DemoReplays 1" plays the disc's replays as retail does.
+- `carsnap.c`, `car.h`: `gCarSnapshotRetailDrivers`. Retail gives every
+  car but traffic an AnimatedDriver (CarRenderInfo's constructor calls
+  Car::AssignAnimatedDriver, `0x00133488`, which skips UsageType 2), and
+  each one's DoSnapshot moves a section: "AnimatedDriver" and two
+  looking-back bytes. The port builds no drivers, so a disc snapshot read
+  two bytes short per car and the restore failed. While a disc replay
+  plays (main.c points the flag at DemoModeReplayActiveFlag), a car with
+  no driver that is not traffic moves the section itself, by retail's
+  overloads, writing 0s.
+- New `tools/demomode_check.py` and `tools/src/demomode_test.c`.
+  `bootflow_check` runs ConsiderStartDemoMode on the main menu now.
+  `rcstates_check` has the two new entries. `carsnap_check` has three new
+  cars for the stand-in: retail's car has a real driver for the call
+  alone, whose own DoSnapshot runs.
+- New `tools/run_azahar_attract.ps1`: boots to the title, waits for the
+  demo, and with -Skip skips the second and waits for a third on the main
+  menu. -Replays sets "DemoReplays 1" for the run and puts the card's
+  config back after.
+- README: attract mode and the REPLAY folder. The five files are on
+  Azahar's card as `sdmc:/NFSHP2/REPLAY/JUL23`.
+
+### The disc's replays
+
+With the driver sections in step, file 2 (track 12, snapshot loops 515
+to 3349) restored and played. A diagnostic build logged each checksum
+miss and did not post it:
+
+- with libctru's FPSCR (round to nearest), every loop missed from 515,
+  the first replayed, to the end. The player's car left the road some
+  40 s in and stopped against a tree;
+- with the FPSCR at `0x03c00000` (round toward zero, as the EE does),
+  every loop still missed from 515. The car left the road some 43 s in,
+  against a tunnel wall.
+
+So rounding is not the whole of it: the port's car physics is the demo's
+(TASKS 73). With the misses posted, as retail does, a replay ends as
+skipped at its first frame. So "DemoReplays" is off until TASKS 73 and
+72h-2c. The diagnostics are gone: the miss log, the FPSCR line, and the
+first stand-in, which the flag-guarded one replaced.
+
+### On Azahar
+
+`tools/run_azahar_attract.ps1` boots to the title and presses nothing.
+
+- `-Skip`: PASS. Thirty seconds after the intro, the AI demo started on
+  track 11 with four AI cars and four cops, at 30 FPS and 100% speed
+  under the Demo overlay. It timed out after two minutes, and the boot
+  stages (the EA logo, the intro) led back to the title. The next demo,
+  track 25, was skipped with A to the main menu. Idle there, a third
+  started on track 44: `count` moves on 7 each demo.
+- `-Replays`: PASS. "flow replay consider 1", then the launch, "demo
+  replay: file 2, track 12", the race's start and RACING, then the first
+  checksum miss and "flow enter New Main Menu". The card's config was put
+  back after both runs.
+
+Each race's first frame waits up to 10 s, behind the Loading screen,
+while the track attaches; any race does the same.
+
+### Checkers re-run
+
+`demomode` is new: 6648 ops, 72049 lines, 0 differ; 101 mutations, all
+caught. `bootflow` (96 scenarios) and `rcstates` (600) pass with 0
+differ. `carsnap` has the stand-in's three cars and six mutations: 106 of
+106 caught.
+
+### Next
+
+1. TASKS 74, the user's request: the AI's retail pass. Each AI function
+   that `out/retail_syms.txt` marks changed (the AI's car controllers,
+   drivers, routes and actions) is compared with the port.
+2. 72h-2c, the drift, which waits on TASKS 73's car physics.
+3. When 72h is committed, publish the launch checklist the user asked
+   for, before TASKS 73.

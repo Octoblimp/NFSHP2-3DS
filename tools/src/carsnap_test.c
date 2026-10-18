@@ -26,6 +26,7 @@
 #include "cardriver.h"
 #include "carrenderinfo.h"
 #include "carstate.h"
+#include "cartypeinfo.h"
 #include "collision.h"
 #include "collisionbody.h"
 #include "copmanager.h"
@@ -770,6 +771,20 @@ static void op(char **a, int n)
                 dump_obj(&objs[i]);
     } else if (!strcmp(o, "dumpg")) {
         dumpg();
+    } else if (!strcmp(o, "usage")) {
+        at = ref(a[1], &ob);
+        if (ob->size < sizeof(CarTypeInfo))
+            die("usage: too small for a CarTypeInfo:", a[1]);
+        ((CarTypeInfo *)at)->UsageType = atoi(a[2]);
+    } else if (!strcmp(o, "rdriver")) {
+        // The port's car keeps no driver; the flag is what the stand-in
+        // reads (car.h, gCarSnapshotRetailDrivers).
+        static int32_t retail_drivers;
+
+        (void)ref(a[1], &ob);
+        (void)ref(a[2], &ob2);
+        retail_drivers = atoi(a[3]);
+        gCarSnapshotRetailDrivers = &retail_drivers;
     } else {
         die("no op", o);
     }

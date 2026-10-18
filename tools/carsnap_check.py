@@ -35,6 +35,15 @@ UpdateCarReplacementTextures, AnimatedDriver::DoSnapshot, and the new
 Collision (bOMalloc and the constructor in retail, gCollisionNewFn in the
 port). bBreak counts, as replay_breaks does.
 
+**A disc replay's cars** (TASKS 72h-2b): retail gives every car but
+traffic an AnimatedDriver, and the port none, so while a disc replay plays
+the port moves the driver's section itself (car.h,
+gCarSnapshotRetailDrivers). The model's car has a real driver for the call
+alone (`rdriver`), and retail's AnimatedDriver::DoSnapshot runs for real;
+its restore's CancelAllAnimations is stubbed silently, with no animations
+to cancel. The harness's car has none, and the flag. A racer, a traffic
+car and a racer with the flag clear.
+
     python tools/carsnap_check.py
     python tools/carsnap_check.py --fields
     python tools/carsnap_check.py --mutate [--only a,b] [--jobs N]
@@ -168,7 +177,7 @@ RETAIL_OFF = {
 # Car: retail's offset for each field the checker writes or reads; the
 # others are left out.
 CAR_MAP = {
-    "CarIndex": 8, "DriverNumber": 10, "pRideInfo": 16,
+    "CarIndex": 8, "DriverNumber": 10, "pCarTypeInfo": 12, "pRideInfo": 16,
     "TheControlMode": 32, "TheMovementMode": 36, "pCarController": 40,
     "pCarDriver": 44, "pCarMover": 48, "pDynamicCollisionBody": 52,
     "State": 64,
@@ -849,6 +858,30 @@ def sc_car():
             car_fixed(c, anim=anim, skin=skins[1], physics=False) + ids
         out += cycle(["call|car|" + c], car_dumps(c), refill,
                      ["set|%s|OldSpeed|%s" % (c, fl(-4.0))])
+    # A disc replay's cars (TASKS 72h-2b): retail's with its driver, run
+    # for real, against the port's with none and the stand-in's section; a
+    # traffic car, which has no driver in retail either; and the flag off.
+    for c, usage, flag, idx in (("cd", 0, 1, (2, 1)), ("ce", 2, 1, (6, 4)),
+                                ("cf", 1, 0, (3, 7))):
+        out += ["# car %s usage %d flag %d" % (c, usage, flag),
+                "new|%s|Car" % c, "new|%sride|RideInfo" % c,
+                "new|%sctl|CarController" % c,
+                "new|%sccb|CarCollisionBody" % c, "new|%scd|CarDamage" % c,
+                "newb|%sri|64" % c, "newb|%sad|144" % c,
+                "newb|%stc|64" % c, "newb|%sti|2048" % c]
+        out += physicscar(c + "pc", c)
+        out += ["vt|%sccb|Dynamic.Body._vtable|CarCollisionBody" % c,
+                "cblist|%sccb" % c, "maxw|" + fl(1.0)]
+        ids = ["set|%s|CarIndex|%s" % (c, i16(idx[0])),
+               "set|%s|DriverNumber|%s" % (c, i16(idx[1])),
+               "link|%s|pCarTypeInfo|%sti|-" % (c, c),
+               "usage|%sti|%d" % (c, usage),
+               "rdriver|%s|%sad|%d" % (c, c, flag)]
+        out += car_fill(c, "a") + car_fixed(c, anim=False, skin=2) + ids
+        refill = car_fill(c, "b") + \
+            car_fixed(c, anim=False, skin=4, physics=False) + ids
+        out += cycle(["call|car|" + c], car_dumps(c), refill,
+                     ["set|%s|OldSpeed|%s" % (c, fl(9.5))])
     return out
 
 
@@ -896,6 +929,11 @@ S_SET_MOVEMENT = 0x00131618
 S_SWITCH_SKIN = 0x0011e588
 S_REPLACE_TEX = (0x0011ff60, 0x0011ff68)
 S_ANIM_DRIVER = 0x001a9770
+S_CANCEL_ANIMATIONS = 0x001a9b30
+# CarTypeInfo's UsageType, which Car::AssignAnimatedDriver (0x001334a8)
+# tests: traffic (2) gets no driver.
+CARTYPEINFO_USAGE = 1336
+CAR_ANIMATED_DRIVER = 1204
 S_OMALLOC = 0x00257c80
 S_COLLISION_CTOR = 0x0021e620
 COLLISION_SIZE = 112
@@ -945,6 +983,10 @@ class Model(object):
         for a in S_REPLACE_TEX:
             e.stub(a, lambda em: self.log1("replacetex"))
         e.stub(S_ANIM_DRIVER, self.animdriver)
+        # A real driver's restore cancels its animations; it has none, and
+        # the port's stand-in has nothing to cancel.
+        e.stub(S_CANCEL_ANIMATIONS, lambda em: 0)
+        self.real_drivers = {}
         e.stub(S_OMALLOC, self.omalloc)
         e.stub(S_COLLISION_CTOR, self.collision_ctor)
         self.register("cblist", COLLISION_BODY_LIST, None, 1, 8, 8)
@@ -992,10 +1034,25 @@ class Model(object):
         return fn
 
     def animdriver(self, em):
+        if self.arg(0) in self.real_drivers.values():
+            return self.real_animdriver()
         self.emit("animdriver %s s=%s %s" % (self.label(self.arg(0)),
                                              self.snaparg(self.arg(1)),
                                              self.where()))
         return 0
+
+    def real_animdriver(self):
+        """Retail's AnimatedDriver::DoSnapshot itself, run under its stub:
+        the call's ra, and the outer run's count, kept."""
+        e = self.e
+        ra, limit, icount = e.reg[31], e.limit, e.icount
+        stub = e.stubs.pop(S_ANIM_DRIVER)
+        try:
+            e.call(S_ANIM_DRIVER, self.arg(0), self.arg(1), limit=LIMIT)
+        finally:
+            e.stubs[S_ANIM_DRIVER] = stub
+        e.reg[31], e.limit, e.icount = ra, limit, icount
+        return None
 
     def omalloc(self, em):
         a = self.e.alloc(COLLISION_SIZE, align=16)
@@ -1205,7 +1262,14 @@ class Model(object):
             self.sdump()
         elif o == "call":
             ob, at = self.ref(a[2])
+            # The real driver for the call alone, so the dumps show the
+            # port's car, which has none.
+            drv = self.real_drivers.get(at) if a[1] == "car" else None
+            if drv is not None:
+                e.put32(at + CAR_ANIMATED_DRIVER, drv)
             self.call(FNS[a[1]], at, S)
+            if drv is not None:
+                e.put32(at + CAR_ANIMATED_DRIVER, 0)
         elif o == "dump":
             self.dump_obj(a[1])
         elif o == "dumpn":
@@ -1214,6 +1278,19 @@ class Model(object):
                     self.dump_obj(ob.id)
         elif o == "dumpg":
             self.dumpg()
+        elif o == "usage":
+            ob, at = self.ref(a[1])
+            e.put32(at + CARTYPEINFO_USAGE, int(a[2]))
+        elif o == "rdriver":
+            # Retail's car has the driver the port's has not: one for each
+            # car but traffic, while the port's flag says a disc replay.
+            ob, at = self.ref(a[1])
+            ob2, drv = self.ref(a[2])
+            usage = s32(e.u32(e.u32(at + 12) + CARTYPEINFO_USAGE))
+            if int(a[3]) and usage != 2:
+                self.real_drivers[at] = drv
+            else:
+                self.real_drivers.pop(at, None)
         else:
             raise ValueError(o)
 
@@ -1639,6 +1716,24 @@ MUTATIONS = [
     M("car-no-animated-driver", "carsnap.c",
       "    if (c->pAnimatedDriver != NULL) {                             // 1204",
       "    if (0) {                                                      // 1204"),
+    M("car-retail-driver-flag-ignored", "carsnap.c",
+      "    } else if (gCarSnapshotRetailDrivers != NULL && *gCarSnapshotRetailDrivers\n",
+      "    } else if (gCarSnapshotRetailDrivers != NULL\n"),
+    M("car-retail-driver-traffic", "carsnap.c",
+      "               && c->pCarTypeInfo->UsageType != 2) {",
+      "               && c->pCarTypeInfo->UsageType != 3) {"),
+    M("car-retail-driver-never", "carsnap.c",
+      "               && c->pCarTypeInfo->UsageType != 2) {",
+      "               && 0) {"),
+    M("car-retail-driver-byte", "carsnap.c",
+      "        int8_t backwards[2] = {0, 0};",
+      "        int8_t backwards[2] = {0, 1};"),
+    M("car-retail-driver-one-byte", "carsnap.c",
+      "        ReplaySnapshot_MoveChar(s, &backwards[1], 1);\n",
+      ""),
+    M("car-retail-driver-no-section", "carsnap.c",
+      "        ReplaySnapshot_BeginNamedSection(s, \"AnimatedDriver\");\n",
+      ""),
     M("car-gear-speed-swapped", "carsnap.c",
       "    ReplaySnapshot_MoveFloat(s, &c->OldSpeed);                    // 1184\n"
       "    ReplaySnapshot_MoveData(s, &c->DispGear, 1, -1, 0);           // 1104",

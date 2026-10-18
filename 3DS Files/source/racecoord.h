@@ -216,8 +216,7 @@ struct DriverInfo *race_parameters_get_driver_info_by_driver_number(
 //   RCStateReplayDemoModeCallback  0x0014aa38
 //
 // Each answers whether it took the message, which nothing reads. A NULL
-// entry takes nothing. rcstates.c defines the table, with all but the two
-// demos', which stay NULL until their slices.
+// entry takes nothing. rcstates.c defines the table, every entry set.
 typedef int32_t (*RCStateCallbackFn)(RaceCoordinator *rc, RCMessage msg,
                                      int32_t param);
 extern RCStateCallbackFn gRCStateCallbacks[NUM_RCSTATES];

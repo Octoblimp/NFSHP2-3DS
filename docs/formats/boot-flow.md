@@ -1202,16 +1202,18 @@ Still owed:
 * the eggs' half of `OnTick`, and the 78 codes;
 * `MakeChallengeCarsAvailable` and `InitWithDefaults`, which car select and
   its race read;
-* the jukebox itself: `hooks.jukebox` only logs;
-* attract mode from the main menu. `StartDemoMode` has no race yet, so all
-  it could do is stop the menu's movie.
+* the jukebox itself: `hooks.jukebox` only logs.
+
+Attract mode from the main menu came with TASKS 72h-2b: `mainMenuTick`
+calls `bgf_consider_start_demo_mode` on the menu's timer, as `OnTick` does.
 
 `bootflow_check` runs retail's `Callback`, `HandleEvent` and `OnTick` on the
 image (`RetailMainMenu`). The members are said as the port traces them:
 "blurb init", "bloom init", "slide in" (with `FlailerGetTopLeftX` answering
 0.0, as the harness's world does), "sel items", "menu animate" once,
 "bloom item", "menu kit released" and "jukebox 1". The two `Fred` calls
-and `ConsiderStartDemoMode` are stubbed, silently, as the port owes them.
+are stubbed, silently, as the port owes them. `ConsiderStartDemoMode`
+runs, with the title's stubs for what it calls (TASKS 72h-2b).
 `HighlightMenuItem` runs. `FlailerGetBoundingBox` answers one box for every
 mask, and the two brackets' Ys are given relative to it, as the offsets the
 port's hook takes. 48 scenarios, 27,890 lines, 0 differ. Of 190 mutations,
@@ -1686,7 +1688,13 @@ landing three frames after it is asked for.
 `bootflow_check` runs it on the image too, with `BuildDemoTrackList` giving
 one track and the database's half saying "attract". The port runs
 `StopMovie`, traces "demo mode" and leaves the rest to the host's
-`startDemoMode`. `DemoModeReplay`'s own internals are owed.
+`startDemoMode`, which is `demomode.c`. `DemoModeReplay` is `dmreplay.c`.
+`docs/formats/replay.md` has both (TASKS 72h-2a and 72h-2b).
+
+On the 3DS, main.c's `replayConsiderLaunching` answers "none" unless
+`nfshp2_config.txt` says "DemoReplays 1", so attract mode is the AI's
+race. A PS2 replay drifts from its first frame on the 3DS: `replay.md`,
+"The disc's replays on the 3DS".
 
 ## Demo disc
 
@@ -2034,7 +2042,8 @@ row. The rows:
   without a sound. The movie plays on, loop after loop, for forty seconds.
   It was `menuattract` while the model was the demo's, whose BACK went to
   the title and whose attract mode stopped the movie. Retail's `OnTick`
-  would start attract mode at thirty seconds, which the port owes.
+  starts attract mode at thirty seconds. The port's has since
+  TASKS 72h-2b, so attract mode starts in this scenario on both sides.
 * **`attractmovie`**: `StartDemoMode`'s `StopMovie` with a movie open.
   With BACK vetoed, the main menu's movie can no longer be left playing
   under the title. The options movie is opened under the title at rest
@@ -2073,8 +2082,6 @@ Not yet on the host:
   current screen when no popup takes a button.
 * **`OverwriteFred`'s six calls** into the frontend. The loaded `Fred` is
   copied, and nothing reads it yet.
-* **`StartDemoMode`'s track and `DemoModeReplay`'s internals.** The port
-  stops the movie, traces "demo mode" and goes to attract.
 
 The popup's title strip runs off the right of the top screen. The popup
 screen is authored that way for a 640-wide TV, and it is left as it is.

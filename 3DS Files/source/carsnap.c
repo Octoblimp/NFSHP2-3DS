@@ -33,6 +33,7 @@
 #include "vtable.h"
 
 AnimatedDriverDoSnapshotFn gAnimatedDriverDoSnapshotFn;
+const int32_t *gCarSnapshotRetailDrivers;
 
 typedef void (*CarSnapshotFn)(void *self, ReplaySnapshot *s);
 
@@ -99,6 +100,17 @@ void car_do_snapshot(Car *c, ReplaySnapshot *s)
             abort();
         }
         gAnimatedDriverDoSnapshotFn(c->pAnimatedDriver, s);
+    } else if (gCarSnapshotRetailDrivers != NULL && *gCarSnapshotRetailDrivers
+               && c->pCarTypeInfo->UsageType != 2) {
+        // The port's own: retail's driver section for a car the port has
+        // no driver for (car.h). Its two looking-back bytes go out as 0
+        // and come back to nothing; CancelAllAnimations has no animations.
+        int8_t backwards[2] = {0, 0};                             // 104, 105
+
+        ReplaySnapshot_BeginNamedSection(s, "AnimatedDriver");
+        ReplaySnapshot_MoveChar(s, &backwards[0], 1);
+        ReplaySnapshot_MoveChar(s, &backwards[1], 1);
+        ReplaySnapshot_EndSection(s);
     }
     ReplaySnapshot_MoveFloat(s, &c->OldSpeed);                    // 1184
     ReplaySnapshot_MoveData(s, &c->DispGear, 1, -1, 0);           // 1104

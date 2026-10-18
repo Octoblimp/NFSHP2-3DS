@@ -16,9 +16,8 @@
 //   FrontendDatabase's record times, no symbol      0x001842a8  112 bytes
 //
 // Step 8f. Step 8g's rcpost.c has the pause and the post-race, 72g-3's
-// rcreplay.c the instant replay and 72g-4's rcauto.c the auto replay. The
-// two demos are later slices'; their entries in gRCStateCallbacks stay
-// NULL until then.
+// rcreplay.c the instant replay, 72g-4's rcauto.c the auto replay and
+// 72h-2b's rcdemo.c the two demos.
 // docs/formats/race-coordinator.md has the decode.
 
 #ifndef RCSTATES_H
@@ -101,8 +100,9 @@ int32_t rc_state_prerace_callback(RaceCoordinator *rc, RCMessage msg,
 int32_t rc_state_race_in_progress_callback(RaceCoordinator *rc,
                                            RCMessage msg, int32_t param);
 
-// rcstates.c defines racecoord.h's gRCStateCallbacks with the four above
-// and rcpost.h's two at their RCStates; the other four stay NULL for now.
+// rcstates.c defines racecoord.h's gRCStateCallbacks with the four above,
+// rcpost.h's two, rcreplay.h's, rcauto.h's and rcdemo.h's two at their
+// RCStates.
 
 // --------------------------------------------------------- the methods
 

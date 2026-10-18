@@ -2228,7 +2228,12 @@ and the track path, which car.c's checkers do not link. In order:
   the body, the steering, four wheels and suspensions, the engine, the
   drivetrain and the aerodynamics) and the collision body's;
 - CarState's, the animated driver's (a seam until 72d, which aborts if a
-  car has a driver) and the track path coordinate's;
+  car has a driver) and the track path coordinate's. The port builds no
+  drivers, but retail gives one to every car but traffic, so a disc
+  replay carries the driver's section: a name and its two looking-back
+  bytes. While a disc replay plays (`gCarSnapshotRetailDrivers`, 72h-2b),
+  a car with no driver that is not traffic moves that section anyway,
+  writing 0s and reading into nothing;
 - ResetMe and JustResetFrames as one byte, the first in the low four
   bits;
 - the blink, the trough, the skid counts, and the boost overrides.
@@ -2243,11 +2248,15 @@ after them (`physicscar.h`).
 RetailEmu and the port's in a host harness over the same objects. Each is
 taken, restored over other values, checksummed and verified, alone and as
 the trees the game builds. The layouts are the port's headers, parsed,
-with a map where retail's offsets differ.
+with a map where retail's offsets differ. Three more cars test the disc
+replay's stand-in. For the call alone, retail's car has a real driver,
+whose own DoSnapshot runs, and the port's has none and the stand-in.
+They are a racer, a traffic car (which retail gives no driver), and a
+racer with the flag clear.
 
 ```
-carsnap_check           6608 script lines, 22867 lines, 0 differ
-carsnap_check --mutate  100 mutations, 100 caught
+carsnap_check           10241 script lines, 35890 lines, 0 differ
+carsnap_check --mutate  106 mutations, 106 caught
 ```
 
 Where retail and the port part, the checker sets the field both read to

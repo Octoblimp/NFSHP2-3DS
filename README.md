@@ -53,6 +53,13 @@ them), and skips any it cannot find. The race speech streams from
 `DAT.PCK`: 1.5 GB for all five, about 300 MB for one). Without it the
 game runs silent of speech.
 
+Attract mode, half a minute idle on the title or the main menu, is an AI
+race with cops, which needs no files of its own. The disc's demo replays
+(`REPLAY/JUL23`, five files, 548 KB) can go on the card as well, as
+`sdmc:/NFSHP2/REPLAY/JUL23`. They play only with `DemoReplays 1` in
+`nfshp2_config.txt`, because on the 3DS a PS2 replay drifts off course
+from its first frame.
+
 ## Status
 
 Phase 2 (boot flow and frontend menus) complete: the port boots the way the

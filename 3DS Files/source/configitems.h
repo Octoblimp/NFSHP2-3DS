@@ -184,6 +184,15 @@ extern int32_t ConfigTestFinishTime;        // 0
 // "DebugLog 1" for the log. Off by default (2026-10-17).
 extern int32_t ConfigReplayCheck;           // 0
 
+// The port's own: "DemoReplays 1" lets attract mode play the disc's six
+// replays (sdmc:/NFSHP2/REPLAY) as retail does. Off by default
+// (2026-10-17): the port's car physics is the demo's (TASKS 73), so a PS2
+// replay drifts from its first frame -- every frame's checksum misses,
+// which ends the demo at once, and the car leaves the road some 40
+// seconds in. Off, ConsiderLaunching answers "none" and attract mode is
+// retail's other demo, the AI race (demomode.c).
+extern int32_t ConfigDemoReplays;           // 0
+
 typedef void (*ConfigItemsLogFn)(const char *line);
 
 // Applies `text` (NUL-terminated), each word as it is read; SkipFE goes

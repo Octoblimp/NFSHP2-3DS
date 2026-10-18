@@ -14,6 +14,7 @@
 #include "racefinish.h"
 #include "racerun.h"
 #include "rcauto.h"
+#include "rcdemo.h"
 #include "rcpost.h"
 #include "rcreplay.h"
 #include "realtime.h"
@@ -51,6 +52,8 @@ RCStateCallbackFn gRCStateCallbacks[NUM_RCSTATES] = {
     [RCSTATE_AUTO_REPLAY]      = rc_state_auto_replay_callback,
     [RCSTATE_PAUSE]            = rc_state_pause_callback,
     [RCSTATE_POSTRACE]         = rc_state_post_race_callback,
+    [RCSTATE_AI_DEMO_MODE]     = rc_state_ai_demo_mode_callback,
+    [RCSTATE_REPLAY_DEMO_MODE] = rc_state_replay_demo_mode_callback,
 };
 
 void (*gSoundMuteFn)(int32_t on);

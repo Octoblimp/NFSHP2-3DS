@@ -753,4 +753,12 @@ typedef void (*AnimatedDriverDoSnapshotFn)(AnimatedDriver *d,
                                            struct ReplaySnapshot *s);
 extern AnimatedDriverDoSnapshotFn gAnimatedDriverDoSnapshotFn;
 
+// The port's own (TASKS 72h-2b). Retail's CarRenderInfo constructor gives
+// every car but traffic (UsageType 2) an AnimatedDriver, so the disc's
+// replays carry its section for each; the port builds none. While
+// *gCarSnapshotRetailDrivers (main.c points it at DemoModeReplayActiveFlag)
+// is set, a car with no driver moves that section anyway, so a disc
+// snapshot reads in step. NULL or 0, the port's own snapshots leave it out.
+extern const int32_t *gCarSnapshotRetailDrivers;
+
 #endif // CAR_H

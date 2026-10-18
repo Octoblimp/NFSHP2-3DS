@@ -1571,15 +1571,14 @@ static void mainMenuDtor(BGameFlow* gf)
 // three seconds after it went up.
 //
 // Not ported: the eggs' half, which needs the 78 codes (TheEasterEggs never
-// sets +4 without them, so nothing of it is seen), and ConsiderStartDemoMode,
-// which waits for StartDemoMode's race: before it, attract mode from here
-// would only stop the menu's movie.
+// sets +4 without them, so nothing of it is seen).
 static void mainMenuTick(BGameFlow* gf)
 {
     BNewMainMenu* m = &gf->mainMenu;
     BAnim*        a = flowAnim(gf);
 
     if (gf->popups[0].active) m->timer = gf->realTimer;
+    bgf_consider_start_demo_mode(gf, &m->timer);
     if (!m->tracedAnimate) trace(gf, "menu animate");
     m->tracedAnimate = 1;
     if (a) {

@@ -4298,18 +4298,34 @@ phases.
               caught) passes, and so do loadertable, rcreplay and
               replayscreen. Nothing sets ActiveFlag yet; a SkipFE race on
               Azahar ran as before.
-            - [ ] 72h-2b. Attract mode from the title: StartDemoMode
-              (`0x0016ecd8`), BuildDemoTrackList (`0x0016ec10`) and
-              FrontendDatabase::StartDemoMode (`0x00184d48`); the flow's
-              hooks (replayConsiderLaunching, replayLaunch,
-              startDemoMode) and its loading flags;
-              RCStateReplayDemoModeCallback (`0x0014aa38`) and, if the
-              title reaches it, RCStateAIDemoModeCallback (`0x0014a8c0`);
-              DemoModeStatus; the REPLAY folder on the card and in the
-              README. On Azahar: idle on the title, a replay plays, then
-              the title comes back; a button goes to the main menu.
+            - [x] 72h-2b. Attract mode from the title.
+              Done in Session 126 (`docs/formats/replay.md`, 72h-2b).
+              `demomode.c` is StartDemoMode (`0x0016ecd8`),
+              BuildDemoTrackList (`0x0016ec10`) and
+              FrontendDatabase::StartDemoMode (`0x00184d48`). `rcdemo.c`
+              is RCStateAIDemoModeCallback (`0x0014a8c0`) and
+              RCStateReplayDemoModeCallback (`0x0014aa38`). The flow's
+              three hooks and its loading flags are bound, and the main
+              menu considers a demo too. The disc's replays restore once
+              each car's AnimatedDriver section is moved
+              (`gCarSnapshotRetailDrivers`), but they drift from their
+              first frame on the 3DS: every loop's checksum missed, under
+              round-to-nearest and round-toward-zero alike. So
+              "DemoReplays" (0 by default) keeps them off, and attract
+              mode is the AI's race. demomode_check (6648 ops, 0 differ;
+              101 of 101 mutations caught), bootflow, rcstates and
+              carsnap (106 of 106) pass. On Azahar
+              (`run_azahar_attract.ps1`), both PASS. With -Skip, the AI
+              demo played on track 11 at 30 FPS under the overlay, timed
+              out after two minutes, and the boot stages led back to the
+              title. A skipped the next to the main menu, where a third
+              started. With -Replays, file 2 restored, reached RACING and
+              went to the main menu at its first checksum miss.
             - [ ] 72h-2c. The PS2-to-3DS drift: each demo snapshot's
-              end against the next start, or checksums.
+              end against the next start, or checksums. 72h-2b found
+              every loop missing from the first, so this waits for TASKS
+              73's car physics; then "DemoReplays 1" and
+              `tools/run_azahar_attract.ps1 -Replays` measure it again.
 
 73. [ ] **The car's retail pass: where 72b found retail and the port
         apart.** The port's car physics is the demo's code. Porting
@@ -4328,7 +4344,19 @@ phases.
         - CollisionBodyWitness: retail's pCollision is at 108, the demo's
           at 104.
         - CarCollisionBody's retail fields.
-        It comes after TASKS 72, unless the replays need it sooner.
+        It comes after TASKS 72, unless the replays need it sooner. The
+        disc's demo replays need it (72h-2b): they miss the checksum from
+        their first frame on the 3DS.
+
+74. [ ] **The AI's retail pass.** Asked for on 2026-10-17, during 72h-2b:
+        "I think the AI in general is somewhat stupid sometimes, would
+        double-check that it matches the retail code as well". The AI
+        was ported from the demo's image, like the car physics (TASKS
+        73). `out/retail_syms.txt` marks each demo function retail
+        changed, so the first step is that list for the AI's classes
+        (the AI car controllers, the drivers, the routes and the
+        actions), each changed function read beside the port's. It comes
+        right after 72h-2b (done), before 72h-2c.
 
 ### The retail frontend
 

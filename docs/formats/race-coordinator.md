@@ -11,8 +11,9 @@ Step 8e ported the lifetime and the queue. Step 8f ported the first four
 states, `NONE` through `RACE_IN_PROGRESS`, with the countdown and the
 finish (see "The states up to the finish", below). Step 8g ports `PAUSE`
 and `POSTRACE` (see "The pause and the post-race"). TASKS 72g-3 and
-72g-4 brought the two replays (see [replay.md](replay.md)). The two
-demos are later slices, and their table entries stay NULL until then. The coordinator's DoSnapshot (0x001498f0), which takes the world's,
+72g-4 brought the two replays, and 72h-2b the two demos (see
+[replay.md](replay.md)); every table entry is set. The coordinator's
+DoSnapshot (0x001498f0), which takes the world's,
 the race's and the players', came with TASKS 72d-2 in `worldsnap.c`; see
 [replay.md](replay.md).
 
@@ -272,7 +273,8 @@ returns NULL if none does. The count is re-read each pass.
 the countdown, the finish and the small methods around them.
 `racefinish.c`/`racefinish.h` port the six `Race` methods those states
 ask. `rcstates.c` defines the state table with the four at their
-`RCState`s. The other six entries stay NULL until their slices.
+`RCState`s. The other six came with later slices (8g, 72g-3, 72g-4
+and 72h-2b).
 
 | retail | what |
 |--------|------|

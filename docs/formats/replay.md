@@ -1368,6 +1368,164 @@ nothing with an empty list, and answers "none" with no manager.
 Nothing sets ActiveFlag until 72h-2b, so a normal race does not change.
 On Azahar a SkipFE race ran as before.
 
+## 72h-2b: attract mode
+
+Half a minute idle on the title at rest, or on the main menu, starts a
+demo. `demomode.c` is frontend.cpp's BuildDemoTrackList (`0x0016ec10`)
+and StartDemoMode (`0x0016ecd8`), and FrontendDatabase::StartDemoMode
+(`0x00184d48`). `rcdemo.c` is the coordinator's two demo states,
+RCStateAIDemoModeCallback (`0x0014a8c0`) and
+RCStateReplayDemoModeCallback (`0x0014aa38`).
+
+### How a demo starts
+
+ConsiderStartDemoMode (`gameflow.c`, `docs/formats/boot-flow.md`) runs on
+each tick of the title at rest and of the main menu. Past
+BeginDemoModeTimeout (30 s) since the last key, it waits while a replay
+loads. Once one has loaded, it calls Launch, which sets ActiveFlag, and
+StartDemoMode. With none loaded, it asks ConsiderLaunching. A replay found
+starts loading, and the demo waits for it. With none found, StartDemoMode
+runs at once and the demo is the AI's.
+
+StartDemoMode stops the menu's movie, builds the track list, takes the
+track at `count % NumDemoableTracks` and moves `count` on 7. The list is
+built once: TrackSelectedInConfigFile alone when it is not -1. Otherwise
+it is every track from 1 to HighestTrackNumber that GetTrackInfo has and
+that is not point to point, up to 32. The database's StartDemoMode then
+sets TheRaceParameters for an AI demo and calls StartRace:
+
+| Field | Value |
+|---|---|
+| TrackNumber | the pick |
+| New624 | 1 |
+| TrackTimeOfDay | 3 |
+| TrackDirection | TrackDirectionForDemoMode (`gp-23104`), 0 |
+| TrafficDensity, TrafficOncoming | 1.0, 0.5 |
+| nMaxCops | 4 |
+| TrackWeather, EventTreeRace | 0 |
+| RaceType | 1 |
+| AIDemoMode | 1 |
+| NumPlayerCars, NumLapsInRace | 0 |
+| NumAICars | 4 |
+| bTickets, bRoadBlocks, bSpikeStrips, bHelicopter | 1 |
+| nNumBeACopRoadBlocks, nNumBeACopChoppers | 0 |
+
+It also sets `Fred.GameType` (`+67372`) to 1 and `Fred.DemoModeStatus`
+(`+384`) to 0.
+
+With a replay launched, StartRace's first act (72h-2a's
+`gDemoModeReplayStartRaceFn`) puts the replay's own parameters over all of
+this, with ReplayDemoMode set. InitForRace then starts the race in
+REPLAY_DEMO_MODE, where an AI demo starts in AI_DEMO_MODE.
+
+### The two states
+
+Both show the Demo overlay (`0xcc28b8a9`: two black bars, the logo top
+left and "Demo" at the bottom), and give JOY_EVENT_SKIP_DEMO_MODE on both
+ports to the coordinator's joystick handler, which sends SKIP. Both make
+the demo camera. UNACTIVATE hides the overlay, takes the two handlers away
+and deletes the camera through its virtual destructor.
+
+A demo ends with `Fred.DemoModeStatus` set, a change to NONE and
+RC_QUIT_RACE sent, which NONE takes. The status is TIMEDOUT (1) or
+SKIPPED (2). Back in the frontend, LaunchFrontendMenus goes to the main
+menu after a skipped demo and through the boot stages to the title after
+one that timed out.
+
+| Message | AI_DEMO_MODE | REPLAY_DEMO_MODE |
+|---|---|---|
+| ACTIVATE | as above | BeginDemoMode first |
+| UNACTIVATE | as above | then EndDemoMode and the type-changed handlers back |
+| TICK | ends, timed out, past DemoModeTimeout (120 s) of race time | ends, timed out, when TestGoesOn answers 0 |
+| SKIP | ends, skipped | ends, skipped |
+| SKIP_REPLAY | 0 | ends, skipped |
+| QUIT_RACE | NONE, and sent on | NONE, and sent on |
+| TAKE_AUTOSNAPSHOT | taken | taken |
+| MOVE_REPLAY | 0 | RestoreSnapshot of the posted snapshot, then the demo camera suspended and resumed |
+| any other | 0 | 0 |
+
+Retail reads pCurrentRace in the AI demo's tick with no test. The port
+counts no race as 0 seconds, which is what retail reads from low memory.
+
+### What main.c binds
+
+- The flow's `replayConsiderLaunching`, `replayLaunch` and
+  `startDemoMode` hooks: `dmreplay_consider_launching`, `dmreplay_launch`
+  and `demomode_start`.
+- `gDemoModeStartRaceFn`, the database's tail-jump to StartRace:
+  `fred_start_race`, then the race-start log.
+- Before each pass of the flow, TheDemoModeReplay's LoadingFlag and
+  LoadedFlag and `Fred.DemoModeStatus`, which the flow keeps as its own.
+- `gCarSnapshotRetailDrivers` at DemoModeReplayActiveFlag (`car.h`, and
+  below).
+
+`gRCStateCallbacks` has every entry set now.
+
+### The card, and "DemoReplays"
+
+The demo's replays are the disc's `REPLAY\JUL23`, five files, 548 KB. They
+can go on the card with the rest, as `sdmc:/NFSHP2/REPLAY/JUL23`. The port
+plays them only with "DemoReplays 1" in `nfshp2_config.txt`. By default
+the flow's `replayConsiderLaunching` hook answers "none" before it calls
+ConsiderLaunching, so every demo is the AI's, as on a card without them.
+The next section says why.
+
+### The disc's replays on the 3DS
+
+A disc replay is a snapshot and the pads from there on. The race runs
+again from the snapshot, with the world's checksum (channel 2, 8 bits a
+frame) to tell when it has left the PS2's path. A miss posts SKIP_REPLAY,
+and REPLAY_DEMO_MODE ends the demo as skipped, so the flow goes to the
+main menu.
+
+**The driver's section.** Retail gives every car but traffic an
+AnimatedDriver: the CarRenderInfo constructor calls
+Car::AssignAnimatedDriver (`0x00133488`), which skips UsageType 2. Car's
+DoSnapshot moves the driver's section for each car that has one:
+"AnimatedDriver", then its two looking-back bytes, `+104` and `+105`.
+The port has no AnimatedDriver yet, so at first the snapshot read the
+next car's data two bytes early, and the restore hit a bad section and
+stopped. While a disc replay plays, `carsnap.c` now moves the section
+itself for each car with no driver that is not traffic. It writes 0s and
+reads into nothing. With the flag clear, the port's own snapshots are as
+before. `carsnap_check` runs retail's AnimatedDriver::DoSnapshot beside it
+(car.md, "The check").
+
+**The drift.** With the sections in step, the replay restores and plays,
+but it does not stay on the PS2's path. Measured on Azahar with a
+diagnostic build that logged each miss and did not post it, on file 2
+(track 12, snapshot loops 515 to 3349, some 94 s):
+
+| Build | First miss | Misses | The player's car |
+|---|---|---|---|
+| libctru's FPSCR (round to nearest) | loop 515, the first replayed | every loop to the end | off the road some 40 s in, stopped against a tree |
+| FPSCR `0x03c00000` (round toward zero, as the EE) | loop 515 | every loop to the end | off the road some 43 s in, stopped against a tunnel wall |
+
+Rounding alone does not explain it. The port's car physics is the demo
+image's, and TASKS 73 brings retail's. The EE's other float behaviour
+(no denormals, no infinities, its own square root and reciprocal) is
+72h-2c's to measure, after that. Until both are done, a disc replay would
+end at its first frame, or would wander off the road if the misses were
+ignored. That is why "DemoReplays" is off. With "DemoReplays 1", the
+replay restores, plays its first frame, and goes to the main menu.
+
+### On Azahar
+
+`tools/run_azahar_attract.ps1` boots to the title and presses nothing.
+
+- `-Skip`: PASS. Thirty seconds after the intro, the AI demo started on
+  track 11, with four AI cars and four cops, at 30 FPS under the overlay.
+  It timed out after two minutes and the boot stages led back to the
+  title. The next demo (track 25) was skipped with A to the main menu,
+  and idle there a third started (track 44): `count` moves on 7 each
+  time.
+- `-Replays`: PASS. File 2 loaded and launched, track 12 restored and
+  reached RACING, and the first checksum miss ended the demo to the main
+  menu.
+
+Each race's first frame waits up to 10 s while the track attaches, behind
+the Loading screen. That is the same as any race.
+
 ## The checker for 72d-1
 
 `tools/racesnap_check.py` runs retail's code beside the port's, on
@@ -1866,9 +2024,59 @@ mutations, all caught.
     python tools/dmreplay_check.py
     python tools/dmreplay_check.py --mutate [--only a,b]
 
+## The checker for 72h-2b
+
+`tools/demomode_check.py` runs retail's BuildDemoTrackList,
+StartDemoMode, FrontendDatabase::StartDemoMode and the two demo states
+beside `demomode.c` and `rcdemo.c`, on `tools/src/demomode_test.c`. The
+stubs print what they are asked on both sides:
+
+- GetTrackInfo, from a table the script fills;
+- StartRace and the overlay's visibility;
+- the joystick handlers' add and remove;
+- the coordinator's ChangeState, SendMessage and the demo cameras'
+  suspend and resume;
+- TheDemoModeReplay's BeginDemoMode, EndDemoMode and TestGoesOn;
+- the ReplayManager's RestoreSnapshot;
+- the type-changed handlers' reinstall;
+- the demo camera's destructor, through its table.
+
+The script sends every message, in and out of range, to both states,
+with the camera there and not. It runs the AI demo's tick around its
+timeout, over each race time and each odd timeout. It builds the track
+list from every mix of the table, and starts the demo over each count,
+list and direction.
+
+These differences are made equal by hand:
+
+- Retail stops the movie in StartDemoMode, and the port's flow does it
+  first, so the model stubs StopMovie silently.
+- The model keeps the demo disc's bActive 0.
+- The script never starts on an empty track list.
+- Retail's unchecked pCurrentRace reads low memory, which is 0, as the
+  port's 0 seconds is.
+
+The run is 6648 ops and 72049 lines; none differ. 101 mutations, all
+caught.
+
+    python tools/demomode_check.py
+    python tools/demomode_check.py --mutate [--only a,b]
+
+Three checkers that already existed cover the rest:
+
+- `bootflow_check`: ConsiderStartDemoMode now runs on the main menu in
+  the retail model, with the title's stubs, and `menuidle` starts attract
+  mode there. 96 scenarios, 0 differ.
+- `rcstates_check`: the table's two demo entries. 600 scenarios, 0 differ.
+- `carsnap_check`: the disc replay's driver sections (car.md, "The
+  check"). 106 mutations, all caught.
+
 ## Not yet
 
 - `FlushClans` (0x001ab650) and `FlushFernShakers` (0x001da1b0): the port
   has neither the clans nor the fern shakers yet.
 - `AnimatedDriver::DoSnapshot` (0x001a9770): AnimatedDriver is not
-  ported, so its snapshot is not either.
+  ported, so its snapshot is not either. A disc replay's driver sections
+  are moved by a stand-in (72h-2b).
+- The disc's replays drift from their first frame (72h-2b, "The disc's
+  replays on the 3DS"); "DemoReplays" stays off until TASKS 73 and 72h-2c.

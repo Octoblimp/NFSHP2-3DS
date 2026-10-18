@@ -69,6 +69,7 @@
 #include "camera.h"
 #include "cameracoord.h"
 #include "democam.h"
+#include "demomode.h"
 #include "dmreplay.h"
 #include "drivecam.h"
 #include "drivetarget.h"
@@ -5165,6 +5166,37 @@ static void demoModeReplayStartRace(void)
               (int)TheRaceParameters.TrackNumber);
 }
 
+// ConsiderStartDemoMode's three (gameflow.c, TASKS 72h-2b): TheDemoModeReplay's
+// ConsiderLaunching and Launch, and StartDemoMode once the flow has stopped
+// the movie. The flow reads the replay's two flags as its own, which the
+// main loop copies in before each pass. With "DemoReplays 0", the default
+// (configitems.h), there is no replay to launch and the race is the AI's.
+static int hookReplayConsiderLaunching(void* user)
+{
+    (void)user;
+    if (!ConfigDemoReplays) return 0;
+    return dmreplay_consider_launching();
+}
+
+static void hookReplayLaunch(void* user)
+{
+    (void)user;
+    dmreplay_launch();
+}
+
+static void hookStartDemoMode(void* user)
+{
+    (void)user;
+    demomode_start();
+}
+
+// FrontendDatabase::StartDemoMode's tail-jump to StartRace.
+static void demoModeStartRace(FrontendDatabase* f)
+{
+    fred_start_race(f);
+    logRaceStart();
+}
+
 // ReplayCheck (configitems.h), the port's own test of the replay (TASKS
 // 72f-2). The race captures as retail's does; this plays two parts of it
 // back and counts what does not come out the same. Round 1 sets the four
@@ -7713,6 +7745,9 @@ int main(int argc, char** argv)
     gDemoModeReplayLoadFn = dmreplay_load_resource_file;
     gDemoModeReplayUnloadFn = dmreplay_unload_resource_file;
     gDemoModeReplayStartRaceFn = demoModeReplayStartRace;
+    // Attract mode's race (demomode.c) and its two states (rcdemo.c, which
+    // gRCStateCallbacks names).
+    gDemoModeStartRaceFn = demoModeStartRace;
     // The bSamples the race's modules make and play, on gSound.
     gGetInGameSampleFn        = sndGetInGameSample;
     gSampleDeleteFn           = sndSampleDelete;
@@ -8165,9 +8200,10 @@ int main(int argc, char** argv)
     hooks.setBlurb         = hookSetBlurb;
     hooks.setBlurbText     = hookSetBlurbText;
     hooks.trace            = hookTrace;
-    // TheDemoModeReplay has no replays to offer (no hook answers "none"),
-    // and StartDemoMode's race is not ported: ConsiderStartDemoMode runs
-    // and only traces.
+    // Attract mode, from the title and the main menu (TASKS 72h-2b).
+    hooks.replayConsiderLaunching = hookReplayConsiderLaunching;
+    hooks.replayLaunch     = hookReplayLaunch;
+    hooks.startDemoMode    = hookStartDemoMode;
 
     bgf_init(&g_flow, kGameFlowStages, BGF_NUM_STATES,
              kScreens, NUM_SCREENS, kBootStages, NUM_BOOT_STAGES, &hooks);
@@ -8308,6 +8344,8 @@ int main(int argc, char** argv)
     gReplayNumInstantReplaySnapshotsFn = replayNumInstantReplaySnapshots;
     // The pause pages' changes, made and replayed (TASKS 72h-1).
     gReplayHandleSpecialEventFn       = replayHandleSpecialEvent;
+    // A disc replay's cars carry retail's driver sections (car.h).
+    gCarSnapshotRetailDrivers         = &DemoModeReplayActiveFlag;
     gRaceCoordinatorPostMessageFn = ConfigReplayCheck
                                         ? replayCheckPostMessage
                                         : racecoordinator_post_message;
@@ -9024,6 +9062,12 @@ int main(int argc, char** argv)
                 PlayerNetLocal = -1;
             }
             eViewShowOne = PlayerNetLocal >= 0;
+
+            // TheDemoModeReplay's +4 and +8 and Fred.DemoModeStatus, which
+            // the flow keeps as its own (gameflow.h).
+            g_flow.replayLoading = TheDemoModeReplay.LoadingFlag;
+            g_flow.replayLoaded = TheDemoModeReplay.LoadedFlag;
+            g_flow.demoModeStatus = Fred.DemoModeStatus;
 
             // MainLoop: one pass of the flow per frame, by the real step.
             // bgf_frame is the flow's service and the menus' tick both.
