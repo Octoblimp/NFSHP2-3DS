@@ -730,7 +730,8 @@ a race snapshot holds 2.5 to 3.3 KB and a checksum 5.7 to 6.4 KB.
   HandlePauseMenuReplaySpecialEvents) and DemoModeReplay::Service
   (`gDemoModeReplayServiceFn`) are NULL until 72h.
 - RCSTATE_INSTANT_REPLAY and RCSTATE_AUTO_REPLAY have no handlers until
-  72g. The End Game Menu still leaves View Replay off.
+  72g-3, so nothing makes a ReplayScreen (72g-2) yet. The End Game Menu
+  still leaves View Replay off.
 
 ### ReplayCheck, the port's own test
 
@@ -808,6 +809,131 @@ On Azahar (2026-10-17), `run_azahar_career.ps1 -Race -FinishSeconds 40
   29.9 FPS.
 - PASS: the autosave, the unload and the event tree followed, with 0
   bakes failed and stderr empty.
+
+## 72g-2: ReplayScreen
+
+`replayscreen.c` is retail's ReplayScreen (`0x001ebda8` .. `0x001ed4e0`):
+the screen over an instant replay, with its timeline, its markers, its
+camera modes and its buttons. Nothing makes one yet. That is
+RCStateInstantReplayCallback's job, in 72g-3. MainLoop's call is in
+already: `raceFrame` updates the race coordinator's screen (word 44)
+after UpdatePlayersNonGameState, as retail does at `0x0012f58c`.
+
+### The class
+
+It is 584 bytes. The demo's class was 248 bytes and had one list of
+markers. Retail has two lists of 16:
+
+- `LapMarkers` at 40, for the laps and the instant replay.
+- `HighlightMarkers` at 300, for the demo's snapshots.
+
+Word 28 is new as well. It holds the RealLoopCounter of the last event
+handled, so the screen handles one event a loop.
+
+- **The constructor** (`0x001ebda8`):
+  - It shows the screen `0x60befaed`.
+  - It sets the timeline's span from the manager's BeginningOfTime and
+    EndOfTime, in seconds. The span is at least a second.
+  - It places the timeline at the TIMELINE bitmap's X, with the bitmap's
+    width. Without the bitmap it uses 10 and 100.
+  - It builds the markers, finds the three demo indicators, adds the
+    handlers for events 99 to 110 on both ports, and makes the camera.
+  - It shows ONE_PLAYER_ONLY when there is one player, and unmutes the
+    replay's sound.
+- **The markers** (`0x001ec0c0`). Retail's symbols call this the
+  constructor; its callers say otherwise. Every marker is hidden first.
+  To build, it then walks the manager's snapshots in order:
+  - `LAP_SNAPSHOT` takes `LAP_MARKERn`, with n counting the laps from 1.
+  - The first `INSTANT_REPLAY` takes `INSTANT_REPLAY_MARKER`, on the lap
+    list.
+  - `DEMO_MODE_SNAPSHOT` takes `HIGHLIGHT_MARKERn`.
+  - `HIGHLIGHT_SNAPSHOT` takes nothing.
+
+  A marker whose object is missing still takes its slot. It is not shown
+  or placed, and its times stay whatever the slot held before;
+  PREVIOUS_MARKER and NEXT_MARKER read them all the same.
+- **Placing the markers.** A lap marker sits at its snapshot's
+  beginning. A demo marker is a bar from its snapshot's beginning to its
+  end: 8 high, at y 40, colored `0x80f08020`. Retail also has a green bar
+  at y 46 (`0x50a040c0`) for a `HIGHLIGHT_SNAPSHOT`. That branch never
+  runs, because the list holds only demo snapshots.
+- **Update** (`0x001ec858`) does these things in order:
+  - It builds the markers again and places the time marker at
+    WorldTimer.
+  - It prints the player's number.
+  - For a cop (usage 1), it hides the lap and the place. Otherwise:
+    - The lap shows as `n/laps` unless the race has one lap or is point
+      to point.
+    - The place shows as `pos/cars` when two or more cars race. With two
+      players, a cop who is the other player does not count.
+  - It shows the race's time. For finish reasons 2 and 3 it shows the
+    reason's text instead.
+  - It blinks the three demo indicators: shown for 11 of every 24
+    frames.
+  - It makes the camera again when there is none, or when the NIS
+    starts or stops.
+- **Tick** (`0x001ec768`) handles the end of the capture:
+  - When the capture's end is reached (EndCapturingLoopCount less
+    WorldLoopCounter is 0 or less, in a subtraction that wraps), it
+    pauses the replay and notes RealTimer.
+  - With the end screens up, after more than 4 seconds paused there, it
+    posts `RC_SKIP_REPLAY`.
+  - During a demo test, it pauses unless the test goes on.
+
+### The buttons
+
+Events 99 to 110 come through `JoyHandlerBridge`. While the help is up,
+only HELP is heard.
+
+| Event | What it does |
+|---|---|
+| 99 SKIP | MenuUpDown; posts `RC_SKIP_REPLAY` |
+| 100 PAUSE | MenuUpDown; pauses, or resumes if the capture is not at its end |
+| 101 PREVIOUS_MARKER | MenuLeftRight; posts `RC_MOVE_REPLAY` to the last lap marker begun more than a second ago. Unpauses and stops watching the NIS |
+| 102 NEXT_MARKER | The same, to the first lap marker not begun yet |
+| 103 PLAYBACK_SPEED | MenuUpDown; paused, it resumes in slow motion, else it toggles slow motion |
+| 104 CAMERA_ANGLE | The next CameraMode of 4, the camera made again, frontend sound 3 |
+| 105 CAMERA_TARGET | With exactly two players, the other one's car; frontend sound 5 |
+| 106 HELP | Summons or dismisses the help (`ReplayScreenHelpIDs`, 802250 .. 802257). Then pauses while it is up, unless the capture has ended |
+| 107 HIDE_TIMELINE | Swaps the screen for `0xddce04a3` and back; frontend sound 5 |
+| 108 MARK_DEMO | Without a disc in the drive: the demo disc's timeouts to 32767 and a recording begun, or ended on release |
+| 109 TEST_DEMO | When a test can run: begins one, or ends the demo; unpauses |
+| 110 ERASE_DEMO | On a press during a demo snapshot, WantToBeRecordingSnapshot 1; on release, 0 |
+
+In a demo snapshot, PREVIOUS_MARKER and NEXT_MARKER call
+ServiceDemoMode instead.
+
+The retail disc always answers that it is in the drive, so MARK_DEMO
+is a tweaker's button.
+
+### The cameras
+
+- CameraMode 0 is a DemoCameraCoordinator.
+- CameraMode 1 is a DriveCameraMover at POV 1.
+- CameraMode 2 is the same looking back, at 300.9.
+- CameraMode 3 is the bumper, at POV 0.
+
+While the player's NIS plays, the NIS manager's coordinator replaces
+the camera. The blur is on in a zone, or with the nitro under
+REAL_CONTROL.
+
+### The seams
+
+main.c binds these:
+
+- The common region's samples and MakeFrontendSound.
+- The help: `g_help`'s IsActive, and 0x0016ca40's toggle on a press.
+
+These stay NULL:
+
+- The radial blur. The race does not draw retail's blur
+  (`gRadialBlurOnFn`).
+- The disc test. NULL answers 1, the disc in the drive.
+- TheDemoModeReplay's seven calls, and its three words, which nothing
+  sets yet. Both wait for 72h.
+
+The two camera constructors, the NIS coordinators and the coordinator's
+delete are the race's seams already bound.
 
 ## The checker for 72d-1
 
@@ -1043,6 +1169,58 @@ mutations: 273 caught, 7 equivalent.
 
     python tools/replaymgr_check.py
     python tools/replaymgr_check.py --mutate [--only a,b]
+
+## The checker for 72g-2
+
+`tools/replayscreen_check.py` runs retail's ReplayScreen beside the
+port's, on `tools/src/replayscreen_test.c`.
+
+Run real on retail's side: bStrCmp, bSPrintf and bStringHash, which
+name and hash the markers. Recorded, as lines both sides print:
+
+- bMalloc and bFree;
+- the flailer's calls: the screens' visibility, the objects found, their
+  visibility, place, size and color, the printed text and the language
+  IDs;
+- the NIS's and the cameras' constructors and destructors, and the
+  blur;
+- PostMessage, GetRacingCar, Timer::PrintToString and
+  GetFinishReasonID;
+- the sounds, the mute, the help, the disc test, the joystick's
+  handlers and the seven DemoModeReplay calls.
+
+The script covers these cases:
+
+- The constructor over each mix of the times, the timeline's object, a
+  missing object and the number of players.
+- Every camera mode, the blur's zone, control and nitro, and the NIS
+  coming and going.
+- The markers from nine lists of snapshots: names one letter off, 15
+  laps and two instant replays, 16 demo snapshots, objects missing, and
+  stale lists built again.
+- Update over the races, the players and the finishes, and the demo's
+  indicators at the blink's edges, negative frames included.
+- Tick at the capture's end, at the 4 seconds' edge and with the demo
+  test, with the counters wrapping.
+- Every event in each state it tests: out of range, twice in a loop,
+  with the help up, and through the bridge.
+- The timeline's positions, Pause and the destructor with each camera
+  up. Then 900 random steps.
+
+The run is 3309 script lines and 29580 output lines; none differ. One
+fix came of it: the port subtracted the loop counters as signed ints,
+and retail's `subu` wraps.
+
+228 mutations: 225 caught, 3 equivalent.
+
+- Two are the green bar's y and color, for a `HIGHLIGHT_SNAPSHOT`
+  that the highlight list never holds.
+- One drops Tick's PausedFlag test before the skip. The first test has
+  paused the replay whenever the capture has ended.
+
+    python tools/replayscreen_check.py
+    python tools/replayscreen_check.py --mutate [--only a,b]
+    python tools/replayscreen_check.py --dump out/replayscreen
 
 ## Not yet
 

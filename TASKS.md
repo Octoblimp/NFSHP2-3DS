@@ -4214,11 +4214,19 @@ phases.
             every logged loop. The run passed: the autosave, the unload
             and the event tree. The 16 checkers that compile main.c or
             run the replay pass again.
-          - [ ] 72g-2. `ReplayScreen` from retail (`0x001ec0c0` ..
+          - [x] 72g-2. `ReplayScreen` from retail (`0x001ebda8` ..
             `0x001ed4e0`): the constructor and destructor, Tick and
             Update, the joystick handlers, the camera movers, the NIS
             watch, the timeline and its flailer bitmap. A checker runs
             it beside retail's.
+            Done in Session 124, continued (`docs/formats/replay.md`,
+            72g-2). `replayscreen.c` is the class; `replayscreen_check`
+            runs it beside retail's (3309 script lines, 29580 output
+            lines, 0 differ; 228 mutations, 225 caught, 3 equivalent).
+            main.c binds its sound and help seams, and MainLoop updates
+            the race coordinator's screen. Nothing makes one until
+            72g-3. The 13 checkers that compile the changed files pass
+            again.
           - [ ] 72g-3. RCStateInstantReplayCallback (`0x0014b568`) with
             the screen, and the pause menu's and End Game Menu's View
             Replay (`gReplayNumInstantReplaySnapshotsFn`, the End Game

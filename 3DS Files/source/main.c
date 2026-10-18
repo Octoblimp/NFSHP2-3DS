@@ -226,6 +226,7 @@
 #include "realtime.h"
 #include "replay.h"
 #include "replaymgr.h"
+#include "replayscreen.h"
 #include "resource.h"
 #include "sinit.h"
 #include "shake.h"
@@ -1317,6 +1318,32 @@ static void sndMuteReplay(int32_t on)
 {
     sound_mute_replay(&gSoundModule, on);
     logLine("sound mute replay %d", (int)on);
+}
+
+// ReplayScreen's (72g-2): its buttons' menu effects from the common
+// region, and MakeFrontendSound's.
+static void replayPlaySample(const char* name, float volume)
+{
+    sound_play_common_region_sample(&gSoundModule, name, volume);
+}
+
+static void replayFrontendSound(int32_t event)
+{
+    fesound_play((int)event, NULL);
+}
+
+// The flow's tHelpMenu is g_help: IsActive, and 0x0016ca40's toggle on a
+// press (1), which then answers IsActive.
+static int32_t replayHelpActive(void)
+{
+    return helpmenu_is_active(&g_help);
+}
+
+static int32_t replayToggleHelp(const int32_t* lines, int32_t value)
+{
+    if (value == 1)
+        helpmenu_toggle(&g_help, lines);
+    return helpmenu_is_active(&g_help);
 }
 
 // SelectCarCameraMover's four (selcam.h): each a new bSample copied from
@@ -6054,12 +6081,15 @@ static void raceFrame(void)
     MainLoopTiming.WorldDoTimestep = bGetTicker();
     frameMark("race: the cameras");
 
-    // MenuSystemTick is bgf_frame's. ReplayScreen::Update is not ported.
+    // MenuSystemTick is bgf_frame's. ReplayScreen::Update runs on the race
+    // coordinator's screen, which the instant replay's state makes (72g-3).
     // UpdateCameraCoordinators (0x00199bd0) takes the real step
     // (RealTimeElapsed, retail's gp-19596), as MainLoop gives it.
     // sound::Update runs at the top of the frame, and UpdatePortRumblers
     // has no rumble to drive.
     update_players_non_game_state();
+    if (pRaceCoordinator != NULL && pRaceCoordinator->pReplayScreen != NULL)
+        replayscreen_update(pRaceCoordinator->pReplayScreen);
     update_camera_coordinators(RealTimeElapsed);
     update_camera_movers();
     MainLoopTiming.UpdateCameraMovers = bGetTicker();
@@ -7599,6 +7629,13 @@ int main(int argc, char** argv)
     gChangeGameFlowFn = raceChangeGameFlow;
     gSoundMuteFn = raceSoundMute;
     gSoundMuteReplayFn = sndMuteReplay;
+    // ReplayScreen (72g-2). Its radial blur stays unbound, as the race's
+    // is (gRadialBlurOnFn); the disc test answers 1, and TheDemoModeReplay's
+    // calls wait for 72h.
+    gReplayScreenPlaySampleFn = replayPlaySample;
+    gReplayScreenFrontendSoundFn = replayFrontendSound;
+    gReplayScreenHelpActiveFn = replayHelpActive;
+    gReplayScreenToggleHelpFn = replayToggleHelp;
     // The bSamples the race's modules make and play, on gSound.
     gGetInGameSampleFn        = sndGetInGameSample;
     gSampleDeleteFn           = sndSampleDelete;

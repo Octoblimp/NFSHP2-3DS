@@ -26184,3 +26184,62 @@ These checkers pass again, with 0 differ and 0 faults:
 3. 72h: the pause pages' special events and DemoModeReplay.
 4. When 72h is committed, the launch checklist the user asked for,
    published, before TASKS 73.
+
+## Session 124, continued -- TASKS 72g-2: ReplayScreen
+
+The second of 72g's three slices. ReplayScreen is the screen over an
+instant replay: its timeline, its markers, its camera modes and its
+buttons. It is now ported from retail, with a checker.
+
+### What changed
+
+- New `replayscreen.c` and `replayscreen.h`: retail's ReplayScreen,
+  `0x001ebda8` .. `0x001ed4e0`. That covers the constructor and
+  destructor, the markers (`0x001ec0c0`), the NIS watch, the camera
+  movers, Tick, Update, the joystick handlers and their bridge, the
+  timeline's positions and Pause.
+  - The class is 584 bytes, with two lists of 16 markers: the laps and
+    the instant replay, and the demo's snapshots.
+  - Word 28 lets the screen handle one event per RealLoopCounter loop.
+- TheDemoModeReplay's three words and TheDemoDiscManager's two timeouts
+  are globals in `replayscreen.c` until 72h ports their classes.
+- main.c:
+  - It binds the screen's common-region samples, MakeFrontendSound and
+    the help (`g_help`'s IsActive, and 0x0016ca40's toggle on a press).
+  - `raceFrame` calls `replayscreen_update` on the race coordinator's
+    screen after UpdatePlayersNonGameState, as retail's MainLoop does
+    at `0x0012f58c`.
+  - The radial blur, the disc test and the seven DemoModeReplay calls
+    stay NULL.
+- New `tools/replayscreen_check.py` and `tools/src/replayscreen_test.c`:
+  - The run is 3309 script lines and 29580 output lines, with 0
+    differ.
+  - 228 mutations: 225 caught, 3 equivalent. Two are the green bar
+    that no highlight marker gets; one is Tick's PausedFlag test, which
+    the first test makes true.
+- The fix it found: the port subtracted the loop counters as signed
+  ints, and retail's `subu` wraps. `loops_left` now wraps, as does
+  RealTimer's difference in Tick.
+
+Nothing makes a ReplayScreen until 72g-3, so nothing changes in a race
+yet, and there was no Azahar run. `docs/formats/replay.md` has a 72g-2
+section and a checker section.
+
+### Checkers re-run
+
+These 13 checkers compile the changed files, and all pass with 0 differ
+and 0 faults: aicarcontroller, bsound, cameracoord, copmgrsnap,
+copsnap, democam, helpglyph, joystick, netrace, netstep, replayscreen,
+sinit and sound.
+
+### Next
+
+1. 72g-3: RCStateInstantReplayCallback (`0x0014b568`) with the screen,
+   and View Replay in the pause menu and the End Game Menu. The
+   auto-replay state (`0x0014b848` and its helpers `0x0014c0f8` ..
+   `0x0014c2d8`) comes in for completeness. The replay's events (99 to
+   110, scannertab.c's entries 92 to 103) need 3DS keys. Check it on
+   Azahar.
+2. 72h: the pause pages' special events, and DemoModeReplay.
+3. When 72h is committed, publish the launch checklist the user asked
+   for, before TASKS 73.

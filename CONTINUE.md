@@ -3656,8 +3656,10 @@ and so replaced every boot.
      parts of a race as it goes; on Azahar, every frame and checksum
      snapshot agreed (`docs/formats/replay.md`, 72f-2). Since 72g-1 the
      post-race plays the race's highlights behind the end screens.
-     72g-2 (ReplayScreen from retail) is next, then 72g-3 (the
-     instant-replay state and View Replay).
+     ReplayScreen is retail's since 72g-2, in `replayscreen.c`;
+     `replayscreen_check` runs it against retail, and MainLoop updates
+     the coordinator's screen. Nothing makes one until 72g-3 (the
+     instant-replay state and View Replay), which is next.
 
    **7b, DriveCameraMover::Update, is done** (HANDOFF.md, Session 31,
    continued: the drive camera's Update). `docs/formats/camera.md`,
