@@ -4242,11 +4242,19 @@ phases.
             run passed. The replay's keys were mapped already (START,
             A, Left/Right, B, X, L, Y, SELECT). The 32 checkers that
             link the changed files pass again.
-          - [ ] 72g-4. RCStateAutoReplayCallback (`0x0014b848`) and the
+          - [x] 72g-4. RCStateAutoReplayCallback (`0x0014b848`) and the
             auto replay's four helpers (`0x0014c0f8` .. `0x0014c2d8`),
             for completeness: nothing in retail posts
             RC_REQUEST_AUTO_REPLAY (7), so the state is never entered.
             A checker runs it beside retail's.
+            Done in Session 125 (`docs/formats/replay.md`, 72g-4).
+            `rcauto.c` is the state's handler and its helpers, in
+            `rcstates.c`'s table; main.c binds CleanUpAutoReplay to the
+            destructor's seam. `rcauto_check` runs all five beside
+            retail's (9513 script lines, 38513 output lines, 0 differ;
+            156 of 156 mutations caught). The 41 checkers that link the
+            changed files pass again. On Azahar the career run passed,
+            the destructor's cleanup included.
           - [ ] 72g-5. The replay bar's button icons are the PS2's
             shapes. Show the 3DS keys the replay uses instead (START
             skip, A pause, Left/Right markers, B speed, X camera, L

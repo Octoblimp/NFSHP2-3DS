@@ -404,6 +404,17 @@ int32_t rc_state_instant_replay_callback(RaceCoordinator *rc,
     return 0;
 }
 
+// rcauto.c's, likewise.
+int32_t rc_state_auto_replay_callback(RaceCoordinator *rc, RCMessage msg,
+                                      int32_t param)
+{
+    (void)rc;
+    (void)msg;
+    (void)param;
+    printf("  auto replay never\n");
+    return 0;
+}
+
 void racecoordinator_init_for_race(RaceCoordinator *rc)
 {
     printf("  initforrace %s\n", nm(rc));

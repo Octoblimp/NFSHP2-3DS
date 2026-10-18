@@ -13,6 +13,7 @@
 #include "playerinit.h"
 #include "racefinish.h"
 #include "racerun.h"
+#include "rcauto.h"
 #include "rcpost.h"
 #include "rcreplay.h"
 #include "realtime.h"
@@ -47,6 +48,7 @@ RCStateCallbackFn gRCStateCallbacks[NUM_RCSTATES] = {
     [RCSTATE_PRERACE]          = rc_state_prerace_callback,
     [RCSTATE_RACE_IN_PROGRESS] = rc_state_race_in_progress_callback,
     [RCSTATE_INSTANT_REPLAY]   = rc_state_instant_replay_callback,
+    [RCSTATE_AUTO_REPLAY]      = rc_state_auto_replay_callback,
     [RCSTATE_PAUSE]            = rc_state_pause_callback,
     [RCSTATE_POSTRACE]         = rc_state_post_race_callback,
 };

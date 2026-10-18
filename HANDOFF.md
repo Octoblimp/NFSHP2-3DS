@@ -26325,3 +26325,67 @@ sound and startrace.
 3. 72h: the pause pages' special events, and DemoModeReplay.
 4. When 72h is committed, publish the launch checklist the user asked
    for, before TASKS 73.
+
+## Session 125 -- TASKS 72g-4: the auto replay
+
+The fourth of 72g's slices, for completeness: retail's auto replay. Retail
+never enters RCSTATE_AUTO_REPLAY (nothing posts RC_REQUEST_AUTO_REPLAY,
+nothing calls SetUpAutoReplay), so the checker is the test.
+
+### What changed
+
+- New `rcauto.c` and `rcauto.h`: RCStateAutoReplayCallback
+  (`0x0014b848`), SetUpAutoReplay (`0x0014c0f8`), CleanUpAutoReplay
+  (`0x0014c148`), CheckAutoReplayCam (`0x0014c1f0`) and
+  SetUpAutoReplayCam (`0x0014c2d8`). `rcstates.c` puts the handler in
+  the state table at RCSTATE_AUTO_REPLAY (5).
+  - ACTIVATE takes THE_PRESENT, restores AUTO_REPLAY_SNAPSHOT and
+    INSTANT_REPLAY, checks the route (on pRaceCoordinator, as retail
+    does), shows the letterbox bars (0x49c15518), turns the camera
+    movers off and builds the camera. Any failure goes back to
+    RACE_IN_PROGRESS.
+  - TICK rewinds at the capture's end: first INSTANT_REPLAY along the
+    road's left edge with the look's push flipped, then
+    AUTO_REPLAY_SNAPSHOT along the route's line, then SKIP.
+  - UNACTIVATE restores and deletes THE_PRESENT, hides the bars, cleans
+    up, and turns the camera movers and type-changed handlers back on.
+  - The camera is a hand-built CameraDataItems (eye points 5 above the
+    road's right edge, 32 FOV entries at 40 degrees, clips 0.5 and
+    5000) on a TrackCarCameraMover following the highlight car.
+- main.c binds `gRCCleanUpAutoReplayFn` to
+  `racecoordinator_clean_up_auto_replay`. The constructor zeroes the six
+  fields, so in a race the destructor's call frees nothing.
+- `racecoord.h`, `rcstates.h` and `rcreplay.h`: comments say where the
+  auto replay is now.
+- New `tools/rcauto_check.py` and `tools/src/rcauto_test.c`: 9513 script
+  lines, 38513 output lines, 0 differ; 156 mutations, all caught. It
+  found nothing to fix. `tools/src/rcstates_test.c` stubs the handler.
+
+`docs/formats/replay.md` has a 72g-4 section and a checker section;
+`race-coordinator.md` says only the two demos' entries are NULL now.
+
+### On Azahar
+
+There is nothing new to see, because retail never enters the state. As a
+regression run, `run_azahar_career.ps1 -Race -FinishSeconds 40
+-FinishPlace 1` raced event 32 to its finish, where the coordinator's
+destructor ran the bound CleanUpAutoReplay. Quit, the save and the tree
+followed. PASS.
+
+### Checkers re-run
+
+These 41 checkers link the changed files, and all pass with 0 differ
+and 0 faults: aicarcontroller, bprintf, bsound, cameracoord, cop,
+copmanager, copmgrsnap, copsnap, democam, endgame, enginesound,
+helpglyph, hudanim, hudcop, hudfeatures, hudrender, hudscore, joystick,
+loadertable, lockhash, netrace, netstep, pausemenu, playercop,
+playernis, playerzone, prevroute, pursuit, pursuitchopper,
+pursuitspeech, racecoord, racespeech, rcreplay, rcstates, replaymgr,
+replayscreen, sinit, sound, startrace, trackflow and worldsnap.
+
+### Next
+
+1. 72g-5: the replay bar's PS2 button icons as the 3DS keys.
+2. 72h: the pause pages' special events, and DemoModeReplay.
+3. When 72h is committed, publish the launch checklist the user asked
+   for, before TASKS 73.

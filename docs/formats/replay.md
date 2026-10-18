@@ -729,8 +729,8 @@ a race snapshot holds 2.5 to 3.3 KB and a checksum 5.7 to 6.4 KB.
 - The special events' handler (`gReplayHandleSpecialEventFn`, retail's
   HandlePauseMenuReplaySpecialEvents) and DemoModeReplay::Service
   (`gDemoModeReplayServiceFn`) are NULL until 72h.
-- RCSTATE_AUTO_REPLAY has no handler until 72g-4. Nothing in retail
-  posts RC_REQUEST_AUTO_REPLAY, so the state is never entered.
+- RCSTATE_AUTO_REPLAY's handler is 72g-4's. Nothing in retail posts
+  RC_REQUEST_AUTO_REPLAY, so the state is never entered.
   RCSTATE_INSTANT_REPLAY's handler is 72g-3's.
 
 ### ReplayCheck, the port's own test
@@ -1047,10 +1047,93 @@ replay, which 72h brings.
 ### Not done here
 
 - The replay bar's button icons are retail's PS2 shapes (72g-5).
-- RCSTATE_AUTO_REPLAY is 72g-4.
+- RCSTATE_AUTO_REPLAY is 72g-4's, below.
 
 The two camera constructors, the NIS coordinators and the coordinator's
 delete are the race's seams already bound.
+
+## 72g-4: the auto replay
+
+`rcauto.c` is retail's auto replay, ported for completeness:
+RCStateAutoReplayCallback (`0x0014b848`, 1176 bytes), the handler for
+RCSTATE_AUTO_REPLAY (5), and its four helpers. `rcstates.c` puts it in
+the state table. main.c binds CleanUpAutoReplay to
+`gRCCleanUpAutoReplayFn`, which the coordinator's destructor calls.
+
+| retail | bytes | what |
+|---|---|---|
+| RCStateAutoReplayCallback `0x0014b848` | 1176 | the state |
+| SetUpAutoReplay `0x0014c0f8` | 80 | the two highlight cars, the view and the incident |
+| CleanUpAutoReplay `0x0014c148` | 168 | frees the camera |
+| CheckAutoReplayCam `0x0014c1f0` | 232 | the route |
+| SetUpAutoReplayCam `0x0014c2d8` | 952 | the camera |
+
+Retail never enters the state. RACE_IN_PROGRESS changes to it on
+RC_REQUEST_AUTO_REPLAY (7), but nothing posts that message. Nothing
+calls SetUpAutoReplay either, and nothing takes the AUTO_REPLAY_SNAPSHOT
+that ACTIVATE restores. So there is nothing to see on Azahar, and the
+checker is the test.
+
+The auto replay would show an incident again three times. The camera
+flies along the road beside it, and the letterbox bars (flailer screen
+`0x49c15518`) are up. SetUpAutoReplay keeps the two highlight cars and
+the view. The first car's route point (Car::GetRoutePoint with 1) is
+the incident point, and its place the incident's.
+
+### The messages
+
+| Message | What it does |
+|---|---|
+| ACTIVATE | Takes `THE_PRESENT` and keeps the highlight car's place as the final position. Restores `AUTO_REPLAY_SNAPSHOT`, then `INSTANT_REPLAY`, and keeps the car's place there as the start. CheckAutoReplayCam, called on `pRaceCoordinator`, then asks for a route between the two. If any of these fails, it changes back to RACE_IN_PROGRESS. Otherwise the bars show, the rewinds go to 0, every player's camera movers go off, and SetUpAutoReplayCam makes the camera. |
+| UNACTIVATE | Restores `THE_PRESENT` and deletes it, hides the bars and cleans up. Then it turns the camera movers back on and puts the joystick's type-changed handlers back. |
+| TICK | Waits for the replay to reach the capture's end (the manager's word 84 against WorldLoopCounter), then counts a rewind. The first restores `INSTANT_REPLAY`. The camera then flies along the road's left edge, following the second highlight car, with the look's sideways push flipped. The second restores `AUTO_REPLAY_SNAPSHOT`, and the camera flies along the route's line with no push. The third sends SKIP. |
+| SKIP | Changes to RACE_IN_PROGRESS. |
+| TAKE_AUTOSNAPSHOT | Nothing; answered 1. |
+| anything else | Answered 0. |
+
+### The camera
+
+CheckAutoReplayCam cleans up first. Then it makes a PreviewRoute (24
+bytes) from the highlight car. The route reaches 100 out, and it is as
+long as the track runs from the start to the final position (the
+difference of their TrackPathCoordinates' DistanceAroundTrack). The
+answer is 1 when the route has 5 points or more. Otherwise it cleans up
+again and answers 0.
+
+SetUpAutoReplayCam builds a CameraDataItems record (164 bytes) by hand:
+
+- An eye point 5 above the road's right edge at each of the route's
+  points, each with a flat bank.
+- An FOV table of 32 entries, all 40 degrees.
+- The percentages from the start to the final position
+  (RatioAroundTrack), or 1 minus each when the track runs backwards.
+- Clip planes of 0.5 and 5000, and a vertical push of 0.2 on the look.
+- The eye's speed locked to the car's. No look points, springs or
+  offsets.
+
+Then a TrackCarCameraMover (1136 bytes) on the view follows the
+highlight car, with an empty shake of two control points. Retail leaves
+the record's area fields, its EnterHorizComp and its ShakeBankNumber as
+bMalloc gives them, and so does the port.
+
+Everything comes from pool 16. The mover is named "TrackCarCameraMover".
+The other allocations are named for racecoordinator.cpp, at these lines:
+2504 (the route), 2516 (the record), 2517 (the FOV table), 2524 (the
+banks) and 2525 (the eyes).
+
+CleanUpAutoReplay deletes the mover (flags 3), the record, the FOV
+table, the route (flags 3), the banks and the eyes. Each pointer is NULL
+after. The constructor zeroes all six, so the destructor's call frees
+nothing in a race.
+
+### Two oddities kept
+
+- ACTIVATE checks the route on `pRaceCoordinator`, not on the
+  coordinator it runs on, and SetUpAutoReplayCam then reads its own.
+  In a race they are the same coordinator.
+- SetUpAutoReplayCam makes a third TrackPathCoordinate from rc+60, read
+  as a place: mIncidentPoint's word and mIncidentCoord's x. Nothing
+  reads it. The port hands it the same two words.
 
 ## The checker for 72d-1
 
@@ -1385,6 +1468,70 @@ its own in state 4.
     python tools/rcreplay_check.py
     python tools/rcreplay_check.py --mutate [--only a,b]
     python tools/rcreplay_check.py --dump out/rcreplay
+
+## The checker for 72g-4
+
+`tools/rcauto_check.py` runs retail's five functions beside the port's,
+on `tools/src/rcauto_test.c`. These are recorded as lines both sides
+print:
+
+- the manager's TakeSnapshot, RestoreSnapshot by name and
+  DeleteSnapshot;
+- ChangeState, SendMessage and the bars' visibility;
+- the camera movers off and on, and the type-changed handlers put back;
+- Car::GetRoutePoint, PreviewRoute's constructor and destructor, and
+  PreviewRoutePoint::GetPosition;
+- TrackPathCoordinate's constructor from a place;
+- bMalloc and bFree;
+- TrackCarCameraMover's constructor, with the whole record, its FOV
+  table, eyes and banks, and the shake; and its destructor.
+
+The script covers these cases:
+
+- Every message, in and out of range.
+- SetUpAutoReplay with each car, view and route point.
+- CleanUpAutoReplay over all 64 mixes of the six objects, on both
+  coordinators.
+- CheckAutoReplayCam over each answer of the constructor, point count
+  and owner.
+- SetUpAutoReplayCam over each route length, direction and pair of
+  TrackPathCoordinates.
+- ACTIVATE over each answer of the three snapshots and the route, from
+  both `pRaceCoordinator`s.
+- TICK across the capture's end, through the rewinds, with each push,
+  and with nothing to rewind into.
+- Four whole replays. Then 2500 random steps.
+
+These differences are made equal by hand:
+
+- Retail deletes the mover through its vtable with flags 3. The port
+  calls the mover's Destroy and then bFree. The model's stub at the
+  destructor (`0x00159490`) prints the destroy, and the free for the 1
+  bit.
+- Retail frees the record and the FOV table with `__builtin_delete` and
+  `__builtin_vec_delete`. Both jump to bFree, which the model stubs.
+- The fourth lane of the bank points and the FOV entries is the stack's
+  in retail and 0 in the port. Neither side prints it, nor the eye
+  points' fourth lane.
+- The TrackPathCoordinates' destructors are retail's alone. The model's
+  stub prints nothing.
+- Retail reads a NULL highlight car's place from low memory, which the
+  model zeroes. The port answers 0.
+- The third TrackPathCoordinate's x is a model address in retail and a
+  host pointer's low word in the port. Both print TP for the route
+  point.
+- No call that would read through NULL is made, on either side. These
+  are a rewind with no route, record or arrays, and ACTIVATE on another
+  `pRaceCoordinator` with no route on this one ("unsafe"). The camera
+  set up with no route prints "no route".
+
+The run is 9513 script lines and 38513 output lines; none differ. 156
+mutations, all caught. `tools/src/rcstates_test.c` stubs the new
+handler, which `rcstates.c`'s table names.
+
+    python tools/rcauto_check.py
+    python tools/rcauto_check.py --mutate [--only a,b]
+    python tools/rcauto_check.py --dump out/rcauto
 
 ## Not yet
 

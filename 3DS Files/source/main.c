@@ -219,6 +219,7 @@
 #include "racesplit.h"
 #include "raceupdate.h"
 #include "raceparams.h"
+#include "rcauto.h"
 #include "rcpost.h"
 #include "rcstates.h"
 #include "realcontroller.h"
@@ -8226,6 +8227,7 @@ int main(int argc, char** argv)
     gCloseAIPlansFn          = ai_close_ai_plans;
     gNewRaceCoordinatorFn    = racecoordinator_new;
     gDeleteRaceCoordinatorFn = racecoordinator_destroy;
+    gRCCleanUpAutoReplayFn   = racecoordinator_clean_up_auto_replay;
     gReplayManagerCtorFn     = replaymgr_construct;
     gReplayManagerDestroyFn  = replaymgr_destroy;
     gReplayManagerGetData    = replaymgr_get_data;

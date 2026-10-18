@@ -10,9 +10,9 @@ go through a queue, and `ChangeState` is three of them in a row.
 Step 8e ported the lifetime and the queue. Step 8f ported the first four
 states, `NONE` through `RACE_IN_PROGRESS`, with the countdown and the
 finish (see "The states up to the finish", below). Step 8g ports `PAUSE`
-and `POSTRACE` (see "The pause and the post-race"). The two replays and
-the two demos are later slices, and their table entries stay NULL until
-then. The coordinator's DoSnapshot (0x001498f0), which takes the world's,
+and `POSTRACE` (see "The pause and the post-race"). TASKS 72g-3 and
+72g-4 brought the two replays (see [replay.md](replay.md)). The two
+demos are later slices, and their table entries stay NULL until then. The coordinator's DoSnapshot (0x001498f0), which takes the world's,
 the race's and the players', came with TASKS 72d-2 in `worldsnap.c`; see
 [replay.md](replay.md).
 
@@ -536,7 +536,8 @@ count.
 `3DS Files/source/rcpost.c`/`rcpost.h` port `PAUSE` and `POSTRACE`, and
 the four small Player calls the pause makes. `rcstates.c`'s state table
 has the two at their `RCState`s now. The two replays and the two demos
-are the last four entries, NULL until their slices.
+are the last four entries, NULL until their slices. Since TASKS 72g-4
+only the demos' two are.
 
 | retail | what |
 |--------|------|
@@ -655,8 +656,9 @@ are caught and 5 are equivalent.
 
 ## Seams
 
-The four states still to come and most of what `InitForRace` and the
-cleanups call are seams, NULL until their slices land. `racecoord.h` lists each one with its
+The two demos' states and most of what `InitForRace` and the cleanups
+call are seams, NULL until their slices land. CleanUpAutoReplay is
+bound since TASKS 72g-4. `racecoord.h` lists each one with its
 retail address. A NULL seam does nothing, and allocates nothing for the
 object it would have built. With `gReplayManagerCtorFn` NULL,
 `pReplayManager` stays NULL, which everything reads as not replaying.

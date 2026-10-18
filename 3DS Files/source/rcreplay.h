@@ -4,7 +4,8 @@
 //
 // TASKS 72g-3. View Replay, on the pause menu and on the End Game Menu,
 // changes to RCSTATE_INSTANT_REPLAY, and this state puts the ReplayScreen
-// (replayscreen.h) over the replay. The auto replay (0x0014b848) is 72g-4's.
+// (replayscreen.h) over the replay. The auto replay (0x0014b848) is
+// rcauto.c's.
 // docs/formats/replay.md has the decode.
 
 #ifndef RCREPLAY_H

@@ -216,8 +216,8 @@ struct DriverInfo *race_parameters_get_driver_info_by_driver_number(
 //   RCStateReplayDemoModeCallback  0x0014aa38
 //
 // Each answers whether it took the message, which nothing reads. A NULL
-// entry takes nothing. rcstates.c defines the table, with the first four;
-// the other six stay NULL until their slices.
+// entry takes nothing. rcstates.c defines the table, with all but the two
+// demos', which stay NULL until their slices.
 typedef int32_t (*RCStateCallbackFn)(RaceCoordinator *rc, RCMessage msg,
                                      int32_t param);
 extern RCStateCallbackFn gRCStateCallbacks[NUM_RCSTATES];
@@ -256,7 +256,7 @@ extern void (*gCollisionSoundResetFn)(void);
 extern void (*gSpeechFlushQueueFn)(void);
 
 // RaceCoordinator::CleanUpAutoReplay (0x0014c148), which the destructor
-// calls. It goes with the auto replay.
+// calls: rcauto.c's racecoordinator_clean_up_auto_replay since TASKS 72g-4.
 extern void (*gRCCleanUpAutoReplayFn)(RaceCoordinator *rc);
 
 // Chopper's destructor (0x001e7b80), AcidEffectSystem::KillAllActiveEffects
