@@ -26816,3 +26816,57 @@ TASKS 72g is ticked in TASKS.md; its slices were all done.
 4. Republish the launch checklist (the scratchpad's
    launch_checklist.html, or the URL from another session) as items
    close.
+
+## Session 128 -- TASKS 46: the smoke's alpha test, and the timing frame in a race
+
+The user's order of 2026-10-18: "Start on task 46, optimizing the game
+to get steady 30 FPS everywhere. Then work on task 65, then task 67 and
+then task 47 and then task 60 and then whatever you want to do next."
+`docs/formats/draw-cuts.md` has the details ("TASKS 46: the smoke's
+alpha test, and the timing frame in a race").
+
+### What changed
+
+- `georender.c`, `set_pass`: a blend with no alpha test and no depth
+  write tests for an alpha over 0. Each of `set_blend`'s blends keeps
+  the destination whole at alpha 0, colour and alpha, so the picture is
+  the same and the GPU skips the depth read and the blend for those
+  fragments. The smoke has 17 to 43% of them.
+- `hangwatch.c`, `hangwatch.h`, `main.c`: the timing frame's replays
+  borrow the top screen's buffers when VRAM has no 768 KB for their own
+  target. In a race it never has, so the replays had never run in one.
+  The buffers are kept on the heap and put back after. The sprites'
+  stage is replayed too, with two more ways: "alpha test 0 off", with
+  its picture compared, and "texture unit 1 off".
+
+### Measured on Azahar and not kept
+
+- **The sprites' textures** were read from the game's memory at the fire:
+  FIREA_CS, RGBA8 additive with alpha 250 throughout; and SMOKE_CS,
+  DUSTA_CS and SMOKEB_CS, LA8 alpha with 36, 43 and 17% of texels at
+  alpha 0.
+- **The quads cut to a polygon round their visible texels** would save
+  about 15% more fill. Not done.
+- **The clusters whose projected box holds no pixel centre** are 0.0 to
+  0.3% of every view's indices, the envmap's 64-pixel faces included.
+  Not done.
+
+### On Azahar
+
+`run_azahar_race.ps1 -HoldKeys @(65)` at track 11's fire, with the
+fire57 config and warp, on AC power at 100% speed:
+
+- The flames, the truck's jets, the smoke and the fog drew as before.
+- With `nfshp2_gputiming.txt`, every replay ran on the borrowed
+  buffers. The models' list, the sprites' list and the first envmap
+  view were each sent ten ways.
+- "Alpha test 0 off" differed from as drawn in 0 pixels in all three.
+
+### Next
+
+- **The device's timing run** with this CIA, the user's: at the fire
+  (track 11) and the desert's end. It needs an empty
+  `sdmc:/nfshp2_gputiming.txt` and `DebugLog 1`; the result is
+  `sdmc:/nfshp2_debug.txt`.
+- **The user's call** on the envmap a face a frame.
+- Meanwhile TASKS 65, 67, 47 and 60, in the user's order.

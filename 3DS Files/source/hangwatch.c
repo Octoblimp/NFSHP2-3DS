@@ -300,12 +300,51 @@ static void stuck(const char *what, const char *how)
 }
 
 // The replays' target, the top screen's size and formats (RGBA8 over
-// D24S8) in VRAM of its own, and their 8x8 RGBA8 texture.
+// D24S8) in VRAM of its own, and their 8x8 RGBA8 texture. A race's
+// textures can leave no 768 KB of VRAM (track 11's left 512 KB), and then
+// the replays borrow the top screen's own buffers, which are the same
+// size and formats in the same banks: what they hold is kept on the heap
+// first and put back after, before the frame's next stage draws on them.
 #define OFF_W     240u
 #define OFF_H     400u
 #define OFF_WORDS (OFF_W * OFF_H)
 
 static u32 *s_offColour, *s_offDepth, *s_standin;
+static u32 *s_topColour, *s_topDepth;  // hangwatch_gpu_top's
+static u32 *s_kept;                    // theirs while borrowed
+static bool s_borrowed;
+
+void hangwatch_gpu_top(void *colour, void *depth)
+{
+    s_topColour = (u32 *)colour;
+    s_topDepth  = (u32 *)depth;
+}
+
+// The top screen's buffers as they were before the replays.
+static void give_back(void)
+{
+    if (!s_borrowed) return;
+    memcpy(s_offColour, s_kept, OFF_WORDS * 4);
+    memcpy(s_offDepth, s_kept + OFF_WORDS, OFF_WORDS * 4);
+    GSPGPU_FlushDataCache(s_offColour, OFF_WORDS * 4);
+    GSPGPU_FlushDataCache(s_offDepth, OFF_WORDS * 4);
+}
+
+static bool borrow_top(void)
+{
+    if (s_offColour && !s_borrowed) vramFree(s_offColour);
+    if (s_offDepth && !s_borrowed) vramFree(s_offDepth);
+    s_offColour = s_offDepth = NULL;
+    if (!s_topColour || !s_topDepth) return false;
+    if (!s_kept) s_kept = (u32 *)malloc(OFF_WORDS * 8);
+    if (!s_kept) return false;
+    s_offColour = s_topColour;
+    s_offDepth  = s_topDepth;
+    s_borrowed  = true;
+    s_log("gpu time: no 768 KB of VRAM for the replays' target; they "
+          "borrow the top screen's buffers");
+    return true;
+}
 
 static bool targets_made(void)
 {
@@ -319,6 +358,7 @@ static bool targets_made(void)
     if (!s_offDepth) s_offDepth = (u32 *)vramAllocAt(OFF_WORDS * 4,
                                                      VRAM_ALLOC_B);
     if (!s_offDepth) s_offDepth = (u32 *)vramAlloc(OFF_WORDS * 4);
+    if (!s_offColour || !s_offDepth) borrow_top();
     if (!s_standin) {
         s_standin = (u32 *)linearAlloc(8 * 8 * 4);
         if (s_standin) {
@@ -344,8 +384,14 @@ static bool targets_made(void)
 // both are tried. RGB8 reads every RGBA8 texture as RGB8: the texels are
 // wrong, but the fetch is the three bytes a texel that the lossless RGB8
 // of the textures with one alpha would fetch (memory: gpu-speed-plan).
+// TASKS 46 adds two more. The blends that write no depth test for an alpha
+// over 0 (georender.c's set_pass), which leaves the picture as it was only
+// if the PICA's blend keeps the frame whole at alpha 0: "alpha test 0 off"
+// sends those tests off, and its picture is compared too. "Texture unit 1
+// off" is the fog's fraction unread, which the sprites read as a texture
+// of one value: its texels are wrong, and its time is what the fetch costs.
 enum { V_DRAWN, V_TEX8, V_PIXEL, V_VERTS, V_NOCLEAR, V_EARLY_GE,
-       V_EARLY_LE, V_RGB8, V_COUNT };
+       V_EARLY_LE, V_RGB8, V_NOAT0, V_UNIT1OFF, V_COUNT };
 
 typedef struct {
     unsigned draws;      // GPUREG_DRAWARRAYS and _DRAWELEMENTS
@@ -392,9 +438,14 @@ static u32 patch(int v, unsigned reg, unsigned mask, u32 val, ListStats *st)
         return val;
     case 0x080:                       // GPUREG_TEXUNIT_CONFIG
         // Bit 16 clears the texture cache; citro3d sets it alone, in a
-        // write of byte 2 only, after each texture change.
+        // write of byte 2 only, after each texture change. Bit 1 is
+        // unit 1's.
         if ((mask & 4) && (val & BIT(16))) st->clears++;
+        if (v == V_UNIT1OFF && (mask & 1)) return val & ~BIT(1);
         return v == V_NOCLEAR ? val & ~BIT(16) : val;
+    case 0x104:                       // GPUREG_FRAGOP_ALPHA_TEST
+        // Bit 0 on, bits 8 to 15 the reference.
+        return v == V_NOAT0 && (val >> 8 & 0xff) == 0 ? val & ~1u : val;
     case 0x065:                       // GPUREG_SCISSORTEST_MODE: inside
         return pixel ? 3 : val;
     case 0x066:                       // _POS and _DIM, inclusive: (0, 0)
@@ -468,7 +519,8 @@ static void replay(const char *name, const u32 *list, u32 words)
     static const char *const kVariant[V_COUNT] = {
         "as drawn", "8x8 textures", "1-pixel scissor",
         "and 3 vertices a draw", "no texture cache clears",
-        "early depth >=", "early depth <=", "RGB8 for RGBA8"
+        "early depth >=", "early depth <=", "RGB8 for RGBA8",
+        "alpha test 0 off", "texture unit 1 off"
     };
     char      line[1024];
     size_t    len;
@@ -485,6 +537,12 @@ static void replay(const char *name, const u32 *list, u32 words)
         s_log("gpu time: %s: no %lu bytes of linear heap to copy it into",
               name, (unsigned long)(words + 4) * 4);
         return;
+    }
+    if (s_borrowed) {
+        GSPGPU_InvalidateDataCache(s_offColour, OFF_WORDS * 4);
+        GSPGPU_InvalidateDataCache(s_offDepth, OFF_WORDS * 4);
+        memcpy(s_kept, s_offColour, OFF_WORDS * 4);
+        memcpy(s_kept + OFF_WORDS, s_offDepth, OFF_WORDS * 4);
     }
     // The as-drawn target, colour then depth, for the early variants'.
     drawn = (u32 *)malloc(OFF_WORDS * 8);
@@ -507,6 +565,7 @@ static void replay(const char *name, const u32 *list, u32 words)
                   st.fbFits ? "fits" : "does not fit");
             linearFree(copy);
             free(drawn);
+            give_back();
             return;
         }
         if (v == V_DRAWN) first = st;
@@ -518,6 +577,7 @@ static void replay(const char *name, const u32 *list, u32 words)
         if (!wait_queue(true, NULL)) {
             stuck(name, "the replays' clear");
             free(drawn);
+            give_back();
             return;   // the copy stays: the GPU may yet read it
         }
         GSPGPU_FlushDataCache(copy, (words + 4) * 4);
@@ -525,18 +585,21 @@ static void replay(const char *name, const u32 *list, u32 words)
         if (!wait_queue(true, &ms[v])) {
             stuck(name, kVariant[v]);
             free(drawn);
+            give_back();
             return;
         }
         if (drawn && v == V_DRAWN) {
             memcpy(drawn, s_offColour, OFF_WORDS * 4);
             memcpy(drawn + OFF_WORDS, s_offDepth, OFF_WORDS * 4);
-        } else if (drawn && (early || v == V_RGB8)) {
+        } else if (drawn && (early || v == V_RGB8 || v == V_NOAT0
+                             || v == V_UNIT1OFF)) {
             differ(drawn, &diffColour[v], &diffDepth[v]);
         }
     }
     linearFree(copy);
     compared = drawn != NULL;
     free(drawn);
+    give_back();
     len = (size_t)snprintf(line, sizeof line,
                            "gpu time: %s sent again (%u draws, %u vertices, "
                            "%u texture addresses, %u cache clears, %lu "
@@ -551,10 +614,12 @@ static void replay(const char *name, const u32 *list, u32 words)
         s_log("gpu time: %s, the early depth test's pictures against as "
               "drawn: >= %u colour and %u depth pixels differ, <= %u and %u "
               "(of %u; RGB8's wrong texels, which show that the compare "
-              "sees a change, %u)", name, diffColour[V_EARLY_GE],
+              "sees a change, %u); alpha test 0 off, %u and %u; texture "
+              "unit 1 off, %u colour", name, diffColour[V_EARLY_GE],
               diffDepth[V_EARLY_GE], diffColour[V_EARLY_LE],
               diffDepth[V_EARLY_LE], (unsigned)OFF_WORDS,
-              diffColour[V_RGB8]);
+              diffColour[V_RGB8], diffColour[V_NOAT0], diffDepth[V_NOAT0],
+              diffColour[V_UNIT1OFF]);
 }
 
 void hangwatch_gpu_race(bool racing)
@@ -602,7 +667,7 @@ void hangwatch_gpu_begin(void)
 }
 
 // A stage's commands, split off and timed, and sent again if it is one
-// of the two.
+// of the three.
 static void time_stage(const char *name, bool split)
 {
     gxCmdQueue_s *q = queue();
@@ -637,6 +702,7 @@ static void time_stage(const char *name, bool split)
                                   "%s %s %.2f", s_stages++ ? ";" : "",
                                   name, ms);
     if (listed && (!strcmp(name, "the models")
+                   || !strcmp(name, "the sun and the scenery's list")
                    || (!s_envDone && !strncmp(name, "envmap view", 11)))) {
         s_envDone = s_envDone || name[0] == 'e';
         replay(name, list, words);

@@ -3134,6 +3134,20 @@ phases.
         scenarios/areas." Done means a steady 30 at the fire, the
         desert's end, and every other heavy place (fog, smoke, many
         cars, the chopper), still lossless (TASKS 46's rules).
+        - [x] Session 128: the blended draws that write no depth test
+          for an alpha over 0 (`georender.c` `set_pass`), which is
+          exact. It drops 17 to 43% of the smoke's and the dust's
+          fragments before their blend. The clusters with no pixel
+          centre are 0.3% at most: not worth a cut.
+        - [x] Session 128: the timing frame's replays run in a race,
+          borrowing the top screen's buffers when VRAM is full, and
+          they replay the sprites' stage too, with "alpha test 0 off"
+          and "texture unit 1 off".
+        - [ ] The device's timing run at the fire and the desert's end
+          (`sdmc:/nfshp2_gputiming.txt`, `DebugLog 1`). Its replays
+          decide the next cuts: fill, the cost of each draw, the
+          textures, and early depth.
+        - [ ] The user's word on the envmap a face a frame.
 
 47. [ ] **A brief artifact on the bridge before the finish line.**
         Reported on 2026-10-12, after the user played build bb70171 on

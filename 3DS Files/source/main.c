@@ -8119,6 +8119,7 @@ int main(int argc, char** argv)
     }
     C3D_RenderTargetSetOutput(top, GFX_TOP, GFX_LEFT,
                               kDisplayTransferFlags);
+    hangwatch_gpu_top(top->frameBuf.colorBuf, top->frameBuf.depthBuf);
     // No depth buffer on this one: nothing 3D is ever drawn to it.
     g_bot = C2D_CreateScreenTarget(GFX_BOTTOM, GFX_LEFT);
     if (!g_bot) {

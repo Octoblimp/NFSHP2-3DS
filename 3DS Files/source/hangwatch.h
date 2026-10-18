@@ -21,15 +21,18 @@
 //     is a hitch of about 150 ms, and the build the user plays has to be
 //     smooth (2026-10-05). At the end of each draw stage the commands so
 //     far go to the GPU and are waited on, and the frame's line has each
-//     stage's GPU time. Two of the stages' command lists, the models' and
-//     the first envmap view's, are then copied and sent again onto a
-//     target of their own in VRAM that is never shown, several ways: as
-//     drawn; with every texture an 8x8 one; with a 1-pixel scissor; with
-//     that and 3 vertices a draw; with no texture cache clears; with the
-//     PICA's early depth test on, compared either way (13b-4f), each
-//     with its target's pixels counted against as drawn's; and with every
-//     RGBA8 texture fetched as RGB8. What each takes says what the stage's
-//     time is spent on. The frame looks as the others do.
+//     stage's GPU time. Three of the stages' command lists, the models',
+//     the sprites' (the sun and the scenery's list) and the first envmap
+//     view's, are then copied and sent again onto a target of their own
+//     in VRAM that is never shown, several ways: as drawn; with every
+//     texture an 8x8 one; with a 1-pixel scissor; with that and 3
+//     vertices a draw; with no texture cache clears; with the PICA's
+//     early depth test on, compared either way (13b-4f), each with its
+//     target's pixels counted against as drawn's; with every RGBA8
+//     texture fetched as RGB8; with the alpha tests of reference 0 off,
+//     compared too (TASKS 46); and with texture unit 1 off. What each
+//     takes says what the stage's time is spent on. The frame looks as
+//     the others do.
 //
 // A mark is two stores. Each frame's GX queue is counted too: citro3d's
 // holds 32 entries, and the 33rd is svcBreak, so a new most is logged. A
@@ -79,6 +82,10 @@ void hangwatch_gpu_race(bool racing);
 
 // After C3D_FrameBegin: a timing frame starts, when one is due.
 void hangwatch_gpu_begin(void);
+
+// The top screen's colour and depth buffers, which the replays borrow
+// when VRAM has no room for a target of their own.
+void hangwatch_gpu_top(void *colour, void *depth);
 
 // The end of a draw stage (`stage` lives for the program): in a timing
 // frame the commands so far to the GPU and timed, and the models' and the

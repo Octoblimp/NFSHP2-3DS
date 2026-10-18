@@ -896,9 +896,16 @@ static void set_pass(GeoPass pass)
     C3D_DepthTest(true, GPU_GEQUAL,
                   pass.noDepthWrite || !s_zwrite ? GPU_WRITE_COLOR
                                                  : GPU_WRITE_ALL);
-    // AREF 0x30, doubled with the packs' alpha.
+    // AREF 0x30, doubled with the packs' alpha. A blend with no test and no
+    // depth write tests for an alpha over 0 (TASKS 46): each of set_blend's
+    // equations takes the source by its alpha and keeps the destination
+    // whole at 0, colour and alpha, so a fragment of alpha 0 changes nothing,
+    // and the test spares the GPU its depth read and its blend. A fragment
+    // that writes depth changes the buffer at any alpha, so it is left be.
     if (pass.noAlphaTest) {
-        alpha_test(false, 0);
+        alpha_test(pass.blend != GEO_BLEND_NONE
+                       && (pass.noDepthWrite || !s_zwrite),
+                   0);
     } else {
         alpha_test(true, 0x60);
     }

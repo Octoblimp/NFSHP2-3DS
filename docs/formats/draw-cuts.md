@@ -603,3 +603,74 @@ at the fire (`$TEMP\nfshp2_fire57`) match the run without the sends
 (`$TEMP\nfshp2_fire1`): the flames, the truck's jets, the smoke, the
 fog and the mirror, whole. Azahar's GPU takes no time, so only the
 device can show the gain.
+
+## TASKS 46: the smoke's alpha test, and the timing frame in a race (Session 128)
+
+The device log puts up to 12.8 ms of the fire's frame in its sprites.
+A counting build on Azahar (not kept) read their textures from the
+game's memory at the fire; the worst frame drew 1.3 million sprite
+pixels:
+
+| Texture   | Format | Blend | Atlas            | Texels of alpha 0 |
+|-----------|--------|-------|------------------|-------------------|
+| FIREA_CS  | RGBA8  | add   | 4x2 cells of 64  | none: 250 throughout, 44% black |
+| SMOKE_CS  | LA8    | alpha | 4x4 cells of 32  | 36% |
+| DUSTA_CS  | LA8    | alpha | 4x2 cells of 64  | 43% |
+| SMOKEB_CS | LA8    | alpha | 4x4 cells of 64  | 17% |
+
+- **The alpha test (done).** The sprites, and every other draw that
+  blends with no alpha test and writes no depth, now test for an alpha
+  over 0 (`georender.c`, `set_pass`). Each of `set_blend`'s three blends
+  takes the source by its alpha and keeps the destination whole at 0,
+  its alpha too, so a fragment of alpha 0 changes nothing. The test
+  drops it before its depth read and its blend.
+  - A draw that writes depth changes the buffer at any alpha, so it is
+    left as it was.
+  - The mirror's quads (`set_blend_source_alpha`) write their own
+    alpha, and they do not go through `set_pass`.
+  - The test kills 17 to 43% of the smoke's and the dust's fragments.
+    The fire's own, alpha 250 everywhere, all pass.
+  - On the PS2 the GS's `(Cs - Cd) * As >> 7 + Cd` is Cd at As 0. Should
+    the PICA's blend round at alpha 0, the test makes it retail's.
+  - On Azahar the timing frame's "alpha test 0 off" replay of the
+    sprites' list differs from as drawn in 0 pixels.
+- **The quads cut to their alpha (not done).** A polygon round each
+  cell's visible texels, with the filter's texel of margin, keeps 0.79
+  to 1.0 of the cell. That is about 15% less fill on top of the test,
+  which gets most of it for nothing.
+- **The clusters with no pixel centre (not done).** A cluster whose
+  projected box holds no pixel centre draws nothing, so leaving it out
+  would be exact. Counted on Azahar at the fire, they are 0.0 to 0.3%
+  of the indices in every view, the envmap's 64-pixel faces included.
+
+### The timing frame in a race
+
+The replays had never run in a race. Their target needs 768 KB of
+VRAM, and a race's textures leave less: track 11's leave 512 KB.
+
+- Now, when VRAM has no room, the replays borrow the top screen's own
+  buffers. They are the same size and formats, in the same banks. What
+  the buffers hold is kept on the heap and put back after
+  (`hangwatch.c`, `borrow_top` and `give_back`).
+- The sprites' stage, "the sun and the scenery's list", is replayed
+  too.
+- There are two more ways:
+  - "alpha test 0 off": the tests of reference 0 off, with its picture
+    compared;
+  - "texture unit 1 off": the fog's fraction unread. The sprites' fog
+    stage reads unit 1's texture of one value.
+- On Azahar's track 11 every replay ran. Early depth's pictures matched
+  as drawn's to the pixel, but Azahar does not emulate early depth.
+
+### What is left
+
+- **The device's timing run** at the fire and the desert's end with
+  this build: `sdmc:/nfshp2_gputiming.txt` (empty) and `DebugLog 1`.
+  For each stage it shows how the time splits:
+  - fill (the 1-pixel scissor);
+  - the cost of each draw (3 vertices a draw);
+  - the textures (8x8, RGB8, unit 1).
+
+  It also shows whether early depth is exact on the PICA, and what it
+  saves.
+- **The envmap a face a frame**, the user's call.
