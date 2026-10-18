@@ -36,6 +36,11 @@
 // aborts.
 //
 // A check costs a few hundred reads.
+//
+// Off unless the config says "ThreadGuard 1" (configitems.h; 2026-10-18,
+// the user's word). Off, nothing is watched and the guard's thread never
+// starts: a check does nothing, a signal is LightEvent_Signal alone and
+// the workers wait 10 ms, as before the guard.
 
 #ifndef THREADGUARD_H
 #define THREADGUARD_H
@@ -44,9 +49,13 @@
 #include <stdio.h>
 #include <3ds.h>
 
+// Turns the guard on, before the first worker is watched (main.c's, at
+// boot, for "ThreadGuard 1").
+void threadguard_enable(void);
+
 // A worker made by threadCreate and the event it waits on, watched until
-// forgotten. `name` lives for the program. The first starts the guard's
-// thread.
+// forgotten, once the guard is on. `name` lives for the program. The first
+// starts the guard's thread.
 void threadguard_watch(const char* name, Thread t, LightEvent* wake);
 void threadguard_forget(Thread t);
 

@@ -3245,6 +3245,13 @@ phases.
             now leave the texture as it is, and a new fill works out each
             column once. `tools/georender_cuts_check.py` holds it to the
             old fill; nothing on screen changes.
+          - threadguard (Session 130, continued): off unless the config
+            says "ThreadGuard 1", at the user's word (2026-10-18). Its
+            checks at each of the main loop's marks and every 10 ms on the
+            game's core were 1.7 to 2.5% of Azahar's race profiles; the
+            crash it was made for was fixed the day it was found (399d67e).
+            Off, nothing is watched and the audio workers wait 10 ms on
+            their own, as before it.
         - [ ] The user's word on the envmap a face a frame.
 
 47. [ ] **A brief artifact on the bridge before the finish line.**

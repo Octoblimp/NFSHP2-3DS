@@ -194,6 +194,14 @@ extern int32_t ConfigReplayCheck;           // 0
 // retail's other demo, the AI race (demomode.c).
 extern int32_t ConfigDemoReplays;           // 0
 
+// The port's own: "ThreadGuard 1" turns on the tripwire over the audio
+// workers' thread blocks (threadguard.h), main.c's at boot. Off by
+// default at the user's word (2026-10-18, TASKS 46): the race-end crash
+// it was made for was DriveTarget::Resample's walk, fixed the day it was
+// found, and its checks, at each of the main loop's marks and every
+// 10 ms on the game's core, were 1.7 to 2.5% of Azahar's race profiles.
+extern int32_t ConfigThreadGuard;           // 0
+
 typedef void (*ConfigItemsLogFn)(const char *line);
 
 // Applies `text` (NUL-terminated), each word as it is read; SkipFE goes

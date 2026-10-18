@@ -31,6 +31,7 @@ typedef struct {
 } Guard;
 
 static Guard                s_guard[GUARD_MAX];
+static bool                 s_on;      // threadguard_enable
 static LightLock            s_lock;    // the list and every check
 static bool                 s_lockUp;
 static Thread               s_thread;
@@ -199,9 +200,14 @@ static void guard_main(void* arg)
 
 // --------------------------------------------------------------- the list
 
+void threadguard_enable(void)
+{
+    s_on = true;
+}
+
 void threadguard_watch(const char* name, Thread t, LightEvent* wake)
 {
-    if (!t) return;
+    if (!t || !s_on) return;
     if (!s_lockUp) {
         LightLock_Init(&s_lock);
         s_lockUp = true;

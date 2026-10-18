@@ -27216,3 +27216,12 @@ Then, read in the code:
   fills (0 differ, 12 of 12 mutations caught); `draw-cuts.md` has the
   details. The build is clean. What it saves on the device is the next
   device log's to say, in the sky's stage, where `fog_frame` runs.
+- **threadguard** is off unless `nfshp2_config.txt` says "ThreadGuard
+  1" (configitems.h), the user's choice on 2026-10-18 when asked. It was
+  a diagnostic from the race-end crash hunt, whose cause
+  (`DriveTarget::Resample`'s walk) was fixed the day it was found
+  (399d67e), and its `scan` was 1.7 to 2.5% of Azahar's race profiles:
+  a check at each of the main loop's marks, and its own thread's every
+  10 ms on the game's core. Off, `threadguard_watch` watches nothing, so
+  its thread never starts, `threadguard_check` returns at once and the
+  audio workers wait 10 ms on their own, as before the guard.

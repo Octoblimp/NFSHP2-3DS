@@ -58,6 +58,7 @@ int32_t ConfigTestFinishPlace = 1;          // the port's own
 int32_t ConfigTestFinishTime;               // the port's own
 int32_t ConfigReplayCheck;                  // the port's own
 int32_t ConfigDemoReplays;                  // the port's own
+int32_t ConfigThreadGuard;                  // the port's own
 
 int32_t config_skip_fe(void)
 {
@@ -122,6 +123,7 @@ static const ConfigItem kConfigItems[] = {
     { "TestFinishTime",             &ConfigTestFinishTime,       0 },
     { "ReplayCheck",                &ConfigReplayCheck,          0 },
     { "DemoReplays",                &ConfigDemoReplays,          0 },
+    { "ThreadGuard",                &ConfigThreadGuard,          0 },
 };
 
 static void config_log(ConfigItemsLogFn log, const char *fmt,

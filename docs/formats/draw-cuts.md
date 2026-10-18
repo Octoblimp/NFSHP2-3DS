@@ -1051,5 +1051,10 @@ rounding and the tiles) are all caught.
     kept so the checks count them as retail does;
   - `scan` (2.5%), `threadguard.c`'s: the tripwire over the audio
     workers' stacks from the race-end crash hunt of 2026-10-11. It is a
-    diagnostic, not the game's code, so whether it stays on is the
-    user's call.
+    diagnostic, not the game's code, and at the user's word (2026-10-18)
+    it is off unless `nfshp2_config.txt` says "ThreadGuard 1". Off, no
+    worker is watched and its thread never starts, so the main loop's
+    marks check nothing and the workers wait 10 ms on their own, as
+    before the guard. The crash it was made for was
+    `DriveTarget::Resample`'s walk, fixed the day it was found
+    (399d67e).

@@ -6054,9 +6054,9 @@ static void logRaceState(void)
     }
 }
 
-// A hangwatch mark, and the thread guard's check there (threadguard.h):
-// a write over the audio workers' blocks is caught at the next mark, and
-// the report names the two it fell between.
+// A hangwatch mark, and the thread guard's check there (threadguard.h,
+// with "ThreadGuard 1"): a write over the audio workers' blocks is caught
+// at the next mark, and the report names the two it fell between.
 static void frameMark(const char* where)
 {
     hangwatch_mark(where);
@@ -7440,6 +7440,10 @@ int main(int argc, char** argv)
     // Where the main loop was if it stops (hangwatch.h): the first race on
     // a New 3DS XL drew a frame and stopped there.
     hangwatch_start(logLine);
+    // The audio workers' tripwire, for "ThreadGuard 1" only (logOpen read
+    // the config): off, its checks cost the game's core nothing.
+    if (ConfigThreadGuard)
+        threadguard_enable();
     threadguard_note = guardNote;
     // exit() frees the heap, and the stacks of the threads that made it
     // with it, before it ends the process: a watcher that woke in between
