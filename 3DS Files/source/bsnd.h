@@ -160,6 +160,10 @@ typedef struct {
     const BsndSink* sink;
     void* (*alloc)(size_t);      // linearAlloc on the 3DS, malloc on the host
     void  (*release)(void*);
+    // A bank's image once it is registered: the DSP's cache flush on the
+    // 3DS, none on the host. Nothing writes an image after, so its patches
+    // need no flush of their own when they start.
+    void  (*registered)(const void* image, size_t size);
     unsigned voices;             // BSND_MAX_VOICES here, 48 for a PS2-shaped run
     uint8_t  mode;               // BSND_MODE_*
     uint16_t patchCount;         // the flat table's high-water mark

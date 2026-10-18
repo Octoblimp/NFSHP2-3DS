@@ -27161,5 +27161,36 @@ was read in the code instead, against the device log.
   "waits: vsync X, gpu Y, replay Z". `frame-profiler.md` and
   `draw-cuts.md` say so. The build is clean; nothing on screen changes.
 
-Next: the fourth profile's functions (`vt_slot`'s callers, `memset`,
-`physicscar_iterate_forces`), read from the saved profile on the host.
+Then the saved fourth profile, read on the host (a new scratchpad
+`callers.py` names each sampled function's caller from its lr or the
+first return address on its stack):
+
+- **The device is bound by the CPU.** Its 20 FPS seconds on Alpine
+  Trail's start straight do 34.7 ms of work a frame (the draw 29.9, the
+  models 10.7 of it, the world 3.1), just over the 33.3 a 30 FPS frame
+  has, so each frame misses a vblank and waits 15.6 ms for the next.
+  The GPU takes 15. Two ms less a frame there would make those seconds
+  30 FPS.
+- **The sound banks' flush** (`bsnd.c`). `DSP_FlushDataCache` was 2.2%
+  of the samples, all from `hw_start`: every sound's start flushed its
+  patch, a DSP service call. A bank's image is written once, by
+  `bsnd_bank_load`'s `fread`, and only read after, so
+  `bsnd_bank_register` flushes it whole once through the driver's new
+  `registered` hook, and `hw_start` flushes nothing. The streams keep
+  their own flushes. Azahar has no caches to get wrong, so the 3DS is
+  the test: crackle or stale sound in an effect would be a flush
+  missing.
+- **`tools/bsnd_check.py out/SOUND` fails before and after:** 449 of
+  5,162 lines differ, the same on the commit before this change. It
+  was at 0 in Session 65. The first differences are the mix lines'
+  volumes in a late scenario. That drift is its own task.
+- `memset` is 7 samples from `bIdentity`, 5 from
+  `physicssystem_integrate_euler` (its 140-float clear); `vt_slot` is
+  10 from `physicssystem_integrate_euler`'s dispatches, 9 from the
+  engine's derivative; `physicscar_iterate_forces` is 11 from
+  `wheel_get_horizontal_ground_force_car` and 10 from
+  `wheel_modify_ground_force`. All three are in the world's 3 ms.
+
+Next: the models stage, the largest CPU stage on the device (10.7 ms
+for 630 models and 1,382 batches where it is slow). Azahar's profile
+barely sees it (3.6%), so its per-batch work is read in the code.

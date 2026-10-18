@@ -967,6 +967,26 @@ different ways: at 26 seconds the baseline's car was 4th and this one's
 camera saw (seconds 42 and 43: the models 11.2 ms here, 6.8 there), so
 the whole race's draw and slow seconds do not compare.
 
+### The sound banks' flush
+
+The fourth profile's 2.2% in `DSP_FlushDataCache`, all of it from
+`bsnd.c`'s `hw_start`, made each sound's start a DSP service call: the
+patch's bytes out of the CPU's cache before ndsp reads them. A bank's
+image is written once, by `bsnd_bank_load`'s `fread` into linear
+memory, and after that only read (`sndbank.c` copies records out and
+hands back pointers). So `bsnd_bank_register` now flushes the whole
+image once, through the driver's `registered` hook (the 3DS half's
+`hw_registered`, none on the host), and `hw_start` flushes nothing. The
+DSP reads the same bytes either way. The streams (`bsndstream.c`,
+`jbstream.c`, the movies) write their buffers as they go and keep their
+own flushes.
+
+`tools/bsnd_check.py out/SOUND` is unchanged by it: 449 of 5,162 lines
+differ, as they do on the commit before. The checker last passed at 0
+in Session 65; the drift is older and is its own task. Azahar does not
+model the caches, so only the 3DS can show a flush missing, as
+crackle or old sound in a patch.
+
 ### What is left
 
 - **The device's numbers** for these builds on Alpine Trail's start

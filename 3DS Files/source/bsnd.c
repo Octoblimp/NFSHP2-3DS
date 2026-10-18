@@ -211,6 +211,7 @@ bool bsnd_bank_register(BsndDriver* d, const char* name, uint8_t* image,
     s->count = (uint16_t)s->bank.count;
     s->used = true;
     d->patchCount = (uint16_t)(d->patchCount + s->count);
+    if (d->registered) d->registered(image, size);
     return true;
 }
 
@@ -966,7 +967,9 @@ static void hw_start(void* user, unsigned ch, const uint8_t* data,
     w->nsamples = samples;
     w->adpcm_data = &gAdpcm[ch];
     w->looping = looping;
-    DSP_FlushDataCache(data, bytes);
+    // The bank's image was flushed whole when it was registered
+    // (hw_registered), and only read since.
+    (void)bytes;
     ndspChnWaveBufAdd(ch, w);
 }
 
@@ -1038,6 +1041,13 @@ static const BsndSink kNdspSink = {
 static void* hw_alloc(size_t n) { return linearAlloc(n); }
 static void  hw_free(void* p)   { linearFree(p); }
 
+// Once a bank is read in, out of the CPU's cache for the DSP. Until TASKS
+// 46 each start flushed its patch, a DSP service call every sound.
+static void hw_registered(const void* image, size_t size)
+{
+    if (gNdspReady) DSP_FlushDataCache(image, (u32)size);
+}
+
 bool bsnd_hw_init(BsndDriver* d)
 {
     char path[GAMEDATA_MAX_PATH];
@@ -1045,6 +1055,7 @@ bool bsnd_hw_init(BsndDriver* d)
     bsnd_init(d, &kNdspSink, BSND_HW_VOICES);
     d->alloc = hw_alloc;
     d->release = hw_free;
+    d->registered = hw_registered;
 
     if (R_FAILED(ndspInit())) {
         d->sink = NULL;          // silent, but every call above still works

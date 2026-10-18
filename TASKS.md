@@ -3234,6 +3234,11 @@ phases.
             race ran at 20. A faster race makes a faster replay; the
             spin stays. The frame line now times it apart ("waits: ...
             replay") and takes it out of "race".
+          - The sound banks' flush (Session 130, continued): each sound's
+            start flushed its patch for the DSP, a service call (2.2% of
+            the fourth profile). A bank is written once, at its load, so
+            it is now flushed once there. To hear on the 3DS: any
+            crackle or old sound in an effect would mean a flush missing.
         - [ ] The user's word on the envmap a face a frame.
 
 47. [ ] **A brief artifact on the bridge before the finish line.**
