@@ -91,6 +91,8 @@
 #define TRACKVIEW_MAX_SOLIDS   1536     // retail's TRACKB61 and B64 have 1,345
 #define TRACKVIEW_MAX_OTHER    512      // solids drawn that are not the track's
 #define TRACKVIEW_MAX_TEXTURES 1024     // its solids name 415 hashes; then the cars
+#define TRACKVIEW_TEX_BUCKET_BITS 11    // find_texture's buckets, twice the list
+#define TRACKVIEW_TEX_BUCKETS  (1 << TRACKVIEW_TEX_BUCKET_BITS)
 #define TRACKVIEW_NUM_TEXFILES 2        // TEX<n>TRACK.BIN, TEX<n>LOCATION.BIN
 #define TRACKVIEW_MAX_SHARED   2        // GLOBALB.BUN, INGAMEB.BUN
 #define TRACKVIEW_MAX_SHARED_CHUNKS 8   // their packs and flipbooks: 4
@@ -220,6 +222,9 @@ typedef struct {
     int          linkedSolids;
     TrackTex*    texture;
     int          numTextures;
+    // The entries by their TextureInfo: each bucket an entry's index plus
+    // one, 0 for none (TASKS 46). Emptied with the list.
+    uint16_t     texBucket[TRACKVIEW_TEX_BUCKETS];
     TrackFrame   frame[TRACKVIEW_MAX_FRAMES];
     int          numFrames;
 

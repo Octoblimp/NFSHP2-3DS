@@ -251,13 +251,26 @@ static int find_solid(const TrackView* v, const void* solid)
 
 // ------------------------------------------------------------- the textures
 
+// The list's entries are found by their TextureInfo in open-addressed
+// buckets, not by a scan of the list from the front: the scan was a
+// profile's 1.7% (TASKS 46). load_texture puts a TextureInfo in the list
+// once, so the entry found is the one the scan found.
+static unsigned tex_bucket(const TextureInfo* info)
+{
+    return ((uint32_t)(uintptr_t)info * 2654435761u)
+           >> (32 - TRACKVIEW_TEX_BUCKET_BITS);
+}
+
 static TrackTex* find_texture(TrackView* v, const TextureInfo* info)
 {
-    int i;
+    unsigned h;
 
-    for (i = 0; i < v->numTextures; i++) {
-        if (v->texture[i].info == info) {
-            return &v->texture[i];
+    for (h = tex_bucket(info); v->texBucket[h] != 0;
+         h = (h + 1) & (TRACKVIEW_TEX_BUCKETS - 1)) {
+        int k = v->texBucket[h] - 1;
+
+        if (k < v->numTextures && v->texture[k].info == info) {
+            return &v->texture[k];
         }
     }
     return NULL;
@@ -557,10 +570,17 @@ static TrackTex* load_texture(TrackView* v, const TextureInfo* info)
         return t;
     }
     if (!t) {
+        unsigned b;
+
         if (v->numTextures >= TRACKVIEW_MAX_TEXTURES) {
             return NULL;
         }
+        // The list is never past half the buckets, so one is empty.
+        for (b = tex_bucket(info); v->texBucket[b] != 0;
+             b = (b + 1) & (TRACKVIEW_TEX_BUCKETS - 1)) {
+        }
         t = &v->texture[v->numTextures++];
+        v->texBucket[b] = (uint16_t)v->numTextures;
     }
     memset(t, 0, sizeof *t);
     t->info       = info;
@@ -2841,14 +2861,27 @@ static void transfer_zbuffer_rect(uint8_t* dst, int x, int y, int w, int h)
 // A top-screen pixel's word in the 240 by 400 buffers citro3d renders to:
 // the screen on its side, its x down the buffer and its y across from the
 // right, in 8 by 8 tiles in rows of 30, and each tile in Morton order.
-static uint32_t tiled_index(int x, int y)
+// The x's bits and the y's land apart, so the word is the x's part plus
+// the y's.
+static uint32_t tiled_x(int x)
+{
+    uint32_t by = (uint32_t)x;
+
+    return (by >> 3) * (240u / 8u) * 64u
+         + (((by & 1u) << 1) | ((by & 2u) << 2) | ((by & 4u) << 3));
+}
+
+static uint32_t tiled_y(int y)
 {
     uint32_t bx = (uint32_t)(239 - y);
-    uint32_t by = (uint32_t)x;
-    uint32_t m  = (bx & 1u) | ((by & 1u) << 1) | ((bx & 2u) << 1)
-                | ((by & 2u) << 2) | ((bx & 4u) << 2) | ((by & 4u) << 3);
 
-    return ((by >> 3) * (240u / 8u) + (bx >> 3)) * 64u + m;
+    return (bx >> 3) * 64u
+         + ((bx & 1u) | ((bx & 2u) << 1) | ((bx & 4u) << 2));
+}
+
+static uint32_t tiled_index(int x, int y)
+{
+    return tiled_x(x) + tiled_y(y);
 }
 
 // The GS's Z for a depth the PICA wrote. The PICA's is the Z-buffer's,
@@ -3025,10 +3058,72 @@ static void probe(TrackView* v, const C3D_RenderTarget* target)
     }
 }
 
+// A sun rect's pixels, read back; the count of them under 2, the sky's.
+// A pixel's place on the screen is its column's and its row's
+// (target_to_screen), and its word is the two's parts added (tiled_x and
+// tiled_y), so each column and row is worked out once a rect, not once a
+// pixel (TASKS 46): the same floats, floors and clamps, and the same
+// words. A column or row off the target is -1.
+static int32_t s_sunCol[SUN_ZBUFFER_SIZE * SUN_ZBUFFER_SIZE];
+static int32_t s_sunRow[SUN_ZBUFFER_SIZE * SUN_ZBUFFER_SIZE];
+
+static int read_sun_rect(const SunRect* q, const uint32_t* depth)
+{
+    int sky = 0;
+    int i, j;
+
+    // StuffSun keeps the rect on the target; a target under 33 across
+    // does not, and none of what is off it counts.
+    for (i = 0; i < q->w; i++) {
+        int   px = q->x + i;
+        float sx, sy;
+        int   ix;
+
+        if (px < 0 || px >= q->targetW) {
+            s_sunCol[i] = -1;
+            continue;
+        }
+        target_to_screen((float)px + 0.5f, 0.5f, q->targetW, q->targetH,
+                         q->aspX, q->aspY, &sx, &sy);
+        ix          = (int)floorf(sx);
+        ix          = ix < 0 ? 0 : ix > 399 ? 399 : ix;
+        s_sunCol[i] = (int32_t)tiled_x(ix);
+    }
+    for (j = 0; j < q->h; j++) {
+        int   py = q->y + j;
+        float sx, sy;
+        int   iy;
+
+        if (py < 0 || py >= q->targetH) {
+            s_sunRow[j] = -1;
+            continue;
+        }
+        target_to_screen(0.5f, (float)py + 0.5f, q->targetW, q->targetH,
+                         q->aspX, q->aspY, &sx, &sy);
+        iy          = (int)floorf(sy);
+        iy          = iy < 0 ? 0 : iy > 239 ? 239 : iy;
+        s_sunRow[j] = (int32_t)tiled_y(iy);
+    }
+    for (j = 0; j < q->h; j++) {
+        for (i = 0; i < q->w; i++) {
+            uint32_t z = 0xffffffu;
+
+            if (s_sunCol[i] >= 0 && s_sunRow[j] >= 0) {
+                z = gs_z(depth[s_sunCol[i] + s_sunRow[j]] & 0xffffffu);
+                if (z < 2) {
+                    sky++;
+                }
+            }
+            q->dst[j * q->w + i] = z;
+        }
+    }
+    return sky;
+}
+
 void trackview_read_depth(TrackView* v, C3D_RenderTarget* target)
 {
     const uint32_t* depth;
-    int             r, i, j;
+    int             r;
 
     v->sunRects = 0;
     v->sunSky   = 0;
@@ -3043,36 +3138,7 @@ void trackview_read_depth(TrackView* v, C3D_RenderTarget* target)
     }
     depth = (const uint32_t*)target->frameBuf.depthBuf;
     for (r = 0; r < s_numSunRects; r++) {
-        const SunRect* q = &s_sunRects[r];
-
-        for (j = 0; j < q->h; j++) {
-            for (i = 0; i < q->w; i++) {
-                int      px = q->x + i;
-                int      py = q->y + j;
-                uint32_t z  = 0xffffffu;
-
-                // StuffSun keeps the rect on the target; a target under
-                // 33 across does not, and none of what is off it counts.
-                if (px >= 0 && py >= 0 && px < q->targetW
-                    && py < q->targetH) {
-                    float sx, sy;
-                    int   ix, iy;
-
-                    target_to_screen((float)px + 0.5f, (float)py + 0.5f,
-                                     q->targetW, q->targetH, q->aspX,
-                                     q->aspY, &sx, &sy);
-                    ix = (int)floorf(sx);
-                    iy = (int)floorf(sy);
-                    ix = ix < 0 ? 0 : ix > 399 ? 399 : ix;
-                    iy = iy < 0 ? 0 : iy > 239 ? 239 : iy;
-                    z  = gs_z(depth[tiled_index(ix, iy)] & 0xffffffu);
-                    if (z < 2) {
-                        v->sunSky++;
-                    }
-                }
-                q->dst[j * q->w + i] = z;
-            }
-        }
+        v->sunSky += read_sun_rect(&s_sunRects[r], depth);
         v->sunRects++;
     }
     s_numSunRects = 0;
@@ -3766,6 +3832,7 @@ static void forget_all(TrackView* v)
     v->numOther    = 0;
     v->numTextures = 0;
     v->numFrames   = 0;
+    memset(v->texBucket, 0, sizeof v->texBucket);
 }
 
 void trackview_forget_later(TrackView* v)

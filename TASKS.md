@@ -3203,6 +3203,18 @@ phases.
             correction, the same ticks on 106 million host checks
             (`tools/bticker_check.py`). On Azahar the world step takes
             2.8 ms from 3.4; the picture is the same to the pixel.
+          - The textures and the sun's read-back (Session 129): a third
+            profile put `load_texture`'s scan of the texture list (659
+            entries at Alpine Trail's start) and the sun's per-pixel
+            `floorf`s next. Every scenery piece and car part looks its
+            textures up there each frame. The list is now found through
+            2,048 buckets, and each sun rect's columns and rows are
+            worked out once. `tools/trackview_cuts_check.py` holds both
+            to the old code (137.5 million pixels and 4 million lookups,
+            none differ, 14 of 14 mutations caught). On Azahar, seconds
+            2 to 8: scenery 1.1 ms from 2.9, cars 5.9 from 8.6, the draw
+            31.0 from 36.6. Over the whole race, 6 seconds under 28 FPS
+            from 13. The picture is the same to the pixel.
           - Found in the device log: after the finish, in the post-race
             and the instant replay (rc 7 and 4), the race phase takes
             13.5 ms a frame on average and up to 34, so 13 of those 40

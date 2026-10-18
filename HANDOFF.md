@@ -27062,3 +27062,32 @@ addresses, and this profile's `scan` (2.3%) can no longer be told apart.
 
 Next: `scenery_classify_aabb`, `trackview_read_depth`'s `floorf`, and
 the device's numbers.
+
+## Session 129 -- the textures and the sun's read-back (TASKS 46)
+
+Session 128 ran out of its limit with these two cuts written but not
+checked or committed; this session finished them.
+
+- **`find_texture`** scanned the whole texture list (659 entries at
+  Alpine Trail's start) for each texture of every scenery piece and car
+  part drawn, every frame. It now finds the entry through 2,048
+  open-addressed buckets (`trackview.c`, `texBucket` in `trackview.h`).
+  `forget_all` empties them with the list.
+- **The sun's read-back** (`read_sun_rect`) works out each rect's
+  columns and rows once (`tiled_x`, `tiled_y`), not each pixel's place
+  with two `floorf`s.
+- **`tools/trackview_cuts_check.py`** cuts both out of `trackview.c` and
+  holds them to the old code: none of 137.5 million pixels or 4 million
+  lookups differ, and 14 of 14 mutations are caught. Its mutations look
+  for their text in `trackview.c` only, since the test bodies in
+  `tools/src` hold the old code too.
+
+On Azahar (Alpine Trail, gas only), seconds 2 to 8: scenery 1.1 ms from
+2.9, cars 5.9 from 8.6, the draw 31.0 from 36.6. Over the whole race, 6
+seconds under 28 FPS from 13. The race-start shot is the same to the
+pixel.
+
+Left on the third profile: `bTickerFromSystemTick` (4.6%, more than its
+multiplies explain), `vt_slot` and `scenery_classify_aabb` (2.9% each),
+`memset`, and threadguard's `scan` (1.7%, a diagnostic: the user's
+call). Then the device's numbers.

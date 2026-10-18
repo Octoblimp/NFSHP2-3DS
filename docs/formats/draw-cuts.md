@@ -847,6 +847,75 @@ time:
 
 The world step is 18% cheaper.
 
+### The textures and the sun's read-back
+
+A third profile (884 samples at 5 a second, its ELF kept) showed two of
+`trackview.c`'s own loops by their own time:
+
+| function | samples |
+|---|---|
+| `load_texture`, almost all of it `find_texture` | 1.7% |
+| `floorf` | 1.6% |
+| `trackview_read_depth` | 1.2% |
+
+- **`find_texture`** looked a TextureInfo up by scanning the texture list
+  from the front. The list holds every texture seen so far, 659 at
+  Alpine Trail's start. Every scenery piece and car part drawn through
+  `render_model` and `render_epoly` looks its textures up there, every
+  frame. The track's own models keep their entries and do not. The list
+  is now found through 2,048 open-addressed buckets, twice
+  `TRACKVIEW_MAX_TEXTURES`, so one is always empty. Each bucket holds an
+  entry's index plus one. `load_texture` fills the bucket as it
+  appends, and `forget_all` empties them all with the list. A
+  TrackView's other lifetimes start and end with a `memset` of the
+  whole struct. A bucket's entry is still compared by its TextureInfo,
+  and `load_texture` puts a TextureInfo in the list only once, so the
+  entry found is the one the scan found.
+- **The sun's read-back** (`read_sun_rect`) worked out each pixel's place
+  on the screen with `target_to_screen`, two `floorf`s and two clamps,
+  then the tiled word. Its x depends only on the column and its y only
+  on the row. The word's x bits and y bits do not overlap, so the word
+  is the x part plus the y part (`tiled_x`, `tiled_y`). Each column and
+  row of a rect is now worked out once, not once a pixel.
+
+**Why nothing changes.** `tools/trackview_cuts_check.py` cuts the
+functions out of `trackview.c` as they are now and builds them on the
+host, with test bodies from `tools/src`:
+
+- `trackview_sun_test.inc` holds `read_sun_rect` to the old per-pixel
+  loop over 400,000 rects on random targets, aspect ratios and depth
+  buffers: 137,500,738 pixels, none differ. It also holds the split
+  `tiled_index` to the whole one.
+- `trackview_tex_test.inc` holds `find_texture` to the old scan over
+  3,999,906 lookups, 94 resets and the list filled to its end: none
+  differ.
+- It catches its 14 mutations, 8 in the sun's code and 6 in the
+  buckets. One of them, buckets kept over a reset, is caught by a hang
+  once the list is full.
+- The race-start shot matches the baseline's to the pixel; only Azahar's
+  title and status bars differ.
+
+**On Azahar**, the same race. Seconds 2 to 8 after the attach, in ms:
+
+| | after the ticker and the vtables | and these |
+|---|---|---|
+| scenery | 2.9 | 1.1 |
+| cars | 8.6 | 5.9 |
+| cull | 3.7 | 3.0 |
+| models | 12.4 | 12.1 |
+| envmap | 2.3 | 2.3 |
+| the draw | 36.6 | 31.0 |
+| citro3d's CPU | 36.2 | 30.6 |
+| FPS | 20.0 | 22.3 |
+
+The cars' seconds 6 and 7 are lower than the baseline's: the new run
+was under 33 ms there and ran at 30 FPS (29.7 and 26.5), so the grid
+had spread out sooner. Over the whole race (58 seconds each) the draw
+is 23.2 ms from 25.5, and 6 seconds were under 28 FPS, down from 13.
+The sun's change shows nothing in the envmap stage on Azahar, where
+`floorf` is cheap. On the 3DS it is a libm call, and is not measured
+yet.
+
 ### What is left
 
 - **The device's numbers** for these builds on Alpine Trail's start
@@ -857,10 +926,14 @@ The world step is 18% cheaper.
   ran at 20 FPS. Not looked at yet.
 - **The world step** (4.9 ms on the device before these cuts) and
   **the cars** (2.9).
-- **The second profile's next functions**:
-  - `scenery_classify_aabb` (2.6%);
-  - `scan` (2.3%): `threadguard.c`'s or `texsrc.c`'s, which the
-    report cannot tell apart, since a rebuild wrote over the profile's
-    ELF. Keep each profile's ELF beside its samples;
-  - `floorf` under `trackview_read_depth` (1.9%);
-  - `memset` (1.9%).
+- **The third profile's next functions**, by their own time (its ELF
+  is kept beside its samples, as each profile's should be):
+  - `bTickerFromSystemTick` (4.6%), more than its few multiplies
+    explain;
+  - `vt_slot` (2.9%) and `scenery_classify_aabb` (2.9%: 1.9 under
+    `scenery_draw_a_scenery`, 1.0 under `scenery_tree_cull`);
+  - `memset` (2.3%);
+  - `scan` (1.7%), `threadguard.c`'s: the tripwire over the audio
+    workers' stacks from the race-end crash hunt of 2026-10-11. It is a
+    diagnostic, not the game's code, so whether it stays on is the
+    user's call.
