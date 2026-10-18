@@ -35,6 +35,8 @@
 #   powershell -File tools/run_azahar_career.ps1 -Race -Event 2 -LapSeconds 120
 #   powershell -File tools/run_azahar_career.ps1 -OpenUltimates -Path down,down
 #   powershell -File tools/run_azahar_career.ps1 -Race -FinishSeconds 40 -ViewReplay
+#   powershell -File tools/run_azahar_career.ps1 -Race -FinishSeconds 90 -ViewReplay -ReplaySeconds 60
+#                                    # a minute of the replay, for a profile
 
 param(
     [string]$AzaharExe = "C:\Program Files\Azahar\azahar.exe",
@@ -49,7 +51,8 @@ param(
     [string]$Path = "",           # D-pad steps on the tree to the event
     [int]$Event = 0,              # the event -Path must end on
     [switch]$OpenUltimates,       # the debug menu's Open the Ultimates first
-    [switch]$ViewReplay           # -Race: the last race's View Replay, then Quit
+    [switch]$ViewReplay,          # -Race: the last race's View Replay, then Quit
+    [int]$ReplaySeconds = 6       # -ViewReplay: between its two shots
 )
 
 $ErrorActionPreference = "Stop"
@@ -594,7 +597,7 @@ if (($atCarSel -or $resumed) -and $Race) {
             $replayOn = Wait-ForLog "race: rc 4," 20
             Start-Sleep -Seconds 2
             Shot ("race{0}-replay-1" -f $races)
-            Start-Sleep -Seconds 6
+            Start-Sleep -Seconds $ReplaySeconds
             Shot ("race{0}-replay-2" -f $races)
             # Y: the replay's help (802250..802257), its keys the 3DS's
             # (72g-5); Y again puts it away.

@@ -27121,3 +27121,19 @@ count), `memset` and `physicscar_iterate_forces` (2.5% each),
 `bTickerFromSystemTick` (2.5%, Azahar's charge for the SVC before it),
 threadguard's `scan` (2.5%, the user's call). Then the race phase after
 the finish, and the device's numbers.
+
+**Started, then stopped at the user's word: the race phase after the
+finish.** The device log (`3DS Files/nfshp2_debug.txt`, 13:32) shows
+where it is slow: the End Game Menu's View Replay (rc 4, replaying the
+race from its start), where the race phase took 20 to 42 ms a frame and
+ran at 14 to 20 FPS for long stretches. The world there was 2.7 to 6.6
+ms and the draw 8 to 14, so the time is in the race phase itself:
+`racecoordinator_execute_queued_messages`, `RC_TICK`, `bgf_service`
+(the replay screen), `replayCheckTick` or `replaymgr_begin_frame`. The
+post-race (rc 7) was 3 to 12 ms. Azahar's gas-only race (58 s) never
+reaches the finish. The next step is to profile the replay:
+`tools/run_azahar_career.ps1 -Race -FinishSeconds 90 -ViewReplay
+-ReplaySeconds 60` (`-ReplaySeconds` is new, the stay between the
+replay's two shots), with `gdbprof.py --period 0.2 --wait-log
+...\nfshp2_debug.txt --wait-for "race: rc 4,"` started once the run's
+log is fresh. Not run yet.
