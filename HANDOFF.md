@@ -26870,3 +26870,29 @@ fire57 config and warp, on AC power at 100% speed:
   `sdmc:/nfshp2_debug.txt`.
 - **The user's call** on the envmap a face a frame.
 - Meanwhile TASKS 65, 67, 47 and 60, in the user's order.
+
+## Session 128, continued -- TASKS 65 closed from the device log
+
+TASKS 65's last box asked for a device log with no slow second with the
+send stages up and small `sends:` numbers. The user's log of 2026-10-16
+(`3DS Files/nfshp2_debug.txt`: track 16, 3 AI and 4 cops, 278 s) was
+made with the kernel's flush, as its "gpu sends: the linear heap flushed
+by the kernel" line says. `sends65.py` and `dip65.py` (scratchpad) read
+it:
+
+- **The dip's mark is gone.** In the dip, the sky and the bottom screen
+  each took about 13 ms. Here they are at most 1.3 and 2.0 ms in any
+  second, and the mirror at most 6.9.
+- **The sends are small.** A send's flush is 0.46 to 0.53 ms a frame and
+  its queue part about 0.1 ms.
+- **A few seconds have a spike.** The log's ten worst sends are 3.9 to
+  10.6 ms, in GX_ProcessCommandList and gxCmdQueueRun. Seven of their
+  seconds are at 29 to 30 FPS anyway. Three are slow seconds (15.1, 23.5
+  and 26.9 FPS) whose GPU or draw was up too. In every other slow second
+  the worst send is under 0.7 ms.
+- **The slow seconds left are TASKS 46's.** 48 of the 278 are under 20
+  FPS: the GPU at 32 to 47 ms, or the draw's CPU at up to 30 ms with
+  four cops.
+
+TASKS 65 is closed. Track 31's corner is still on the launch checklist's
+list for a real 3DS.

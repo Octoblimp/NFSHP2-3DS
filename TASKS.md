@@ -3706,7 +3706,7 @@ phases.
           early depth, the mip chains, NaNs in the smokeables' matrices.
           Waits on the user's next look at that corner on their 3DS.
 
-65. [ ] **The FPS dip in the same race.** Reported with TASKS 64:
+65. [x] **The FPS dip in the same race.** Reported with TASKS 64:
         "there was a minor FPS slowdown too at one point, locate that
         and fix it too". The log's worst second is at world 185.8 to
         186.8 s (lines ~6902 to 6936): 23.1, then 10.7, then 20.2 FPS,
@@ -3732,9 +3732,26 @@ phases.
           failed call goes back to GSP for good; "KernelFlush 0" turns
           it off. Each send is timed: the log's `sends:` line, after
           the cars' (`frame-profiler.md`, "The sends").
-        - [ ] The next device log: no slow second with the send stages up,
-          and the `sends:` line's flush and worst small. Not run on the
-          device or on Azahar (whose call does no cache work).
+        - [x] The next device log: no slow second with the send stages up,
+          and the `sends:` line's flush and worst small. The user's log
+          of 2026-10-16 (track 16, 3 AI and 4 cops, 278 s) was made with
+          the kernel's flush, and it says so ("gpu sends: the linear
+          heap flushed by the kernel"). Session 128 read it:
+          - The dip's mark is gone. In the dip the sky and the bottom
+            screen took 13.0 and 13.9 ms; here they are at most 1.3 and
+            2.0 ms, in every second.
+          - A send's flush is 0.46 to 0.53 ms a frame, its queue part
+            about 0.1.
+          - The log's ten worst sends are 3.9 to 10.6 ms, in the queue
+            part. Seven of their seconds are at 29 to 30 FPS, and three
+            are slow ones (15.1, 23.5 and 26.9 FPS) whose GPU or draw
+            was up as well. In every other slow second the worst send
+            is under 0.7 ms.
+          - The log's slow seconds (48 under 20 FPS) are the GPU's,
+            32 to 47 ms, or the draw's CPU, up to 30 ms with 4 cops:
+            TASKS 46's.
+          - Track 31's corner itself is on the launch checklist's
+            hardware list.
 66. [x] **Hot Pursuit 2's icon, banner and banner sound.** Asked for on
         2026-10-15: the logo as the icon, a 3D logo that spins as the
         banner (assets for it in the CIA only), and an engine's rev or a
