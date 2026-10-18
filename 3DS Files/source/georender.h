@@ -252,10 +252,14 @@ void georender_set_zwrite(bool on);
 
 typedef struct {
     C3D_Tex tex;
+    // The fractions the texture was last filled with, once `filled`.
+    bool    filled;
+    float   keep[GEO_FOG_STEPS + 1];
 } GeoFog;
 
 // Fills `fog` with `keep`, its texture made the first time and kept for
-// good. Call it after C3D_FrameBegin, which waits for the GPU to be done
+// good. Fractions the same to the bit as the last fill's leave it as it
+// is. Call it after C3D_FrameBegin, which waits for the GPU to be done
 // with the last frame, and before the draws that take it. False when there
 // is no memory.
 bool georender_fog_fill(GeoFog* fog, const float keep[GEO_FOG_STEPS + 1]);

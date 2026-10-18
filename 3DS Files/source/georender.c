@@ -822,15 +822,23 @@ static void set_unlit(void)
 }
 
 // Every row of the texture is the same, so a texel's byte is its column's
-// fraction: step j's for column j, and the last step's past it. The PICA
-// lays a texture out in 8 by 8 tiles, here one row of them, each in Morton
-// order, x in the even bits.
+// fraction: step j's for column j, and the last step's past it, each
+// worked out once. The PICA lays a texture out in 8 by 8 tiles, here one
+// row of them, each in Morton order, x in the even bits.
+//
+// The bytes are the fractions' alone, so fractions the same to the bit as
+// the last fill's are the bytes the texture holds: it is not written
+// again, nor flushed. The flush is a request to GSP's thread, and a race
+// made two a frame, the sky's fog and the scenery's, for a palette that
+// changes only with the weather (TASKS 46).
 bool georender_fog_fill(GeoFog* fog, const float keep[GEO_FOG_STEPS + 1])
 {
+    uint8_t  col[GEO_FOG_TEX_W];
     uint8_t* p;
     int      k, m;
 
     if (!fog->tex.data) {
+        fog->filled = false;
         if (!C3D_TexInit(&fog->tex, GEO_FOG_TEX_W, 8, GPU_A8)) {
             memset(&fog->tex, 0, sizeof fog->tex);
             return false;
@@ -838,17 +846,25 @@ bool georender_fog_fill(GeoFog* fog, const float keep[GEO_FOG_STEPS + 1])
         C3D_TexSetFilter(&fog->tex, GPU_LINEAR, GPU_LINEAR);
         C3D_TexSetWrap(&fog->tex, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
     }
+    if (fog->filled && memcmp(fog->keep, keep, sizeof fog->keep) == 0) {
+        return true;
+    }
+    for (k = 0; k < GEO_FOG_TEX_W; k++) {
+        float f = keep[k < GEO_FOG_STEPS ? k : GEO_FOG_STEPS];
+
+        f = f < 0.0f ? 0.0f : f > 1.0f ? 1.0f : f;
+        col[k] = (uint8_t)(f * 255.0f + 0.5f);
+    }
     p = (uint8_t*)fog->tex.data;
     for (k = 0; k < GEO_FOG_TEX_W / 8; k++) {
         for (m = 0; m < 64; m++) {
-            int   x = k * 8 + ((m & 1) | (m >> 1 & 2) | (m >> 2 & 4));
-            float f = keep[x < GEO_FOG_STEPS ? x : GEO_FOG_STEPS];
-
-            f = f < 0.0f ? 0.0f : f > 1.0f ? 1.0f : f;
-            p[k * 64 + m] = (uint8_t)(f * 255.0f + 0.5f);
+            p[k * 64 + m] = col[k * 8 + ((m & 1) | (m >> 1 & 2)
+                                         | (m >> 2 & 4))];
         }
     }
     GSPGPU_FlushDataCache(p, fog->tex.size);
+    memcpy(fog->keep, keep, sizeof fog->keep);
+    fog->filled = true;
     return true;
 }
 

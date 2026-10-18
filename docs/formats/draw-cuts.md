@@ -987,6 +987,40 @@ in Session 65; the drift is older and is its own task. Azahar does not
 model the caches, so only the 3DS can show a flush missing, as
 crackle or old sound in a patch.
 
+### The fog's texture
+
+`trackview.c`'s `fog_frame` makes the view's fog each frame: `fog_attach`
+works out the fog's 129 fractions twice, once for the scenery and once
+for the sky, and `georender_fog_fill` wrote each into its 256-by-8 A8
+texture, a fraction for each of its 2,048 texels, then flushed it with
+`GSPGPU_FlushDataCache`. That flush is a request to GSP's own thread on
+the system core, which the main thread waits on (the fourth profile's 6
+samples of GSP's flush were all this). Two a frame, for a palette that
+changes only with the weather.
+
+- **The same fractions, nothing done.** The texture's bytes are its
+  fractions' alone, so `GeoFog` now keeps the fractions its texture was
+  last filled with. Fractions the same to the bit leave the texture as
+  it is, with no write and no flush. A new texture fills whatever the
+  fractions, and a failed one keeps none.
+- **A column's byte once.** Every row of the texture is the same, so
+  each column's byte is worked out once (256) and laid into the tiles,
+  not once a texel (2,048), when the fractions are new.
+
+**Why nothing changes.** `tools/georender_cuts_check.py` cuts the
+function out of `georender.c` and holds it to the fill it replaced
+(`tools/src/georender_fog_test.inc`) over 300,000 fills: mostly the same
+fractions again, as a race has them, and else one, a few or all of them
+changed, a single bit flipped, -0, NaN, infinity and any bits among
+them, with the texture now and then made again or failing to be. A stub
+flush copies the range it is given into what the GPU would read, and
+after each fill that must be the old fill's bytes, as must the texture's,
+and a fill must flush exactly when its fractions are new. 0 of 300,000
+differ, and its 12 mutations (the skip without a texture, the new
+texture kept as filled, the last step not compared, the fractions not
+kept, the flush left out or halved, the columns, the clamp, the
+rounding and the tiles) are all caught.
+
 ### What is left
 
 - **The device's numbers** for these builds on Alpine Trail's start

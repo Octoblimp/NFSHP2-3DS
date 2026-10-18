@@ -3239,6 +3239,12 @@ phases.
             the fourth profile). A bank is written once, at its load, so
             it is now flushed once there. To hear on the 3DS: any
             crackle or old sound in an effect would mean a flush missing.
+          - The fog's texture (Session 130, continued): the view's two fog
+            textures were refilled and flushed every frame, each flush a
+            request to GSP's thread. Fractions the same as the last fill's
+            now leave the texture as it is, and a new fill works out each
+            column once. `tools/georender_cuts_check.py` holds it to the
+            old fill; nothing on screen changes.
         - [ ] The user's word on the envmap a face a frame.
 
 47. [ ] **A brief artifact on the bridge before the finish line.**

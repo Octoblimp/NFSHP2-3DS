@@ -27194,3 +27194,25 @@ first return address on its stack):
 Next: the models stage, the largest CPU stage on the device (10.7 ms
 for 630 models and 1,382 batches where it is slow). Azahar's profile
 barely sees it (3.6%), so its per-batch work is read in the code.
+
+Then, read in the code:
+
+- **The car shadows** (1.0 to 1.8 ms a frame on the device, 0.4 to 0.5
+  a car) were left. Their ground heights are `topology_get_elevation`
+  on the car's own `TheTopologyCoordinate`, which keeps the last
+  polygon found and moves each hit to the table's front, so the shadow
+  queries change what the physics' next ones find, as retail's do. A
+  cache or a reordering there would not be lossless.
+- **The scenery's cull** is as the boxes' cut left it (Session 130), and
+  the Azahar profile's begin_frame samples are that cull.
+- **The fog's texture** (`georender.c`). `fog_frame` refilled the view's
+  two fog textures every frame, 2,048 texels each, and flushed each with
+  `GSPGPU_FlushDataCache`, a request to GSP's thread the main thread
+  waits on (all 6 of the fourth profile's GSP flush samples). `GeoFog`
+  now keeps the fractions its texture holds, and the same fractions to
+  the bit leave it as it is, with no write and no flush. A new fill
+  works out each of the 256 columns once. The new
+  `tools/georender_cuts_check.py` holds it to the old fill over 300,000
+  fills (0 differ, 12 of 12 mutations caught); `draw-cuts.md` has the
+  details. The build is clean. What it saves on the device is the next
+  device log's to say, in the sky's stage, where `fog_frame` runs.
