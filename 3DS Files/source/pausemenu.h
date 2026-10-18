@@ -42,9 +42,9 @@
 //
 // The screens the menu leads to are pauseoptions.c's: Pause Options and
 // its two pages, the objective and the cop controls (0x001710f8 to
-// 0x00173e30). It applies HandlePauseMenuReplaySpecialEvents' (0x001703e0)
-// changes there and then, since the port has no replay. The debug menu
-// (PauseDebugMenu, 0x00173e30) is not: retail never shows its row.
+// 0x00173e30). Their changes are replay special events, which
+// pausereplay.c makes (0x001703e0). The debug menu (PauseDebugMenu,
+// 0x00173e30) is not ported: retail never shows its row.
 //
 // docs/formats/pause-menu.md has the decode.
 

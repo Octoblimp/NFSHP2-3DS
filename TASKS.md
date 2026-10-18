@@ -4272,8 +4272,20 @@ phases.
             and the help showed the 3DS keys; the career run passed.
         - [ ] 72h. The pause pages' special events (`AddSpecialEvent`),
           and `DemoModeReplay` with the disc's replays for attract mode.
-          The PS2's float rounding is not the 3DS's, so these may drift.
-          Measure it then.
+          - [x] 72h-1. The pause pages' special events.
+            Done in Session 125, continued (`docs/formats/replay.md`,
+            72h-1). `pausereplay.c` is retail's
+            HandlePauseMenuReplaySpecialEvents (`0x001703e0`), events 0
+            to 6, bound to the manager's HandleSpecialEvent. The Options
+            page gives each change to `replaymgr_add_special_event`, as
+            retail's setters do, so a replay makes it again on its loop.
+            `pausereplay_check` (1848 ops, 0 differ; 44 of 44 mutations
+            caught) passes, and so do the six checkers that read the
+            changed headers. On Azahar, Damage turned on in the pause
+            menu at loop 191 and View Replay made it again at loop 191.
+          - [ ] 72h-2. `DemoModeReplay` with the disc's replays for
+            attract mode. The PS2's float rounding is not the 3DS's, so
+            these may drift. Measure it then.
 
 73. [ ] **The car's retail pass: where 72b found retail and the port
         apart.** The port's car physics is the demo's code. Porting

@@ -23,9 +23,10 @@
 // who paused pressed it. None of them writes the save: the pause changes
 // TheRaceParameters, the players' settings and bSound, as retail does.
 //
-// Retail's Options page records each change as a replay special event and
-// HandlePauseMenuReplaySpecialEvents (0x001703e0) applies it. The port has
-// no replay: pause_options_apply_special_event applies it there and then.
+// The Options page gives each change to the race's ReplayManager as a
+// special event (AddSpecialEvent), which makes it at once with
+// HandlePauseMenuReplaySpecialEvents (pausereplay.c) and keeps it for the
+// replay, as retail does.
 //
 // The 3DS has no rumble, so Vibration (MENUITEM_3) is hidden and the five
 // rows under it move up a row. "Race Objective 2PBAC" (the two-player
@@ -77,12 +78,6 @@ void pause_race_objective_callback(struct BGameFlow* gf, BScreenMessage msg,
                                    BScreenCallbackData* data);
 void pause_view_controls_callback(struct BGameFlow* gf, BScreenMessage msg,
                                   BScreenCallbackData* data);
-
-// HandlePauseMenuReplaySpecialEvents' events 1 to 5, the ones the Options
-// page makes: 1 driving style (player `a`, style `b`), 2 damage on or off
-// (`a`), 3 transmission (player `a`, type `b`), 4 jump cams (`a`) and 5
-// zone cams (`a`). Anything else does nothing.
-void pause_options_apply_special_event(int32_t ev, int32_t a, int32_t b);
 
 // Player::CycleHud (0x00178ba8): PlayersHudState stepped by `dir` through
 // {0, 1, 3, 2}, or {0, 3, 2} with two players shown, wrapping; a state

@@ -26457,3 +26457,69 @@ TEX12LOCATION with `--chain`.
 1. 72h: the pause pages' special events, and DemoModeReplay.
 2. When 72h is committed, publish the launch checklist the user asked
    for, before TASKS 73.
+
+## Session 125, continued -- TASKS 72h-1: the pause pages' special events
+
+Retail never changes a race setting from the pause menu directly. Each
+change goes to the ReplayManager as a special event. The manager makes it
+at once and, while capturing, keeps it, so a replay makes it again on the
+loop it was made on. The port made the five Options changes directly, so
+a replay never saw them. 72h is split: 72h-1 is the special events,
+72h-2 is DemoModeReplay.
+
+### What changed
+
+- New `pausereplay.c` and `pausereplay.h`: retail's
+  HandlePauseMenuReplaySpecialEvents (`0x001703e0`). Events 0 to 6:
+  - 0, the Race's forced finish (place, player);
+  - 1, handling: the car's DriverMode, the player's DrivingStyle and
+    NFSRaceMode, then SetAIDriverModesFromPlayers;
+  - 2, damage: DamageEnabled, then RethinkDamage for each car with
+    damage, reading the world again after each;
+  - 3, transmission: TransmissionType, then SetManualTransmission;
+  - 4 and 5, JumpCams and ZoneCams, A's low byte;
+  - 6, SuperEasyAI.
+
+  It answers 1 for those and 0 for any other. Retail reads through the
+  players, cars and world with no test. The port skips what is NULL.
+- `pauseoptions.c`: `special_event` calls `replaymgr_add_special_event`
+  on `pReplayManager` with retail's arguments (`0x001723d8` to
+  `0x00172558`). With no manager it calls the handler alone.
+  `pause_options_apply_special_event` is gone.
+- `main.c`: `replayHandleSpecialEvent` binds the handler to
+  `gReplayHandleSpecialEventFn` (ReplayManager::HandleSpecialEvent,
+  `0x0013e4a8`). It logs `replay: special event T (A, B) loop N`, with
+  `, replayed` while the manager replays.
+- Comments in `pauseoptions.h`, `pausemenu.h` and `replaymgr.h`.
+- New `tools/pausereplay_check.py` and `tools/src/pausereplay_test.c`:
+  retail's handler beside the port's on every type from -2 to 9, the
+  edges, NULL players, cars, drivers and world, and stubs that move the
+  world's count under the damage loop. 1848 ops, 1398 events, 11325
+  lines, 0 differ; 44 mutations, 44 caught.
+
+`docs/formats/replay.md` has a 72h-1 section and a checker section.
+`pause-options.md`'s special events section is rewritten.
+
+The debug menu (PauseDebugMenu), which makes events 0 and 6, is not
+ported: retail never shows its row.
+
+### On Azahar
+
+`run_azahar_race.ps1` paused 15 s into the race, opened Options, turned
+Damage on with Left, resumed, paused again and chose View Replay. The log
+said `replay: special event 2 (1, 0) loop 191` and `pause: event 2
+(1, 0)`. During the replay it said `replay: special event 2 (1, 0) loop
+191, replayed`. The page showed Damage On. PASS.
+
+### Checkers re-run
+
+`pausereplay` is new and passes. endgame, pausemenu, rcauto, rcreplay,
+replaymgr and replayscreen read the changed headers, and all pass with 0
+differ.
+
+### Next
+
+1. 72h-2: DemoModeReplay with the disc's replays for attract mode, and
+   the PS2-to-3DS float drift measured.
+2. When 72h is committed, publish the launch checklist the user asked
+   for, before TASKS 73.

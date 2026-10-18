@@ -191,6 +191,7 @@
 #include "p32.h"
 #include "pausemenu.h"
 #include "pauseoptions.h"
+#include "pausereplay.h"
 #include "endevent.h"
 #include "endgame.h"
 #include "endresults.h"
@@ -5134,6 +5135,21 @@ static int32_t replayNumInstantReplaySnapshots(const ReplayManager* rm)
     return rm->NumInstantReplaySnapshots;
 }
 
+// ReplayManager::HandleSpecialEvent (0x0013e4a8), a jump to
+// HandlePauseMenuReplaySpecialEvents (pausereplay.c): a pause page's
+// change made as it happens and again in a replay (TASKS 72h-1). The log
+// says which, by the manager's replaying flag.
+static void replayHandleSpecialEvent(const ReplaySpecialEventInfo* e)
+{
+    int32_t known = pause_menu_replay_special_event(e);
+
+    logPrintf("replay: special event %d (%d, %d) loop %d%s%s\n",
+              (int)e->Type, (int)e->A, (int)e->B, (int)e->LoopCount,
+              pReplayManager != NULL && pReplayManager->ReplayingFlag
+                  ? ", replayed" : "",
+              known ? "" : ", unknown");
+}
+
 // ReplayCheck (configitems.h), the port's own test of the replay (TASKS
 // 72f-2). The race captures as retail's does; this plays two parts of it
 // back and counts what does not come out the same. Round 1 sets the four
@@ -8257,6 +8273,8 @@ int main(int argc, char** argv)
     gReplayMuteHighlightsFn           = replayMuteHighlights;
     gReplayEndCurrentHighlightTimeFn  = replayEndCurrentHighlightTime;
     gReplayNumInstantReplaySnapshotsFn = replayNumInstantReplaySnapshots;
+    // The pause pages' changes, made and replayed (TASKS 72h-1).
+    gReplayHandleSpecialEventFn       = replayHandleSpecialEvent;
     gRaceCoordinatorPostMessageFn = ConfigReplayCheck
                                         ? replayCheckPostMessage
                                         : racecoordinator_post_message;

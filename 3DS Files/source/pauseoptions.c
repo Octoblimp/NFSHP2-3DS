@@ -9,8 +9,6 @@
 #include "banim.h"
 #include "bsetup.h"
 #include "cammover.h"
-#include "car.h"
-#include "cardamage.h"
 #include "drivecam.h"
 #include "flailer.h"
 #include "flailerwrap.h"
@@ -18,6 +16,7 @@
 #include "joyevent.h"
 #include "joystick.h"
 #include "pausemenu.h"
+#include "pausereplay.h"
 #include "player.h"
 #include "portlang.h"
 #include "race.h"
@@ -25,9 +24,9 @@
 #include "raceevent.h"
 #include "raceparams.h"
 #include "rcpost.h"
-#include "realdriver.h"
+#include "realtime.h"
+#include "replaymgr.h"
 #include "startrace.h"
-#include "world.h"
 
 // GrayMenuItem's modes.
 #define GRAY_DISABLE 0
@@ -218,50 +217,22 @@ static int base_resume(BScreenCallbackData* data)
 
 // ------------------------------------------------- the special events
 
-void pause_options_apply_special_event(int32_t ev, int32_t a, int32_t b)
+// AddSpecialEvent on the race's ReplayManager (0x0013e3f8): the change is
+// made at once (pausereplay.c, through main.c's gReplayHandleSpecialEventFn)
+// and kept for the replay. Retail calls it on pReplayManager with no test;
+// with no manager the port makes the change alone.
+static void special_event(int32_t ev, int32_t a, int32_t b)
 {
-    struct Player* p;
-    int32_t        i;
+    if (pReplayManager != NULL) {
+        replaymgr_add_special_event(pReplayManager, ev, a, b);
+    } else {
+        ReplaySpecialEventInfo e;
 
-    switch (ev) {
-    case 1:
-        p = a >= 0 && a < 2 ? PlayerPlayersByNumber[a] : NULL;
-        if (p == NULL)
-            return;
-        if (p->MyCar != NULL)
-            p->MyCar->State.DriverMode = b;
-        p->PlayerSettings.DrivingStyle = (int8_t)b;    // SetDrivingStyle
-        TheRaceParameters.NFSRaceMode = b;
-        set_ai_driver_modes_from_players();
-        break;
-    case 2:
-        TheRaceParameters.DamageEnabled = a != 0;
-        if (pCurrentWorld == NULL)
-            return;
-        for (i = 0; i < pCurrentWorld->TotalNumCars; i++) {
-            struct Car* c = pCurrentWorld->CarTable[i];
-
-            if (c != NULL && c->pCarDamage != NULL)
-                cardamage_rethink_damage(c->pCarDamage);
-        }
-        break;
-    case 3:
-        p = a >= 0 && a < 2 ? PlayerPlayersByNumber[a] : NULL;
-        if (p == NULL)
-            return;
-        p->PlayerSettings.TransmissionType = (int8_t)b;
-        if (p->MyCar != NULL && p->MyCar->pCarDriver != NULL)
-            realdriver_set_manual_transmission(
-                (RealDriver*)p->MyCar->pCarDriver, b);
-        break;
-    case 4:
-        TheRaceParameters.GlobalDisplaySettings.JumpCams = (int8_t)a;
-        break;
-    case 5:
-        TheRaceParameters.GlobalDisplaySettings.ZoneCams = (int8_t)a;
-        break;
-    default:
-        return;
+        e.Type = ev;
+        e.LoopCount = WorldLoopCounter;
+        e.A = a;
+        e.B = b;
+        pause_menu_replay_special_event(&e);
     }
     say("pause: event %d (%d, %d)", (int)ev, (int)a, (int)b);
 }
@@ -488,30 +459,32 @@ static int opt_change(PauseOptions* o, uint32_t item, BScreenMessage msg)
 
     switch (item) {
     case OPT_ITEM_DAMAGE:      // SetDrivingStyle, so named in retail
-        pause_options_apply_special_event(
-            2, TheRaceParameters.DamageEnabled ^ 1, 0);
+        special_event(PAUSE_EVENT_DAMAGE,
+                      TheRaceParameters.DamageEnabled ^ 1, 0);
         opt_display_damage(o);
         return 1;
     case OPT_ITEM_HANDLING:    // 0x00172420
-        pause_options_apply_special_event(1, o->player->PlayerNumber,
-                                          s->DrivingStyle == 0);
+        special_event(PAUSE_EVENT_HANDLING, o->player->PlayerNumber,
+                      s->DrivingStyle == 0);
         opt_display_handling(o);
         opt_gray_cams(o);
         return 1;
     case OPT_ITEM_TRANS:
         t = s->TransmissionType + (msg == BMSG_MENUITEM_PAD_LEFT ? -1 : 1);
-        pause_options_apply_special_event(3, o->player->PlayerNumber,
-                                          (t % 3 + 3) % 3);
+        special_event(PAUSE_EVENT_TRANSMISSION, o->player->PlayerNumber,
+                      (t % 3 + 3) % 3);
         opt_display_transmission(o);
         return 1;
     case OPT_ITEM_JUMP:
-        pause_options_apply_special_event(
-            4, TheRaceParameters.GlobalDisplaySettings.JumpCams == 0, 0);
+        special_event(PAUSE_EVENT_JUMP_CAMS,
+                      TheRaceParameters.GlobalDisplaySettings.JumpCams == 0,
+                      0);
         opt_display_jump_cam(o);
         return 1;
     case OPT_ITEM_ZONE:
-        pause_options_apply_special_event(
-            5, TheRaceParameters.GlobalDisplaySettings.ZoneCams == 0, 0);
+        special_event(PAUSE_EVENT_ZONE_CAMS,
+                      TheRaceParameters.GlobalDisplaySettings.ZoneCams == 0,
+                      0);
         opt_display_zone_cam(o);
         return 1;
     default:

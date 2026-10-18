@@ -79,18 +79,37 @@ hides them otherwise. Handling's change runs it again.
 
 ### The special events
 
-Retail records each change as a replay special event.
-`HandlePauseMenuReplaySpecialEvents` (`0x001703e0`) then applies it. The
-port has no replay, so `pause_options_apply_special_event` applies it at
-once:
+Each change is a replay special event, as in retail (TASKS 72h-1). The
+page calls `AddSpecialEvent` (`0x0013e3f8`) on the race's ReplayManager.
+That makes the change at once, through `ReplayManager::HandleSpecialEvent`
+(`0x0013e4a8`), which jumps to `HandlePauseMenuReplaySpecialEvents`
+(`0x001703e0`, `pausereplay.c`). While the race is capturing, the manager
+also keeps the event, and a replay makes it again on the loop it was made
+on. So an instant replay drives with the race's settings as they were at
+each moment. With no manager the port makes the change alone; retail
+calls the manager with no test.
 
-| Event | Effect |
-|---|---|
-| 1 (player, style) | the car's `State.DriverMode`, `PlayerSettings.DrivingStyle` and `NFSRaceMode` set to the style, then `SetAIDriverModesFromPlayers` |
-| 2 (on) | `DamageEnabled`, then `CarDamage::RethinkDamage` for every car with damage |
-| 3 (player, type) | `TransmissionType`, then `RealDriver::SetManualTransmission` |
-| 4 (on) | `GlobalDisplaySettings.JumpCams` |
-| 5 (on) | `GlobalDisplaySettings.ZoneCams` |
+| Event | Made by | A, B | Effect |
+|---|---|---|---|
+| 0 | the debug menu's destructor | place, player | the Race's `ForceRaceFinishPosition` and `ForceRaceFinishPlayerNum` |
+| 1 | Handling | player, style | the car's `State.DriverMode`, `PlayerSettings.DrivingStyle` (`Player::SetDrivingStyle`) and `NFSRaceMode` set to the style, then `SetAIDriverModesFromPlayers` |
+| 2 | Damage | on | `DamageEnabled` is A != 0, then `CarDamage::RethinkDamage` for every car with damage |
+| 3 | Transmission | player, type | `TransmissionType`, then `RealDriver::SetManualTransmission` |
+| 4 | Jump Cams | on | `GlobalDisplaySettings.JumpCams`, A's low byte |
+| 5 | Zone Cams | on | `GlobalDisplaySettings.ZoneCams`, A's low byte |
+| 6 | the debug menu's Super Easy AI | on | `SuperEasyAI` |
+
+The handler answers 1 for these seven and 0 for any other. The debug menu
+(`PauseDebugMenu`) is not ported, since retail never shows its row, so
+nothing makes 0 or 6. The handler still takes them, as a replay could.
+Retail reads through the players, cars and world with no test. The port
+skips what is NULL, and a player number off the table.
+
+The page's arguments are retail's (`0x001723d8` to `0x00172558`): Damage
+sends `DamageEnabled ^ 1`, Handling the player's number and
+`DrivingStyle == 0`, Transmission the type stepped by Left or Right and
+wrapped to 0..2, and the two cams `== 0` of their setting.
+`tools/pausereplay_check.py` runs the handler beside retail's.
 
 ### Vibration
 

@@ -3664,7 +3664,10 @@ and so replaced every boot.
      Since 72g-4 (Session 125) RCSTATE_AUTO_REPLAY is retail's too, in
      `rcauto.c`, though retail never enters it; `rcauto_check` runs it
      against retail. Since 72g-5 the replay bar and its help show the
-     3DS keys (`replaybar.c`, HELPGLYPH_LAYOUT_SCANNERS). Next: 72h.
+     3DS keys (`replaybar.c`, HELPGLYPH_LAYOUT_SCANNERS). Since 72h-1
+     the pause pages' changes are replay special events
+     (`pausereplay.c`), made again when a replay reaches them. Next:
+     72h-2 (DemoModeReplay).
 
    **7b, DriveCameraMover::Update, is done** (HANDOFF.md, Session 31,
    continued: the drive camera's Update). `docs/formats/camera.md`,

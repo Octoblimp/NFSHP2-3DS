@@ -43,7 +43,8 @@ extern uint32_t DemoModeReplay_SnapshotList[2];  // 0x002f0998
 extern int32_t ChecksumSnapshotTimes[4];
 
 // HandlePauseMenuReplaySpecialEvents (0x001703e0), which makes a special
-// event happen, recorded or replayed (TASKS 72h). NULL does nothing.
+// event happen, recorded or replayed: main.c binds pausereplay.c's. NULL
+// does nothing.
 extern void (*gReplayHandleSpecialEventFn)(const ReplaySpecialEventInfo *e);
 
 // DemoModeReplay::Service (0x0013f500) on TheDemoModeReplay, given whether

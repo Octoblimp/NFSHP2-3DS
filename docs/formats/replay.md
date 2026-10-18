@@ -727,8 +727,9 @@ a race snapshot holds 2.5 to 3.3 KB and a checksum 5.7 to 6.4 KB.
 ### Not bound yet
 
 - The special events' handler (`gReplayHandleSpecialEventFn`, retail's
-  HandlePauseMenuReplaySpecialEvents) and DemoModeReplay::Service
-  (`gDemoModeReplayServiceFn`) are NULL until 72h.
+  HandlePauseMenuReplaySpecialEvents) is bound since 72h-1, below.
+  DemoModeReplay::Service (`gDemoModeReplayServiceFn`) is NULL until
+  72h-2.
 - RCSTATE_AUTO_REPLAY's handler is 72g-4's. Nothing in retail posts
   RC_REQUEST_AUTO_REPLAY, so the state is never entered.
   RCSTATE_INSTANT_REPLAY's handler is 72g-3's.
@@ -929,7 +930,7 @@ These stay NULL:
   (`gRadialBlurOnFn`).
 - The disc test. NULL answers 1, the disc in the drive.
 - TheDemoModeReplay's seven calls, and its three words, which nothing
-  sets yet. Both wait for 72h.
+  sets yet. Both wait for 72h-2.
 
 ## 72g-3: the instant replay
 
@@ -1042,7 +1043,7 @@ buttons, and `joyhid.c`'s map gives each a 3DS key:
 The last three are the demo recorder's. MARK_DEMO does nothing while
 the disc is in, which on a retail PS2 is always, and the port leaves its
 disc test NULL to the same end. TEST_DEMO and ERASE_DEMO need a demo
-replay, which 72h brings.
+replay, which 72h-2 brings.
 
 ### Not done here
 
@@ -1199,6 +1200,48 @@ help, shoots `race1-replay-help`, and presses Y again before START. On
 event 32 the bar showed B, A, X and Y on its grey, and the one player's
 blank covered the L. The help named A for Play/Pause, X for Change view
 and B for Toggle play speed. The run passed.
+
+## 72h-1: the pause pages' special events
+
+`pausereplay.c` is retail's HandlePauseMenuReplaySpecialEvents
+(`0x001703e0`, 380 bytes). main.c binds it to the manager's
+`gReplayHandleSpecialEventFn`, which is ReplayManager::HandleSpecialEvent
+(`0x0013e4a8`, a jump to it).
+
+The pause menu's Options page now gives each change to
+`replaymgr_add_special_event` on `pReplayManager`, as retail's setters do
+(`0x001723d8` to `0x00172558`). The manager makes the change at once and,
+while capturing, keeps it. CheckForSpecialEvents makes it again when a
+replay reaches its loop. Before, the port made the change at once and a
+replay never saw it.
+
+| Event | A, B | Effect |
+|---|---|---|
+| 0 | place, player | the Race's ForceRaceFinishPosition and ForceRaceFinishPlayerNum |
+| 1 | player, style | the car's DriverMode, the player's DrivingStyle and NFSRaceMode, then SetAIDriverModesFromPlayers |
+| 2 | on | DamageEnabled (A != 0), then RethinkDamage for each car with damage |
+| 3 | player, type | TransmissionType, then the car's RealDriver's SetManualTransmission |
+| 4, 5 | on | JumpCams, ZoneCams: A's low byte |
+| 6 | on | SuperEasyAI |
+
+Any other type answers 0 and does nothing. The debug menu
+(PauseDebugMenu), which makes 0 and 6, is not ported: retail never shows
+its row. Retail reads through the players, cars and world with no test.
+The port skips what is NULL, and a player number off the table. With no
+manager, the page makes the change through the handler alone. The log
+says `replay: special event T (A, B) loop N`, with `, replayed` when the
+manager is replaying (DebugLog 1).
+
+`pause-options.md` has the page's side.
+
+### On Azahar
+
+`run_azahar_race.ps1` paused 15 s into the race, opened Options, turned
+Damage on with Left, resumed, paused again and chose View Replay. The log
+said `replay: special event 2 (1, 0) loop 191`, then `pause: event 2
+(1, 0)`. Twenty seconds into the replay it said `replay: special event 2
+(1, 0) loop 191, replayed`, on the same loop. The page showed Damage On,
+and the run passed.
 
 ## The checker for 72d-1
 
@@ -1622,6 +1665,36 @@ bindings and with throttle on ZR and camera on L.
 
     python tools/replaybar_check.py
     python tools/replaybar_check.py --mutate [--only a,b]
+
+## The checker for 72h-1
+
+`tools/pausereplay_check.py` runs retail's handler beside
+`pausereplay.c`, on `tools/src/pausereplay_test.c`. Retail's
+Player::SetDrivingStyle runs under it. The stubs print on both sides:
+SetAIDriverModesFromPlayers, SetManualTransmission and RethinkDamage. The
+RethinkDamage stub can also take a car off the world's count, add one, or
+clear pCurrentWorld, which shows that the loop reads both again after
+each car.
+
+The script covers:
+
+- every type from -2 to 9;
+- each event over its values' edges, bytes and words;
+- the damage over every car count, mask of CarDamages and NULL cars;
+- the transmission with and without a car and a driver;
+- 300 random states with events.
+
+These differences are made equal by hand. Retail's NULL reads land in low
+memory, which the model zeroes. A player with no car has retail write its
+DriverMode at 988, and hand SetManualTransmission the word at 44, which is
+NULL. A car with no driver hands it NULL. The port calls nothing for
+either, and the model's stub prints nothing for NULL.
+
+The run is 1848 ops, 1398 events and 11325 lines; none differ. 44
+mutations, all caught.
+
+    python tools/pausereplay_check.py
+    python tools/pausereplay_check.py --mutate [--only a,b]
 
 ## Not yet
 
