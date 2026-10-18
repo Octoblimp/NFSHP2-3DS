@@ -92,6 +92,7 @@
 #include "carsound.h"
 #include "enginesound.h"
 #include "carstate.h"
+#include "cartriggereffect.h"
 #include "characterinfo.h"
 #include "collision.h"
 #include "collisionbody.h"
@@ -239,6 +240,7 @@
 #include "smokeable.h"
 #include "spikestrip.h"
 #include "startrace.h"
+#include "terraineffect.h"
 #include "terraintype.h"
 #include "tiresound.h"
 #include "texpack.h"
@@ -6799,6 +6801,19 @@ static void acidEmitterDelete(bNode* emitter, int32_t flags)
     acid_emitter_delete((AcidEmitter*)emitter, flags);
 }
 
+// Collision::AddImpulse fires the ground's impacts and scrapes on
+// pTerrainEffectEmitters with no test; the port skips them while there is
+// no World to have made it.
+static void terrainEffectTrigger(void* emitters, int32_t effect,
+                                 int32_t terrain, float scale,
+                                 const bVector3* at,
+                                 const bVector3* velocity)
+{
+    if (emitters != NULL)
+        terrain_effect_emitters_trigger((TerrainEffectEmitters*)emitters,
+                                        effect, terrain, scale, at, velocity);
+}
+
 // RaceCoordinator's cleanup kills the world's effects.
 static void killAllWorldEffects(void)
 {
@@ -7954,6 +7969,16 @@ int main(int argc, char** argv)
     gWorldEffectsTweakerCheckFn = worldEffectsTweakerCheck;
     gWorldEffectsDoTimeStepFn   = worldEffectsDoTimeStep;
     gAcidGameFlowStateFn        = fredFlowState;
+    // TASKS 60: a car's bursts -- a broken part's glass, steam and smoke,
+    // a blown tire, the ground under its wheels -- through
+    // Car::TriggerEffect (cartriggereffect.h), and the ground's own
+    // emitters for each terrain, made with the World and deleted with it,
+    // which the wheels' and a collision's impacts and scrapes fire
+    // (terraineffect.h).
+    gCarTriggerEffectFn           = car_trigger_effect;
+    gInitTerrainEffectEmittersFn  = init_terrain_effect_emitters;
+    gCloseTerrainEffectEmittersFn = close_terrain_effect_emitters;
+    gTerrainEffectTriggerFn       = terrainEffectTrigger;
 
     // elInit, and eLight.obj's two calls the solids and the cars make
     // through seams: elGetLightMaterial, which eFixUpTables uses to fill

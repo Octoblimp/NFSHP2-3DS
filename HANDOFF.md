@@ -27271,3 +27271,38 @@ log with "CoreSample 1" and "DebugLog 1" through the slow stretch, and
 the builds since 7082fa3 played (listen for crackle after 7134c05, look
 at the fog after 0e3c1c6). Next: TASKS 60, the car's particle effects
 (Car::TriggerEffect).
+
+## Session 131 -- the car's particle bursts (TASKS 60)
+
+At the user's word, TASKS 46 was set aside after the held-back list's
+sort, and work moved to the damage effects. That is TASKS 60, the
+particles a car's bursts make, all of which were skipped.
+
+- **Car::TriggerEffect** (`cartriggereffect.c`, retail `0x0011e2b8`). It
+  checks four gates: a car with no render info, a scale of 0, no effect,
+  or an overridden view. The list is the render info's
+  `EmitterList[effect]`, or for effects 1 to 5 the ground's list for the
+  terrain in `where`'s low half. The wheel is the high half, for skid
+  smoke, tire spew, a blown tire and a flat. The origin is `Position` for
+  wheels 1 to 8 and `GeometryPosition` otherwise, under the body's
+  matrix. Each emitter fires at each of its places (the wheel's, or its
+  data's `CarPosition`) with `-scale` and the car, inheriting `vel` or
+  the car's `Velocity`. The copy of its LocalWorld put back keeps the last
+  place, as the listing does.
+- **TerrainEffectEmitters** (`terraineffect.c`, `0x00222248` ..
+  `0x00222594`). There are 7 effects by 33 terrains of emitter lists,
+  copies of the 92 groups the terrain table names, made in World's
+  constructor and deleted in its destructor. Its TriggerEffect places each
+  emitter at a point with no turn, and fires it with no car. Collisions'
+  impacts and scrapes now fire it.
+- **The check**, `tools/cartriggereffect_check.py`, runs retail's six
+  functions in RetailEmu against the port: 513 ops, 329 emitter triggers,
+  0 differ. Of 56 mutations, 54 are caught and 2 are equivalent and noted
+  (`docs/formats/car-effects.md`).
+- The CIA builds clean. It has not run on Azahar or the device yet. Many
+  more particles now fire than before (the wheels' smoke and dirt each
+  frame, collisions' sparks). That is retail's behaviour, but the frame
+  rate needs watching where they are thick.
+
+Next: the device run for TASKS 60's open item, and TASKS 46's device
+items, which still wait.

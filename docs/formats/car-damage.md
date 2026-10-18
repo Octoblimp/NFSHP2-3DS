@@ -385,8 +385,9 @@ binds `gCarDamageAboveFn` to it. Its one addition is a NULL test on the
 race coordinator before the state is read. Retail would read the word at
 address 0, which is not 3 either.
 
-`Car::TriggerEffect` (`0x0011e2b8`, `gCarTriggerEffectFn`) is not
-ported, so the effects are skipped (TASKS 60). The replay's DoSnapshots,
+`Car::TriggerEffect` (`0x0011e2b8`, `gCarTriggerEffectFn`) is ported
+since TASKS 60 (`cartriggereffect.c`, [car-effects](car-effects.md)), so
+a broken part's glass, steam and smoke now fire. The replay's DoSnapshots,
 BodyDamage's (retail's 0x001b4c58) and CarDamage's (0x001b5638), are
 ported since TASKS 72b, and `carsnap_check` runs them against retail.
 

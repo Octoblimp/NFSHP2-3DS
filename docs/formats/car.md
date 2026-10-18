@@ -1499,6 +1499,11 @@ is Car's own method, 720 bytes, but it is one of the six compiled into
 other objects. It belongs with the effect system, the render group that
 task 27 inherits. Nothing sets any of the five yet.
 
+Since TASKS 60, `main.c` sets `gCarTriggerEffectFn` to the port of
+TriggerEffect (`cartriggereffect.c`, [car-effects](car-effects.md)).
+The cop manager's, the AI's and the sound's were set by their own tasks;
+`DeliveryMover::SetDestination` is still unset.
+
 ### The check
 
 `carmode_check` runs one more scenario after the steps. On the image's

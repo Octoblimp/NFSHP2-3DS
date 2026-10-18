@@ -3701,7 +3701,7 @@ phases.
           gone. libctru leaves the top screen's 3D off, so the slider
           does nothing. The design and its Azahar measurements stay in
           git, in b6bd138's docs/formats/stereo-3d.md.
-60. [ ] **The car's particle effects (Car::TriggerEffect).** Found on
+60. [x] **The car's particle effects (Car::TriggerEffect).** Found on
         2026-10-13 with TASKS 51a. `gCarTriggerEffectFn` is never set, so
         `Car::TriggerEffect` (`0x0011e2b8`) is skipped: a broken light,
         window or mirror throws no glass, and a radiator hit or a blown
@@ -3709,6 +3709,24 @@ phases.
         a scale (0.1, 0.4 or 1 for an item's level), `careffects.c` with
         its per-frame effects, and `carrace.c` for each blown tire. Port
         it with a checker, over the particle system it starts.
+        - Done in Session 131 (`docs/formats/car-effects.md`):
+          `cartriggereffect.c` ports Car::TriggerEffect, and
+          `terraineffect.c` ports TerrainEffectEmitters (`0x00222248` ..
+          `0x00222594`). That object is the ground's emitters for each
+          terrain, made with the World and deleted with it. Car effects 1
+          to 5 come from it, and a collision's impacts and scrapes fire it
+          through `gTerrainEffectTriggerFn`, so the sparks come too.
+          `main.c` sets the four seams; the collision's skips a NULL
+          object, which retail does not test.
+        - `tools/cartriggereffect_check.py` runs retail's six functions in
+          RetailEmu over its own terrain table, `eMulMatrix`, `bIdentity`,
+          `bStringHash` and `~bTList<AcidEmitter>`. Over 513 ops (329
+          emitter triggers, 92 groups, every list) 0 differ. Of its 56
+          mutations, 54 are caught and 2 are equivalent and noted.
+        - [ ] Seen on the device: glass when a light, window or mirror
+          breaks, steam and smoke from a hurt car, a blown tire's burst,
+          smoke and dirt from the wheels, and sparks where cars hit or
+          scrape. Watch the frame rate where the particles are thick.
 61. [ ] **Cops and racers in one wireless race.** Asked for on 2026-10-14,
         for later or next: over task 37's local wireless, one or more
         players drive cops and the others race, all in the same race.

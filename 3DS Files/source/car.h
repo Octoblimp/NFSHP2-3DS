@@ -668,7 +668,8 @@ typedef int32_t CarEffect;
 //   BaseCarSound::TriggerTireBlowOut            0x00185200  task 29, skipped
 //
 // Car::TriggerEffect is Car's own, but it is not in Car.obj: it sits with
-// the effect system's code, and is that port's.
+// the effect system's code, and is that port's. Retail's is 0x0011e2b8,
+// ported since TASKS 60 (cartriggereffect.h); main.c sets it.
 typedef int32_t (*CarCopManagerIsBeingPursuedFn)(tCopManager *m, Car *c);
 typedef float   (*CarAIDrivingLineSpeedFn)(CarController *ctl);
 typedef void    (*CarDeliveryMoverSetDestinationFn)(CarMover *m, bVector2 *pos,

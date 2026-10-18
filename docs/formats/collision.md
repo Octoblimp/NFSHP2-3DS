@@ -223,6 +223,11 @@ In the other direction, collision.c fills three of `collisionbody.h`'s
 seams: `gCollisionNewFn` (collision_new), `gCollisionAddImpulseFn` and
 `gCollisionDestroyFn`. `main.c` sets all three.
 
+Since TASKS 60, `gTerrainEffectTriggerFn` fires the ground's sparks and
+dust (`terraineffect.c`, [car-effects](car-effects.md)). `main.c`'s
+`terrainEffectTrigger` skips the call while `pTerrainEffectEmitters` is
+NULL, outside a World; the image does not test it.
+
 ## The cross-check
 
 `collision_check.py` runs on the retail image (it ran on the demo's

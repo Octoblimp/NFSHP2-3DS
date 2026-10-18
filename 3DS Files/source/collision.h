@@ -92,12 +92,12 @@ extern float CollisionLifetime;
 
 // ---------------------------------------------------------------- the seams
 //
-// What a collision starts outside the collision system, none of it ported:
-// collision_sound's sample for a new collision (0x001e5278), its release
-// (0x001e53b0) and its scrape (0x001e57d0), which are task 29's; and
+// What a collision starts outside the collision system: collision_sound's
+// sample for a new collision (0x001e5278), its release (0x001e53b0) and its
+// scrape (0x001e57d0), which are task 29's; and
 // TerrainEffectEmitters::TriggerEffect (0x00222438) on pTerrainEffectEmitters
-// (gp-15816, 0x00331b28), the particles. The image calls all four with no
-// test. A NULL seam skips the call -- a collision makes no sound and no
+// (gp-15816, 0x00331b28), the particles, which TASKS 60 ported
+// (terraineffect.h). The image calls all four with no test. A NULL seam skips the call -- a collision makes no sound and no
 // sparks -- and CreateSample's skipped answer is NULL, which is also what the
 // sound hands back when it has no voice to give.
 extern struct CollisionSample *(*gCollisionSoundCreateSampleFn)(Collision *c);
