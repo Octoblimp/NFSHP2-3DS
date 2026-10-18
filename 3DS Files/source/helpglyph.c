@@ -56,7 +56,12 @@ typedef char helpglyph_layout_check[
     (HELPGLYPH_LAYOUT_KEYS != JOYHID_LAYOUT_MENU
      && HELPGLYPH_LAYOUT_KEYS != JOYHID_LAYOUT_RACE
      && HELPGLYPH_LAYOUT_KEYS != JOYHID_LAYOUT_COP
-     && HELPGLYPH_LAYOUT_KEYS != JOYHID_LAYOUT_FE) ? 1 : -1];
+     && HELPGLYPH_LAYOUT_KEYS != JOYHID_LAYOUT_FE
+     && HELPGLYPH_LAYOUT_SCANNERS != JOYHID_LAYOUT_MENU
+     && HELPGLYPH_LAYOUT_SCANNERS != JOYHID_LAYOUT_RACE
+     && HELPGLYPH_LAYOUT_SCANNERS != JOYHID_LAYOUT_COP
+     && HELPGLYPH_LAYOUT_SCANNERS != JOYHID_LAYOUT_FE
+     && HELPGLYPH_LAYOUT_SCANNERS != HELPGLYPH_LAYOUT_KEYS) ? 1 : -1];
 
 // HELPGLYPH_LAYOUT_KEYS: the bind keys' buttons, by JOYHID_BIND_*.
 static const unsigned char kKeyChar[JOYHID_BIND_KEYS] = {
@@ -109,13 +114,16 @@ int32_t helpglyph_map(unsigned char c, int32_t layout)
             if (kKeyChar[k] == c)
                 return ICON(k);   // the sheet's first eight
     } else {
+        // The scanners' menu layout swaps the menus' Triangle and Square.
+        int32_t scan = layout == HELPGLYPH_LAYOUT_SCANNERS;
+
         switch (c) {
         case HC_CROSS:
             return ICON(HELPGLYPH_3DS_A);
         case HC_TRIANGLE:
-            return ICON(HELPGLYPH_3DS_B);
+            return ICON(scan ? HELPGLYPH_3DS_X : HELPGLYPH_3DS_B);
         case HC_SQUARE:
-            return ICON(HELPGLYPH_3DS_X);
+            return ICON(scan ? HELPGLYPH_3DS_B : HELPGLYPH_3DS_X);
         case HC_CIRCLE:
             return ICON(HELPGLYPH_3DS_Y);
         case HC_L1:

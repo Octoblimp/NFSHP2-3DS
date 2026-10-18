@@ -3663,8 +3663,8 @@ and so replaced every boot.
      menu and the End Game Menu (on Azahar, START goes back to each).
      Since 72g-4 (Session 125) RCSTATE_AUTO_REPLAY is retail's too, in
      `rcauto.c`, though retail never enters it; `rcauto_check` runs it
-     against retail. Next: 72g-5 (the replay bar's PS2 icons as 3DS
-     keys), then 72h.
+     against retail. Since 72g-5 the replay bar and its help show the
+     3DS keys (`replaybar.c`, HELPGLYPH_LAYOUT_SCANNERS). Next: 72h.
 
    **7b, DriveCameraMover::Update, is done** (HANDOFF.md, Session 31,
    continued: the drive camera's Update). `docs/formats/camera.md`,

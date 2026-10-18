@@ -581,6 +581,13 @@ GPU_TEXCOLOR texpack_gpu_format(TexPackFormat f)
 bool texpack_upload(const TexPack* tp, const TexInfo* ti, int level,
                     C3D_Tex* out)
 {
+    return texpack_upload_retouched(tp, ti, level, out, NULL, NULL);
+}
+
+bool texpack_upload_retouched(const TexPack* tp, const TexInfo* ti, int level,
+                              C3D_Tex* out, TexPackRetouchFn retouch,
+                              void* ctx)
+{
     uint32_t w, h;
     if (!texpack_level(ti, level, &w, &h, NULL, NULL)) return false;
     if (w == 0 || h == 0 || w > 1024 || h > 1024) return false;
@@ -608,6 +615,7 @@ bool texpack_upload(const TexPack* tp, const TexInfo* ti, int level,
         C3D_TexDelete(out);
         return false;
     }
+    if (retouch) retouch(ctx, rgba, w, h);
 
     // The padding repeats the edge texel rather than being cleared, so that
     // GPU_LINEAR at the image's right and bottom edges blends with a copy of

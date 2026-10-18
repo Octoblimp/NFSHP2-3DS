@@ -4255,11 +4255,21 @@ phases.
             156 of 156 mutations caught). The 41 checkers that link the
             changed files pass again. On Azahar the career run passed,
             the destructor's cleanup included.
-          - [ ] 72g-5. The replay bar's button icons are the PS2's
+          - [x] 72g-5. The replay bar's button icons are the PS2's
             shapes. Show the 3DS keys the replay uses instead (START
             skip, A pause, Left/Right markers, B speed, X camera, L
             target, Y help, SELECT timeline), as `uirender.c` does for
             the help line's icons.
+            Done in Session 125, continued (`docs/formats/replay.md`,
+            72g-5). `replaybar.c` retouches REPLAYBOTTOM_NEW as it loads
+            (`texpack_upload_retouched`): L1, Square, Cross, Triangle and
+            Circle become L, B, A, X and Y. The D-pad's two, SELECT and
+            START stay retail's. The help's Triangle and Square were the
+            menus' B and X; HELPGLYPH_LAYOUT_SCANNERS draws them as X and
+            B while a replay is up. `replaybar_check` (18 cases, 0
+            differ; 49 of 50 mutations caught, 1 equivalent) and the
+            checkers that link the changed files pass. On Azahar the bar
+            and the help showed the 3DS keys; the career run passed.
         - [ ] 72h. The pause pages' special events (`AddSpecialEvent`),
           and `DemoModeReplay` with the disc's replays for attract mode.
           The PS2's float rounding is not the 3DS's, so these may drift.

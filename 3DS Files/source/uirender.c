@@ -13,6 +13,7 @@
 #include "helpglyph.h"
 #include "hudtach.h"
 #include "joyhid.h"
+#include "replaybar.h"
 
 // RenderHelpCharacter (retail 0x00141dd8) hashes this name and calls
 // FindFont.
@@ -205,8 +206,18 @@ BUIScreen* uirender_screen_at(UIRenderer* r, uint32_t index, BUI** outUI)
 // Texture cache
 // ---------------------------------------------------------------------------
 
+// The replay bar's PS2 buttons drawn as the 3DS keys the replay hears
+// (replaybar.h), from the help line's sheet.
+static void retouch_replay_bar(void* ctx, uint8_t* rgba, uint32_t w,
+                               uint32_t h)
+{
+    (void)ctx;
+    (void)replaybar_retouch(rgba, w, h, buttons3ds_bin, buttons3ds_bin_size);
+}
+
 // Decodes and uploads on first use. A miss is cached as an invalid entry so a
 // screen full of one missing hash does not rescan every bundle every frame.
+// The replay bar's texture is retouched on the way (retouch_replay_bar).
 static int find_texture(UIRenderer* r, uint32_t hash)
 {
     int index = -1;
@@ -232,7 +243,11 @@ static int find_texture(UIRenderer* r, uint32_t hash)
         for (uint32_t n = 0; texpack_open_nth(&tp, b->data, 0, b->len, n); n++) {
             TexInfo ti;
             if (!texpack_find(&tp, hash, &ti)) continue;
-            if (!texpack_upload(&tp, &ti, 0, &slot->tex)) continue;
+            if (!texpack_upload_retouched(&tp, &ti, 0, &slot->tex,
+                                          hash == REPLAYBAR_TEX_HASH
+                                              ? retouch_replay_bar : NULL,
+                                          NULL))
+                continue;
             slot->w     = ti.width;
             slot->h     = ti.height;
             slot->valid = true;

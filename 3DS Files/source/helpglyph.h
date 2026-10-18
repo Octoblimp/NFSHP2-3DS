@@ -28,7 +28,9 @@
 // In the menus Triangle is B, Square X and Circle Y because main.c's
 // frontend keys are what the menus hear: B pops the screen, X is
 // MENU_SQUARE and Y summons the HELP panel (helpmenu.h, 2026-10-16), which
-// joyhid's frontend layout matches for car select's scanners. In a race
+// joyhid's frontend layout matches for car select's scanners. A replay
+// hears the scanners alone, which in a race have Triangle on X and Square
+// on B (HELPGLYPH_LAYOUT_SCANNERS, below). In a race
 // the keys are joyhid's gJoyHidBindings, the racer's or the cop's: the
 // defaults are joyhid.h's map, and Options' Controller changes them. A
 // key draws as its icon, D-pad Up and Down as BUTTONSOUT's; an action on
@@ -74,6 +76,14 @@
 // L, R1 R, L2 ZL, R2 ZR. Options' Controller page names keys with it
 // (joyconfig.h), whatever they do in a layout.
 #define HELPGLYPH_LAYOUT_KEYS 4
+
+// Another: joyhid's menu layout as its scanners hear it, with none of
+// main.c's keys -- Cross A, Square B, Triangle X, Circle Y, L1 L, R1 R,
+// L2 ZL, R2 ZR, R3 D-pad Down. A replay's events (99..110) come from the
+// scanners alone, so main.c's uiHelpLayout answers this while a
+// ReplayScreen is up, for its help (802250..802257: Triangle "Change
+// view", Square "Toggle play speed"). replaybar.h's bar names the same.
+#define HELPGLYPH_LAYOUT_SCANNERS 5
 
 // What help character `c` (0x80..0x9d) draws as in joyhid layout `layout`
 // (JOYHID_LAYOUT_*): HELPGLYPH_ICON + an icon, or a help character for

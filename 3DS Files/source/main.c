@@ -102,6 +102,7 @@
 #include "audiooptions.h"
 #include "displayoptions.h"
 #include "joyconfig.h"
+#include "helpglyph.h"
 #include "credits.h"
 #include "netrace.h"
 #include "netstep.h"
@@ -1222,6 +1223,21 @@ static int32_t joyhidRaceLayout(void)
         && cop->pMyCar == p->MyCar)
         return JOYHID_LAYOUT_COP;
     return JOYHID_LAYOUT_RACE;
+}
+
+// The help glyphs' own layout (uirender.h's gUiHelpLayoutFn): the
+// Controller page's, and while a ReplayScreen is up the scanners' menu
+// layout, which the replay's events alone hear -- its help's Triangle is
+// X and its Square B (helpglyph.h). -1 leaves joyhidRaceLayout's.
+static int32_t uiHelpLayout(void)
+{
+    int32_t own = joyconfig_help_layout();
+
+    if (own >= 0)
+        return own;
+    if (pRaceCoordinator != NULL && pRaceCoordinator->pReplayScreen != NULL)
+        return HELPGLYPH_LAYOUT_SCANNERS;
+    return -1;
 }
 
 static SoundHooks gSoundHooks = {
@@ -8685,8 +8701,9 @@ int main(int argc, char** argv)
     joyConfigHooks.noise = fesound_play;
     joyConfigHooks.text  = hookJoyConfigText;
     joyconfig_init(&joyConfigHooks);
-    // Options' Controller page names the keys themselves (joyconfig.h).
-    gUiHelpLayoutFn = joyconfig_help_layout;
+    // Options' Controller page names the keys themselves (joyconfig.h),
+    // and a replay the scanners' (uiHelpLayout).
+    gUiHelpLayoutFn = uiHelpLayout;
 
     // Retail's main (0x0012f000), after InitializeEverything: with SkipFE
     // set, StartSkipFEGame on Fred, whose StartRace asks for

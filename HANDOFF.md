@@ -26389,3 +26389,71 @@ replayscreen, sinit, sound, startrace, trackflow and worldsnap.
 2. 72h: the pause pages' special events, and DemoModeReplay.
 3. When 72h is committed, publish the launch checklist the user asked
    for, before TASKS 73.
+
+## Session 125, continued -- TASKS 72g-5: the replay bar's keys
+
+The last of 72g's slices. The replay bar drew retail's DualShock 2 buttons
+for the events a replay hears. Five of them are other keys on the 3DS, so
+the bar now shows L, B, A, X and Y in their places. The replay's help
+named two of them wrong as well, and now names the right ones.
+
+### What changed
+
+- New `replaybar.c` and `replaybar.h`, the port's own. The bar is one
+  texture, REPLAYBOTTOM_NEW (640 x 88, INGAMEB.BUN, hash 0xba7fcb6a).
+  `replaybar_retouch` wipes the L1, Square, Cross, Triangle and Circle
+  buttons on the bar's grey band (rows 29 to 60), each with a copy of a
+  bare column beside it. Then it lays L, B, A, X and Y over them from
+  `data/buttons3ds.bin`, blended by the icon's alpha. Alphas stay the
+  bar's, so the texture keeps its format. The D-pad's two, SELECT and
+  START stay retail's. With one player, retail's REPLAYBOTTOM_BLANK
+  still covers the L.
+- `texpack.c` and `texpack.h`: `texpack_upload_retouched` is
+  `texpack_upload` with a hook on the decoded texels, before they are
+  padded and tiled. `texpack_upload` calls it with no hook.
+- `uirender.c`: find_texture passes the retouch for the bar's hash alone.
+- `helpglyph.c` and `helpglyph.h`: `HELPGLYPH_LAYOUT_SCANNERS` (5), the
+  menu map with Triangle and Square swapped. A replay hears joyhid's
+  scanners alone, which have Triangle on X and Square on B. The menus'
+  map (main.c's frontend keys) has them the other way round.
+- `main.c`: `uiHelpLayout` is uirender's `gUiHelpLayoutFn`. It answers
+  Options' Controller page's layout first, as before. Otherwise it
+  answers SCANNERS while `pRaceCoordinator->pReplayScreen` is set, so
+  the help shows X for "Change view" and B for "Toggle play speed".
+- New `tools/replaybar_check.py` and `tools/src/replaybar_test.c`: a
+  model of the retouch, written apart from the C, on the disc's bar,
+  random images and sheets, and the refusals. 18 cases, 2067 lines, 0
+  differ; 50 mutations, 49 caught, 1 equivalent.
+- `tools/src/helpglyph_test.c`: the shared characters in SCANNERS, and a
+  `scanners` pass. Each of joyhid's menu keys must press the button its
+  icon draws, with the default bindings and with changed ones.
+- `tools/run_azahar_career.ps1`: `-ViewReplay` presses Y for the
+  replay's help, shoots `race{n}-replay-help`, and presses Y again
+  before START.
+
+`docs/formats/replay.md` has a 72g-5 section and a checker section;
+`help-menu.md` notes the replay's map.
+
+### On Azahar
+
+`run_azahar_career.ps1 -Race -FinishSeconds 40 -FinishPlace 1
+-ViewReplay` raced event 32 and chose View Replay at the End Game Menu.
+The bar showed B, A, X and Y on its grey, with no seams. With one
+player, retail's blank covered the L. Y opened the help, which named A
+for Play/Pause, X for Change view and B for Toggle play speed. Y closed
+it, and START went back to the menu. Quit, the save and the tree
+followed. PASS.
+
+### Checkers re-run
+
+These checkers link the changed files, and all pass with 0 differ and 0
+faults: aicarcontroller, bsound, cameracoord, copmgrsnap, copsnap,
+democam, helpglyph, joystick, netrace, netstep, replaybar, sinit, sound
+and texsrc. `texpack_check.py` passes on HUDTEX.BIN and on
+TEX12LOCATION with `--chain`.
+
+### Next
+
+1. 72h: the pause pages' special events, and DemoModeReplay.
+2. When 72h is committed, publish the launch checklist the user asked
+   for, before TASKS 73.

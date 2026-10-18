@@ -1046,7 +1046,8 @@ replay, which 72h brings.
 
 ### Not done here
 
-- The replay bar's button icons are retail's PS2 shapes (72g-5).
+- The replay bar's button icons were retail's PS2 shapes. 72g-5, below,
+  draws the 3DS keys.
 - RCSTATE_AUTO_REPLAY is 72g-4's, below.
 
 The two camera constructors, the NIS coordinators and the coordinator's
@@ -1134,6 +1135,70 @@ nothing in a race.
 - SetUpAutoReplayCam makes a third TrackPathCoordinate from rc+60, read
   as a place: mIncidentPoint's word and mIncidentCoord's x. Nothing
   reads it. The port hands it the same two words.
+
+## 72g-5: the replay bar's keys
+
+This is the port's own (`replaybar.c`), not a port of anything.
+ReplayScreen's bar, the bitmap at (0, 394) of screen 0x60befaed, is one
+texture: REPLAYBOTTOM_NEW, 640 x 88, in INGAMEB.BUN's pack. It shows a
+symbol for each of the replay's events, each over the DualShock 2 button
+that raises it. A replay keeps joyhid's menu layout (72g-3, "The keys"),
+so five of those buttons are other keys on the 3DS:
+
+| Columns | Symbol | Event | DS2 | 3DS |
+|---|---|---|---|---|
+| 16..39 | Player 1/2 | CAMERA_TARGET | L1 | L |
+| 62..89 | << | PREVIOUS_MARKER | Left | Left |
+| 107..131 | 1/2 > | PLAYBACK_SPEED | Square | B |
+| 153..177 | stop / play | PAUSE | Cross | A |
+| 196..221 | camera | CAMERA_ANGLE | Triangle | X |
+| 241..265 | ? | HELP | Circle | Y |
+| 281..309 | >> | NEXT_MARKER | Right | Right |
+| 325..354 | dot / dot | HIDE_TIMELINE | SELECT | SELECT |
+| 373..399 | eject | SKIP | START | START |
+
+The keys are fixed, because the replay's scanners are not among Options'
+Controller bindings. So the bar is retouched once, as it loads:
+
+- `texpack_upload_retouched` is `texpack_upload` with a hook. The hook
+  runs on the decoded RGBA8 texels, before they are padded and tiled.
+- `uirender.c`'s find_texture passes `replaybar_retouch` for the bar's
+  hash (0xba7fcb6a) and nothing for any other texture.
+- The texture's rows 29 to 60 are a flat grey band, about (45, 45, 49).
+  For each of the five keys, every texel of the band in the key's columns
+  becomes a copy of a bare column beside it. That keeps the band's faint
+  dither on rows 58 to 60.
+- The key's icon from `data/buttons3ds.bin` (helpglyph.h's sheet) goes
+  over the wiped columns, from row 30, blended by the icon's alpha and
+  rounded to nearest. Every alpha stays the bar's 254, so the texture
+  keeps its format.
+
+The D-pad's two, SELECT and START stay retail's. They fit the 3DS as they
+are, as helpglyph keeps BUTTONSOUT's for them. With one player,
+ReplayScreen draws REPLAYBOTTOM_BLANK over the first 52 columns, and the
+L goes with them, as retail's L1 does.
+
+### The help
+
+Circle's help (802250 to 802257) names the same buttons: Triangle
+"Change view", Square "Toggle play speed". helpglyph's menu map draws
+Triangle as B and Square as X, because main.c's frontend keys are what
+the menus hear. A replay hears its scanners alone, which have Triangle on
+X and Square on B, so those two lines named the wrong keys.
+
+- `HELPGLYPH_LAYOUT_SCANNERS` (5) is the scanners' map: the menu map with
+  Triangle and Square swapped.
+- main.c's `uiHelpLayout` is uirender's `gUiHelpLayoutFn`. It answers
+  Options' Controller page's layout first, as before. Otherwise it
+  answers SCANNERS while `pRaceCoordinator->pReplayScreen` is set.
+
+### On Azahar
+
+`run_azahar_career.ps1 -ViewReplay` now presses Y on the replay for its
+help, shoots `race1-replay-help`, and presses Y again before START. On
+event 32 the bar showed B, A, X and Y on its grey, and the one player's
+blank covered the L. The help named A for Play/Pause, X for Change view
+and B for Toggle play speed. The run passed.
 
 ## The checker for 72d-1
 
@@ -1532,6 +1597,31 @@ handler, which `rcstates.c`'s table names.
     python tools/rcauto_check.py
     python tools/rcauto_check.py --mutate [--only a,b]
     python tools/rcauto_check.py --dump out/rcauto
+
+## The checker for 72g-5
+
+`tools/replaybar_check.py` holds `replaybar_retouch` to a model of
+replaybar.h's promise, written apart from the C. The C runs on
+`tools/src/replaybar_test.c`. Both print the return and each row's
+CRC-32 for 18 cases:
+
+- the disc's bar, decoded from INGAMEB.BUN, with the port's sheet;
+- four random images with that sheet;
+- four with random sheets, whose alphas are 0, 255 or anything;
+- one with a sheet 100 bytes too long;
+- the refusals, which change nothing: 639, 641 or 88 columns, 87 or 89
+  rows, no image, no sheet, and a sheet a byte short.
+
+The run is 2067 lines; none differ. 50 mutations: 49 caught, and one is
+equivalent (skipping a texel of alpha 0 blends to the same texel).
+
+`tools/helpglyph_check.py`'s test now runs the shared help characters
+in SCANNERS too, and a `scanners` pass. In that pass, each of joyhid's
+menu keys must press the button that its icon draws, with the default
+bindings and with throttle on ZR and camera on L.
+
+    python tools/replaybar_check.py
+    python tools/replaybar_check.py --mutate [--only a,b]
 
 ## Not yet
 

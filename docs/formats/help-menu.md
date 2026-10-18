@@ -72,7 +72,9 @@ read past the end of a line of nothing but buttons and bounds neither
 buffer; the port stops at the terminator and at 128 bytes.
 
 The buttons column draws each help character as the 3DS key
-(`helpglyph.c`): Cross A, Triangle B, Square X, Circle Y, L1 L.
+(`helpglyph.c`): Cross A, Triangle B, Square X, Circle Y, L1 L. A
+replay's help hears the scanners alone, so there Triangle is X and
+Square B (HELPGLYPH_LAYOUT_SCANNERS, replay.md's 72g-5).
 
 The "Help" mark bottom left of each screen is not a help character but
 BUTTONSOUT text, `k` (Circle). `uirender.c` draws such a glyph as the 3DS

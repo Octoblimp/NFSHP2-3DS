@@ -19,8 +19,9 @@
 # the Ultimates ("DebugMenu 1" written for the run) and saves. The tree's
 # popup that says the Ultimate is open is closed whenever it shows (TASKS
 # 69g). -ViewReplay takes the last race's View Replay before Quit: the
-# race from its first lap on the replay screen (RC state 4), then START
-# back to the End Game Menu (TASKS 72g-3). It captures each step and
+# race from its first lap on the replay screen (RC state 4), Y for its
+# help and Y again, then START back to the End Game Menu (TASKS 72g-3,
+# 72g-5). It captures each step and
 # reports the flow's and the view's lines. The capture and key methods
 # are run_azahar_test.ps1's; see its header for why each is the way it is.
 #
@@ -595,6 +596,13 @@ if (($atCarSel -or $resumed) -and $Race) {
             Shot ("race{0}-replay-1" -f $races)
             Start-Sleep -Seconds 6
             Shot ("race{0}-replay-2" -f $races)
+            # Y: the replay's help (802250..802257), its keys the 3DS's
+            # (72g-5); Y again puts it away.
+            [Hp2Cap]::PressKey($hwnd, 88)
+            Start-Sleep -Seconds 2
+            Shot ("race{0}-replay-help" -f $races)
+            [Hp2Cap]::PressKey($hwnd, 88)
+            Start-Sleep -Seconds 2
             [Hp2Cap]::PressKey($hwnd, $VK_M)           # START, back
             $replayBack = Wait-ForLogCount $menuLine ($menuN + 1) 30
             Start-Sleep -Seconds 2

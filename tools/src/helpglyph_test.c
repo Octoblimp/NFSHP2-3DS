@@ -7,8 +7,10 @@
 // changed ones. Be A Cop's calls go through joyhid_cop_calls, whose
 // Triangle and trigger are the Blurb's "Triangle + L2/R2", which
 // helpglyph_rewrite makes the one key. The menus hear main.c's frontend
-// keys (A select, B back, X Square, Y help), so they are a table. joyhid_bind and
-// joyhid_bindings_valid are held to their promises here too.
+// keys (A select, B back, X Square, Y help), so they are a table. The
+// scanners' layout, a replay's, is held to joyhid's menu layout as
+// joyhid_build presses it. joyhid_bind and joyhid_bindings_valid are held
+// to their promises here too.
 
 #include <stdio.h>
 #include <string.h>
@@ -380,7 +382,8 @@ static void shared(int32_t layout, const char *name)
         if ((c >= 0x86 && c <= 0x8d) || c == 0x8f || is_stick(c))
             continue;
         if (c == 0x82 && layout != JOYHID_LAYOUT_MENU
-            && layout != JOYHID_LAYOUT_FE)
+            && layout != JOYHID_LAYOUT_FE
+            && layout != HELPGLYPH_LAYOUT_SCANNERS)
             continue;
         snprintf(what, sizeof what, "%s: 0x%02x drawn as retail's", name, c);
         expect(helpglyph_map((unsigned char)c, layout), c, what);
@@ -432,6 +435,64 @@ static void keys_layout(void)
     joyhid_bind(gJoyHidBindings.racer, JOYHID_ACT_THROTTLE, JOYHID_BIND_ZR);
     expect(helpglyph_map(0x86, HELPGLYPH_LAYOUT_KEYS), ICON(HELPGLYPH_3DS_A),
            "KEYS: Cross is A, rebound or not");
+    joyhid_default_bindings(&gJoyHidBindings);
+}
+
+// HELPGLYPH_LAYOUT_SCANNERS, a replay's: each key joyhid's menu layout
+// reads presses one button outside the frontend, which draws as that key,
+// whatever the bindings say. D-pad Down presses Down and R3, which draw
+// as Down; Up draws as itself.
+static void scanners(void)
+{
+    static const uint32_t kKey[8] = {
+        JOYHID_A, JOYHID_B, JOYHID_X, JOYHID_Y, JOYHID_L, JOYHID_R,
+        JOYHID_ZL, JOYHID_ZR,
+    };
+    char what[96];
+
+    for (int pass = 0; pass < 2; pass++) {
+        for (int32_t k = JOYHID_BIND_A; k <= JOYHID_BIND_ZR; k++) {
+            unsigned char help[16];
+            int           n = pressed(kKey[k], 0, JOYHID_LAYOUT_MENU, help);
+
+            snprintf(what, sizeof what, "SCANNERS: %s presses one button",
+                     kKeyName[k]);
+            expect(n, 1, what);
+            if (n != 1)
+                continue;
+            snprintf(what, sizeof what, "SCANNERS: 0x%02x draws as %s",
+                     help[0], kKeyName[k]);
+            expect(helpglyph_map(help[0], HELPGLYPH_LAYOUT_SCANNERS),
+                   ICON(k), what);
+        }
+        {
+            unsigned char help[16];
+            int           n = pressed(JOYHID_DDOWN, 0, JOYHID_LAYOUT_MENU,
+                                      help);
+
+            expect(n, 2, "SCANNERS: Down presses two buttons");
+            for (int i = 0; i < n; i++) {
+                snprintf(what, sizeof what, "SCANNERS: 0x%02x draws as Down",
+                         help[i]);
+                expect(helpglyph_map(help[i], HELPGLYPH_LAYOUT_SCANNERS),
+                       0x83, what);
+            }
+            n = pressed(JOYHID_DUP, 0, JOYHID_LAYOUT_MENU, help);
+            expect(n == 1 && help[0] == 0x82, 1, "SCANNERS: Up presses Up");
+            expect(helpglyph_map(0x82, HELPGLYPH_LAYOUT_SCANNERS), 0x82,
+                   "SCANNERS: Up draws as Up");
+        }
+        // The replay's help: Triangle "Change view", Square "Toggle play
+        // speed".
+        expect(helpglyph_map(0x87, HELPGLYPH_LAYOUT_SCANNERS),
+               ICON(HELPGLYPH_3DS_X), "SCANNERS: Triangle is X");
+        expect(helpglyph_map(0x88, HELPGLYPH_LAYOUT_SCANNERS),
+               ICON(HELPGLYPH_3DS_B), "SCANNERS: Square is B");
+        // Rebinding the race's keys moves nothing here.
+        joyhid_bind(gJoyHidBindings.racer, JOYHID_ACT_THROTTLE,
+                    JOYHID_BIND_ZR);
+        joyhid_bind(gJoyHidBindings.racer, JOYHID_ACT_CAMERA, JOYHID_BIND_L);
+    }
     joyhid_default_bindings(&gJoyHidBindings);
 }
 
@@ -497,7 +558,9 @@ int main(void)
     shared(JOYHID_LAYOUT_COP, "COP");
     shared(JOYHID_LAYOUT_FE, "FE");
     shared(HELPGLYPH_LAYOUT_KEYS, "KEYS");
+    shared(HELPGLYPH_LAYOUT_SCANNERS, "SCANNERS");
     keys_layout();
+    scanners();
     rewrite();
 
     if (failures) {

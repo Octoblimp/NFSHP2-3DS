@@ -271,6 +271,18 @@ GPU_TEXCOLOR texpack_gpu_format(TexPackFormat f);
 bool texpack_upload(const TexPack* tp, const TexInfo* ti, int level,
                     C3D_Tex* out);
 
+// As texpack_upload(), with `retouch` given the decoded level -- w x h
+// RGBA8 texels, rows from the top -- to change before it is tiled, and
+// `ctx` passed through; NULL changes nothing. The format is still picked
+// from the disc's texels, so a retouch must keep what it holds: an opaque
+// texture opaque, a gray one gray. The port's own art over a disc
+// texture's, such as replaybar.h's keys.
+typedef void (*TexPackRetouchFn)(void* ctx, uint8_t* rgba, uint32_t w,
+                                 uint32_t h);
+bool texpack_upload_retouched(const TexPack* tp, const TexInfo* ti, int level,
+                              C3D_Tex* out, TexPackRetouchFn retouch,
+                              void* ctx);
+
 // As texpack_upload(), with the whole chain from level `base` in one
 // texture of format f and the record's MMAG/MMIN filters. A third larger
 // than level `base` alone, in the linear heap; the heap takes only what
