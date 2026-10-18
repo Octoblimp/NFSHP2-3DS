@@ -535,8 +535,8 @@ nothing; the device's timing lines are what will say how much of the
 ### What is left
 
 - **The device's numbers** at the laggy places: the fog, the desert's
-  end with the chopper. A timing run (`sdmc:/nfshp2_gputiming.txt`,
-  `DebugLog 1`) with and without `ClusterCull 0` and `GpuSends 0`.
+  end with the chopper. A timing run (`GPULog 1` in
+  `nfshp2_config.txt`) with and without `ClusterCull 0` and `GpuSends 0`.
 - **The envmap a face a frame.** Its six faces are a third of a light
   frame's GPU. Drawing one face a frame would cut most of that, but the
   cars' reflections would lag the world by a few frames: a change to the
@@ -672,7 +672,8 @@ VRAM, and a race's textures leave less: track 11's leave 512 KB.
 ### What is left
 
 - **The device's timing run** at the fire and the desert's end with
-  this build: `sdmc:/nfshp2_gputiming.txt` (empty) and `DebugLog 1`.
+  this build: `GPULog 1` in `nfshp2_config.txt` (until 2026-10-18 an
+  empty `sdmc:/nfshp2_gputiming.txt` with `DebugLog 1`).
   For each stage it shows how the time splits:
   - fill (the 1-pixel scissor);
   - the cost of each draw (3 vertices a draw);
@@ -1055,7 +1056,7 @@ were equivalent and are noted in the checker.
 ### What is left
 
 - **The device's numbers** for these builds on Alpine Trail's start
-  straight, with "DebugLog 1" and no `nfshp2_gputiming.txt`.
+  straight, with "DebugLog 1" and no "GPULog 1".
 - **After the finish, the race phase: not a cost.** In the device log's
   post-race and instant replay (rc 7 and 4) it took 13.5 ms a frame on
   average over 40 s, and up to 34 ms. That is retail's pacing, not

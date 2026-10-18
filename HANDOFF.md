@@ -27330,3 +27330,16 @@ It then crashed right after a replay finished, a new crash.
   `democam_check` 0 differ. The CIA builds clean.
 
 Next: the user's device run of the fix, and TASKS 46's device items.
+
+### The GPU log is a config key, GPULog
+
+The user asked how to turn the GPU logging on, then for a config key in
+place of the flag file. `GPULog 1` in `sdmc:/nfshp2_config.txt` now turns
+on hangwatch's timing frames (`configitems.h`, `hangwatch.c`): every 10 s
+of a race, from 5 s in, a "gpu time:" line of each draw stage's GPU time
+and how it splits, each a hitch of about 150 ms. It opens
+`nfshp2_debug.txt` as `DebugLog 1` does, so it needs no other word.
+`sdmc:/nfshp2_gputiming.txt` is no longer read. `CoreSample 1` (the third
+core's sampler) still needs `DebugLog 1` or `GPULog 1` for its log.
+`GpuSends` is not logging. The CIA builds clean; `fred_check` and
+`fredrace_check`, which compile `configitems.c`, are 0 differ.

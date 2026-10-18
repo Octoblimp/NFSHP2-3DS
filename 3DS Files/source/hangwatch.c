@@ -233,7 +233,7 @@ void hangwatch_log(const char *fmt, ...)
 // ------------------------------------------------------- the timing frame
 
 static bool     s_racing;
-static bool     s_wanted;      // the flag file was there at the race's start
+static bool     s_wanted;      // "GPULog 1" at the race's start
 static bool     s_due;
 static bool     s_timing;      // this frame
 static bool     s_broken;      // a wait failed: no more timing frames
@@ -655,14 +655,11 @@ void hangwatch_gpu_race(bool racing)
         return;
     }
     if (!s_racing) {
-        FILE *f = fopen(HANGWATCH_TIMING_FLAG, "r");
-
         s_racing = true;
         s_nextMs = t + 5000;
-        s_wanted = f != NULL;
-        if (f != NULL) fclose(f);
-        s_log("gpu time: timing frames %s (%s)", s_wanted ? "on" : "off",
-              HANGWATCH_TIMING_FLAG);
+        s_wanted = ConfigGpuLog != 0;
+        s_log("gpu time: timing frames %s (GPULog %d)",
+              s_wanted ? "on" : "off", (int)ConfigGpuLog);
     }
     if (s_wanted && !s_broken && (int32_t)(t - s_nextMs) >= 0) s_due = true;
 }

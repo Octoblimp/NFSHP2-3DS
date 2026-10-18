@@ -208,6 +208,14 @@ extern int32_t ConfigThreadGuard;           // 0
 // Needs "DebugLog 1" for the log. Off by default (2026-10-18).
 extern int32_t ConfigCoreSample;            // 0
 
+// The port's own: "GPULog 1" turns on hangwatch.h's timing frames, every
+// 10 s of a race, each a "gpu time:" line of the draw stages' GPU times
+// and how they split. Each is a hitch of about 150 ms, so it is off by
+// default. It opens sdmc:/nfshp2_debug.txt as "DebugLog 1" does, with no
+// need of that word. Until 2026-10-18 an empty sdmc:/nfshp2_gputiming.txt
+// turned the timing frames on, at the user's word a key now.
+extern int32_t ConfigGpuLog;                // 0
+
 typedef void (*ConfigItemsLogFn)(const char *line);
 
 // Applies `text` (NUL-terminated), each word as it is read; SkipFE goes
