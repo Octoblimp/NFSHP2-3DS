@@ -27343,3 +27343,31 @@ and how it splits, each a hitch of about 150 ms. It opens
 core's sampler) still needs `DebugLog 1` or `GPULog 1` for its log.
 `GpuSends` is not logging. The CIA builds clean; `fred_check` and
 `fredrace_check`, which compile `configitems.c`, are 0 differ.
+
+## Session 133 -- the staticky road, and launch night
+
+The user ran 792ce27 on their 3DS (track 21, Desert Heat, 2 laps, "DebugLog
+1"): smooth, but "the road/wall texture looked all staticky for a second"
+right after the start and near the end, the same stretch. They want it
+launched publicly tonight if it can be.
+
+- **The log** (`3DS Files/nfshp2_debug.txt`): no GPU faults, no texture
+  missing, reduced, evicted or failed. SMOKEB_CS's late upload is a 20 ms
+  hitch at the first jump. Track 21 is GPU-bound around (1400..1490,
+  -180..115) on both laps, and in crash scenes of ~500 particles.
+- **The likely cause, on the device alone.** The prepare puts the track's
+  textures in VRAM (2f0a300, before all three of the user's brief
+  artifact reports: TASKS 47, 64 and this one) through
+  `C3D_SyncTextureCopy`. Outside a frame, citro3d's call waits with
+  `gspWaitForEvent(GSPGPU_EVENT_PPF, false)`, which does not clear the
+  event first, and the event is still set by the transfer before (the
+  last frame's display transfer, or the previous chain, whose end the
+  call's own queue wait saw). So the call came back while its copy ran,
+  and `upload_chain` gave the linear copy back at once; the next
+  texture's linearAlloc (or its scratch) took it while the GPU still read
+  it. Azahar's transfers end at once, so it never showed there.
+- **The fix.** `texpack.c` waits for citro3d's GX queue to stop
+  (`gxCmdQueueWait`, the flag libctru clears at the copy's interrupt)
+  before `linearFree`. The only GPU transfer in the game outside
+  hangwatch, which waits its own way. The CIA builds clean; the 3DS-only
+  code has no host checker. Waits on the user's next 3DS run.

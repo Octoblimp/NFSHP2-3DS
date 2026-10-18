@@ -635,6 +635,15 @@ bool texpack_upload_chain(const TexPack* tp, const TexInfo* ti, int base,
                                    out);
 }
 
+// citro3d's GX queue, which its context starts with (hangwatch.c and
+// main.c read it the same way).
+extern u8 __C3D_Context[];
+
+static gxCmdQueue_s* c3d_gx_queue(void)
+{
+    return (gxCmdQueue_s*)(void*)__C3D_Context;
+}
+
 static bool upload_chain(const TexPack* tp, const TexInfo* ti, int base,
                          TexPackFormat f, C3D_Tex* out, bool vram)
 {
@@ -681,6 +690,16 @@ static bool upload_chain(const TexPack* tp, const TexInfo* ti, int base,
         // levels lie one after another, as they do in the texture.
         GSPGPU_FlushDataCache(build, total);
         C3D_SyncTextureCopy((u32*)build, 0, (u32*)out->data, 0, total, 8);
+        // And its end, before the copy is given back. Outside a frame the
+        // call waits for the GSP's PPF event without clearing it first, and
+        // that is still set by the transfer before -- the last frame's to
+        // the screen, or the chain before this one, whose end the call's
+        // own wait for the queue saw -- so it came back while its copy ran,
+        // and the next chain's linearAlloc took the copy while the GPU
+        // still read it: roads and walls with static in them for a moment,
+        // on the 3DS only, as Azahar's transfers end at once (2026-10-18).
+        // The queue stops running at the copy's interrupt.
+        gxCmdQueueWait(c3d_gx_queue(), -1);
     }
     if (build) linearFree(build);
     if (!ok) {

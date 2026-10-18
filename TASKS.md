@@ -3325,6 +3325,20 @@ phases.
         - [ ] On the 3DS: the user's next race on track 44 with the
           helicopter, and what the artifact looks like if it is still
           there (a flash, a gap, a stretched or missing triangle).
+        - [x] Session 133 (2026-10-18), a likely cause on the device
+          alone. The user's run of 792ce27 on track 21 had "the
+          road/wall texture ... all staticky for a second" at the start
+          and near the end, the same stretch. The prepare puts the
+          track's textures in VRAM (2f0a300, 2026-10-08, before all
+          three reports) through `C3D_SyncTextureCopy`, which outside a
+          frame waits for the GSP's PPF event without clearing it
+          first. That event is still set by the transfer before, so
+          the call came back while its copy ran, and texpack.c gave the
+          linear copy back at once; the next texture's linearAlloc took
+          it while the GPU still read it. Azahar's transfers end at
+          once, so it never showed there. `upload_chain` now waits for
+          citro3d's GX queue to stop (`gxCmdQueueWait`) before the copy
+          goes. Waits on the user's next 3DS run.
 
 48. [x] **The help menu (tHelpMenu).** Found on 2026-10-12 with TASKS
         43. The frontend shows a PS2 Circle and "help" bottom left;
@@ -3869,6 +3883,9 @@ phases.
           glare. Ruled out on top: the fog textures, the vertex rings,
           early depth, the mip chains, NaNs in the smokeables' matrices.
           Waits on the user's next look at that corner on their 3DS.
+        - [x] Session 133: the VRAM upload's copy, given back before
+          the GPU had read it (TASKS 47's note), fixed. The likely
+          cause of all three of the user's brief road artifacts.
 
 65. [x] **The FPS dip in the same race.** Reported with TASKS 64:
         "there was a minor FPS slowdown too at one point, locate that
