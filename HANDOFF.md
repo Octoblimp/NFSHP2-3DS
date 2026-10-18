@@ -26243,3 +26243,85 @@ sinit and sound.
 2. 72h: the pause pages' special events, and DemoModeReplay.
 3. When 72h is committed, publish the launch checklist the user asked
    for, before TASKS 73.
+
+## Session 124, continued -- TASKS 72g-3: the instant replay
+
+The third of 72g's slices. View Replay now works: from the pause menu it
+replays the last 5 to 10 seconds, and from the End Game Menu the race
+from its start. START goes back to the menu each came from.
+
+### What changed
+
+- New `rcreplay.c` and `rcreplay.h`: retail's
+  RCStateInstantReplayCallback (`0x0014b568`), the handler for
+  RCSTATE_INSTANT_REPLAY (4). `rcstates.c` puts it in the state table.
+  - ACTIVATE restores the first lap snapshot from the end screens, or
+    takes THE_PRESENT and restores the first instant replay from the
+    pause. When that fails, it goes back to POSTRACE or PAUSE.
+  - It makes the ReplayScreen for the player the pause menu's chooser
+    picks (1, the best finisher for -1, else 0).
+  - UNACTIVATE deletes the screen, mutes, and turns the camera movers
+    and the joystick's type-changed handlers back on. TICK ticks the
+    screen. SKIP_REPLAY goes back (restoring THE_PRESENT from the
+    pause). MOVE_REPLAY restores the posted snapshot and makes the
+    camera again.
+  - Two tests are the port's own: no pause menu answers player 0, and
+    MOVE_REPLAY with no screen does not touch one.
+- main.c:
+  - `gReplayNumInstantReplaySnapshotsFn` is bound to the manager's word
+    140, so the pause menu's View Replay is enabled once an instant
+    replay is held (after the countdown).
+  - `gEndGameReplayViewableFn` is gone. The End Game Menu's View Replay
+    follows retail's test alone: MuteHighlightSoundFlag clear.
+  - With "DebugLog 1", the race lines add the manager's state every 60
+    world frames.
+- The replay's keys needed no code: scannertab.c's entries 92 to 103
+  read the DS2's buttons in every configuration, and joyhid.c maps
+  them (START skip, A pause, Left/Right markers, B speed, X camera, L
+  target, Y help, SELECT timeline).
+- New `tools/rcreplay_check.py` and `tools/src/rcreplay_test.c`:
+  - The run is 5649 script lines and 10839 output lines, with 0
+    differ. 65 mutations, all caught.
+  - The fix it found: `replayscreen_construct(bMalloc(...),
+    replay_player())` left the order to the compiler. Retail asks for
+    the driver first, and the port now does too.
+- `tools/src/rcstates_test.c` stubs the new handler.
+- `tools/run_azahar_quickrace.ps1` gained `-HoldFirst`, which holds the
+  plan before the presses. `tools/run_azahar_career.ps1` gained
+  `-ViewReplay`, and its event start now waits for the log before
+  counting, because the tree's A can start the event at once.
+
+`docs/formats/replay.md` has a 72g-3 section, the keys and a checker
+section. `pause-menu.md` and `end-game.md` say how View Replay is
+enabled now.
+
+### On Azahar
+
+- **The pause menu:** a quick race held gas for 60 s, then paused. View
+  Replay (item 4) changed to state 4. The screen showed the timeline,
+  Player1, the time and the place, played to the pause and stopped.
+  START restored the present and brought the pause menu back, and
+  START again resumed the race where it was.
+- **The End Game Menu:** `run_azahar_career.ps1 -Race -FinishSeconds 40
+  -FinishPlace 1 -ViewReplay` on event 32. View Replay replayed from the
+  lap snapshot (world frame 1133). START went back to state 7 and the
+  menu; Quit, the autosave and the tree followed. PASS.
+
+### Checkers re-run
+
+These 32 checkers link the changed files, and all pass with 0 differ
+and 0 faults: aicarcontroller, bprintf, bsound, cameracoord,
+copmgrsnap, copsnap, democam, endevent, endgame, endresults, endtimes,
+fredend, helpglyph, hudanim, hudcop, hudfeatures, hudrender, hudscore,
+joystick, netrace, netstep, pausemenu, playercop, playerzone,
+prevroute, pursuitchopper, rcreplay, rcstates, replayscreen, sinit,
+sound and startrace.
+
+### Next
+
+1. 72g-4: RCStateAutoReplayCallback (`0x0014b848`) and its helpers
+   (`0x0014c0f8` .. `0x0014c2d8`), for completeness, with a checker.
+2. 72g-5: the replay bar's PS2 button icons as the 3DS keys.
+3. 72h: the pause pages' special events, and DemoModeReplay.
+4. When 72h is committed, publish the launch checklist the user asked
+   for, before TASKS 73.

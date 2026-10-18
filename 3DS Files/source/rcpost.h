@@ -9,7 +9,8 @@
 //   TellPlayersToUnPause                      0x00181ce8   92 bytes
 //
 // Step 8g. The two replays and the two demos are the last four states;
-// their entries in gRCStateCallbacks stay NULL until then.
+// rcreplay.c has the instant replay (72g-3), and the other three entries
+// in gRCStateCallbacks stay NULL until their slices.
 // docs/formats/race-coordinator.md has the decode.
 
 #ifndef RCPOST_H

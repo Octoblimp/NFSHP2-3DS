@@ -372,9 +372,6 @@ extern void (*gSetAutosaveCompletionCallbackFn)(void (*cb)(void));
 // with autosave off too, so the end of a race always asks before it saves.
 // 0 is retail's, which goes there only with Fred.Autosave on.
 extern int32_t gEndGameAlwaysAskToSave;
-// The port's: whether View Replay has a replay to go to. A 0 leaves the
-// item off; NULL is retail's, which only reads the ReplayManager.
-extern int32_t (*gEndGameReplayViewableFn)(void);
 // TheRaceEvent's (0x0031b600) calls, none named in the image:
 //   0x00200b30(ev, i, ev+8)  reward `i` tested against the event's state
 //   0x00201db8               GetOldStatus against GetStatus: the race

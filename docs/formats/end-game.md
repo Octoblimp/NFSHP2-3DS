@@ -289,11 +289,12 @@ Three of retail's reads are tested first in the port:
 - the instance for messages other than ACTIVATE and UNACTIVATE.
 - `pReplayManager` for View Replay. A NULL one hides the item.
 
-The port's own test also hides View Replay: `gEndGameReplayViewableFn`.
-The port's `ReplayManager` is a zeroed stand-in, so retail's test
-would offer the item. Choosing it changes to `RCSTATE_INSTANT_REPLAY`,
-which has no handler yet, and the race would sit there with nothing up.
-main.c's answer is whether that state has a handler.
+Until TASKS 72g-3 the port hid View Replay with a test of its own,
+`gEndGameReplayViewableFn`, because `RCSTATE_INSTANT_REPLAY` had no
+handler. `rcreplay.c` is that handler now, so the test is gone. View
+Replay shows whenever the manager's MuteHighlightSoundFlag is clear, as
+retail's does. It replays the race from its first lap snapshot, and
+START goes back to the End Game Menu (`replay.md`, "72g-3").
 
 ## Checking
 

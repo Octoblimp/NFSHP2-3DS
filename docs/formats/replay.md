@@ -729,9 +729,9 @@ a race snapshot holds 2.5 to 3.3 KB and a checksum 5.7 to 6.4 KB.
 - The special events' handler (`gReplayHandleSpecialEventFn`, retail's
   HandlePauseMenuReplaySpecialEvents) and DemoModeReplay::Service
   (`gDemoModeReplayServiceFn`) are NULL until 72h.
-- RCSTATE_INSTANT_REPLAY and RCSTATE_AUTO_REPLAY have no handlers until
-  72g-3, so nothing makes a ReplayScreen (72g-2) yet. The End Game Menu
-  still leaves View Replay off.
+- RCSTATE_AUTO_REPLAY has no handler until 72g-4. Nothing in retail
+  posts RC_REQUEST_AUTO_REPLAY, so the state is never entered.
+  RCSTATE_INSTANT_REPLAY's handler is 72g-3's.
 
 ### ReplayCheck, the port's own test
 
@@ -791,8 +791,7 @@ race's last frame. main.c now binds them to the manager:
 The world now replays the race's highlights behind the end screens, as
 retail's does. The rules are the ones in "The highlights" above.
 
-The instant-replay state and View Replay are 72g-3. Until then, the End
-Game Menu and the pause menu still leave View Replay off.
+The instant-replay state and View Replay came in 72g-3.
 
 On Azahar (2026-10-17), `run_azahar_career.ps1 -Race -FinishSeconds 40
 -FinishPlace 1` played event 32 (Coastal Parklands) with the gas held:
@@ -814,10 +813,10 @@ On Azahar (2026-10-17), `run_azahar_career.ps1 -Race -FinishSeconds 40
 
 `replayscreen.c` is retail's ReplayScreen (`0x001ebda8` .. `0x001ed4e0`):
 the screen over an instant replay, with its timeline, its markers, its
-camera modes and its buttons. Nothing makes one yet. That is
-RCStateInstantReplayCallback's job, in 72g-3. MainLoop's call is in
-already: `raceFrame` updates the race coordinator's screen (word 44)
-after UpdatePlayersNonGameState, as retail does at `0x0012f58c`.
+camera modes and its buttons. RCStateInstantReplayCallback makes one
+(72g-3). MainLoop's `raceFrame` updates the race coordinator's screen
+(word 44) after UpdatePlayersNonGameState, as retail does at
+`0x0012f58c`.
 
 ### The class
 
@@ -931,6 +930,124 @@ These stay NULL:
 - The disc test. NULL answers 1, the disc in the drive.
 - TheDemoModeReplay's seven calls, and its three words, which nothing
   sets yet. Both wait for 72h.
+
+## 72g-3: the instant replay
+
+`rcreplay.c` is retail's RCStateInstantReplayCallback (`0x0014b568`, 736
+bytes), the handler for RCSTATE_INSTANT_REPLAY (4). `rcstates.c` puts it
+in the state table. View Replay, on the pause menu and on the End Game
+Menu, posts `RC_START_REPLAY`, which changes to this state.
+
+### The messages
+
+| Message | What it does |
+|---|---|
+| ACTIVATE, from the end screens | `pEndGameScreens` is set. It restores the first `LAP_SNAPSHOT`, the race from its start. When there is none, it queues a change back to POSTRACE and makes the screen all the same. |
+| ACTIVATE, from the pause | It takes `THE_PRESENT` and restores the first `INSTANT_REPLAY`. When either fails, it changes back to PAUSE and makes no screen. |
+| UNACTIVATE | Deletes the screen (destructor flags 3), mutes the sound, turns every player's camera movers back on and puts the joystick's type-changed handlers back. |
+| TICK | Ticks the screen. |
+| SKIP_REPLAY | From the end screens, back to POSTRACE. From the pause, it restores `THE_PRESENT`, deletes it and changes back to PAUSE. |
+| TAKE_AUTOSNAPSHOT | Nothing; answered 1. |
+| MOVE_REPLAY | Restores the snapshot posted as the param (the screen's PREVIOUS_MARKER and NEXT_MARKER), then makes the screen's camera again. |
+| anything else | Answered 0. |
+
+Making the screen turns every player's camera movers off first. Then it
+picks the player the replay follows, from the pause menu's
+ReplayChooser:
+
+- 1: player 1.
+- -1: the player who finished best. That is the lowest FinishPosition in
+  TransientStats, the first of a tie, and its UniqueDriveNumber is used.
+  It is player 0 when no player has a stats element.
+- anything else: player 0.
+
+Then come 584 bytes from pool 16, named "ReplayScreen", and the
+constructor. Retail picks the player before the allocation, and so does
+the port.
+
+The port differs from retail in two tests. Retail reads ThePauseMenu
+unchecked, and the port answers player 0 without one. Retail also makes
+the camera again on MOVE_REPLAY with no screen test, and the port tests.
+
+### View Replay
+
+- **The pause menu.** main.c binds `gReplayNumInstantReplaySnapshotsFn`
+  to the manager's word 140. The item is enabled while the manager holds
+  an instant replay and MuteHighlightSoundFlag is clear. The first
+  instant replay is taken when the capture begins, after the countdown.
+  Then one comes every 300 WorldTimeFrames, and two are kept ("The
+  snapshots" above). The replay begins at the older one, so it goes back
+  5 to 10 seconds, and Tick pauses it at the capture's end, the moment
+  of the pause.
+- **The End Game Menu.** main.c's own test, `gEndGameReplayViewableFn`,
+  is gone. Retail's test decides: MuteHighlightSoundFlag clear.
+
+With "DebugLog 1", main.c's race lines now add the manager's state every
+60 world frames: "race: replay log L, capturing C, replaying R, paused
+P, loops B..E at W, snapshots: instant I, laps L, highlights H".
+
+### On Azahar
+
+Both runs were on 2026-10-17.
+
+**From the pause menu:** `run_azahar_quickrace.ps1 -HoldFirst -HoldPlan
+"65:60,0:1,77:0.45" -Presses "71:1.5,71:1.5,71:1.5,65:8,90:5,65:3,65:5,77:5,77:4"`.
+START is held as a step of the plan because a short press was lost at
+55% speed.
+
+- Two instant replays were held when START paused the race. Three downs
+  reached View Replay (item 4), and A changed to state 4.
+- The replay screen came up with the timeline, Player1, the time and the
+  place. It played to the capture's end, where Tick paused it.
+- START (SKIP) restored the present and brought the pause menu back.
+  START then resumed the race where the car had been before the replay.
+- In an earlier run the pause came during the countdown. There the item
+  stayed grayed, with no instant replay yet, as it should.
+
+**From the End Game Menu:** `run_azahar_career.ps1 -Race -FinishSeconds
+40 -FinishPlace 1 -ViewReplay` played event 32.
+
+- The menu had 4 rows: Restart Race, View Replay, View Lap Times and
+  Quit.
+- View Replay replayed from world frame 1133, the lap snapshot, with
+  car 0 driving the race again.
+- START went back to state 7 and the End Game Menu, and the highlights
+  went on behind it.
+- Quit, the autosave and the tree followed. PASS.
+
+Two script changes came with this. `run_azahar_quickrace.ps1` gained
+`-HoldFirst`, which holds the plan before the presses. In
+`run_azahar_career.ps1`, `-ViewReplay` does the steps above. Its event
+start now counts the Select Car lines once the log has caught up,
+because the tree's A can start the event at once.
+
+### The keys
+
+The replay's events (99 to 110) need no new code. `scannertab.c`'s
+entries 92 to 103 hold for every configuration and read the DS2's
+buttons, and `joyhid.c`'s map gives each a 3DS key:
+
+| Event | DS2 | 3DS |
+|---|---|---|
+| SKIP | Start | START |
+| PAUSE | Cross | A |
+| PREVIOUS_MARKER, NEXT_MARKER | Left, Right | Left, Right |
+| SPEED | Square | B |
+| CAMERA_ANGLE | Triangle | X |
+| CAMERA_TARGET | L1 | L |
+| HELP | Circle | Y |
+| HIDE_TIMELINE | Select | SELECT |
+| MARK_DEMO, TEST_DEMO, ERASE_DEMO | R2, L2, R1 | ZR, ZL, R |
+
+The last three are the demo recorder's. MARK_DEMO does nothing while
+the disc is in, which on a retail PS2 is always, and the port leaves its
+disc test NULL to the same end. TEST_DEMO and ERASE_DEMO need a demo
+replay, which 72h brings.
+
+### Not done here
+
+- The replay bar's button icons are retail's PS2 shapes (72g-5).
+- RCSTATE_AUTO_REPLAY is 72g-4.
 
 The two camera constructors, the NIS coordinators and the coordinator's
 delete are the race's seams already bound.
@@ -1221,6 +1338,53 @@ and retail's `subu` wraps.
     python tools/replayscreen_check.py
     python tools/replayscreen_check.py --mutate [--only a,b]
     python tools/replayscreen_check.py --dump out/replayscreen
+
+## The checker for 72g-3
+
+`tools/rcreplay_check.py` runs retail's RCStateInstantReplayCallback
+beside the port's, on `tools/src/rcreplay_test.c`. These are recorded as
+lines both sides print:
+
+- the manager's TakeSnapshot, RestoreSnapshot by name and by pointer,
+  and DeleteSnapshot;
+- ChangeState, and the camera movers off and on;
+- TransientStats::GetDriver and bMalloc;
+- ReplayScreen's constructor, destructor, Tick and ChangeCameraMover;
+- the mute, and the type-changed handlers put back.
+
+The script covers these cases:
+
+- Every message, in and out of range, with the end screens up and not
+  and a screen up and not.
+- ACTIVATE over each answer of the snapshots, from the end screens and
+  from the pause.
+- Each chooser, and no pause menu.
+- The best finisher over random drivers and finishes, then ties and
+  order.
+- UNACTIVATE, TICK, SKIP_REPLAY and MOVE_REPLAY.
+- Two full flows. Then 1500 random steps.
+
+Three differences are made equal by hand:
+
+- Retail reads ThePauseMenu unchecked. The model's NULL reads low
+  memory, which is 0, so both sides answer player 0.
+- The script never sends MOVE_REPLAY without a screen.
+- A snapshot posted as the param is a word in retail and a pointer
+  truncated to one in the port. Both print it as the snapshot's label.
+
+The run is 5649 script lines and 10839 output lines; none differ. One
+fix came of it. The port first made the screen with
+`replayscreen_construct(bMalloc(...), replay_player())`, and C leaves
+that argument order open. Retail asks for the driver first, and the
+port now does too.
+
+65 mutations, all caught. `tools/src/rcstates_test.c` stubs the new
+handler, which `rcstates.c`'s table names; `rcstates_check` still puts
+its own in state 4.
+
+    python tools/rcreplay_check.py
+    python tools/rcreplay_check.py --mutate [--only a,b]
+    python tools/rcreplay_check.py --dump out/rcreplay
 
 ## Not yet
 

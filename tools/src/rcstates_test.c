@@ -392,6 +392,18 @@ void player_change_camera_mover(struct Player *p, CameraMoverType type,
     printf("  mover %s %d %d\n", nm(p), (int)type, keep);
 }
 
+// rcreplay.c's state, which gRCStateCallbacks names; main() puts a fake
+// in its place, as for the other states this does not run.
+int32_t rc_state_instant_replay_callback(RaceCoordinator *rc,
+                                         RCMessage msg, int32_t param)
+{
+    (void)rc;
+    (void)msg;
+    (void)param;
+    printf("  instant replay never\n");
+    return 0;
+}
+
 void racecoordinator_init_for_race(RaceCoordinator *rc)
 {
     printf("  initforrace %s\n", nm(rc));

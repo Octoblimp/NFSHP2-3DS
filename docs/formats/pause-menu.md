@@ -119,13 +119,17 @@ The seams are in `pausemenu.h`. main.c fills them:
 | `gPauseMenuAnimFn` | the flow's `BAnim`, its clock set to the real timer |
 | `gChangeGameFlowFn` | `bgf_change_state` |
 | `gSoundMuteFn` | `jb_sound_mute` |
+| `gReplayNumInstantReplaySnapshotsFn` | `replayNumInstantReplaySnapshots`, the manager's word 140 (TASKS 72g-3) |
 
-Five seams are left NULL, and each does nothing:
+View Replay is enabled once the manager holds an instant replay. The
+first is taken when the capture begins, after the countdown; during the
+countdown the item stays grayed, as retail's does (`replay.md`, "72g-3").
+Choosing it changes to RCSTATE_INSTANT_REPLAY (`rcreplay.c`).
+
+Four seams are left NULL, and each does nothing:
 
 - `gSetScreenFilterPortFn`: there is one pad.
 - `gPortStopForceFn`: there is no rumble.
-- `gReplayNumInstantReplaySnapshotsFn`: no replay, so View Replay stays
-  grayed.
 - `gRestoreTypeChangedHandlersFn`.
 - the `gFED*` seams.
 

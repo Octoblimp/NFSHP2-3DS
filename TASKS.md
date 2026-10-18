@@ -4227,15 +4227,31 @@ phases.
             the race coordinator's screen. Nothing makes one until
             72g-3. The 13 checkers that compile the changed files pass
             again.
-          - [ ] 72g-3. RCStateInstantReplayCallback (`0x0014b568`) with
+          - [x] 72g-3. RCStateInstantReplayCallback (`0x0014b568`) with
             the screen, and the pause menu's and End Game Menu's View
             Replay (`gReplayNumInstantReplaySnapshotsFn`, the End Game
-            Menu's test). Also RCStateAutoReplayCallback (`0x0014b848`)
-            and the auto replay's four helpers (`0x0014c0f8` ..
-            `0x0014c2d8`), for completeness: nothing in retail posts
+            Menu's test). Checked on Azahar: View Replay from the pause
+            menu and from the End Game Menu.
+            Done in Session 124, continued (`docs/formats/replay.md`,
+            72g-3). `rcreplay.c` is the state's handler; `rcreplay_check`
+            runs it beside retail's (5649 script lines, 10839 output
+            lines, 0 differ; 65 of 65 mutations caught). The pause
+            menu's item is enabled once an instant replay is held, and
+            the End Game Menu's follows retail's test alone. On Azahar,
+            both replayed and START went back to their menu; the career
+            run passed. The replay's keys were mapped already (START,
+            A, Left/Right, B, X, L, Y, SELECT). The 32 checkers that
+            link the changed files pass again.
+          - [ ] 72g-4. RCStateAutoReplayCallback (`0x0014b848`) and the
+            auto replay's four helpers (`0x0014c0f8` .. `0x0014c2d8`),
+            for completeness: nothing in retail posts
             RC_REQUEST_AUTO_REPLAY (7), so the state is never entered.
-            Checked on Azahar: View Replay from the pause menu and
-            from the End Game Menu.
+            A checker runs it beside retail's.
+          - [ ] 72g-5. The replay bar's button icons are the PS2's
+            shapes. Show the 3DS keys the replay uses instead (START
+            skip, A pause, Left/Right markers, B speed, X camera, L
+            target, Y help, SELECT timeline), as `uirender.c` does for
+            the help line's icons.
         - [ ] 72h. The pause pages' special events (`AddSpecialEvent`),
           and `DemoModeReplay` with the disc's replays for attract mode.
           The PS2's float rounding is not the 3DS's, so these may drift.

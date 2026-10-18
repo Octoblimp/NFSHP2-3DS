@@ -18,9 +18,11 @@
 # instead of the tour. -OpenUltimates first takes the debug menu's Open
 # the Ultimates ("DebugMenu 1" written for the run) and saves. The tree's
 # popup that says the Ultimate is open is closed whenever it shows (TASKS
-# 69g). It captures each step and reports the flow's and the view's
-# lines. The capture and key methods are run_azahar_test.ps1's; see its
-# header for why each is the way it is.
+# 69g). -ViewReplay takes the last race's View Replay before Quit: the
+# race from its first lap on the replay screen (RC state 4), then START
+# back to the End Game Menu (TASKS 72g-3). It captures each step and
+# reports the flow's and the view's lines. The capture and key methods
+# are run_azahar_test.ps1's; see its header for why each is the way it is.
 #
 # sdmc:/nfshp2_config.txt must not set SkipFE: the run needs the frontend.
 #
@@ -31,6 +33,7 @@
 #   powershell -File tools/run_azahar_career.ps1 -Race -Path down -Event 3
 #   powershell -File tools/run_azahar_career.ps1 -Race -Event 2 -LapSeconds 120
 #   powershell -File tools/run_azahar_career.ps1 -OpenUltimates -Path down,down
+#   powershell -File tools/run_azahar_career.ps1 -Race -FinishSeconds 40 -ViewReplay
 
 param(
     [string]$AzaharExe = "C:\Program Files\Azahar\azahar.exe",
@@ -44,7 +47,8 @@ param(
     [int]$LapSeconds = 0,         # -Race: its lap instead of the projected one
     [string]$Path = "",           # D-pad steps on the tree to the event
     [int]$Event = 0,              # the event -Path must end on
-    [switch]$OpenUltimates        # the debug menu's Open the Ultimates first
+    [switch]$OpenUltimates,       # the debug menu's Open the Ultimates first
+    [switch]$ViewReplay           # -Race: the last race's View Replay, then Quit
 )
 
 $ErrorActionPreference = "Stop"
@@ -437,12 +441,17 @@ if ($atTree -and $onEvent) {
     [Hp2Cap]::PressKey($hwnd, $VK_S)                   # back to the tree
     Start-Sleep -Seconds 2
     Shot "tree-again"
-    [Hp2Cap]::PressKey($hwnd, $VK_A)                   # the details
-    Start-Sleep -Seconds 2
     # Start the event: Select Car, or, for a tournament or a knockout
-    # saved between its races, straight to the next race's track.
+    # saved between its races, straight to the next race's track. The
+    # tree's A can start it at once, its details already on the tree, so
+    # the lines are counted once the log has caught up, and A is pressed
+    # again only when the first did not start it.
     $begin = "flow enter Select Car [0-9a-f]{8}|etv resume event"
-    $started = Press-UntilCount $VK_A $begin ((LogCount $begin) + 1) 2 20
+    Start-Sleep -Seconds 8
+    $base = LogCount $begin
+    [Hp2Cap]::PressKey($hwnd, $VK_A)                   # the details
+    $started = Wait-ForLogCount $begin ($base + 1) 10
+    if (-not $started) { $started = Press-UntilCount $VK_A $begin ($base + 1) 2 20 }
     $resumed = $started -and ((LogCount "etv resume event") -gt 0)
     $atCarSel = $started -and -not $resumed
     if ($atCarSel) {
@@ -473,6 +482,7 @@ if ($atTree -and $onEvent) {
 # Yes, then A. After Quit the tree is entered again.
 $left = $false; $racing = $false; $treeAgain = $false
 $races = 0; $finishes = 0; $nexts = 0
+$replayOn = $false; $replayBack = $false
 function Popup-Yes {
     Start-Sleep -Milliseconds 1500
     [Hp2Cap]::PressKey($hwnd, $VK_A)                   # the row
@@ -571,6 +581,32 @@ if (($atCarSel -or $resumed) -and $Race) {
             $more = $true
             continue
         }
+        # -ViewReplay: down to View Replay, the row before View Lap Times
+        # and Quit, and A: the replay screen, RC state 4 in the race's
+        # lines. START skips it back to the post-race, whose End Game Menu
+        # logs its line again; Quit is then taken from there.
+        if ($ViewReplay) {
+            for ($k = $row; $k -lt $rows - 3; $k++) { Press $VK_G }
+            Shot ("race{0}-view-replay" -f $races)
+            $menuN = LogCount $menuLine
+            [Hp2Cap]::PressKey($hwnd, $VK_A)
+            $replayOn = Wait-ForLog "race: rc 4," 20
+            Start-Sleep -Seconds 2
+            Shot ("race{0}-replay-1" -f $races)
+            Start-Sleep -Seconds 6
+            Shot ("race{0}-replay-2" -f $races)
+            [Hp2Cap]::PressKey($hwnd, $VK_M)           # START, back
+            $replayBack = Wait-ForLogCount $menuLine ($menuN + 1) 30
+            Start-Sleep -Seconds 2
+            Shot ("race{0}-replay-back" -f $races)
+            Write-Host ("  race {0} View Replay: screen {1}, back at the menu {2}" -f $races, $replayOn, $replayBack)
+            if (-not $replayBack) { break }
+            $m = @(Get-Content $debugLog | Where-Object { $_ -match $menuLine }) | Select-Object -Last 1
+            Write-Host ("  " + $m)
+            if ($m -match "rows (\d+), row (\d+), loop (\d)") {
+                $rows = [int]$Matches[1]; $row = [int]$Matches[2]; $loop = $Matches[3] -eq "1"
+            }
+        }
         if ($loop -and $row -eq 0) {
             Press $VK_T                                # up, round to Quit
         } else {
@@ -631,8 +667,11 @@ elseif (-not $atCarSel -and -not $resumed) { $verdict = "PARTIAL (A on the detai
 elseif ($Race -and -not $left)      { $verdict = "PARTIAL (A on car select did not leave the frontend)" }
 elseif ($Race -and -not $racing)    { $verdict = "PARTIAL (left the frontend, never reached RACING)" }
 elseif ($Race -and $finishes -lt 1) { $verdict = "PARTIAL (RACING, but the test's finish never came)" }
+elseif ($ViewReplay -and -not $replayOn)   { $verdict = "PARTIAL (View Replay on the End Game Menu showed no replay)" }
+elseif ($ViewReplay -and -not $replayBack) { $verdict = "PARTIAL (the replay, but START did not bring the End Game Menu back)" }
 elseif ($Race -and -not $treeAgain) { $verdict = "PARTIAL ($finishes race(s) finished; the end screens never reached the tree)" }
 elseif ($Race -and -not $survived)  { $verdict = "FAIL (back at the tree, then died)" }
+elseif ($Race -and $ViewReplay) { $verdict = "PASS ($finishes race(s), Next Race $nexts time(s), View Replay and back, and back at the tree)" }
 elseif ($Race)           { $verdict = "PASS ($finishes race(s), Next Race $nexts time(s), and back at the tree)" }
 elseif (-not $survived)  { $verdict = "FAIL (reached car select, then died)" }
 else                     { $verdict = "PASS (tree, details, reward, then car select)" }

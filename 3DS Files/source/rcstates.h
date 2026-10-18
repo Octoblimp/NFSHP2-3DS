@@ -15,10 +15,10 @@
 //   RaceCoordinator::RequestPause                   0x001832a8   12 bytes
 //   FrontendDatabase's record times, no symbol      0x001842a8  112 bytes
 //
-// Step 8f. Step 8g's rcpost.c has the pause and the post-race. The two
-// replays and the two demos are later slices'; their entries in
-// gRCStateCallbacks stay NULL until then. docs/formats/race-coordinator.md
-// has the decode.
+// Step 8f. Step 8g's rcpost.c has the pause and the post-race, and 72g-3's
+// rcreplay.c the instant replay. The auto replay and the two demos are
+// later slices'; their entries in gRCStateCallbacks stay NULL until then.
+// docs/formats/race-coordinator.md has the decode.
 
 #ifndef RCSTATES_H
 #define RCSTATES_H

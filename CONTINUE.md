@@ -3658,8 +3658,11 @@ and so replaced every boot.
      post-race plays the race's highlights behind the end screens.
      ReplayScreen is retail's since 72g-2, in `replayscreen.c`;
      `replayscreen_check` runs it against retail, and MainLoop updates
-     the coordinator's screen. Nothing makes one until 72g-3 (the
-     instant-replay state and View Replay), which is next.
+     the coordinator's screen. Since 72g-3 RCSTATE_INSTANT_REPLAY is
+     retail's, in `rcreplay.c`, and View Replay works from the pause
+     menu and the End Game Menu (on Azahar, START goes back to each).
+     Next: 72g-4 (the auto replay, never entered in retail), 72g-5
+     (the replay bar's PS2 icons as 3DS keys), then 72h.
 
    **7b, DriveCameraMover::Update, is done** (HANDOFF.md, Session 31,
    continued: the drive camera's Update). `docs/formats/camera.md`,

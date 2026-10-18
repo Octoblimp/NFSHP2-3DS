@@ -25,11 +25,13 @@
 # (after -Presses) before -HoldKeys and the watch: "65:30,0:20" holds the
 # gas for 30 seconds and then nothing for 20. A key of 0 holds nothing.
 # The user watches these runs: no brake (83), which stops the car and then
-# reverses it.
+# reverses it. -HoldFirst runs the plan before -Presses instead, so a run
+# can drive and then work the pause menu.
 #
 # -Presses are single presses, "key:seconds" apart, the first -PressAfter
-# seconds into RACING, with a shot after each (run_azahar_race.ps1's; the
-# key codes are listed there). The watch starts after the last.
+# seconds into RACING (or after -HoldFirst's plan), with a shot after each
+# (run_azahar_race.ps1's; the key codes are listed there). The watch starts
+# after the last.
 
 param(
     [int]$WatchSeconds = 40,      # after the flow reaches RACING
@@ -42,7 +44,8 @@ param(
     [string]$Presses = "",
     [double]$PressAfter = 6,
     [int[]]$HoldKeys = @(),
-    [string]$HoldPlan = ""
+    [string]$HoldPlan = "",
+    [switch]$HoldFirst            # -HoldPlan before -Presses
 )
 
 $ErrorActionPreference = "Stop"
@@ -269,6 +272,28 @@ if ($quick) {
     $racing = Wait-ForLog "flow state RACING" 90
     Write-Host ("  RACING: {0}" -f $racing)
 }
+$n = 0
+function Run-HoldPlan {
+    foreach ($h in $HoldPlan.Split(",")) {
+        if (-not (Alive)) { break }
+        $kv = $h.Split(":")
+        $vk = [int]$kv[0]
+        $holdEnd = (Get-Date).AddSeconds([double]$kv[1])
+        Write-Host ("  [{0,5:N1}s] hold {1} for {2} s" -f (Elapsed), $vk, $kv[1])
+        $nextShot = Get-Date
+        while ((Get-Date) -lt $holdEnd -and (Alive)) {
+            if ($vk -ne 0) { [Hp2Cap]::KeyDown($hwnd, $vk) }
+            if ((Get-Date) -ge $nextShot) {
+                $script:n++
+                Shot ("hold-{0}-{1}" -f $vk, $script:n)
+                $nextShot = (Get-Date).AddSeconds($ShotSeconds)
+            }
+            Start-Sleep -Milliseconds 150
+        }
+        if ($vk -ne 0) { [Hp2Cap]::KeyUp($hwnd, $vk) }
+    }
+}
+if ($racing -and $HoldFirst -and $HoldPlan -ne "") { Run-HoldPlan }
 if ($racing -and $Presses -ne "") {
     Start-Sleep -Milliseconds ([int]($PressAfter * 1000))
     $i = 0
@@ -284,27 +309,7 @@ if ($racing -and $Presses -ne "") {
         Shot ("press-{0}-{1}" -f $i, $vk)
     }
 }
-$n = 0
-if ($racing -and $HoldPlan -ne "") {
-    foreach ($h in $HoldPlan.Split(",")) {
-        if (-not (Alive)) { break }
-        $kv = $h.Split(":")
-        $vk = [int]$kv[0]
-        $holdEnd = (Get-Date).AddSeconds([double]$kv[1])
-        Write-Host ("  [{0,5:N1}s] hold {1} for {2} s" -f (Elapsed), $vk, $kv[1])
-        $nextShot = Get-Date
-        while ((Get-Date) -lt $holdEnd -and (Alive)) {
-            if ($vk -ne 0) { [Hp2Cap]::KeyDown($hwnd, $vk) }
-            if ((Get-Date) -ge $nextShot) {
-                $n++
-                Shot ("hold-{0}-{1}" -f $vk, $n)
-                $nextShot = (Get-Date).AddSeconds($ShotSeconds)
-            }
-            Start-Sleep -Milliseconds 150
-        }
-        if ($vk -ne 0) { [Hp2Cap]::KeyUp($hwnd, $vk) }
-    }
-}
+if ($racing -and -not $HoldFirst -and $HoldPlan -ne "") { Run-HoldPlan }
 if ($racing) {
     $end = (Get-Date).AddSeconds($WatchSeconds)
     $nextShot = Get-Date

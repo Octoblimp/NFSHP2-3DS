@@ -5110,6 +5110,13 @@ static int32_t replayEndCurrentHighlightTime(const ReplayManager* rm)
     return rm->EndCurrentHighlightTime;
 }
 
+// The pause menu's View Replay is there while the manager holds an
+// instant replay (TASKS 72g-3): its count at +140, read inline.
+static int32_t replayNumInstantReplaySnapshots(const ReplayManager* rm)
+{
+    return rm->NumInstantReplaySnapshots;
+}
+
 // ReplayCheck (configitems.h), the port's own test of the replay (TASKS
 // 72f-2). The race captures as retail's does; this plays two parts of it
 // back and counts what does not come out the same. Round 1 sets the four
@@ -5559,6 +5566,19 @@ static void logRaceState(void)
             view->pCamera ? (double)view->pCamera->CurrentKey.Position.x : 0.0,
             view->pCamera ? (double)view->pCamera->CurrentKey.Position.y : 0.0,
             view->pCamera ? (double)view->pCamera->CurrentKey.Position.z : 0.0);
+    if (pReplayManager != NULL) {
+        const ReplayManager* rm = pReplayManager;
+
+        logLine("race: replay log %d, capturing %d, replaying %d, paused %d, "
+                "loops %d..%d at %d, snapshots: instant %d, laps %d, "
+                "highlights %d",
+                rm->pRepeat != 0, (int)rm->CapturingFlag,
+                (int)rm->ReplayingFlag, (int)rm->PausedFlag,
+                (int)rm->BeginCapturingLoopCount,
+                (int)rm->EndCapturingLoopCount, (int)WorldLoopCounter,
+                (int)rm->NumInstantReplaySnapshots, (int)rm->NumLapSnapshots,
+                (int)rm->NumHighlightSnapshots);
+    }
     if (p && p->MyCar) {
         const Car* c = p->MyCar;
 
@@ -6845,14 +6865,6 @@ static void endGameAutosaveNow(void (*cb)(void))
     bgf_set_autosave_completion_callback(&g_flow, cb);
 }
 
-// View Replay changes to RCSTATE_INSTANT_REPLAY. Until that state has a
-// handler (72g), the race would sit there with nothing up, so the End Game
-// Menu leaves the item off, though the ReplayManager captures the race.
-static int32_t endGameReplayViewable(void)
-{
-    return gRCStateCallbacks[RCSTATE_INSTANT_REPLAY] != NULL;
-}
-
 static int32_t fedIsThereAnotherRace(void)
 {
     return fred_is_there_another_race(&Fred);
@@ -7531,7 +7543,6 @@ int main(int argc, char** argv)
     // Quit and Next Race always end at the Autosave screen, which asks
     // before it makes or overwrites the save (g_flow.saveAskCreate).
     gEndGameAlwaysAskToSave = 1;
-    gEndGameReplayViewableFn = endGameReplayViewable;
     gFEDIsThereAnotherRaceFn = fedIsThereAnotherRace;
     gFEDIsMultiTrackFn = fedIsMultiTrack;
     // The results (endresults.c): Race Results, Points Rewards and Task
@@ -8227,6 +8238,7 @@ int main(int argc, char** argv)
     gReplayBeginNextRaceHighlightFn   = replaymgr_begin_next_race_highlight;
     gReplayMuteHighlightsFn           = replayMuteHighlights;
     gReplayEndCurrentHighlightTimeFn  = replayEndCurrentHighlightTime;
+    gReplayNumInstantReplaySnapshotsFn = replayNumInstantReplaySnapshots;
     gRaceCoordinatorPostMessageFn = ConfigReplayCheck
                                         ? replayCheckPostMessage
                                         : racecoordinator_post_message;
