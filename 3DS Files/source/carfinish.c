@@ -31,7 +31,9 @@
 #include "trackpath.h"
 #include "world.h"
 
-// gp-32068. Further than this from the track path's nearest point and the
+// Retail's gp offsets; the demo's are 80 lower (gp-32068 for the first).
+
+// gp-31988. Further than this from the track path's nearest point and the
 // car is lost: it is put back, unless the camera tuner has the AI boring.
 #define CAR_LOST_DISTANCE 5000.0f
 
@@ -39,18 +41,25 @@
 // track path coordinate forgets its point and searches the whole table.
 #define CAR_RESEARCH_DISTANCE 300.0f
 
-// The tick, 1/4000 s, as gp-32056, -32052, -32048 and -32040 each hold it.
+// The tick, 1/4000 s, as gp-31976, -31972, -31968 and -31952 each hold it.
 #define CAR_FINISH_TICK 0.00025f
 
-// gp-32064 and gp-32044: 3.14/32 and 3.14/8. A car in the air counts as
+// gp-31984 and gp-31956: 3.14/32 and 3.14/8. A car in the air counts as
 // flying straight under the first; a car on the ground counts as sliding
 // over the second.
 #define CAR_AIR_STRAIGHT_YAW 0.098125f
 #define CAR_SLIDING_YAW      0.3925f
 
-// gp-32060. A jump shorter than this, in seconds, keeps the jump cam up
+// gp-31980. A jump shorter than this, in seconds, keeps the jump cam up
 // for five seconds; a longer one for half of it.
 #define CAR_SHORT_JUMP 0.9f
+
+// Retail's. Under 5.0 (0x40a00000) a player still racing is "GoingSlow".
+// Each cop within 40 is worth gp-31964, 0.05; the speed times gp-31960,
+// 1/150 (0x3bda740e), is "Speed".
+#define CAR_GOING_SLOW      5.0f
+#define CAR_CLOSE_COP_VALUE 0.05f
+#define CAR_SPEED_VALUE     (1.0f / 150.0f)
 
 // ------------------------------------------------------------- the seams
 
@@ -119,7 +128,9 @@ static float track_offset(const TrackPathCoordinate *t)
 
 // ---------------------------------------------------------------- the step
 
-// 0x00130480. In order:
+// Retail's 0x00131da8; the demo's is 0x00130480. Retail's is the demo's
+// with four things added, marked "Retail" below, and the debug tail gone.
+// In order:
 //
 //   * For a positive dt, Acceleration and AngularAcceleration are the
 //     change from vOldVel and vOldAngVel times 1/dt, all four lanes (VU0's
@@ -127,6 +138,10 @@ static float track_offset(const TrackPathCoordinate *t)
 //     it as zero, so 1/dt is ee_div's FLT_MAX.
 //   * The odometer adds speed * dt, unless the speed is below zero or
 //     above 1000. The tests are `<`, so a NaN speed is added.
+//   * Retail: DistanceMoved adds how far Position is from vOldPos (x x +
+//     y y, then + z z, as VU0 sums them), whatever dt is, and vOldPos
+//     becomes Position, all four lanes. BeginMovement saved it; the race
+//     results' average speed is DistanceMoved over the race time.
 //   * The track path coordinate is moved to the car. Every thirty-second
 //     step, a car that is moving and has no topology under it, nor a metre
 //     to its +x, is marked ResetMe.
@@ -152,25 +167,25 @@ static float track_offset(const TrackPathCoordinate *t)
 //   * In the jump cam's zone: the highest point the car reaches while
 //     falling is kept in EyeVerts[2].z, and past AirTimeSwitch the player
 //     is moved to the zone after, without a sound.
+//   * Retail: GoingSlow, -10, under 5 while the player's
+//     TimeFinishedRacing is 0. A NaN speed is not under 5.
 //   * CloseCars, half a point each: above 40, every AI car within 40 of
 //     this one. The world is not tested for NULL, nor is the car itself
 //     skipped; the loop runs AICarPos up to CopCarPos.
+//   * Retail: CloseCops, 0.05 each, the same way over CopCarPos up to
+//     TrafficCarPos, still above 40.
+//   * Retail: Speed, the speed / 150, at any speed.
 //   * Above 30: CarSlidingSideways, 1, for a yaw past 3.14/8. Then the
 //     car's first collision, if a player is in it and it touched in the
 //     last half second: CarCollision, 3, for two cars above 40, and
-//     otherwise SmokeableCollision, 5, for a smokeable body above 30.
+//     otherwise SmokeableCollision for a smokeable body: 2.5 in retail,
+//     where the demo had 5 and tested `30 < speed` again.
 //
-// Three things in the listing are left out, because they have no effect:
-//
-//   * After CarCollision it asks for the colliding cars and swaps the two
-//     when the second is the player's own. Nothing reads either local
-//     afterwards. The call is kept; it only reads.
-//   * The tail, reached when DoScreenPrintf or TerminalPrintPosition is
-//     set and the camera follows this car: Race::AreAllPlayersFinished
-//     Racing, GetCurrentZoneNumber, DisplayCullingStats and
-//     Race::GetRacingCar, each for a print that was compiled out.
-//   * The second `30 < speed` test before the collision, which the first
-//     has already passed.
+// One thing in the listing is left out, because it has no effect: after
+// CarCollision it asks for the colliding cars and swaps the two when the
+// second is the player's own. Nothing reads either local afterwards. The
+// call is kept; it only reads. The demo's tail, a debug print's reads
+// when DoScreenPrintf or TerminalPrintPosition was set, is gone in retail.
 void car_finish_movement(Car *c, float dt)
 {
     CarState *st = &c->State;
@@ -199,6 +214,16 @@ void car_finish_movement(Car *c, float dt)
     speed = st->VelocityMagnitude;
     if (!(speed < 0.0f) && !(1000.0f < speed))
         st->Odometer = st->Odometer + speed * dt;
+
+    {
+        float dx = c->vOldPos.x - st->Position.x;
+        float dy = c->vOldPos.y - st->Position.y;
+        float dz = c->vOldPos.z - st->Position.z;
+
+        st->DistanceMoved = st->DistanceMoved
+                          + sqrtf((dx * dx + dy * dy) + dz * dz);
+        c->vOldPos = st->Position;
+    }
 
     trackpath_coord_update_position(tpc, (const bVector2 *)&st->Position);
 
@@ -268,6 +293,9 @@ void car_finish_movement(Car *c, float dt)
         }
     }
 
+    if (speed < CAR_GOING_SLOW && p->TimeFinishedRacing == 0)
+        interesting(-10.0f, "GoingSlow");
+
     if (40.0f < speed) {
         World *w = pCurrentWorld;
         bVector3 pos = st->Position;
@@ -284,7 +312,20 @@ void car_finish_movement(Car *c, float dt)
         }
         if (n > 0)
             interesting((float)n * 0.5f, "CloseCars");
+        n = 0;
+        for (i = 0; i < w->TrafficCarPos - w->CopCarPos; i++) {
+            const Car *o = w->CarTable[w->CopCarPos + i];
+            float dx = o->State.Position.x - pos.x;
+            float dy = o->State.Position.y - pos.y;
+            float dz = o->State.Position.z - pos.z;
+
+            if (sqrtf((dx * dx + dy * dy) + dz * dz) < 40.0f)
+                n++;
+        }
+        if (n > 0)
+            interesting((float)n * CAR_CLOSE_COP_VALUE, "CloseCops");
     }
+    interesting(speed * CAR_SPEED_VALUE, "Speed");
 
     if (30.0f < speed) {
         Collision *col;
@@ -302,9 +343,8 @@ void car_finish_movement(Car *c, float dt)
 
                 interesting(3.0f, "CarCollision");
                 collision_get_colliding_cars(col, &a, &b);
-            } else if (collision_is_smokeable_involved(col)
-                       && 30.0f < speed) {
-                interesting(5.0f, "SmokeableCollision");
+            } else if (collision_is_smokeable_involved(col)) {
+                interesting(2.5f, "SmokeableCollision");
             }
         }
     }

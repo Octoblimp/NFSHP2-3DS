@@ -703,6 +703,7 @@ FM_CAR = {"vOldVel": 1120, "vOldAngVel": 1136, "AirTimeSwitch": 1156,
 # The Player: all 2480 bytes, and the three fields FinishMovement reads.
 FM_PL_SIZE, FM_PL_ZONE, FM_PL_WRONG, FM_PL_EYEZ = 2480, 76, 736, 1640
 WD_AI, WD_COP, WD_TABLE = 32, 36, 44   # World
+WD_TRAFFIC = 40                        # World.TrafficCarPos
 FM_NCARS = 5                           # the table: this car, then four
 COL_SIZE, COL_LCT, COL_WIT = 96, 12, 84
 WIT_SIZE, WIT_B1, WIT_B2, WIT_COL = 112, 96, 100, 104
@@ -724,6 +725,19 @@ FM_FAR = ((1000.0, 0.0, 0.0), (0.0, 1000.0, 0.0), (0.0, 0.0, 1000.0),
 # 1.5 above the plane (found by reading the image's frame after the call).
 FM_JUMP = (600.0, 10.0, 26.0, 0.25)
 FM_H15 = 0x41a15446
+# Retail's FinishMovement (0x00131da8) is the demo's with four things
+# added. The model runs the demo's and hooks them in where retail has them.
+FM_H_DIST = 0x0013055c     # after the odometer: DistanceMoved, vOldPos
+FM_H_SLOW = 0x00130948     # before CloseCars: GoingSlow
+FM_H_COPS = 0x00130a1c     # after CloseCars: CloseCops, then Speed
+FM_H_SMOKE = 0x00130b8c    # SmokeableCollision's lui: 0x4020, not 0x40a0
+FM_REG = "RegisterInterestingEvent__13ReplayManagerfPCc"
+FM_COP_VALUE = 0x3d4ccccd  # gp-31964, 0.05
+FM_SPEED_VALUE = 0x3bda740e  # gp-31960, 1/150
+FM_DM = 100.0              # DistanceMoved before each case
+# vOldPos, from Position: 13 away by default. Its w is its own, so that
+# the copy's shows.
+FM_OLD = (-3.0, 4.0, -12.0, 7.0)
 
 
 def fm_points():
@@ -763,13 +777,17 @@ def fm(dt=0.03125, vmag=45.0, odo=100.0, pos=FM_POS, vel=FM_VEL, tp=None,
        nopaths=False, loop=5, now=FM_NOW, mode=7, topo=(), boring=0,
        player=True, zone=0, wheels=0, wrong=0, jc=1, rz=1, disable=0,
        angle=0, fwd=30.0, eye=0.0, ats=0.0, ai=1, cop=4, close=None,
-       col=None, rm=True, lights=0):
+       col=None, rm=True, lights=0, dm=FM_DM, old=FM_OLD, fin=0,
+       traffic=5):
     """A case. `tp` is the track path coordinate's point before, or None;
     it is put at the car, so the search starts from that point. `close`
     is up to four offsets from the car for the table's others (FM_FAR
     otherwise). `col` is None for no collision, else (kind, ticks since
     the last contact, which of the witness's two bodies is the car's,
-    whether the witness has its Collision, the car's own body's Type)."""
+    whether the witness has its Collision, the car's own body's Type).
+    Retail's: `dm` is DistanceMoved before, `old` vOldPos less Position
+    (its w as it is), `fin` the player's TimeFinishedRacing, `traffic`
+    the world's TrafficCarPos, so that the cops are CopCarPos up to it."""
     others = list(close or ()) + list(FM_FAR[len(close or ()):])
     table = [tuple(tpc.f32(pos[k] + o[k]) for k in range(3)) for o in others]
     return dict(dt=dt, vmag=vmag, odo=odo, pos=pos, vel=vel, tp=tp,
@@ -777,7 +795,9 @@ def fm(dt=0.03125, vmag=45.0, odo=100.0, pos=FM_POS, vel=FM_VEL, tp=None,
                 topo=tuple(topo), boring=boring, player=player, zone=zone,
                 wheels=wheels, wrong=wrong, jc=jc, rz=rz, disable=disable,
                 angle=angle, fwd=fwd, eye=eye, ats=ats, ai=ai, cop=cop,
-                table=table, col=col, rm=rm, lights=lights)
+                table=table, col=col, rm=rm, lights=lights, dm=dm,
+                vold=tuple(tpc.f32(pos[k] + old[k]) for k in range(3))
+                + (old[3],), fin=fin, traffic=traffic)
 
 
 FINISH = [
@@ -937,6 +957,38 @@ FINISH = [
     fm(col=("car", 0, 1, True, 2), wheels=4),
     fm(col=("car", 0, 0, True, 0), rm=False, angle=4100,
        close=[(1.0, 0.0, 0.0)]),
+    # Retail's DistanceMoved: whatever dt is (the first case's is 0), each
+    # lane, none moved onto -0 (which makes +0), and a move whose sum
+    # comes out otherwise if y y and z z are added first.
+    fm(old=(0.0, 0.0, 0.0, 7.0), dm=-0.0, player=False),
+    fm(old=(0.0, 0.0, 40.0, 7.0), dt=-0.03125, player=False),
+    fm(old=(0.125, -0.25, 0.0, 7.0), player=False),
+    fm(old=(5000.0, 1.0, 9.0, 7.0), player=False),
+    fm(old=(5000.0, 1.0, 9.0, 7.0), dm=1e9, player=False),
+    # Retail's GoingSlow: under 5, at it, the float under it; finished, or
+    # finished at -1; backwards; a NaN, which is not under 5.
+    fm(vmag=4.9, wheels=4),
+    fm(vmag=5.0, wheels=4),
+    fm(vmag=tpc.bf(fb(5.0) - 1), wheels=4),
+    fm(vmag=4.9, fin=1, wheels=4),
+    fm(vmag=4.9, fin=-1, wheels=4),
+    fm(vmag=-1.0, wheels=4),
+    fm(vmag=float("nan"), wheels=4),
+    # Retail's CloseCops (the default has one, the cop's slot 5 away):
+    # none from CopCarPos to itself; three, the AI's one far; one at
+    # exactly 40 and one just inside; the car itself; a range backwards;
+    # at 40 and a moving car with no cops in range.
+    fm(traffic=4, wheels=4),
+    fm(cop=2, close=[(100.0, 0.0, 0.0), (10.0, 0.0, 0.0), (0.0, 20.0, 0.0)],
+       wheels=4),
+    fm(cop=2, close=[(1.0, 0.0, 0.0), (40.0, 0.0, 0.0),
+                     (0.0, -39.999, 0.0)], traffic=4, wheels=4),
+    fm(ai=0, cop=0, traffic=2, wheels=4),
+    fm(cop=5, traffic=4, wheels=4),
+    fm(vmag=40.0, cop=2, close=[(1.0, 0.0, 0.0), (1.0, 0.0, 0.0)],
+       wheels=4),
+    fm(cop=1, traffic=5, close=[(1.0, 0.0, 0.0), (2.0, 0.0, 0.0)],
+       wheels=4),
 ]
 
 
@@ -1137,14 +1189,16 @@ def generate(cti):
       "int32_t tp, nopaths, loop, now, mode, ntopo, topo[2], boring, "
       "player, zone, wheels, wrong, jc, rz, disable, angle; uint32_t fwd, "
       "eye, ats; int32_t ai, cop; uint32_t table[4][3]; int32_t col, iscar, "
-      "type, ago, order, has, selftype, rm, lights; } CmFm;")
+      "type, ago, order, has, selftype, rm, lights, fin, traffic; "
+      "uint32_t dm, vold[4]; } CmFm;")
     w("static const CmFm cm_fm[] = {")
     for c in FINISH:
         topo = list(c["topo"]) + [0] * (2 - len(c["topo"]))
         col = c["col"] or ("car", 0, 0, False, 0)
         kind, ago, order, has, selftype = col
         w("    { 0x%08xu, 0x%08xu, 0x%08xu, {%s}, {%s}, %s, {%s}, %s, "
-          "0x%08xu, 0x%08xu, 0x%08xu, %s, {%s}, %s }," % (
+          "0x%08xu, 0x%08xu, 0x%08xu, %s, {%s}, %s, %s, 0x%08xu, {%s} },"
+          % (
               fb(c["dt"]), fb(c["vmag"]), fb(c["odo"]), f32s(c["pos"]),
               f32s(c["vel"]),
               i32s((-1 if c["tp"] is None else c["tp"], int(c["nopaths"]),
@@ -1157,7 +1211,8 @@ def generate(cti):
               ", ".join("{%s}" % f32s(p) for p in c["table"]),
               i32s((int(c["col"] is not None), int(kind == "car"),
                     FM_KIND_TYPE[kind], ago,
-                    order, int(has), selftype, int(c["rm"]), c["lights"]))))
+                    order, int(has), selftype, int(c["rm"]), c["lights"])),
+              i32s((c["fin"], c["traffic"])), fb(c["dm"]), f32s(c["vold"])))
     w("};")
     w("")
     w("typedef struct CmFn { VtFn fn; uint32_t addr; } CmFn;")
@@ -1233,6 +1288,15 @@ class Model(mmc.Model):
         e.stub(SYM["reset-route"], self.on_reset_route)
         self.rr_just = 0           # its fifth argument, which the demo's
         self.jrf = JRF0            # Car has no room for, nor JustResetFrames
+        # The demo's FinishMovement is retail's here: see on_fm_dist and
+        # the three after it.
+        e.hook(FM_H_DIST, self.on_fm_dist)
+        e.hook(FM_H_SLOW, self.on_fm_slow)
+        e.hook(FM_H_COPS, self.on_fm_cops)
+        e.hook(FM_H_SMOKE, self.on_fm_smoke)
+        self.fm_dm = fb(FM_DM)     # DistanceMoved, vOldPos and the
+        self.fm_vold = [0] * 4     # player's TimeFinishedRacing, which the
+        self.fm_fin = 0            # demo's Car and Player have no room for
         # Clear leaves retail's -1 in LastPointToScore.
         pcc.retail_clear(e)
         self.install_fakes()
@@ -2344,6 +2408,66 @@ class Model(mmc.Model):
                 self.label(self.cur_mover())))
         self.set_move(0)
 
+    def fm_event(self, value):
+        """RegisterInterestingEvent(pReplayManager, value), unchecked, as
+        retail calls it."""
+        self.nested(FM_REG, self.w(G_REPLAY), 0, floats=(fb(value),))
+
+    def fm_dist(self, a, b):
+        """|a - b| in xyz as VU0 takes it: vsub, vmul.xyz, x + y, then
+        + z; then sqrt.s."""
+        F = mipsemu.f32
+        d = [F(a[k] - b[k]) for k in range(3)]
+        s = F(F(F(d[0] * d[0]) + F(d[1] * d[1])) + F(d[2] * d[2]))
+        return F(mipsemu.ieee_sqrt(s))
+
+    def on_fm_dist(self, em):
+        """Retail's 0x00131e80, after the odometer: DistanceMoved (retail
+        CarState+876) adds |vOldPos - Position|, and vOldPos (retail
+        Car+1136) becomes Position, all four lanes."""
+        c = em.reg[17] & M32
+        pos = [self.w(c + 96 + 4 * k) for k in range(4)]
+        r = self.fm_dist([mipsemu.fbits_to(v) for v in self.fm_vold],
+                         [mipsemu.fbits_to(v) for v in pos])
+        self.fm_dm = fb(mipsemu.f32(mipsemu.fbits_to(self.fm_dm) + r))
+        self.fm_vold = pos
+        return None
+
+    def on_fm_slow(self, em):
+        """Retail's 0x001322b4: GoingSlow, -10, under 5 while the
+        player's TimeFinishedRacing (retail Player+80) is 0."""
+        if mipsemu.fbits_to(em.fpr[20] & M32) < 5.0 and self.fm_fin == 0:
+            self.fm_event(-10.0)
+        return None
+
+    def on_fm_cops(self, em):
+        """Retail's 0x001323dc to 0x001324ac: above 40, CloseCops, 0.05
+        for each car from CopCarPos up to TrafficCarPos within 40 (as
+        CloseCars counts); then Speed, the speed times 1/150."""
+        F = mipsemu.f32
+        speed = mipsemu.fbits_to(em.fpr[20] & M32)
+        if 40.0 < speed:
+            c = em.reg[17] & M32
+            pos = [self.f(c + 96 + 4 * k) for k in range(3)]
+            w = self.w(G_WORLD)
+            n = 0
+            i = 0
+            while i < s32((self.w(w + WD_TRAFFIC) - self.w(w + WD_COP)) & M32):
+                o = self.w(w + WD_TABLE + 4 * ((self.w(w + WD_COP) + i) & M32))
+                if self.fm_dist([self.f(o + 96 + 4 * k) for k in range(3)],
+                                pos) < 40.0:
+                    n += 1
+                i += 1
+            if n > 0:
+                self.fm_event(F(float(n) * mipsemu.fbits_to(FM_COP_VALUE)))
+        self.fm_event(F(speed * mipsemu.fbits_to(FM_SPEED_VALUE)))
+        return None
+
+    def on_fm_smoke(self, em):
+        """SmokeableCollision's weight: retail's lui is 0x4020, 2.5."""
+        em.reg[1] = 0x40200000
+        return None
+
     def s_finish(self):
         c = self.car
         e = self.e
@@ -2423,6 +2547,10 @@ class Model(mmc.Model):
             self.fm_jc, self.fm_rz = x["jc"], x["rz"]
             self.put(world + WD_AI, x["ai"] & M32)
             self.put(world + WD_COP, x["cop"] & M32)
+            self.put(world + WD_TRAFFIC, x["traffic"] & M32)
+            self.fm_dm = fb(x["dm"])
+            self.fm_vold = [fb(v) for v in x["vold"]]
+            self.fm_fin = x["fin"]
             for o, p in zip(others, x["table"]):
                 for k in range(3):
                     self.put(o + CAR["State"] + OFF("CarState", "Position")
@@ -2465,6 +2593,7 @@ class Model(mmc.Model):
                 s32(self.w(pl + FM_PL_ZONE)), self.w(pl + FM_PL_EYEZ),
                 self.w(c + FM_CAR["AirTimeSwitch"]),
                 hexw([self.w(s + SNAP_TIV) for s in self.snaps])))
+            self.say("fm dm=%08x vold=%s" % (self.fm_dm, hexw(self.fm_vold)))
         self.put(c + CAR["pPlayer"], player0)
         self.put(c + CAR["TheMovementMode"], mode0)
         self.put(c + CAR["ResetMe"], 0)
@@ -3669,15 +3798,67 @@ MUTATIONS = [
     ("fm-col-smoke-no-else", CFM,
      "            } else if (collision_is_smokeable_involved(col)",
      "            }" + NL + "            if (collision_is_smokeable_involved(col)"),
-    ("fm-col-smoke-no-speed", CFM,
-     "collision_is_smokeable_involved(col)" + NL
-     + "                       && 30.0f < speed) {",
-     "collision_is_smokeable_involved(col)) {"),
-    ("fm-col-smoke-value", CFM, 'interesting(5.0f, "SmokeableCollision");',
+    ("fm-col-smoke-value", CFM, 'interesting(2.5f, "SmokeableCollision");',
      'interesting(3.0f, "SmokeableCollision");'),
+    ("fm-col-smoke-demo", CFM, 'interesting(2.5f, "SmokeableCollision");',
+     'interesting(5.0f, "SmokeableCollision");'),
     ("fm-col-smoke-is-cars", CFM,
      "} else if (collision_is_smokeable_involved(col)",
      "} else if (collision_is_two_car_collision(col)"),
+    # -- retail's: DistanceMoved, GoingSlow, CloseCops, Speed
+    ("fm-dm-none", CFM, "+ sqrtf((dx * dx + dy * dy) + dz * dz);", "+ 0.0f;"),
+    ("fm-dm-flat", CFM, "+ sqrtf((dx * dx + dy * dy) + dz * dz);",
+     "+ sqrtf(dx * dx + dy * dy);"),
+    ("fm-dm-order", CFM, "+ sqrtf((dx * dx + dy * dy) + dz * dz);",
+     "+ sqrtf(dx * dx + (dy * dy + dz * dz));"),
+    ("fm-dm-squared", CFM, "+ sqrtf((dx * dx + dy * dy) + dz * dz);",
+     "+ ((dx * dx + dy * dy) + dz * dz);"),
+    ("fm-dm-replaced", CFM, "        st->DistanceMoved = st->DistanceMoved"
+     + NL + "                          + sqrtf(",
+     "        st->DistanceMoved = 0.0f" + NL
+     + "                          + sqrtf("),
+    ("fm-dm-dt", CFM, "    {" + NL + "        float dx = c->vOldPos.x",
+     "    if (0.0f < dt) {" + NL + "        float dx = c->vOldPos.x"),
+    ("fm-dm-dz-from-y", CFM, "float dz = c->vOldPos.z - st->Position.z;",
+     "float dz = c->vOldPos.y - st->Position.z;"),
+    ("fm-old-not-kept", CFM, "        c->vOldPos = st->Position;" + NL, ""),
+    ("fm-old-xyz", CFM, "        c->vOldPos = st->Position;",
+     "        c->vOldPos.x = st->Position.x;"
+     + " c->vOldPos.y = st->Position.y;"
+     + " c->vOldPos.z = st->Position.z;"),
+    ("fm-slow-le", CFM, "    if (speed < CAR_GOING_SLOW &&",
+     "    if (speed <= CAR_GOING_SLOW &&"),
+    ("fm-slow-nan", CFM, "    if (speed < CAR_GOING_SLOW &&",
+     "    if (!(CAR_GOING_SLOW <= speed) &&"),
+    ("fm-slow-finished", CFM, " && p->TimeFinishedRacing == 0)", ")"),
+    ("fm-slow-finished-sign", CFM, " && p->TimeFinishedRacing == 0)",
+     " && (int32_t)p->TimeFinishedRacing <= 0)"),
+    ("fm-slow-value", CFM, 'interesting(-10.0f, "GoingSlow");',
+     'interesting(10.0f, "GoingSlow");'),
+    ("fm-cops-from-ai", CFM,
+     "for (i = 0; i < w->TrafficCarPos - w->CopCarPos; i++) {",
+     "for (i = 0; i < w->TrafficCarPos - w->AICarPos; i++) {"),
+    ("fm-cops-table-ai", CFM, "w->CarTable[w->CopCarPos + i];",
+     "w->CarTable[w->AICarPos + i];"),
+    ("fm-cops-with-traffic", CFM, "i < w->TrafficCarPos - w->CopCarPos;",
+     "i <= w->TrafficCarPos - w->CopCarPos;"),
+    ("fm-cops-skip-first", CFM,
+     "for (i = 0; i < w->TrafficCarPos - w->CopCarPos; i++) {",
+     "for (i = 1; i < w->TrafficCarPos - w->CopCarPos; i++) {"),
+    ("fm-cops-count-on", CFM, '"CloseCars");' + NL + "        n = 0;" + NL,
+     '"CloseCars");' + NL),
+    ("fm-cops-value", CFM, "(float)n * CAR_CLOSE_COP_VALUE",
+     "(float)n * 0.5f"),
+    ("fm-cops-gone", CFM, "        if (n > 0)" + NL
+     + '            interesting((float)n * CAR_CLOSE_COP_VALUE, "CloseCops");'
+     + NL, ""),
+    ("fm-speed-gone", CFM,
+     '    interesting(speed * CAR_SPEED_VALUE, "Speed");' + NL, ""),
+    ("fm-speed-value", CFM, "speed * CAR_SPEED_VALUE",
+     "speed * 0.00667f"),
+    ("fm-speed-over-40", CFM, "    }" + NL
+     + '    interesting(speed * CAR_SPEED_VALUE, "Speed");',
+     '        interesting(speed * CAR_SPEED_VALUE, "Speed");' + NL + "    }"),
     ("fm-replay-untested", CFM, "    if (pReplayManager != NULL)" + NL
      + "        ReplayManager_RegisterInterestingEvent",
      "    ReplayManager_RegisterInterestingEvent"),
@@ -3737,11 +3918,11 @@ EQUIVALENT = {
         "The first branch is taken only when both of the witness's bodies "
         "are CAR_COLLISION_BODY, and then neither is smokeable, so the "
         "smokeable test after it, run unconditionally, still fails.",
-    "fm-col-smoke-no-speed":
-        "The collision is only looked at inside `30 < speed`, and speed "
-        "is a local that nothing in between changes, so the second test "
-        "always passes. The image makes it anyway (the listing's third "
-        "left-out thing).",
+    "fm-slow-nan":
+        "Only a NaN speed tells `speed < 5` from `!(5 <= speed)`, and then "
+        "retail's Speed event, the speed / 150, is a NaN too. It goes into "
+        "the same sums right after GoingSlow's -10, so every one comes out "
+        "the same NaN whether the -10 went in or not.",
 }
 
 

@@ -4596,8 +4596,22 @@ phases.
           an automatic in second with the throttle open never dropped to
           first. Both images run in mipsemu agree. drivetrain_check 0
           differ, its 10 new mutations caught.
+        - [x] Car::FinishMovement: retail's (`0x00131da8`, 2168 bytes) is
+          the demo's (`0x00130480`) with four things added. Done in
+          Session 133. **Bug fixed:** DistanceMoved was never added to,
+          so the race results' average speed was always 0. Retail adds
+          how far the car moved since BeginMovement's vOldPos and saves
+          the new one. The replay's interest gets three more events
+          for a player's car, every eighth step: GoingSlow (-10, under
+          5 while still racing), CloseCops (0.05 for each cop within
+          40, above 40) and Speed (the speed / 150). And a smokeable
+          collision is worth 2.5, not 5. `carmode_check` runs the
+          demo's image with the four hooked in at retail's places: 24
+          new cases, 0 differ; FinishMovement's 112 mutations, 106
+          caught, 6 equivalent (one new: a NaN speed's Speed event
+          hides GoingSlow's -10).
         - Other demo-derived functions retail changed (TASKS 74's list):
-          Car::FinishMovement, Car::TriggerEvents, Car::CalcForceParameters,
+          Car::TriggerEvents, Car::CalcForceParameters,
           PhysicsCar::Move, World::GetTimestep, DriveTrain::SetDesiredGear,
           Wheel's GuessGroundForce and FinalizeGroundForce, InitSkids,
           CarCollisionBody::AddDamage, FindWaferNormal and the

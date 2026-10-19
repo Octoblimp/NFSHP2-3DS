@@ -27527,3 +27527,40 @@ carreset.c and "later" mutations: 82 mutations, 79 caught, 3 equivalent as befor
 (3 new mutations caught), pullover_check, traffictele_check and
 realdriver_check 0 differ (3 new mutations caught). The CIA builds
 clean.
+
+### TASKS 73, slice 5: FinishMovement
+
+- `carfinish.c`: `car_finish_movement` is retail's `0x00131da8`. Its
+  listing is the demo's (`0x00130480`) line for line but for four
+  additions and the debug tail, which retail dropped:
+  - after the odometer, State.DistanceMoved (retail CarState+876) adds
+    |vOldPos - Position| (VU0's sum: x x + y y, then + z z), and
+    vOldPos (retail Car+1136) becomes Position, for every car and any
+    dt. Nothing added to DistanceMoved before, so `racerun.c`'s
+    AverageSpeed, and the results screen's average speed, was 0;
+  - GoingSlow, -10, under 5 while the player's TimeFinishedRacing is 0;
+  - CloseCops, 0.05 for each car from CopCarPos up to TrafficCarPos
+    within 40, inside CloseCars' `40 < speed`;
+  - Speed, the speed times 1/150 (gp-31960), at any speed;
+  - SmokeableCollision is 2.5 (the demo's 5), with no second
+    `30 < speed` test.
+  The constants' comments give retail's gp offsets (80 above the
+  demo's).
+- `carmode_check.py`: the Model hooks the demo image at
+  `FM_H_DIST`, `FM_H_SLOW`, `FM_H_COPS` and `FM_H_SMOKE`, the four
+  places retail differs. The hooks call the image's
+  RegisterInterestingEvent through `nested`. DistanceMoved, vOldPos
+  and TimeFinishedRacing live in the Model (`fm_dm`, `fm_vold`,
+  `fm_fin`), since the demo's Car and Player have no room for them.
+  `fm()` takes `dm`, `old`, `fin` and `traffic` (5 by default, so the
+  cop's slot 5 away counts in every case above 40). Each case prints
+  one more line, `fm dm=... vold=...`. 24 new cases: DistanceMoved
+  per lane, onto -0, one whose sum differs if y y + z z goes first,
+  and a large total; GoingSlow at 5 and either side of it, finished,
+  backwards and NaN; CloseCops with none, three, at 40, the car
+  itself, a backwards range and a speed of 40.
+
+carmode_check: 74 transitions, 31 resets, 42036 lines, 0 differ.
+FinishMovement's 112 mutations: 106 caught, 6 equivalent (the five
+before, and `fm-slow-nan`: a NaN speed makes Speed's value NaN too, so
+GoingSlow's -10 cannot show). The CIA builds clean.

@@ -1803,6 +1803,10 @@ static void s_finish(void)
         g_fm_rz = x->rz;
         world->AICarPos = x->ai;
         world->CopCarPos = x->cop;
+        world->TrafficCarPos = x->traffic;
+        cs->DistanceMoved = fb(x->dm);
+        put4(&c->vOldPos, x->vold);
+        g_fmplayer.TimeFinishedRacing = (uint32_t)x->fin;
         for (i = 0; i < CM_FM_NCARS - 1; i++) {
             others[i]->State.Position.x = fb(x->table[i][0]);
             others[i]->State.Position.y = fb(x->table[i][1]);
@@ -1853,6 +1857,9 @@ static void s_finish(void)
             printf("%s%08x", k ? " " : "",
                    bf(g_snaps[k].TotalInterestingValue));
         printf("\n");
+        printf("fm dm=%08x vold=%08x %08x %08x %08x\n",
+               bf(cs->DistanceMoved), bf(c->vOldPos.x), bf(c->vOldPos.y),
+               bf(c->vOldPos.z), bf(c->vOldPos.pad));
     }
     c->pPlayer = player0;
     c->TheMovementMode = mode0;

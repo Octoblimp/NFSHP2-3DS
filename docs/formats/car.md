@@ -1772,7 +1772,8 @@ careffects_check --mutate  136 mutations, 133 caught, 3 equivalent, 0 unexplaine
 ## What is in the eleventh code slice
 
 One method, in `carfinish.c`:
-- `FinishMovement` (`0x00130480`, 2008 bytes).
+- `FinishMovement` (`0x00130480`, 2008 bytes; retail's is `0x00131da8`,
+  2168, and the port has had retail's since TASKS 73).
 
 That makes Car 63 of 80 methods. It has a file of its own because it
 reaches Collision, the world's car table and the Player, and `car.c`
@@ -1788,6 +1789,7 @@ it for every car once the moves and the collisions are done, through
          AngularAcceleration = (AngularVelocity - vOldAngVel) * (1 / dt)
 speed = VelocityMagnitude
 !(speed < 0) and !(1000 < speed):  Odometer += speed * dt
+retail:  DistanceMoved += |Position - vOldPos|, vOldPos = Position
 the track path coordinate's UpdatePosition(Position)
 (loop + 7) & 31 == 0, a movement mode, no topology at Position
     nor at Position + (1, 0):  ResetMe = 1
@@ -1809,13 +1811,17 @@ way, 30 < speed:
 in zone 6:
     falling, and EyeVerts[2].z below Position.z:  EyeVerts[2].z = Position.z
     AirTimeSwitch < now:  ClearZone(no sound), RequestZone(7, 0, 0, 1)
+retail:  speed < 5, TimeFinishedRacing 0:  GoingSlow, -10
 40 < speed:  CloseCars, half a point for each AI car within 40
+             retail:  CloseCops, 0.05 for each cop within 40
+retail:  Speed, speed / 150
 30 < speed:
     3.14/8 < |yaw|:  CarSlidingSideways, 1
     the body's first collision, a player's car in it, touched less than
     half a second ago:
         two cars and 40 < speed:  CarCollision, 3
-        else a smokeable body and 30 < speed:  SmokeableCollision, 5
+        else a smokeable body:  SmokeableCollision, 2.5 (the demo's:
+            30 < speed again, and 5)
 ```
 
 `loop` is `WorldLoopCounter`. `speed` is read again once the eighth-step
@@ -1867,6 +1873,28 @@ Three things in the listing are left out, because they change nothing:
   was compiled out. Both switches are 0 in the image.
 - The second `30 < speed` before the smokeable, which the first has
   already passed.
+
+### Retail's
+
+Retail's listing (`0x00131da8`) is the demo's line for line, with the
+Car's and the Player's retail offsets, but for these:
+- **DistanceMoved.** After the odometer, `CarState`+876 adds the
+  distance from `vOldPos` (`Car`+1136, which `BeginMovement` saves) to
+  `Position`, summed as VU0 sums it: `x x + y y`, then `+ z z`, then
+  `sqrt.s`. Then `vOldPos` takes `Position`, all four lanes. It runs
+  for every car, whatever `dt` is. `RaceCoordinator`'s AverageSpeed is
+  DistanceMoved over the race time, so before this the port's results
+  always showed an average speed of 0.
+- **GoingSlow**, -10 (`0x001322b4`): under 5 while the player's
+  `TimeFinishedRacing` (+80) is 0. A NaN speed is not under 5.
+- **CloseCops**, 0.05 (gp-31964) for each car from `CopCarPos` up to
+  `TrafficCarPos` within 40, counted the way CloseCars counts, inside
+  the same `40 < speed`.
+- **Speed**, the speed times 1/150 (gp-31960), after that block at any
+  speed.
+- **SmokeableCollision is 2.5** (`lui 0x4020`), and the second
+  `30 < speed` is gone.
+- **The debug tail is gone.**
 
 `g_DisableAutoReplay` (`0x00323040`) is Car.obj's, and 0 in the image. It
 is in `car.c`.
@@ -1939,6 +1967,20 @@ The 105 cases:
 
 The poison runs cover it: the stack is scrubbed around the call, and no
 line of the scenario is masked.
+
+Retail's four additions are hooked into the demo image where retail
+has them (`FM_H_DIST`, `FM_H_SLOW`, `FM_H_COPS`, `FM_H_SMOKE`), and the
+hooks call the image's RegisterInterestingEvent. The Model keeps
+DistanceMoved, `vOldPos` and `TimeFinishedRacing` itself, since the
+demo's Car and Player have no room for them, and each case prints them
+on one more line. The world's `TrafficCarPos` is 5 unless a case says
+otherwise, so the cop's slot, 5 away, counts in every case above 40.
+24 more cases: DistanceMoved in each lane, onto `-0`, a move whose sum
+comes out otherwise if `y y + z z` goes first, and a large total;
+GoingSlow at 5, under it, the float under it, finished at 1 and at -1,
+backwards and NaN; CloseCops with none in range, three, one at exactly
+40 and one inside, the car itself, a range that ends before it starts,
+a speed of 40, and a run that starts at the first AI car.
 
 ```
 carmode_check  74 transitions, 19 resets, 36396 lines, 103 masked, 0 differ
