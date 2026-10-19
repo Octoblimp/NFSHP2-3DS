@@ -15,6 +15,7 @@
 #include "elight.h"
 #include "epositionmarker.h"
 #include "esolid.h"
+#include "eventmgr.h"
 #include "eventtree.h"
 #include "helisheet.h"
 #include "nisinfo.h"
@@ -160,7 +161,6 @@ static int take(const uint32_t *types, size_t n, int slot, int unload,
     }
 
 UNPORTED(LoaderFontInfo, UnloaderFontInfo, 3, 0x00015010u, 0x00030200u)
-UNPORTED(LoaderEventManager, UnloaderEventManager, 7, 0x80036000u)
 UNPORTED(LoaderFlailerChunk, UnloaderFlailerChunk, 10, 0x80010200u)
 UNPORTED(LoaderAnimations, UnloaderAnimations, 12, 0x80034008u)
 UNPORTED(LoaderLanguage, UnloaderLanguage, 26, 0x00039000u)
@@ -195,7 +195,7 @@ BChunkLoader LoaderTable[BCHUNK_NUM_LOADERS] = {
     loader_solid_list,              //  4
     loader_light_list,              //  5
     loader_acid_fx,                 //  6
-    LoaderEventManager,             //  7
+    loader_event_manager,           //  7
     loader_position_markers,        //  8
     loader_collision_volumes,       //  9
     LoaderFlailerChunk,             // 10
@@ -228,7 +228,7 @@ BChunkLoader UnloaderTable[BCHUNK_NUM_LOADERS] = {
     unloader_solid_list,            //  4
     unloader_light_list,            //  5
     unloader_acid_fx,               //  6
-    UnloaderEventManager,           //  7
+    unloader_event_manager,         //  7
     unloader_position_markers,      //  8
     unloader_collision_volumes,     //  9
     UnloaderFlailerChunk,           // 10

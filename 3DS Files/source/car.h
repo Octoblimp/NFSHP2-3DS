@@ -739,6 +739,27 @@ extern PlayerCleanUpJumpCamFn     gPlayerCleanUpJumpCamFn;
 #define PLAYER_ZONE_JUMP_CAM   6
 #define PLAYER_ZONE_AFTER_JUMP 7
 
+// TASKS 73: Car::TriggerEvents, retail 0x001335c0, in carevents.c, apart
+// from car.c because it reaches the event manager, the fern shaker, the
+// Player and the race. World::DoTimestep calls it through world.h's
+// gCarTriggerEventsFn for a car within 100 of a player: the bushes the
+// car is in shake, and a player's training line is shown.
+void     car_trigger_events(Car *c);
+
+// Player::TriggerVisibleDrivingLine(int, float), retail 0x00180b78, in
+// carevents.c too. Only while TheRaceParameters.TrainingLinesEnabled, the
+// race is in progress and the player has no line: a new
+// VisibleDrivingLine(player, line, seconds), 5 seconds for 0, bMalloc'd
+// (108 bytes, "VisibleDrivingLine", pool 16). The line is not ported, so
+// its constructor is a seam, and with it NULL nothing is made. Retail
+// never enables the training lines (TrainingLinesEnabled stays 0).
+#define VISIBLE_DRIVING_LINE_SIZE 108
+typedef struct VisibleDrivingLine *(*VisibleDrivingLineCtorFn)(
+    void *mem, Player *p, int32_t line, float seconds);   // 0x00174ec0
+extern VisibleDrivingLineCtorFn gVisibleDrivingLineCtorFn;
+void     player_trigger_visible_driving_line(Player *p, int32_t line,
+                                             float seconds);
+
 // ---------------------------------------------------------------- the replay
 
 // Retail's Car::DoSnapshot (0x00130ff0), in carsnap.c. A section named

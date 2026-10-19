@@ -114,7 +114,7 @@ and "R-TB12" retail's, whose 279 top-level chunks all have a taker.
 | 4 | 4 | SolidList | `80034000` | 110 | 65 | 10 | `esolid.c` |
 | 5 | 5 | LightList | `80034015`, `80034019`, `3401c`, `3401e` | 1, 1, 0, 1 | 2 | 2 | `elight.c` |
 | 6 | 6 | AcidFX | `80035000`, `80035010`, `35020`, `35021` | 0, 0, 2, 2 | 2 | 2 | `acidsys.c` |
-| 7 | 7 | EventManager | `80036000` | 1 | 1 | 1 | -- |
+| 7 | 7 | EventManager | `80036000` | 1 | 1 | 1 | `eventmgr.c` ([event-manager](event-manager.md)) |
 | 8 | 8 | PositionMarkers | `34013` | 27 | 0 | 0 | `epositionmarker.c` |
 | 9 | 9 | CollisionVolumes | `80034020` | 16 | 1 | 1 | `polyhedra.c` |
 | 10 | 10 | FlailerChunk | `80010200` | 3 | 0 | 0 | -- |

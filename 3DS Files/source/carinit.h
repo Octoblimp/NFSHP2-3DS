@@ -31,20 +31,9 @@
 #include <stdint.h>
 
 #include "car.h"
+#include "eventmgr.h"
 
-// 7emEvent, 36 bytes (the stabs). The event manager's; Car only reads
-// CarPtr. The links are the list's, as 32-bit slots, as in BodyDamage.
-typedef struct emEvent {
-    uint32_t pNext;               //  0  bTNode<emEvent>
-    uint32_t pPrev;               //  4
-    uint32_t ReferenceCount;      //  8
-    int32_t  ID;                  // 12
-    void    *pEventTrigger;       // 16
-    Car     *CarPtr;              // 20
-    uint32_t Parameter0;          // 24
-    uint32_t Parameter1;          // 28
-    uint32_t Parameter2;          // 32
-} emEvent;                        // 36
+// The event manager's emEvent (eventmgr.h); Car only reads CarPtr.
 
 // CarDamage's bMalloc size in retail, which grew 16 bytes over the demo's
 // 212 (cardamage.h). It becomes sizeof(CarDamage) when the damage system is
@@ -86,7 +75,6 @@ typedef void          (*CarDamageDestroyFn)(CarDamage *d, int32_t flags);
 typedef void          (*CarInitRenderInfoFn)(Car *c, RideInfo *ride);
 typedef void          (*CarRenderInfoDestroyFn)(CarRenderInfo *ri,
                                                 int32_t flags);
-typedef void          (*EmHandlerFn)(emEvent *e);
 typedef int32_t       (*EmAddHandlerFn)(EmHandlerFn fn, uint32_t mask);
 typedef void          (*EmRemoveHandlerFn)(EmHandlerFn fn);
 

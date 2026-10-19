@@ -2386,10 +2386,15 @@ damage, render and event calls are seams.
 `DamageAbove` and `DamageCap` are ported too (`cardamageabove.c`,
 [car-damage](car-damage.md), "The marker over the car").
 
-Nine are left, eight of the forty-six and `DoWheelForces`, and every
+`TriggerEvents` is ported from retail's `0x001335c0` (the demo's is
+`0x00131a58`), in `carevents.c` with `Player::TriggerVisibleDrivingLine`
+([event-manager](event-manager.md), "Car::TriggerEvents"). Its callees
+are the event manager's emTriggerEvents and emRemoveEvent, ShakeFern,
+FlattenFern and the replay's RegisterInterestingEvent. The
+VisibleDrivingLine constructor is a seam, which retail never reaches.
+
+Eight are left, seven of the forty-six and `DoWheelForces`, and every
 one reaches a class that is not ported:
-- `TriggerEvents` (`0x00131a58`): the event manager, the ferns,
-  `Player::TriggerVisibleDrivingLine`;
 - `AssignAnimatedDriver` and `UnAssignAnimatedDriver`;
 - the render group: `TriggerEffect` and `SwitchSkin`;
 - force feedback and rumble: `DoWheelForces`, `CalcForceParameters`,

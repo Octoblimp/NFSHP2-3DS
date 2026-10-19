@@ -166,4 +166,29 @@ void emodel_delete(eModel *m, int32_t flags);
 // Nothing happens when the pool is already made.
 void emodel_init_slot_pool(void);
 
+// ---------------------------------------- the rigid animation's timing
+//
+// emodelanim.c: these three read WorldTimeFrames, which nothing else here
+// does. RigidAnimationStartTime keeps a start in its low 14 bits, in
+// WorldTimeFrames; bit 0x4000 loops the animation and bit 0x8000 marks a
+// start as set, so a field of 0 is an animation not started. The
+// animation runs NumFrames * FrameRateScale sixtieths, where
+// SetRigidAnimationFrameNumber counts two to a frame whatever the scale.
+
+// eModel::GetRigidAnimation, 0x0010c8f0: the solid's rigid animation, or
+// NULL for no solid or none.
+struct eRigidAnimation *emodel_get_rigid_animation(const eModel *m);
+
+// eModel::GetRigidAnimationTime, 0x0010dae8. -1 for a start of 0.
+// Otherwise the frames since the start, mod 0x4000: for a looping
+// animation that mod NumFrames * FrameRateScale (both read signed), and
+// for any other that, or -1 once it is not under it. The model must have
+// a solid with an animation.
+int32_t emodel_get_rigid_animation_time(const eModel *m);
+
+// eModel::SetRigidAnimationFrameNumber(int), 0x0010c910: a start of
+// WorldTimeFrames less twice the frame, low 14 bits, with bit 0x8000 and
+// not 0x4000.
+void emodel_set_rigid_animation_frame_number(eModel *m, int32_t frame);
+
 #endif

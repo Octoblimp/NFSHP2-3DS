@@ -27564,3 +27564,63 @@ carmode_check: 74 transitions, 31 resets, 42036 lines, 0 differ.
 FinishMovement's 112 mutations: 106 caught, 6 equivalent (the five
 before, and `fm-slow-nan`: a NaN speed makes Speed's value NaN too, so
 GoingSlow's -10 cannot show). The CIA builds clean.
+
+## Session 134 -- the event manager and the bushes (TASKS 73, slice 6)
+
+Retail's Car::TriggerEvents (`0x001335c0`) reaches four things the port
+did not have: the event manager, the fern shakers, eModel's rigid
+animation timing and Player::TriggerVisibleDrivingLine. All four are
+ported, and one checker runs retail's code for them.
+
+- `eventmgr.{c,h}`: EventManager.obj (`0x001ba078` .. `0x001ba898`).
+  LoaderTable slot 7 (`loader_event_manager`, `unloader_event_manager`)
+  links each track's pack of triggers. The pools are made in
+  InitializeEverything's place (main.c, after `init_queued_files`). The
+  queue, the handlers, emProcessAllEvents (bound to
+  `gEmProcessAllEventsFn`, the end of World::DoTimestep) and
+  emTriggerEvents are retail's. Car's constructor and destructor add and
+  remove its handler (mask `0x10000`, on to the empty Car::EventHandler
+  for an event with a CarPtr) through `gEmAddHandlerFn` and
+  `gEmRemoveHandlerFn`, now bound. `carinit.h`'s stand-in emEvent is
+  gone, and it uses eventmgr.h's.
+- `fernshaker.{c,h}`: the FernShaker half of FernShaker.obj. A bush a car
+  drives into is hidden and drawn as a WorldObject of its model, and its
+  info's emitters (BUSHSHAKE_A, BUSHSHAKE_B) fire. A shaker goes 241
+  frames after its last start. The World's seams
+  (`gInitFernShakersFn`, `gCloseFernShakersFn`, `gFlushFernShakersFn`)
+  are bound.
+- `emodelanim.c`: GetRigidAnimation, GetRigidAnimationTime and
+  SetRigidAnimationFrameNumber (`emodel.h`'s last section).
+- `carevents.c`: Car::TriggerEvents and
+  Player::TriggerVisibleDrivingLine, bound to `gCarTriggerEventsFn`.
+  The look-ahead is 0.15 s of the velocity. A player's car over 30 in a
+  bush tells the replay (FlattenFern, 2), every fourth loop. The training
+  line needs TrainingLinesEnabled, which retail never sets. Its 108-byte
+  class is not ported, and its constructor is a NULL seam.
+- Retail reads VelocityMagnitude at CarState+900; the port's is at 896.
+  That is TASKS 73's CarState layout item. The port reads the field by
+  name, so nothing is wrong today.
+- Not ported: the rigid animation in the renderer. Nothing draws an
+  eModel's animation, so a shaken bush stands still while its leaves fly.
+  That is TASKS 76.
+
+`tools/eventmgr_check.py` with `tools/src/eventmgr_test.c`: retail's
+functions in mipsemu against the port's, over the queue, the triggers,
+the ferns and the cars. Every stub prints its arguments, and both sides
+dump the lists, pools, shakers and emitters after every op.
+- The edges: a sphere 2 ulp outside that the other summation order puts
+  inside, a velocity whose speed changes with the order, exactly 5 mph,
+  ages 240 and 241, the clock wrapping.
+- The image's own traps, which the scripts avoid: the unloader spins on
+  a non-header first child, a looping animation of length 0 divides by
+  zero, and removing the next event while handling corrupts the queue
+  (the last test of its scenario only).
+
+4 scenarios, 1090 ops, 11687 lines, 404 handled, 237 emitters triggered,
+0 differ. 134 mutations, 132 caught, 2 equivalent: no float speed is
+exactly 30 mph, and the shake is never below 0. The first pass left two
+holes, now covered: the 40 cap reached inside a leaf (`Q 9.0 5`), and a
+start of 0 read while the clock's low bits fall inside the animation.
+loadertable_check counts slot 7 as ported: 0 differ on both images.
+carinit, car, world, carsnap, physicscar and realdriver 0 differ. The CIA
+builds clean.

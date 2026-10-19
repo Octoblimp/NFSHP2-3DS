@@ -161,7 +161,7 @@ SOURCES = [HARNESS, STUBS, BCL, ESC, EMC] + ["3DS Files/source/" + f for f in (
     "suspension.c", "steering.c", "rigidbody.c", "table.c", "elight.c",
     "helisheet.c", "copmgr.c", "cop.c", "copmanager.c", "timer.c",
     "epositionmarker.c", "nisinfo.c", "soundscape.c", "eventtree.c",
-    "smokeableinfo.c", "cardamage.c", "estripdata.c")]
+    "smokeableinfo.c", "cardamage.c", "estripdata.c", "eventmgr.c")]
 
 HARNESS_TIMEOUT = 600
 EXTRACTED = ROOT / "extracted"
@@ -280,7 +280,7 @@ CLAIMS = {
     30: [0x00039100, 0x00039101, 0x00039102],
 }
 TAKER = {t: k for k, ts in CLAIMS.items() for t in ts}
-PORTED = {0, 1, 2, 4, 5, 6, 8, 9, 11, 13, 14, 16, 17, 18, 19, 21, 22,
+PORTED = {0, 1, 2, 4, 5, 6, 7, 8, 9, 11, 13, 14, 16, 17, 18, 19, 21, 22,
           23, 24, 25, 26, 28, 29}
 
 # Retail's: the demo's without PhysPredict, slot 20, and HeliSheet (23) a
@@ -2188,7 +2188,7 @@ MUTATIONS = [
     ("take-skips-first", BCL, "for (i = 0; i < n; i++) {",
      "for (i = 1; i < n; i++) {"),
     ("unported-unload-flag", BCL, "slot, 1, c);", "slot, 0, c);"),
-    ("slot-6-is-7", BCL, "    loader_acid_fx,", "    LoaderEventManager,"),
+    ("slot-6-is-7", BCL, "    loader_acid_fx,", "    loader_event_manager,"),
     ("slot-8-unloader-loads", BCL, "    unloader_position_markers,      //  8",
      "    loader_position_markers,        //  8"),
     ("slot-8-loader-is-null", BCL, "    loader_position_markers,        //  8",

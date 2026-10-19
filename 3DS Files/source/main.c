@@ -137,10 +137,12 @@
 #include "emath.h"
 #include "emodel.h"
 #include "esolid.h"
+#include "eventmgr.h"
 #include "eventtree.h"
 #include "eventtreeview.h"
 #include "eview.h"
 #include "gamedata.h"
+#include "fernshaker.h"
 #include "fesound.h"
 #include "flailer.h"
 #include "flailerwrap.h"
@@ -7858,6 +7860,14 @@ int main(int argc, char** argv)
     // preview zones (1 and 2) stay a dead button until their movers are
     // ported, and the zones' sounds wait for the sample seams.
     gCarFinishMovementFn = car_finish_movement;
+    // TASKS 73: Car::TriggerEvents for every car near a player, which
+    // shakes the bushes it drives into (fernshaker.h), and the event queue
+    // emptied at the end of the step. Car's constructor adds its handler,
+    // Car::EventHandler, which is empty, and its destructor takes it off.
+    gCarTriggerEventsFn = car_trigger_events;
+    gEmProcessAllEventsFn = em_process_all_events;
+    gEmAddHandlerFn = em_add_handler;
+    gEmRemoveHandlerFn = em_remove_handler;
     gPlayerCleanUpJumpCamFn = player_clean_up_jump_cam;
     gPlayerIsJumpCamAvailableFn = player_is_jump_cam_available;
     gPlayerRequestZoneFn = player_request_zone;
@@ -7933,6 +7943,11 @@ int main(int argc, char** argv)
     // reads ResourceFile and the texture packs queue (queuedfile.h).
     init_queued_files();
     gServiceQueuedFilesFn = service_queued_files;
+
+    // InitializeEverything's emEventManagerInit (retail 0x001ba078), after
+    // InitQueuedFiles and before eMathInit: the event and handler pools.
+    // LoaderTable slot 7 takes the track's event triggers (eventmgr.h).
+    em_event_manager_init();
 
     // InitializeEverything runs eMathInit (0x0011b9a0) just before
     // eInitEngine, and nothing else fills eMathIdentityMatrix: StuffScenery
@@ -8483,6 +8498,12 @@ int main(int argc, char** argv)
     gSpikeStripBlinkBlinkPoofFn    = tspikestrip_blink_blink_poof;
     gInitWorldObjectsFn            = init_world_objects;
     gCloseWorldObjectsFn           = close_world_objects;
+    // The fern shakers: a bush a car drives into is drawn as a world
+    // object, and its leaves fly. The World makes and closes them, and a
+    // replay's restore flushes them (fernshaker.h).
+    gInitFernShakersFn             = init_fern_shakers;
+    gCloseFernShakersFn            = close_fern_shakers;
+    gFlushFernShakersFn            = flush_fern_shakers;
     // The smokeables (14b): the track's cones, signs, fences and barrels.
     // Each waits as a virgin in the scenery until a car touches it, then
     // turns into a body that flies, breaks and settles; one far away or

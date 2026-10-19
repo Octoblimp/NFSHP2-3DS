@@ -4610,10 +4610,29 @@ phases.
           new cases, 0 differ; FinishMovement's 112 mutations, 106
           caught, 6 equivalent (one new: a NaN speed's Speed event
           hides GoingSlow's -10).
+        - [x] Car::TriggerEvents: retail's (`0x001335c0`) reaches the
+          event manager, the fern shakers, eModel's rigid animation
+          timing and Player::TriggerVisibleDrivingLine, none of them
+          ported before. Done in Session 134, all four from retail
+          (`docs/formats/event-manager.md`):
+          - LoaderTable slot 7 links each track's triggers;
+          - the event queue runs at the end of each step;
+          - a car driving into a bush hides it, draws it as a world
+            object, and fires its leaves (BUSHSHAKE_A, BUSHSHAKE_B);
+          - a player's car over 30 in one tells the replay.
+          The training line needs TrainingLinesEnabled, which retail
+          never sets, so its class stays a NULL seam. Retail reads
+          VelocityMagnitude at CarState+900 (the port's 896, the
+          layout item below; read by name, so nothing is off).
+          `eventmgr_check` runs retail's functions against the port's:
+          4 scenarios, 1090 ops, 11687 lines, 0 differ; 134
+          mutations, 132 caught, 2 equivalent. The bush stands still
+          while its leaves fly: nothing in the port draws a rigid
+          animation (TASKS 76).
         - Other demo-derived functions retail changed (TASKS 74's list):
-          Car::TriggerEvents, Car::CalcForceParameters,
-          PhysicsCar::Move, World::GetTimestep, DriveTrain::SetDesiredGear,
-          Wheel's GuessGroundForce and FinalizeGroundForce, InitSkids,
+          Car::CalcForceParameters, PhysicsCar::Move,
+          World::GetTimestep, Wheel's GuessGroundForce and
+          FinalizeGroundForce, InitSkids,
           CarCollisionBody::AddDamage, FindWaferNormal and the
           RectPolyhedron constructor. Retail's TerrainTypeInfoTable has
           another layout.
@@ -4731,6 +4750,21 @@ phases.
           the frontend, the debug menus and the editors.
         A paired literal can be an alignment artefact, so each needs
         reading beside the port's. It comes after TASKS 73.
+
+76. [ ] **Rigid animations: the shaken bush, and the rest.** Found in
+        TASKS 73's sixth slice. An eModel's rigid animation is its
+        solid's keyframed transform, timed by RigidAnimationStartTime
+        (`emodelanim.c` has retail's timing). Nothing in the port's
+        renderer reads it, so no rigid animation plays:
+        - a bush a car drives into is drawn as a world object
+          (`fernshaker.c`) whose shake starts the animation, and it
+          stands still while its leaves fly;
+        - the car's wipers set a start time (`carrender.c`) that
+          nothing plays.
+        The first step is eModel::Render's (`0x0010c7c8`) animation
+        setup, which `trackview.c`'s render_model skips (it draws each
+        solid as georender baked it), then which models on the disc
+        carry one. It comes after TASKS 73.
 
 ### The retail frontend
 
