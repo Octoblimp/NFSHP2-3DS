@@ -27481,3 +27481,8 @@ realdriver_check: 215871 ops, 50499 lines, 0 differ; 165 mutations, 161
 caught, 4 equivalent, 0 unexplained. playernis_check: 180125 ops,
 100348 lines, 0 differ; its 9 PlayerSelectedReset mutations caught.
 chopper_check and realcontroller_check 0 differ. The CIA builds clean.
+
+The launch checklist is a new artifact, since the first URL is gone:
+https://claude.ai/artifact/BmUh9FxPwzKyCLRwGrP5w2 (source in session
+93f8c806's scratchpad, `launch_checklist.html`). Republish it after every
+finished task.
