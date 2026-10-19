@@ -194,17 +194,38 @@ written into the struct.
 |---|---|---|
 | 0 | `DynamicCollisionBody` | |
 | 256 | `pCar` | |
-| 260 | `LastPenetrationTime` | a Timer |
-| 264 | `LastYawControlCollisionTime` | a Timer |
-| 268 | | four bytes: the matrix's quadword alignment |
+| 260 | `LastCollisionTime` | retail's, and the name is ours: a Timer, stamped at each contact |
+| 264 | `LastPenetrationTime` | a Timer |
+| 268 | `LastYawControlCollisionTime` | a Timer |
 | 272 | `ScaledInverseInertiaTensor` | a bMatrix4, what GetInertiaTensorInverse answers |
 
-The four bytes at 268 are written into the struct too.
+This is retail's order, which the port has had since TASKS 73. The demo
+has LastPenetrationTime at 260, LastYawControlCollisionTime at 264 and four
+bytes of the matrix's quadword alignment at 268. Retail put a third stamp
+first, and all of these agree on it:
+
+- its TestForContact (0x001d65f8);
+- the six accessors (0x001d8e08 .. 0x001d8e48), with a pair for the new
+  stamp that nothing calls;
+- DoSnapshot (0x001d8058), which moves the three in order;
+- Car::GetLastPenetrationTime (0x00135190), which loads 264;
+- GetPostCollisionYawControlBoost (0x00135eb8), which loads 268.
+
+The constructor stamps all three with `WorldTimer`. Player::ChooseToDisplayReset
+(0x00181f68, which the demo lacks) reads the new one: a car is in trouble
+only within 3 s of its last contact. The port had been reading
+LastPenetrationTime there, which only a blinking car's contact stamps.
 
 **CollisionBodyWitness** (`t1522`, s112) has two bases: the bTNode at 0 and
 the VCWitness at 16. The eight bytes between them are the VCWitness's
 quadword alignment. After the VCWitness come `pBody1` at 96, `pBody2` at
 100 and `pCollision` at 104.
+
+Retail's witness has `pCollision` at 108, and nothing reads or writes 104:
+not the constructor, the destructor, DoSnapshot, SnapshotEverything,
+GetCollision, BeginCollision, EndCollision, HasExpired or the Collision's
+constructor. Those differ from the demo's only in that offset, so the port
+keeps the demo's layout.
 
 **Contact** (`t2017`, s64):
 
@@ -1073,21 +1094,24 @@ byte that wraps (`lbu`, `addiu`, `sb`), and to the stats' collisions, raising
 their highest if it is passed. Then it makes the Collision, without looking
 at the one there may already be.
 
-**TestForContact** (0x001cc058):
+**TestForContact** (0x001cc058; retail's 0x001d65f8, which the port has):
 
-1. VClip is asked about the two bodies where they are now: the first's
+1. Retail's: the first body is asked AreCollisionsEnabled (slot 136), then
+   the second. If either answers 0, that is all, before VClip.
+2. VClip is asked about the two bodies where they are now: the first's
    rotation and position, then the second's.
-2. `PrintThisTime` is cleared if it was set.
-3. If they do not overlap, that is all.
-4. If either blinks and both are dynamic, each that is a car (type 0) has
+3. `PrintThisTime` is cleared if it was set.
+4. If they do not overlap, that is all.
+5. If either blinks and both are dynamic, each that is a car (type 0) has
    its LastPenetrationTime stamped with `WorldTimer`, and that is all. The
    first is asked whether it blinks first, and the second only if the first
    does not. A blinking car goes through other cars, but still hits the
    track, which is not dynamic.
-5. Otherwise a car whose other body stirs the yaw control
-   (IsYawControlInducingCollisionBody) has its LastYawControlCollisionTime
-   stamped, the first body, then the second.
-6. A Contact is made on the pool, for the first body, the second and the
+6. Otherwise each body that is a car has its LastYawControlCollisionTime
+   stamped if the other body stirs the yaw control
+   (IsYawControlInducingCollisionBody), and, retail's, its LastCollisionTime
+   stamped whatever the other is; the first body, then the second.
+7. A Contact is made on the pool, for the first body, the second and the
    witness, and added to the list in order.
 
 The pool grows, so it does not run out; the port aborts if it ever answers
@@ -1366,6 +1390,8 @@ Slices D and E's scenarios come after slice C's. They cover:
     is not a car, and with either body not dynamic;
   - the yaw stamps: against a type of -1, with only one car, and against a
     track body whose polygon is a wall and then is not, at either end;
+  - retail's: collisions off on the first body, then on the second, so
+    that neither is asked anything more and nothing is stamped;
 - RemoveContacts: the last contact, none, a run of them, a track body's,
   and an empty list;
 - AddSorted: ties, and a new contact at the head, at the tail and between;
@@ -1449,13 +1475,15 @@ stops if any division but CollisionImpulse's friction (0x001cb278) divides
 by zero, or if that one never does.
 
 ```
-collisionbody_check  81 scenarios, 1573 ops, 35427 lines, 89 dumps, 0 differ
+collisionbody_check  83 scenarios, 1583 ops, 35588 lines, 90 dumps, 0 differ
                      TrackPolygon bodies on TRACKB12 polygons 2 11 1553 1543 40 220 734
 ```
 
-`--mutate` runs 648 mutations: 624 are caught and 24 are
-equivalent, with 0 unexplained. `--only NAME,...` runs just those. The
-twenty-four are:
+`--mutate` ran 648 mutations: 624 were caught and 24 are
+equivalent, with 0 unexplained. There are 661 now: TASKS 73's slices
+added the rest and ran their own with `--only NAME,...`, which runs just
+those. Slice 13's sixteen, its own and the yaw stamps' rewritten for the
+new shape, are all caught. The twenty-four are:
 
 - the static destructor's two unlinks, of a witness and of a body. Each
   record's own destructor unlinks it again from its own links, which the

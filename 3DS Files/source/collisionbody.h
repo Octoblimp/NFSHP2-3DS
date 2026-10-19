@@ -181,15 +181,18 @@ typedef char dynamiccollisionbody_layout_check[
 // Timer, the two stamps below, is timer.h's: Car's blink reaches
 // Timer::SetTime, and RacingCar holds thirty-seven of them.
 
+// Retail's order (TASKS 73). The demo has LastPenetrationTime at 260,
+// LastYawControlCollisionTime at 264 and the matrix's round-up at 268.
+// Retail put a third stamp first, and its TestForContact (0x001d65f8),
+// accessors (0x001d8e08 .. 0x001d8e48) and DoSnapshot all agree on it.
 typedef struct CarCollisionBody {
     DynamicCollisionBody Dynamic;               //   0
     struct Car *pCar;                           // 256
-    Timer     LastPenetrationTime;              // 260
-    Timer     LastYawControlCollisionTime;      // 264
-    // Retail's, in the demo's round-up, and the name is ours: its
-    // constructor stamps it with WorldTimer beside the two above and the
-    // replay moves it; nothing in the object reads it.
-    Timer     ThirdTime;                        // 268
+    // Retail's, and the name is ours: WorldTimer whenever TestForContact
+    // hands the car on in a contact. Player::ChooseToDisplayReset reads it.
+    Timer     LastCollisionTime;                // 260
+    Timer     LastPenetrationTime;              // 264
+    Timer     LastYawControlCollisionTime;      // 268
     bMatrix4  ScaledInverseInertiaTensor;       // 272
 } CarCollisionBody;                             // 336
 
@@ -198,9 +201,9 @@ typedef struct CarCollisionBody {
 // itself makes the eleventh.
 typedef char carcollisionbody_layout_check[
     (CB_AT(CarCollisionBody, pCar, 256, 10)
-     && CB_AT(CarCollisionBody, LastPenetrationTime, 260, 11)
-     && CB_AT(CarCollisionBody, LastYawControlCollisionTime, 264, 11)
-     && CB_AT(CarCollisionBody, ThirdTime, 268, 11)
+     && CB_AT(CarCollisionBody, LastCollisionTime, 260, 11)
+     && CB_AT(CarCollisionBody, LastPenetrationTime, 264, 11)
+     && CB_AT(CarCollisionBody, LastYawControlCollisionTime, 268, 11)
      && CB_AT(CarCollisionBody, ScaledInverseInertiaTensor, 272, 11)
      && sizeof(CarCollisionBody) == CB_ROUND(336 + 11 * CB_SLACK))
     ? 1 : -1];
@@ -931,7 +934,9 @@ bMatrix4 *carcollisionbody_get_inertia_tensor_inverse(CollisionBody *b);
 // 0x001ce720, slot 184. Car::IsBlinking, or Car::IsPoofed when it is not.
 int32_t carcollisionbody_is_blinking(CollisionBody *b);
 
-// Inline in the image, and out of line at 0x001ce6c0 .. 0x001ce6f0.
+// Inline in the image, and out of line at 0x001ce6c0 .. 0x001ce6f0;
+// retail's, 0x001d8e08 .. 0x001d8e48, add a pair for LastCollisionTime
+// that nothing calls.
 static inline void carcollisionbody_set_last_yaw_control_collision_time(
     CarCollisionBody *b, const Timer *t)
 {

@@ -139,7 +139,9 @@ C_NW, C_FWD, C_VM, C_PDX, C_PDY = 956, 960, 964, 2040, 2044
 # The NisManager's, the record's, the rest.
 NM_PLAYING, NM_END, NM_NIS, NM_CAM = 68, 76, 80, 84
 R_TYPE, R_NUM, R_FRAMES, R_CAMS = 32, 40, 44, 48
-B_PEN, T_CLASS, AV_MEAN, RACE_TIME = 260, 230, 8, 16
+# B_COL: retail's CarCollisionBody's first Timer, the port's
+# LastCollisionTime, which TestForContact stamps on every contact.
+B_COL, T_CLASS, AV_MEAN, RACE_TIME = 260, 230, 8, 16
 RT_DLI, PT_SPEEDS = 40, 90
 
 
@@ -534,7 +536,7 @@ class Model(object):
             e.put32(c + C_PDX, v(10))
             e.put32(c + C_PDY, v(11))
             e.write(self.types[k] + T_CLASS, bytes([v(12) & 0xff]))
-            e.put32(self.bodies[k] + B_PEN, v(13))
+            e.put32(self.bodies[k] + B_COL, v(13))
             return
         if o == "dl":
             e.put32(self.route + RT_DLI + 48 * int(a[1]), v(2))
@@ -1304,7 +1306,7 @@ MUTATIONS = [
     # ---- ChooseToDisplayReset
     ("d_speed", P, "    float speed = car->State.VelocityMagnitude * MPH_PER_MPS;",
      "    float speed = car->State.ForwardSpeed * MPH_PER_MPS;"),
-    ("d_hit", P, "                    &car->pDynamicCollisionBody->LastPenetrationTime)",
+    ("d_hit", P, "                    &car->pDynamicCollisionBody->LastCollisionTime)",
      "                    &p->tTroubleSpeedTimer)"),
     ("d_s60", P, "    if (speed > 60.0f && hit < 3.0f) {",
      "    if (speed >= 60.0f && hit < 3.0f) {"),

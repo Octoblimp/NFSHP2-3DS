@@ -683,6 +683,8 @@ static void scenario_layout2(void)
     pi("off Dynamic LocalBBMax", (int)offsetof(DynamicCollisionBody, LocalBBMax));
     pi("sizeof CarCollisionBody", (int)sizeof(CarCollisionBody));
     pi("off CarBody pCar", (int)offsetof(CarCollisionBody, pCar));
+    pi("off CarBody LastCollision",
+       (int)offsetof(CarCollisionBody, LastCollisionTime));
     pi("off CarBody LastPenetration",
        (int)offsetof(CarCollisionBody, LastPenetrationTime));
     pi("off CarBody LastYawControl",

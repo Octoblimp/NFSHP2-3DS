@@ -4771,9 +4771,33 @@ phases.
           the padding. Nothing to port (Session 135): every reader goes
           by name, the replay's checksums go field by field, and the
           lock hash uses the port's own offsets.
-        - CollisionBodyWitness: retail's pCollision is at 108, the demo's
-          at 104.
-        - CarCollisionBody's retail fields.
+        - [x] CollisionBodyWitness: retail's pCollision is at 108, the
+          demo's at 104. Nothing to port (Session 135): none of
+          retail's witness functions reads or writes 104, and the
+          constructor, destructor, DoSnapshot, SnapshotEverything,
+          GetCollision, BeginCollision, EndCollision, HasExpired and the
+          Collision's constructor differ from the demo's only in that
+          offset.
+        - [x] CarCollisionBody's retail fields, with retail's
+          TestForContact (`0x001d65f8`). Done in Session 135. Retail has a
+          third stamp first, LastCollisionTime (our name) at 260, and
+          LastPenetrationTime and LastYawControlCollisionTime at 264 and
+          268 (the demo's 260 and 264); TestForContact, the accessors
+          (`0x001d8e08` .. `0x001d8e48`), DoSnapshot and the two Car
+          accessors agree. The port had the demo's order with the third
+          at 268. TestForContact first asks both bodies
+          AreCollisionsEnabled (slot 136) and stops if either says no,
+          before VClip, and stamps LastCollisionTime on each car it hands
+          on in a contact. **Bug fixed:** Player::ChooseToDisplayReset
+          (`0x00181f68`) reads the new stamp, so a car spinning or
+          slowing hard within 3 s of a crash is in trouble; the port read
+          LastPenetrationTime, which only a blinking car's contact
+          stamps, so a crash almost never counted. `collisionbody_check`
+          stubs retail's test into the demo image and stamps at its
+          contact: 83 scenarios, 0 differ; 16 new or rewritten mutations
+          caught. car_check reads the offsets from SLES_507.31; car,
+          carmode, physicscar, playernis and carsnap 0 differ, and their
+          7 timer mutations (5 new or rewritten) are caught.
         It comes after TASKS 72, unless the replays need it sooner. The
         disc's demo replays need it (72h-2b): they miss the checksum from
         their first frame on the 3DS.

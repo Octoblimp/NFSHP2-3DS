@@ -1615,9 +1615,14 @@ MUTATIONS = [
       "        dynamiccollisionbody_update_position(&c->Dynamic);"),
     M("ccb-bbox-max-gone", "carcollisionbody.c",
       "    ReplaySnapshot_VerifyVector2(s, &b->BBoxMax);\n", ""),
-    M("ccb-third-time-gone", "carcollisionbody.c",
-      "    ReplaySnapshot_MoveTimer(s, (int32_t *)&c->ThirdTime.PackedTime);\n",
+    M("ccb-collision-time-gone", "carcollisionbody.c",
+      "    ReplaySnapshot_MoveTimer(s, (int32_t *)&c->LastCollisionTime.PackedTime);\n",
       ""),
+    M("ccb-times-order", "carcollisionbody.c",
+      "    ReplaySnapshot_MoveTimer(s, (int32_t *)&c->LastCollisionTime.PackedTime);\n"
+      "    ReplaySnapshot_MoveTimer(s, (int32_t *)&c->LastPenetrationTime.PackedTime);\n",
+      "    ReplaySnapshot_MoveTimer(s, (int32_t *)&c->LastPenetrationTime.PackedTime);\n"
+      "    ReplaySnapshot_MoveTimer(s, (int32_t *)&c->LastCollisionTime.PackedTime);\n"),
 
     # -- the witnesses and the Collision ----------------------------------
     M("vcw-not-looked-up", "vclip.c",

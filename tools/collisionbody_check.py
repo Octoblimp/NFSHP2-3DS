@@ -37,6 +37,13 @@ as its bits. VClip is retail's: vclip_check's hook puts its restart into
 the demo's, and as the harness binds no World::Random, a restart takes
 vertex 0 of each polyhedron on both sides.
 
+**TestForContact is retail's** (`0x001d65f8`): Python around the demo's
+asks AreCollisionsEnabled of both bodies first and returns if either says
+no, and stamps each car it hands on in a contact with the time. Retail
+keeps that third Timer at 260 and moves the demo's two to 264 and 268; the
+model keeps the demo's layout and puts it in the round-up at 268, which
+retail's constructor stamps too. The harness prints the port's by name.
+
 **Labels, not pointers.** H0..H15 are bodies made in the checker's memory,
 Tn, Wn, Kn and Pn slot n of the TrackPolygon-body, witness, car-body and
 TrackPolygon pools (Tn.poly is a body's wafer), #n the nth block bMalloc
@@ -186,6 +193,10 @@ G_WILLIAMS_AT = GP - 16016          # WilliamsAITuningMode
 G_RC_AT = GP - 22720                # pRaceCoordinator
 G_COP_AT = GP - 16500               # pCopManager
 G_TIMER_AT = GP - 20224             # WorldTimer
+# Retail's third Timer, in the demo's round-up at 268 (the port's 260,
+# LastCollisionTime), and where the demo's TestForContact makes a contact.
+CCB_COL = 268
+DEMO_TFC_CONTACT = 0x001cc1f4
 G_LOOP_AT = GP - 20200              # WorldLoopCounter
 G_PRINT_AT = 0x00324448             # PrintThisTime
 POOL_CONTACT = GP - 18460           # ContactSlotPool
@@ -1729,6 +1740,22 @@ def contact_test_section(sc, es):
     sc.op(OP_CT_DUMP)
     sc.dump()
 
+    # Retail's: before VClip, either body with its collisions off ends it,
+    # so there is no contact and no stamp, and the witness is not walked.
+    sc.tag("TestForContact: collisions off on the first body, the second")
+    es[1].put(sc, pos=(1.1, 0.1, 0.0, 0.0), vel=(-2.0, 0.0, 0.0, 0.0))
+    sc.op(OP_GLOBAL, G_TIMER, 4400)
+    sc.op(OP_SETB, E(0), F_DIS, 1)
+    sc.op(OP_CT_TEST, W_EE)
+    sc.op(OP_SETB, E(0), F_DIS, 0)
+    sc.op(OP_SETB, E(1), F_DIS, 1)
+    sc.op(OP_GLOBAL, G_TIMER, 4500)
+    sc.op(OP_CT_TEST, W_EE)
+    sc.op(OP_SETB, E(1), F_DIS, 0)
+    es[1].put(sc, pos=(1.2, 0.0, 0.0, 0.0))
+    sc.op(OP_CT_DUMP)
+    sc.dump()
+
 
 def contact_list_section(sc, es):
     sc.tag("RemoveContacts")
@@ -2546,6 +2573,43 @@ class Model(object):
         # The port's VClip is retail's, with its restart (TASKS 73).
         vclip_check.install_retail_vclip(e, lambda n: 0)
 
+        # Retail's TestForContact (0x001d65f8): slot 136 of the first body,
+        # then the second, before anything, and the demo's after them.
+        tfc = self.fn["ct_test"]
+
+        def tfc_retail(em):
+            saved = list(em.reg)
+            w = em.reg[4] & M32
+            for off in (96, 100):
+                b = em.u32(w + off)
+                ent = em.u32(b + 80) + VT_ENABLED
+                ok = em.call(em.u32(ent + 4), s32(b + s16(em.u16(ent))))
+                if ok == 0:
+                    em.reg[:] = saved
+                    return None
+            em.reg[:] = saved
+            del em.stubs[tfc]
+            try:
+                em.reg[31] = em.RETURN
+                em.run(tfc)
+            finally:
+                em.stubs[tfc] = tfc_retail
+            em.reg[:] = saved
+            return None
+
+        e.stub(tfc, tfc_retail)
+
+        # And each car it hands on gets the time in the third Timer, where
+        # the contact is made (0x001cc1f4, the demo's jal ContactSlotPool).
+        def tfc_stamp(em):
+            w = em.reg[20] & M32
+            for off in (96, 100):
+                b = em.u32(w + off)
+                if em.mem[b + 12] == 0:
+                    em.put32(b + CCB_COL, em.u32(G_TIMER_AT))
+
+        e.hook(DEMO_TFC_CONTACT, tfc_stamp)
+
     def ct_init(self):
         """E0..E3 and what testC's stubs answer for them, testC, B0..B3 and
         clist; and the stubs for Collision's two calls."""
@@ -2604,6 +2668,12 @@ class Model(object):
                 self.emit("  e-%s E%d -> %d" % (name, k, r))
                 return r
             return fn
+
+        def e_enabled(em):
+            k = which(arg(0))
+            r = 1 if e.mem[self.ebody[k] + F_DIS] == 0 else 0
+            self.emit("  e-enabled E%d -> %d" % (k, r))
+            return r
 
         def timed(name):
             def fn(em):
@@ -2702,6 +2772,7 @@ class Model(object):
                  (VT_INERTIA, getter("inertia", E_INERTIA)),
                  (VT_MOVEABLE, iscal("moveable")),
                  (VT_BLINKING, iscal("blinking")),
+                 (VT_ENABLED, e_enabled),
                  (VT_BOUNCE, fscal("bounce", "bounce")),
                  (VT_FRICTION, fscal("friction", "friction")))
         vt = self.vt_testc = e.alloc(8 * VT_ENTRIES, 16)
@@ -2912,13 +2983,14 @@ class Model(object):
                                                  SIDE_WORDS))
         if b in self.ebody:
             s = self.es[self.ebody.index(b)]
-            self.emit("    e pen %08x yaw %08x" % (e.u32(b + 260),
-                                                   e.u32(b + 264)))
+            self.emit("    e col %08x pen %08x yaw %08x"
+                      % (e.u32(b + CCB_COL), e.u32(b + 260), e.u32(b + 264)))
             self.emit("    epos %s cv %s" % (self.words(s + E_POS, 8),
                                             self.words(s + E_CV, 8)))
         if e.u32(b + 80) == VT_CAR:
-            self.emit("    car %s pen %08x yaw %08x"
-                      % (L(e.u32(b + 256)), e.u32(b + 260), e.u32(b + 264)))
+            self.emit("    car %s col %08x pen %08x yaw %08x"
+                      % (L(e.u32(b + 256)), e.u32(b + CCB_COL),
+                         e.u32(b + 260), e.u32(b + 264)))
             self.emit("    sit %s" % self.words(b + 272, 16))
             p = e.u32(b + 8)
             if p in self.blocks:        # the box: its corners and faces
@@ -3514,6 +3586,8 @@ class Model(object):
             emit("  new %s" % L(m))
             if m:
                 emit("  -> %s" % L(self.call("ccb_ctor", m, self.cars[k])))
+                # retail's constructor stamps the third Timer too
+                e.put32(m + CCB_COL, e.u32(G_TIMER_AT))
         elif code == OP_CAR_DTOR:
             r, fl = args(2)
             b = self.body(r)
@@ -4643,6 +4717,8 @@ MUTATIONS = [
        "    b->LastPenetrationTime.PackedTime = 0;", CCB),
     _m("ccb_ctor_yaw_stamp", "    b->LastYawControlCollisionTime.PackedTime = (uint32_t)WorldTimer;",
        "    b->LastYawControlCollisionTime.PackedTime = 0;", CCB),
+    _m("ccb_ctor_col_stamp", "    b->LastCollisionTime.PackedTime = (uint32_t)WorldTimer;",
+       "    b->LastCollisionTime.PackedTime = 0;", CCB),
     _m("ccb_ctor_name", '"Car%d", car->DriverNumber', '"Car%d", car->DriverNumber + 1', CCB),
     _m("ccb_ctor_name_case", '"Car%d"', '"car%d"', CCB),
     _m("ccb_cv_suffix", '"%s_CV"', '"%s_cv"', CCB),
@@ -4902,13 +4978,12 @@ MUTATIONS = [
        "    return b->LastYawControlCollisionTime;", CBH),
     _m("ccb_get_car", "    return b->pCar;\n}", "    return NULL;\n}", CBH),
     _m("ccb_timers_swapped",
-       "    Timer     LastPenetrationTime;              // 260\n"
-       "    Timer     LastYawControlCollisionTime;      // 264",
-       "    Timer     LastYawControlCollisionTime;      // 264\n"
-       "    Timer     LastPenetrationTime;              // 260", CBH),
-    _m("ccb_no_quadword_pad",
-       "    uint8_t   _pad268[4];                       // 268  the quadword round-up\n",
-       "", CBH),
+       "    Timer     LastPenetrationTime;              // 264\n"
+       "    Timer     LastYawControlCollisionTime;      // 268",
+       "    Timer     LastYawControlCollisionTime;      // 268\n"
+       "    Timer     LastPenetrationTime;              // 264", CBH),
+    _m("ccb_no_collision_time",
+       "    Timer     LastCollisionTime;                // 260\n", "", CBH),
 
     # Contact's lanes and the VU's odd corners
     _m("ct_add_pad", "    o->pad = a->pad + b->pad;", "    o->pad = a->pad;",
@@ -5269,6 +5344,31 @@ MUTATIONS = [
        "", CTC),
     _m("ct_test_apart", "    if (r != VCLIP_PENETRATION)\n        return;",
        "    if (r == 0)\n        return;", CTC),
+    _m("ct_test_no_enabled1",
+       "    if (!are_collisions_enabled(w->pBody1))\n        return;\n", "",
+       CTC),
+    _m("ct_test_no_enabled2",
+       "    if (!are_collisions_enabled(w->pBody2))\n        return;\n", "",
+       CTC),
+    _m("ct_test_enabled2_b1",
+       "    if (!are_collisions_enabled(w->pBody2))\n        return;\n",
+       "    if (!are_collisions_enabled(w->pBody1))\n        return;\n", CTC),
+    _m("ct_test_enabled_after",
+       "    if (!are_collisions_enabled(w->pBody1))\n        return;\n"
+       "    if (!are_collisions_enabled(w->pBody2))\n        return;\n"
+       "    r1 = get_rotation(w->pBody1);\n"
+       "    p1 = get_position(w->pBody1);\n"
+       "    r2 = get_rotation(w->pBody2);\n"
+       "    p2 = get_position(w->pBody2);\n"
+       "    r = vcwitness_vclip(&w->Witness, r1, p1, r2, p2);\n",
+       "    r1 = get_rotation(w->pBody1);\n"
+       "    p1 = get_position(w->pBody1);\n"
+       "    r2 = get_rotation(w->pBody2);\n"
+       "    p2 = get_position(w->pBody2);\n"
+       "    r = vcwitness_vclip(&w->Witness, r1, p1, r2, p2);\n"
+       "    if (!are_collisions_enabled(w->pBody1))\n        return;\n"
+       "    if (!are_collisions_enabled(w->pBody2))\n        return;\n",
+       CTC),
     _m("ct_test_blink_b1_only",
        "    if (is_blinking(w->pBody1) || is_blinking(w->pBody2)) {",
        "    if (is_blinking(w->pBody1)) {", CTC),
@@ -5294,20 +5394,56 @@ MUTATIONS = [
        "                    .PackedTime = (uint32_t)WorldTimer;\n            return;",
        "                    .PackedTime = (uint32_t)WorldTimer;", CTC),
     _m("ct_test_yaw1_any",
-       "    if (w->pBody1->Type == CAR_COLLISION_BODY\n        && is_yaw",
-       "    if (1\n        && is_yaw", CTC),
+       "    if (w->pBody1->Type == CAR_COLLISION_BODY) {\n"
+       "        CarCollisionBody *c = (CarCollisionBody *)w->pBody1;",
+       "    if (1) {\n"
+       "        CarCollisionBody *c = (CarCollisionBody *)w->pBody1;", CTC),
     _m("ct_test_yaw1_always",
-       "        && is_yaw_control_inducing_collision_body(w->pBody2))",
-       "        && 1)", CTC),
+       "        if (is_yaw_control_inducing_collision_body(w->pBody2))",
+       "        if (1)", CTC),
     _m("ct_test_yaw2_any",
-       "    if (w->pBody2->Type == CAR_COLLISION_BODY\n        && is_yaw",
-       "    if (1\n        && is_yaw", CTC),
+       "    if (w->pBody2->Type == CAR_COLLISION_BODY) {\n"
+       "        CarCollisionBody *c = (CarCollisionBody *)w->pBody2;",
+       "    if (1) {\n"
+       "        CarCollisionBody *c = (CarCollisionBody *)w->pBody2;", CTC),
     _m("ct_test_yaw2_always",
-       "        && is_yaw_control_inducing_collision_body(w->pBody1))",
-       "        && 1)", CTC),
+       "        if (is_yaw_control_inducing_collision_body(w->pBody1))",
+       "        if (1)", CTC),
     _m("ct_test_yaw_field",
-       "        ((CarCollisionBody *)w->pBody1)->LastYawControlCollisionTime",
-       "        ((CarCollisionBody *)w->pBody1)->LastPenetrationTime", CTC),
+       "(w->pBody2))\n            c->LastYawControlCollisionTime",
+       "(w->pBody2))\n            c->LastPenetrationTime", CTC),
+    _m("ct_test_col1_gone",
+       "(w->pBody2))\n"
+       "            c->LastYawControlCollisionTime.PackedTime = (uint32_t)WorldTimer;\n"
+       "        c->LastCollisionTime.PackedTime = (uint32_t)WorldTimer;\n",
+       "(w->pBody2))\n"
+       "            c->LastYawControlCollisionTime.PackedTime = (uint32_t)WorldTimer;\n",
+       CTC),
+    _m("ct_test_col2_gone",
+       "(w->pBody1))\n"
+       "            c->LastYawControlCollisionTime.PackedTime = (uint32_t)WorldTimer;\n"
+       "        c->LastCollisionTime.PackedTime = (uint32_t)WorldTimer;\n",
+       "(w->pBody1))\n"
+       "            c->LastYawControlCollisionTime.PackedTime = (uint32_t)WorldTimer;\n",
+       CTC),
+    _m("ct_test_col1_with_yaw",
+       "(w->pBody2))\n"
+       "            c->LastYawControlCollisionTime.PackedTime = (uint32_t)WorldTimer;\n"
+       "        c->LastCollisionTime.PackedTime = (uint32_t)WorldTimer;\n",
+       "(w->pBody2)) {\n"
+       "            c->LastYawControlCollisionTime.PackedTime = (uint32_t)WorldTimer;\n"
+       "        c->LastCollisionTime.PackedTime = (uint32_t)WorldTimer;\n"
+       "        }\n",
+       CTC),
+    _m("ct_test_col_in_blink",
+       "                    .PackedTime = (uint32_t)WorldTimer;\n"
+       "            if (w->pBody2->Type == CAR_COLLISION_BODY)",
+       "                    .PackedTime = (uint32_t)WorldTimer;\n"
+       "            if (w->pBody1->Type == CAR_COLLISION_BODY)\n"
+       "                ((CarCollisionBody *)w->pBody1)->LastCollisionTime\n"
+       "                    .PackedTime = (uint32_t)WorldTimer;\n"
+       "            if (w->pBody2->Type == CAR_COLLISION_BODY)",
+       CTC),
     _m("ct_test_swapped",
        "contact_init(contact_new(), w->pBody1, w->pBody2, w));",
        "contact_init(contact_new(), w->pBody2, w->pBody1, w));", CTC),

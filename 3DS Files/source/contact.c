@@ -4,8 +4,8 @@
 // pair of bodies VClip has found inside each other, backed up to the moment
 // they touched and pushed apart. Then the witness's three calls that make
 // one and its collision: GetCollision and BeginCollision (0x001cbde0,
-// 0x001cbe18) and TestForContact (0x001cc058). The fourteenth and
-// fifteenth slices of task 27. The image's inline ~Contact (0x0014c188) and
+// 0x001cbe18) and TestForContact (0x001cc058; retail's 0x001d65f8, TASKS
+// 73). The fourteenth and fifteenth slices of task 27. The image's inline ~Contact (0x0014c188) and
 // operator delete (0x0014c330), which RemoveContacts reaches, are here too,
 // and bList::AddSorted (0x00238290), which TestForContact does.
 //
@@ -283,6 +283,14 @@ static int32_t is_moveable(CollisionBody *b)
 static int32_t is_blinking(CollisionBody *b)
 {
     const VtEntry *e = vt_slot(b->_vtable, COLLISIONBODY_VT_IS_BLINKING);
+
+    return ((VtBoolFn)e->fn)(vt_this(b, e));
+}
+
+static int32_t are_collisions_enabled(CollisionBody *b)
+{
+    const VtEntry *e = vt_slot(b->_vtable,
+                               COLLISIONBODY_VT_ARE_COLLISIONS_ENABLED);
 
     return ((VtBoolFn)e->fn)(vt_this(b, e));
 }
@@ -790,12 +798,20 @@ static Contact *contact_new(void)
     return c;
 }
 
+// Retail's 0x001d65f8, the demo's 0x001cc058 with two things added: it
+// asks both bodies whether their collisions are on before VClip, and each
+// car it hands on in a contact gets LastCollisionTime stamped, beside the
+// yaw stamp the demo's gave.
 void cbwitness_test_for_contact(CollisionBodyWitness *w, ContactNode *list)
 {
     bMatrix4 *r1, *r2;
     bVector3 *p1, *p2;
     int32_t r;
 
+    if (!are_collisions_enabled(w->pBody1))
+        return;
+    if (!are_collisions_enabled(w->pBody2))
+        return;
     r1 = get_rotation(w->pBody1);
     p1 = get_position(w->pBody1);
     r2 = get_rotation(w->pBody2);
@@ -818,14 +834,20 @@ void cbwitness_test_for_contact(CollisionBodyWitness *w, ContactNode *list)
             return;
         }
     }
-    if (w->pBody1->Type == CAR_COLLISION_BODY
-        && is_yaw_control_inducing_collision_body(w->pBody2))
-        ((CarCollisionBody *)w->pBody1)->LastYawControlCollisionTime
-            .PackedTime = (uint32_t)WorldTimer;
-    if (w->pBody2->Type == CAR_COLLISION_BODY
-        && is_yaw_control_inducing_collision_body(w->pBody1))
-        ((CarCollisionBody *)w->pBody2)->LastYawControlCollisionTime
-            .PackedTime = (uint32_t)WorldTimer;
+    if (w->pBody1->Type == CAR_COLLISION_BODY) {
+        CarCollisionBody *c = (CarCollisionBody *)w->pBody1;
+
+        if (is_yaw_control_inducing_collision_body(w->pBody2))
+            c->LastYawControlCollisionTime.PackedTime = (uint32_t)WorldTimer;
+        c->LastCollisionTime.PackedTime = (uint32_t)WorldTimer;
+    }
+    if (w->pBody2->Type == CAR_COLLISION_BODY) {
+        CarCollisionBody *c = (CarCollisionBody *)w->pBody2;
+
+        if (is_yaw_control_inducing_collision_body(w->pBody1))
+            c->LastYawControlCollisionTime.PackedTime = (uint32_t)WorldTimer;
+        c->LastCollisionTime.PackedTime = (uint32_t)WorldTimer;
+    }
     add_sorted(list, contact_time_sorting,
                contact_init(contact_new(), w->pBody1, w->pBody2, w));
 }

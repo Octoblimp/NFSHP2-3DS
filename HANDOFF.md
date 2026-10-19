@@ -27964,3 +27964,63 @@ Next: TASKS 73 slice 13, read ahead and not yet written:
   stamp, where the port reads LastPenetrationTime.
 - The witness's new word at 104: no witness function in retail touches
   it; check the rest of the image.
+
+## Session 135, continued -- the collision witness (TASKS 73, slice 13)
+
+Retail's CarCollisionBody times and TestForContact (`0x001d65f8`), against
+the demo's (`0x001cc058`).
+
+What retail has:
+
+- CarCollisionBody: a new stamp at 260 (LastCollisionTime, our name),
+  LastPenetrationTime at 264 and LastYawControlCollisionTime at 268. The
+  demo has those two at 260 and 264 and the matrix's round-up at 268.
+  TestForContact, the six accessors (`0x001d8e08` .. `0x001d8e48`; a pair
+  for the new stamp that nothing calls), DoSnapshot (`0x001d8058`, the
+  three in order), Car::GetLastPenetrationTime (`0x00135190`, 264) and
+  GetPostCollisionYawControlBoost (`0x00135eb8`, 268) all agree.
+- TestForContact first calls slot 136 (AreCollisionsEnabled) on pBody1
+  (+96), then pBody2 (+100), and returns if either answers 0, before VClip.
+  The blink path stamps LastPenetrationTime as before. On the contact
+  path, each body of Type 0 gets LastYawControlCollisionTime if the other
+  induces yaw control, and LastCollisionTime always.
+- Player::ChooseToDisplayReset (`0x00181f68`) reads +260, the new stamp.
+- The witness: pCollision at 108, the demo's 104. None of its functions
+  reads or writes 104 (constructor, destructor, DoSnapshot,
+  SnapshotEverything, GetCollision, BeginCollision, EndCollision,
+  HasExpired, the Collision's constructor); they differ from the demo's
+  only in that offset. Nothing to port.
+
+The port:
+
+- `collisionbody.h`: CarCollisionBody in retail's order, ThirdTime renamed
+  LastCollisionTime and moved to 260; the layout checks follow.
+- `carcollisionbody.c`: the constructor stamps it and DoSnapshot moves
+  the three in retail's order: the same words, so the stream is the same.
+- `contact.c`: `are_collisions_enabled`, the early return, and the stamp.
+- `playernis.c`: the trouble watch reads LastCollisionTime. **Bug fixed:**
+  it read LastPenetrationTime, which only a blinking car's contact stamps,
+  so spinning or slowing hard after a crash almost never counted as
+  trouble.
+
+Checks:
+
+- `collisionbody_check`: a stub on TestForContact asks slot 136 of both
+  bodies, then runs the demo's; a hook at the contact (`0x001cc1f4`)
+  stamps +268 of each car body, which the model reads as LastCollisionTime
+  (the demo's +260 and +264 are the other two). testC answers slot 136
+  from CollisionsDisabled on both sides (the demo table's entry is
+  `__terminate`). A new scenario turns collisions off on the first body,
+  then the second. 83 scenarios, 35588 lines, 0 differ; 16 mutations new
+  or rewritten, all caught.
+- `car_check` reads 264 and 268 from SLES_507.31's two Car accessors and
+  prints the new stamp's offset: 58 scenarios, 0 differ; 4 timer
+  mutations caught (cb-demo-timer-order new).
+- `playernis_check` (B_COL), `carsnap_check` (ccb-collision-time-gone,
+  ccb-times-order): 0 differ, mutations caught. carmode and physicscar:
+  0 differ (their models are the demo's and set the stamps by name).
+
+The CIA builds clean.
+
+Next: TASKS 73 slice 14, InitSkids (retail's MaybeMakeSkids takes the Car
+in a1). The skids aren't ported, so it may be a note.

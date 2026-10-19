@@ -597,7 +597,7 @@ static void run(char **t, int n)
         c->TheTrackPathCoordinate.PathDirection.x = bf(hx(t[10]));
         c->TheTrackPathCoordinate.PathDirection.y = bf(hx(t[11]));
         c->pCarTypeInfo->CarClass = (int8_t)ix(t[12]);
-        c->pDynamicCollisionBody->LastPenetrationTime.PackedTime = hx(t[13]);
+        c->pDynamicCollisionBody->LastCollisionTime.PackedTime = hx(t[13]);
         return;
     } else if (strcmp(o, "mv") == 0) {
         // mv|k|on|type|lb|dlb|hang|mode

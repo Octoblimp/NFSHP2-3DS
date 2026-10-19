@@ -596,7 +596,8 @@ static void dump_dynamic(DynamicCollisionBody *d)
         }
     for (i = 0; i < NE; i++)
         if (d == &ebody[i].Dynamic) {
-            printf("    e pen %08x yaw %08x\n",
+            printf("    e col %08x pen %08x yaw %08x\n",
+                   ebody[i].LastCollisionTime.PackedTime,
                    ebody[i].LastPenetrationTime.PackedTime,
                    ebody[i].LastYawControlCollisionTime.PackedTime);
             print_words("    epos", &es[i].pos, 8);
@@ -606,7 +607,8 @@ static void dump_dynamic(DynamicCollisionBody *d)
     if (d->Body._vtable == CARCOLLISIONBODY_VTABLE) {
         CarCollisionBody *c = (CarCollisionBody *)d;
 
-        printf("    car %s pen %08x yaw %08x\n", label(c->pCar),
+        printf("    car %s col %08x pen %08x yaw %08x\n", label(c->pCar),
+               c->LastCollisionTime.PackedTime,
                c->LastPenetrationTime.PackedTime,
                c->LastYawControlCollisionTime.PackedTime);
         print_words("    sit", &c->ScaledInverseInertiaTensor, 16);
@@ -1441,6 +1443,15 @@ static int32_t e_blinking(void *self)
     return es[k].blinking;
 }
 
+static int32_t e_enabled(void *self)
+{
+    int k = e_index(self);
+    int32_t r = ebody[k].Dynamic.Body.CollisionsDisabled == 0;
+
+    printf("  e-enabled E%d -> %d\n", k, r);
+    return r;
+}
+
 static float e_bounce(void *self)
 {
     int k = e_index(self);
@@ -1534,6 +1545,7 @@ static void install_test_tables(void)
             { COLLISIONBODY_VT_GET_INERTIA_TENSOR_INVERSE, (VtFn)e_inertia },
             { COLLISIONBODY_VT_IS_MOVEABLE, (VtFn)e_moveable },
             { COLLISIONBODY_VT_IS_BLINKING, (VtFn)e_blinking },
+            { COLLISIONBODY_VT_ARE_COLLISIONS_ENABLED, (VtFn)e_enabled },
             { COLLISIONBODY_VT_GET_BOUNCINESS, (VtFn)e_bounce },
             { COLLISIONBODY_VT_GET_FRICTION, (VtFn)e_friction },
         };

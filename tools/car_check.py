@@ -697,6 +697,19 @@ def imm(addr, op):
 
 
 OP_ADDIU, OP_LUI, OP_LH, OP_LW, OP_LWC1 = 0x09, 0x0f, 0x21, 0x23, 0x31
+_RETAIL = []
+
+
+def rimm(addr, op):
+    """imm, read from the retail image, SLES_507.31."""
+    if not _RETAIL:
+        from mipsdis import Elf
+        _RETAIL.append(Elf(str(ROOT / "PS2 Files" / "Full Game"
+                               / "SLES_507.31")))
+    w = struct.unpack("<I", _RETAIL[0].read(addr, 4))[0]
+    assert w >> 26 == op, (hex(addr), hex(w), op)
+    v = w & 0xffff
+    return v - 0x10000 if v & 0x8000 else v
 
 
 def slot_at(lh_addr):
@@ -967,10 +980,14 @@ def model_slice2():
     base = rnd(at(256, 9))
     p("sizeof CarCollisionBody", rnd(base + (336 - 256) + 4 * 0 + SLACK))
     p("off CarBody pCar", base)
-    # lw v0,260(v1) in GetLastPenetrationTime.
+    # The demo's lw v0,260(v1) in GetLastPenetrationTime; retail's
+    # (0x00135190) loads 264 and its GetPostCollisionYawControlBoost
+    # (0x00135eb8) 268, the demo's 264, with a new stamp at 260 (TASKS 73).
     assert imm(0x001334e8, OP_LW) == 260
-    p("off CarBody LastPenetration", base + PTR)
-    p("off CarBody LastYawControl", base + PTR + 4)
+    assert rimm(0x00135198, OP_LW) == 264 and rimm(0x00135ec4, OP_LW) == 268
+    p("off CarBody LastCollision", base + PTR)
+    p("off CarBody LastPenetration", base + PTR + 4)
+    p("off CarBody LastYawControl", base + PTR + 8)
     p("off CarBody InertiaTensor", base + PTR + 12)
     p("sizeof Timer", 4)
     # lw v0,28(v1) and lw a1,44(v0) in CalculateDraftFactor__3Car.
@@ -2413,10 +2430,15 @@ MUTATIONS = [
      "#define COLLISIONBODY_VT_ARE_COLLISIONS_ENABLED      136",
      "#define COLLISIONBODY_VT_ARE_COLLISIONS_ENABLED      128"),
     ("cb-timers-swapped", CB,
+     "    Timer     LastPenetrationTime;              // 264" + NL +
+     "    Timer     LastYawControlCollisionTime;      // 268",
+     "    Timer     LastYawControlCollisionTime;      // 264" + NL +
+     "    Timer     LastPenetrationTime;              // 268"),
+    ("cb-demo-timer-order", CB,
+     "    Timer     LastCollisionTime;                // 260" + NL +
+     "    Timer     LastPenetrationTime;              // 264",
      "    Timer     LastPenetrationTime;              // 260" + NL +
-     "    Timer     LastYawControlCollisionTime;      // 264",
-     "    Timer     LastYawControlCollisionTime;      // 260" + NL +
-     "    Timer     LastPenetrationTime;              // 264"),
+     "    Timer     LastCollisionTime;                // 264"),
     ("s3d-update-32", S3,
      "#define SOUND3D_VT_UPDATE        24",
      "#define SOUND3D_VT_UPDATE        32"),

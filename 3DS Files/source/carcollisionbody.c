@@ -116,7 +116,7 @@ CarCollisionBody *carcollisionbody_init(CarCollisionBody *b, Car *car)
     d->pBody = NULL;
     b->LastPenetrationTime.PackedTime = (uint32_t)WorldTimer;
     b->LastYawControlCollisionTime.PackedTime = (uint32_t)WorldTimer;
-    b->ThirdTime.PackedTime = (uint32_t)WorldTimer;       // retail's
+    b->LastCollisionTime.PackedTime = (uint32_t)WorldTimer;   // retail's
 
     // bSPrintf, which the port does not have.
     snprintf(name, sizeof name, "Car%d", car->DriverNumber);
@@ -488,10 +488,10 @@ void carcollisionbody_do_snapshot(CollisionBody *b, ReplaySnapshot *s)
         dynamiccollisionbody_update_position(&c->Dynamic);
     ReplaySnapshot_VerifyVector2(s, &b->BBoxMin);
     ReplaySnapshot_VerifyVector2(s, &b->BBoxMax);
+    ReplaySnapshot_MoveTimer(s, (int32_t *)&c->LastCollisionTime.PackedTime);
     ReplaySnapshot_MoveTimer(s, (int32_t *)&c->LastPenetrationTime.PackedTime);
     ReplaySnapshot_MoveTimer(s,
         (int32_t *)&c->LastYawControlCollisionTime.PackedTime);
-    ReplaySnapshot_MoveTimer(s, (int32_t *)&c->ThirdTime.PackedTime);
     ReplaySnapshot_EndSection(s);
 }
 

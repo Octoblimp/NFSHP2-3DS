@@ -275,7 +275,7 @@ void player_choose_to_display_reset(struct Player *p)
     struct Car *car = p->MyCar;
     float speed = car->State.VelocityMagnitude * MPH_PER_MPS;
     float hit = (float)ticks_since(
-                    &car->pDynamicCollisionBody->LastPenetrationTime)
+                    &car->pDynamicCollisionBody->LastCollisionTime)
                 * SECONDS_PER_TICK;
     float dt;
     Timer t;

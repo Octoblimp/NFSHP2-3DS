@@ -89,9 +89,10 @@ void player_selected_reset(struct Player *p);
 
 // Player::ChooseToDisplayReset, 0x00181f68: the trouble watch.
 // LastTimeCarInTrouble is WorldTimer when the car, within 3 s of its last
-// penetration, is above 60 mph and yawing more than 50 degrees a second,
-// or was above 60 at the last half-second sample and is losing more than
-// 70 mph a second; or when below 10 mph upside down. Five seconds on it
+// contact (its body's LastCollisionTime), is above 60 mph and yawing more
+// than 50 degrees a second, or was above 60 at the last half-second sample
+// and is losing more than 70 mph a second; or when below 10 mph upside
+// down. Five seconds on it
 // is let go. While it holds, with the car allowed to reset and not being
 // chased, it is let go too unless TimeToDisplayResetPrompt is showing --
 // which nothing in retail sets: the reset prompt was cut, and this is
