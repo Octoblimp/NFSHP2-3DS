@@ -239,6 +239,7 @@
 #include "resource.h"
 #include "sinit.h"
 #include "shake.h"
+#include "skids.h"
 #include "smokeable.h"
 #include "spikestrip.h"
 #include "startrace.h"
@@ -8550,6 +8551,16 @@ int main(int argc, char** argv)
     gInitMunitionsFn              = init_munitions;
     gCloseMunitionsFn             = close_munitions;
     gMunitionEffectsDoTimestepFn  = munition_effects_do_timestep;
+    // The skid marks (TASKS 78): the sets and the 64 m clans that keep
+    // them, made and closed with the world and flushed by its snapshot; a
+    // wheel's destructor finishes its maker's set (skids.h). Nothing lays
+    // a skid until MaybeMakeSkids, 78b.
+    gInitClansFn                  = init_clans;
+    gInitSkidsFn                  = init_skids;
+    gCloseClansFn                 = close_clans;
+    gCloseSkidsFn                 = close_skids;
+    gFlushClansFn                 = flush_clans;
+    gSkidSetFinishedAddingFn      = skidset_finished_adding_seam;
     // The race's cop drivers each get a car, in limbo -- unseen, parked,
     // not colliding -- until a radar trap or a roadblock calls it out
     // (copmgr.h).

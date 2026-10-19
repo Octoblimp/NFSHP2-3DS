@@ -4911,6 +4911,18 @@ phases.
         The first step is the sets and the clans against retail in
         mipsemu, then MaybeMakeSkids, then the drawing on the 3DS. It
         comes right after TASKS 73.
+        - [x] **78a, the sets and the clans** (`skids.{c,h}`):
+              SkidSegment .. the clans, retail's 272-byte SkidSet
+              with its car, both-views bit and centre, and the 4 m
+              test; the World's six seams filled in `main.c`.
+              Nothing lays a skid yet. `skids_check` runs retail's
+              own code: 5839 ops, 0 differ, 118 of 122 mutations
+              caught and 4 equivalent. Write-up:
+              `docs/formats/skids.md`.
+        - [ ] **78b, MaybeMakeSkids**, with the Car, filling
+              gWheelMaybeMakeSkidsFn.
+        - [ ] **78c, the drawing**: SkidSet::Render, RenderSkids
+              and RenderClans after StuffSun.
 
 ### The retail frontend
 

@@ -28054,3 +28054,38 @@ functions). Read so far:
   each pair as an ePoly through Render3D with the terrain's texture
   (0x00311520 by TheTerrainType, the 33 InitSkids finds), raised by
   gp-29156, alpha (intensity - fade) / 2, 0 at least.
+
+## Session 135, continued -- the skid marks' sets and clans (TASKS 78a)
+
+Retail's skids from SkidSegment::SetPoints to the clans (`0x001aa788` ..
+`0x001abaa0`), ported as `skids.{c,h}`, all but the drawing.
+
+What retail has that the demo doesn't:
+
+- SkidSet is 272 bytes, not 256: the car at 36, whether that car is seen
+  by both players at 40 (VisibleViewBits bits 1 and 2 when the set is
+  made), and the box's centre at 256, which RenderSkids measures to.
+- MakeSkid lays nothing more than 4 m from the car's GeometryPosition
+  (Car+80), and a change of the both-views bit ends the set as a change
+  of terrain does.
+
+The port:
+
+- `skids.c`/`skids.h`: the records; AddSegment's rules (a turn over 0.2
+  as 1 - cos ends the set, under 0.002 or a pair under 0.25 m moves the
+  last point unless the two pass 3 m, eight to a set); the set pool (128,
+  memory pool 16, not to grow, the tail's set freed when full) and the
+  clan pool (40); GetClan's 64 m squares, most recently used first; the
+  textures by each terrain's SkidTextureName.
+- `main.c`: gInitClansFn, gInitSkidsFn, gCloseClansFn, gCloseSkidsFn,
+  gFlushClansFn and gSkidSetFinishedAddingFn. Nothing lays a skid until
+  78b fills gWheelMaybeMakeSkidsFn.
+
+Check: `skids_check` (new) runs retail's own functions in mipsemu with the
+pools, nodes and GetTextureInfo stubbed on both sides, and hashes the
+whole state after every op. 5839 ops, 39503 lines, 0 differ; 122
+mutations, 118 caught, 4 equivalent. Write-up: `docs/formats/skids.md`.
+
+The CIA builds clean.
+
+Next: 78b, MaybeMakeSkids (`0x001a5520`) with the Car, and its callers.

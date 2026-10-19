@@ -1,0 +1,420 @@
+// skids -- see skids.h.
+
+#include "skids.h"
+
+#include <math.h>
+#include <stdint.h>
+
+#include "bchunk.h"
+#include "car.h"
+#include "eefpu.h"
+#include "realtime.h"
+#include "wheel.h"
+
+bNode        SkidSetList = { &SkidSetList, &SkidSetList };
+BSlotPool   *SkidSetSlotPool;
+int32_t      PlotSkidsInCaffeine;
+int32_t      PlotSkidPointsInCaffeine;
+TextureInfo *SkidTextureInfo[NUM_TERRAIN_TYPES];
+bNode        ClanList = { &ClanList, &ClanList };
+BSlotPool   *ClanSlotPool;
+
+// The .sdata floats at gp-29164, gp-29160 and gp-29152: a turn that ends a
+// set and one that moves its last point, both as 1 - cos, and a byte's
+// intensity back to a float.
+static const float SkidTurnLimit      = 0.2f;
+static const float SkidStraightLimit  = 0.002f;
+static const float SkidIntensityScale = 1.0f / 255.0f;
+
+static void add_head(bNode *list, bNode *n)
+{
+    bNode *head = list->next;
+
+    list->next = n;
+    head->prev = n;
+    n->prev = list;
+    n->next = head;
+}
+
+static void add_tail(bNode *list, bNode *n)
+{
+    bNode *tail = list->prev;
+
+    tail->next = n;
+    list->prev = n;
+    n->next = list;
+    n->prev = tail;
+}
+
+static void unlink_node(bNode *n)
+{
+    n->prev->next = n->next;
+    n->next->prev = n->prev;
+}
+
+// VisibleViewBits' players 1 and 2 (eview.h's IDs), both: `sra 1 ; andi
+// 1`, and `sra 2 ; andi 1` only when that is set. The image reads the car
+// whatever it is.
+static int32_t visible_to_both_players(const Car *car)
+{
+    uint32_t bits;
+
+    if (car == NULL)
+        return 0;
+    bits = car->TheOverrideRenderingPosition.VisibleViewBits;
+    if (((bits >> 1) & 1u) == 0)
+        return 0;
+    return (int32_t)((bits >> 2) & 1u);
+}
+
+// ------------------------------------------------------------ SkidSegment
+
+void skid_segment_set_points(SkidSegment *s, const bVector3 *pos,
+                             const bVector3 *delta)
+{
+    s->Position[0] = pos->x;
+    s->Position[1] = pos->y;
+    s->Position[2] = pos->z;
+    s->DeltaPosition[0] = (int8_t)ee_trunc_w(delta->x * 64.0f);
+    s->DeltaPosition[1] = (int8_t)ee_trunc_w(delta->y * 64.0f);
+    s->DeltaPosition[2] = (int8_t)ee_trunc_w(delta->z * 64.0f);
+}
+
+void skid_segment_get_points(const SkidSegment *s, bVector3 *pos,
+                             bVector3 *delta)
+{
+    pos->x = s->Position[0];
+    pos->y = s->Position[1];
+    pos->z = s->Position[2];
+    if (delta != NULL) {
+        delta->x = (float)s->DeltaPosition[0] * (1.0f / 64.0f);
+        delta->y = (float)s->DeltaPosition[1] * (1.0f / 64.0f);
+        delta->z = (float)s->DeltaPosition[2] * (1.0f / 64.0f);
+    }
+}
+
+void skid_segment_get_end_points(const SkidSegment *s, bVector3 *a,
+                                 bVector3 *b)
+{
+    float dx = (float)s->DeltaPosition[0] * (1.0f / 64.0f);
+    float dy = (float)s->DeltaPosition[1] * (1.0f / 64.0f);
+    float dz = (float)s->DeltaPosition[2] * (1.0f / 64.0f);
+
+    a->x = s->Position[0] + dx;
+    a->y = s->Position[1] + dy;
+    a->z = s->Position[2] + dz;
+    b->x = s->Position[0] - dx;
+    b->y = s->Position[1] - dy;
+    b->z = s->Position[2] - dz;
+}
+
+// ---------------------------------------------------------------- SkidSet
+
+SkidSet *skidset_construct(SkidSet *s, SkidMaker *maker, Car *car,
+                           const bVector3 *pos, const bVector3 *delta,
+                           int32_t terrain, float intensity)
+{
+    Clan   *clan;
+    bPNode *node;
+
+    s->TheTerrainType = terrain;
+    s->NumSkidSegments = 0;
+    s->pSkidMaker = maker;
+    s->pCar = car;
+    s->bVisibleToBothPlayers = visible_to_both_players(car);
+    s->Position = *pos;
+    bInitializeBoundingBox3At(&s->BBoxMin, &s->BBoxMax, pos);
+    s->Centre = *pos;
+    clan = get_clan(pos);
+    s->pClan = clan;
+    node = bpnode_malloc();
+    s->pClanNode = node;
+    add_tail(&clan->SkidSetList, &node->Node);
+    node->Object = s;
+    skidset_add_segment(s, pos, delta, intensity);
+    return s;
+}
+
+void skidset_destroy(SkidSet *s, int32_t flags)
+{
+    if (s->pSkidMaker != NULL)
+        skidmaker_make_no_skid(s->pSkidMaker);
+    // bPList<SkidSet>::Remove: off the clan's list, and ~bPNode with 3.
+    unlink_node(&s->pClanNode->Node);
+    bpnode_free(s->pClanNode);
+    if ((flags & 1) != 0)
+        bSlotFree(SkidSetSlotPool, s);
+}
+
+int32_t skidset_add_segment(SkidSet *s, const bVector3 *pos,
+                            const bVector3 *delta, float intensity)
+{
+    SkidSegment *seg;
+    bVector3     way = { 0.0f, 0.0f, 0.0f, 0.0f };
+    float        step = 0.0f;
+    int32_t      n = s->NumSkidSegments;
+    int32_t      merge = 0;
+
+    if (n > 0) {
+        const SkidSegment *last = &s->SkidSegments[n - 1];
+        float len2, q;
+
+        way.x = pos->x - last->Position[0];
+        way.y = pos->y - last->Position[1];
+        way.z = pos->z - last->Position[2];
+        len2 = (way.x * way.x + way.y * way.y) + way.z * way.z;
+        step = sqrtf(len2);
+        // vrsqrt, whose 1/0 is FLT_MAX: a step of nothing has no way.
+        q = ee_div(1.0f, sqrtf(len2));
+        way.x *= q;
+        way.y *= q;
+        way.z *= q;
+    }
+    if (n >= 2) {
+        float turn = 1.0f - ((way.x * s->LastNormal.x
+                              + way.y * s->LastNormal.y)
+                             + way.z * s->LastNormal.z);
+        float len = s->LastSegmentLength + step;
+
+        if (SkidTurnLimit < turn) {
+            skidset_finished_adding_skids(s);
+            return 0;
+        }
+        if (len < 0.25f)
+            merge = 1;
+        if (turn < SkidStraightLimit)
+            merge = 1;
+        if (3.0f < len)
+            merge = 0;
+    }
+    if (merge) {
+        seg = &s->SkidSegments[n - 1];
+        s->LastSegmentLength = s->LastSegmentLength + step;
+    } else {
+        if (n == SKIDSET_MAX_SEGMENTS)
+            return 1;
+        seg = &s->SkidSegments[n];
+        s->NumSkidSegments = n + 1;
+        if (n + 1 >= 2)
+            s->LastNormal = way;
+        s->LastSegmentLength = step;
+    }
+    skid_segment_set_points(seg, pos, delta);
+    seg->Intensity = (uint8_t)ee_trunc_w(intensity * 255.0f);
+    bExpandBoundingBox3R(&s->BBoxMin, &s->BBoxMax, pos, step);
+    clan_expand_bounding_box(s->pClan, &s->BBoxMin, &s->BBoxMax);
+    s->Centre.x = (s->BBoxMin.x + s->BBoxMax.x) * 0.5f;
+    s->Centre.y = (s->BBoxMin.y + s->BBoxMax.y) * 0.5f;
+    s->Centre.z = (s->BBoxMin.z + s->BBoxMax.z) * 0.5f;
+    s->Centre.pad = (s->BBoxMin.pad + s->BBoxMax.pad) * 0.5f;
+    return 0;
+}
+
+void skidset_finished_adding_skids(SkidSet *s)
+{
+    if (s->pSkidMaker != NULL) {
+        s->pSkidMaker->pSkidSet = NULL;
+        s->pSkidMaker = NULL;
+    }
+}
+
+void skidset_finished_adding_seam(void *s)
+{
+    skidset_finished_adding_skids((SkidSet *)s);
+}
+
+void skidset_get_last_points(const SkidSet *s, bVector3 *pos,
+                             bVector3 *delta)
+{
+    skid_segment_get_points(&s->SkidSegments[s->NumSkidSegments - 1], pos,
+                            delta);
+}
+
+SkidSet *create_new_skid_set(SkidMaker *maker, Car *car, const bVector3 *pos,
+                             const bVector3 *delta, int32_t terrain,
+                             float intensity)
+{
+    SkidSet *s;
+
+    if (bIsSlotPoolFull(SkidSetSlotPool)) {
+        SkidSet *tail = (SkidSet *)(void *)SkidSetList.prev;
+
+        unlink_node(&tail->Node);
+        skidset_destroy(tail, 3);
+    }
+    s = skidset_construct((SkidSet *)bSlotMalloc(SkidSetSlotPool), maker,
+                          car, pos, delta, terrain, intensity);
+    add_head(&SkidSetList, &s->Node);
+    return s;
+}
+
+void skidmaker_make_skid(SkidMaker *m, Car *car, const bVector3 *pos,
+                         const bVector3 *delta, int32_t terrain,
+                         float intensity)
+{
+    SkidSet *s;
+    bVector3 last_pos = { 0.0f, 0.0f, 0.0f, 0.0f };
+    bVector3 last_delta = { 0.0f, 0.0f, 0.0f, 0.0f };
+    float    last_intensity;
+
+    if (car != NULL) {
+        const bVector3 *g = &car->State.GeometryPosition;
+        float dx = g->x - pos->x;
+        float dy = g->y - pos->y;
+        float dz = g->z - pos->z;
+
+        if (4.0f < sqrtf((dx * dx + dy * dy) + dz * dz))
+            return;
+    }
+    s = (SkidSet *)m->pSkidSet;
+    if (s == NULL) {
+        m->pSkidSet = create_new_skid_set(m, car, pos, delta, terrain,
+                                          intensity);
+        return;
+    }
+    if (visible_to_both_players(car) == s->bVisibleToBothPlayers
+        && s->TheTerrainType == terrain
+        && skidset_add_segment(s, pos, delta, intensity) == 0)
+        return;
+    // A new set from the last point of this one, at its last intensity.
+    // The image reads the maker's set again, which is still this one: a
+    // set that finished itself on a turn answered 0 and returned above.
+    s = (SkidSet *)m->pSkidSet;
+    skidset_get_last_points(s, &last_pos, &last_delta);
+    s = (SkidSet *)m->pSkidSet;
+    last_intensity = (float)s->SkidSegments[s->NumSkidSegments - 1].Intensity
+                     * SkidIntensityScale;
+    skidset_finished_adding_skids(s);
+    s = create_new_skid_set(m, car, &last_pos, &last_delta, terrain,
+                            last_intensity);
+    skidset_add_segment(s, pos, delta, intensity);
+    m->pSkidSet = s;
+}
+
+void skidmaker_make_no_skid(SkidMaker *m)
+{
+    if (m->pSkidSet != NULL)
+        skidset_finished_adding_skids((SkidSet *)m->pSkidSet);
+}
+
+void init_skids(void)
+{
+    int32_t i;
+
+    if (SkidSetSlotPool == NULL) {
+        SkidSetSlotPool = bNewSlotPool((int)sizeof(SkidSet),
+                                       SKIDSET_POOL_SLOTS, "SkidSetSlotPool",
+                                       16);
+        bClearSlotPoolFlag(SkidSetSlotPool, BSP_OVERFLOW_IF_FULL);
+    }
+    for (i = 0; i < NUM_TERRAIN_TYPES; i++) {
+        const char *name = TerrainTypeInfoTable[i].SkidTextureName;
+
+        SkidTextureInfo[i] = NULL;
+        if (name != NULL)
+            SkidTextureInfo[i] = GetTextureInfo(bchunk_hash(name), 1, 0);
+    }
+    PlotSkidsInCaffeine = 0;
+    PlotSkidPointsInCaffeine = 0;
+}
+
+void close_skids(void)
+{
+    int32_t i;
+
+    if (SkidSetSlotPool != NULL) {
+        bDeleteSlotPool(SkidSetSlotPool);
+        SkidSetSlotPool = NULL;
+    }
+    for (i = NUM_TERRAIN_TYPES - 1; i >= 0; i--)
+        SkidTextureInfo[i] = NULL;
+}
+
+void delete_this_skid(SkidSet *s)
+{
+    unlink_node(&s->Node);
+    skidset_destroy(s, 3);
+}
+
+// ------------------------------------------------------------------ Clan
+
+Clan *clan_construct(Clan *c, const bVector3 *pos, uint32_t hash)
+{
+    c->SkidSetList.next = &c->SkidSetList;
+    c->SkidSetList.prev = &c->SkidSetList;
+    c->Position = *pos;
+    c->Hash = hash;
+    bInitializeBoundingBox3At(&c->BBoxMin, &c->BBoxMax, pos);
+    return c;
+}
+
+void clan_destroy(Clan *c, int32_t flags)
+{
+    bNode *list = &c->SkidSetList;
+
+    while (list->next != list)
+        delete_this_skid((SkidSet *)((bPNode *)(void *)list->next)->Object);
+    if ((flags & 1) != 0)
+        bSlotFree(ClanSlotPool, c);
+}
+
+void clan_expand_bounding_box(Clan *c, const bVector3 *mn,
+                              const bVector3 *mx)
+{
+    bExpandBoundingBox3Box(&c->BBoxMin, &c->BBoxMax, mn, mx);
+}
+
+void init_clans(void)
+{
+    if (ClanSlotPool == NULL)
+        ClanSlotPool = bNewSlotPool((int)sizeof(Clan), CLAN_POOL_SLOTS,
+                                    "ClanSlotPool", 16);
+}
+
+void flush_clans(void)
+{
+    bNode *n;
+
+    for (n = ClanList.next; n != &ClanList; n = ClanList.next) {
+        unlink_node(n);
+        clan_destroy((Clan *)(void *)n, 3);
+    }
+}
+
+void close_clans(void)
+{
+    if (ClanSlotPool != NULL) {
+        flush_clans();
+        bDeleteSlotPool(ClanSlotPool);
+        ClanSlotPool = NULL;
+    }
+}
+
+Clan *get_clan(const bVector3 *pos)
+{
+    int32_t  x = ee_trunc_w(pos->x * 65536.0f);
+    int32_t  y = ee_trunc_w(pos->y * 65536.0f);
+    uint32_t hash = ((uint32_t)(y >> 22) << 16)
+                    + ((uint32_t)(x >> 22) & 0xffffu);
+    bNode   *n;
+    Clan    *c;
+
+    for (n = ClanList.next; n != &ClanList; n = n->next) {
+        c = (Clan *)(void *)n;
+        if (c->Hash == hash) {
+            unlink_node(n);
+            c->LastUpdateTime = WorldTime;
+            add_head(&ClanList, n);
+            return c;
+        }
+    }
+    if (bIsSlotPoolFull(ClanSlotPool)) {
+        bNode *tail = ClanList.prev;
+
+        unlink_node(tail);
+        clan_destroy((Clan *)(void *)tail, 3);
+    }
+    c = clan_construct((Clan *)bSlotOMalloc(ClanSlotPool), pos, hash);
+    add_head(&ClanList, &c->Node);
+    return c;
+}
