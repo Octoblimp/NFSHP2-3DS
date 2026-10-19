@@ -28089,3 +28089,94 @@ mutations, 118 caught, 4 equivalent. Write-up: `docs/formats/skids.md`.
 The CIA builds clean.
 
 Next: 78b, MaybeMakeSkids (`0x001a5520`) with the Car, and its callers.
+
+## Session 135, continued -- MaybeMakeSkids read, not yet ported (TASKS 78b)
+
+Stopped here at the user's request, with nothing of 78b written yet. The
+working tree has no 78b changes. Everything needed to write it:
+
+Retail's `MaybeMakeSkids__5Wheelf` (`0x001a5520`) takes (Wheel *, Car *)
+in a0/a1; the float in f12 is never read. The demo's took only the float,
+which is why the port's seam is `WheelMaybeMakeSkidsFn(Wheel *, float)`.
+All three retail callers pass their mover's own car:
+
+| Caller | Call | a1 |
+|---|---|---|
+| PhysicsCar::Move | `0x00138c84` | `lw a1,84(s3)`, PhysicsCar.pCar |
+| BeltMover::Move | `0x0020533c` | `lw a1,8(s2)`, BeltMover.pCar (s2 = this) |
+| MellowMover::UpdateCar | `0x00219cb4` | `lw a1,44(s1)`, MellowMover.pCar |
+
+The port's calls are `physicscar.c:1191`, `beltmover.c:623` and
+`mellowmover.c:848`, each `wheel_maybe_make_skids(wheel, dt)`: change the
+seam to (Wheel *, Car *) and pass the car. `docs/formats/belt-mover.md`
+step 11 and its "MaybeMakeSkids' second argument" note say `dt`, and
+that the image passes a1 as it happens to be; that is the demo's reading
+and needs correcting.
+
+What it does (w = the wheel, offsets as in `wheel.h`):
+
+1. `hard = ZForce (344) * TractionUsage (360) > 8.0`.
+2. `blown = (Car byte 2124 >> WI->[20]) & 1`, the wheel's bit in retail's
+   BlownTireBits (`lb`, so the byte is signed; WI+20 is the wheel's
+   number). The port's field is `car->BlownTireBits` (demo offset 2088;
+   check the retail map).
+3. A skid needs `(Slipping (340) || hard) && TouchingGround (341) &&
+   !blown`, and a ground speed `sqrtf(vx*vx + vy*vy)` over 1.0, from
+   Velocity (240, 244). Anything else is MakeNoSkid(&w->TheSkidMaker).
+4. `across = (-vy, vx, 0)`, normalized through vrsqrt (vmulx.xyzw; the w
+   word at sp+12 is left to the stack and nothing reads it).
+5. `fwd = bRotateVector(WorldMatrix (112), (0, 1, 0))`; `d =
+   |dot3(fwd, across)|`.
+6. `half = WI->[16] * TerrainTypeInfoTable[Terrain (336)].[20]` (the
+   SkidWidthMultiplier, `terraintype.h`), times `max(d, 0.5)`, times 0.5.
+   `bNormalize(across, across, half)`.
+7. The wheel's place is WorldMatrix's row 3 (w+160). `A = place + across`
+   and `B = place - across` (vadd/vsub .xyzw). Each one's height is
+   GetElevation(CS->[4] (CS = w+24), &A, NULL, NULL, NULL); the port has
+   gTopologyGetElevationFn and gWheelTopologyOfCarStateFn for that.
+8. The point is (place.x, place.y, (hA + hB) * 0.5). `across.z = hA*0.5
+   - hB*0.5`, then `bNormalize(across, across, half)` again.
+9. `intensity = d`, times 1/3 (gp-29264) when Slipping is 0. Terrain 4
+   gives intensity 0; any other terrain raises it to 0.3 (gp-29260) at
+   least (`c.lt.s` then `bc1tl`).
+10. MakeSkid(&w->TheSkidMaker, car, &point, &across, Terrain,
+    intensity).
+
+The plan for 78b:
+
+- Write `skids_maybe_make_skids(Wheel *, Car *)` in skids.c, or in
+  wheel.c behind the seam.
+- Change the seam and the three callers.
+- Check it with mipsemu against `0x001a5520`. Stub MakeSkid, MakeNoSkid,
+  GetElevation and bRotateVector or run them as shipped, with Wheels and
+  Cars at retail's offsets. Either extend `skids_check.py` or write a
+  `wheelskids_check.py`. Then mutations, docs (`skids.md` and
+  `belt-mover.md`), the CIA build, the commit and the checklist.
+
+After 78b comes 78c, the drawing, as read from retail:
+
+- RenderClans (`0x001ab810`), called by eDisplayFrame after StuffSun
+  (`0x001132c4`). For each clan on ClanList: if its box is 11 pixels or
+  more and visible, then if WorldTime (gp-19568) minus its stamp is over
+  300, re-stamp it and move it to the head; then RenderSkids.
+- RenderSkids (`0x001ab248`, (Clan *, bMatrix4 *, eView *)). Nothing at
+  all when eView byte 6 is set. For each set on the clan's list, it is
+  drawn when its box is visible (IsBoundingBoxVisible `0x0010ce80`, min
+  +96, max +80) and it has no car or `(car VisibleViewBits (+1300) >>
+  view ID) & 1`. Then `px = GetPixelSize(view, 1.0, |Centre - camera
+  position (view->pCamera + 64)|)`. When px > 4: fade = 0 if px > 10,
+  else `(u8)trunc(256 - (px - 4) * 42.6667)` (gp-29148). Render the set
+  with that fade and move it to SkidSetList's head.
+- SkidSet::Render (`0x001aacc0`): the texture is SkidTextureInfo
+  [terrain]; return if it is NULL. For i in 0..n-2, GetEndPoints of
+  segments i and i+1 (A/B and C/D, plus and minus the delta). The ePoly's
+  vertices are v0 = A, v1 = C, v2 = D, v3 = B, each z += 0.05 (gp-29156).
+  The alpha bytes at ePoly+131/135/139/143 are `max(0, I - fade) >> 1`:
+  v0 and v3 from segment i, v1 and v2 from i+1. Then Render3D(poly, tex,
+  eMathIdentityMatrix, 0) through the port's gEPolyRender3DFn. The blend
+  is 0x42, Cd - Cs*As (georender's GEO_BLEND_SUBTRACT).
+- Still open for 78c: what eView byte 6 means (an NIS override? the
+  port's stays 0), and whether SKID_ROAD and the others are loaded on the
+  3DS.
+
+Then the zone cameras, 72h-2c, 75 and 76.

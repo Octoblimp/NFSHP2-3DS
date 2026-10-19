@@ -4920,7 +4920,8 @@ phases.
               caught and 4 equivalent. Write-up:
               `docs/formats/skids.md`.
         - [ ] **78b, MaybeMakeSkids**, with the Car, filling
-              gWheelMaybeMakeSkidsFn.
+              gWheelMaybeMakeSkidsFn. Retail's code is read (see
+              HANDOFF, the 78b entry); the port is not started.
         - [ ] **78c, the drawing**: SkidSet::Render, RenderSkids
               and RenderClans after StuffSun.
 
