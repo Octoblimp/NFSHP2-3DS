@@ -27636,3 +27636,59 @@ Its only write to the Car is ForceBuzzTime (retail Car+2188, after the
 shake). In `out/retail_full.dis` the only loads at that offset are a
 camera table's (`0x0019b0c4`). The 3DS has no such motors, so the item
 is closed with nothing ported.
+
+### TASKS 73, slice 7: PhysicsCar::Move and the blown tyres
+
+Retail's PhysicsCar::Move (`0x00137d90`, listing in
+`out/pcmove_retail.txt`, diff in `out/pcmove_diff.txt`) is the demo's
+(`0x00135c78`) but for four things, all ported:
+
+- `physicscar.c`, the wheel loop: a rear wheel brakes by mph * 0.05
+  (gp-31736) when the throttle is over 0.8 (gp-31740), the brake over 0.5
+  and the speed under 10 mph, all strict. NFS mode's handbrake extra is
+  the HP arm's 0.5; `PC_EBRAKE_NFS` (0.7) is gone.
+- Blown tyres: each wheel's Damage is 1 when its own bit of
+  BlownTireBits is set (`(int8_t)` then shifted, so bit 7 reaches no
+  wheel), else 0. `PC_BLOWN_TRACTION` (0.4) and the
+  fTractionBoostOverride read are gone; retail reads the override
+  nowhere (`car.h` says so; playercop.c and copmgr.c still write it).
+  The limiter's 60 on a blown tyre and the damage boost override's
+  test are unchanged.
+- `wheel.c`, wheel_get_derivative (retail `0x001a46b0`): after the
+  rolling friction, `acc -= w * (Damage * 0.1)` (`WHEEL_DAMAGE_DRAG`,
+  gp-29344). So a blown tyre drags its own wheel's spin, where the demo
+  cut every wheel's grip.
+- move_brake_stand: the lurch is `(bRandomF(0.15) + 0.4) * 4000 + 0.5`
+  ticks, truncated (`PC_LURCH_RANDOM`, `PC_LURCH_MIN`), for both
+  lurches: 0.4 to 0.55 s. The start stamp adds 0.5 too, which first
+  matters at WorldTimer 4096691.
+
+`physicscar_check.py`: `retail_move` and `retail_wheel_derivative` hook
+the demo image (stubs at the brake store, the blown-tyre block and the
+lurch call; hooks for the 0.5 and the two roundings; the drag at
+`0x0019a42c`, before the divide). New SCEN_FIELD `wdmg` sets a wheel's
+Damage. New scenarios: ten `ln-*` launch edges (0.8 and 0.5 one ulp
+either side, exactly 10 mph from 0x408f0c79, over the brake, at rest,
+backing), `mv-prerace-late` (the start stamp's rounding),
+`mv-prerace-round` (seed 0x123e5678, a lurch of 1685.52 ticks that
+rounds up; the default seed's is 1685.33), `mv-blown-1-3`,
+`mv-blown-high` (bit 7) and `mv-unblown-damaged`. 121 scenarios, 128464
+lines, 0 differ. 306 mutations, 299 caught, 7 equivalent. Two old ones,
+`dmg-always-enabled` and `dmg-enabled-is-one`, had gone stale when TASKS
+51 put GetVisibleDamageAmountAt first in `cardamage.c` (Move never calls
+it); they now name GetVisibleTotalDamage and are caught.
+
+`wheel_check.py` and `tools/src/wheel_test.c`: the model's
+get_derivative has the drag (0.1 read from SLES_507.31), and
+`dvd<spin>_<damage>` prints 3 spins x Damage 1, 0.37, -0.5. 19
+scenarios, 10779 lines, 0 differ. 166 mutations, 156 caught, 10
+equivalent; `wh-terraininfo-static-dynamic-swapped` had gone stale with
+`terraintype.h`'s offsets (now 32 and 36) and is caught again.
+
+carmode, mellowmover, beltmover, physicssystem, rigidbody, physcomp,
+engine, drivetrain, suspension, carsnap, car, realdriver, carstate,
+cardamage, playercop, copmanager, pullover, traffictele, careffects and
+tiresound: 0 differ. The CIA builds clean. `docs/formats/physics-car.md`'s
+Move section says what retail changed. Left for InitSkids: retail's
+MaybeMakeSkids takes the Car in a1 from every caller; the port's skid
+seam is still unbound. Next: World::GetTimestep.

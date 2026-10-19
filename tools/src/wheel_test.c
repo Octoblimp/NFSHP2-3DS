@@ -735,6 +735,25 @@ static void scenario_derivative(void)
         }
         gUglyTimestepHack = saved;
     }
+
+    // Retail's damage drag: a blown tyre's Damage of 1, and two that are
+    // not, each way round.
+    {
+        static const float dmgs[] = { 1.0f, 0.37f, -0.5f };
+        size_t d;
+        for (s = 0; s < sizeof spins / sizeof spins[0]; s++) {
+            for (d = 0; d < sizeof dmgs / sizeof dmgs[0]; d++) {
+                Wheel *w = fresh();
+                float out[2] = { 0.0f, 0.0f };
+                w->State.w = spins[s];
+                w->Damage = dmgs[d];
+                w->Terrain = 3;
+                wheel_get_derivative(w, out);
+                sprintf(tag, "dvd%u_%u", (unsigned)s, (unsigned)d);
+                pf(tag, out[1]);
+            }
+        }
+    }
 }
 
 // ------------------------------------------------ CheckForBrakeLock, pilot

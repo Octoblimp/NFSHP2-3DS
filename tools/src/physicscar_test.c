@@ -541,6 +541,8 @@ static void after_ctor(const PcScen *s)
             g_pc->pWheel[i]->Terrain = s->wterr[i];
         if (s->wlock >> i & 1)
             g_pc->pWheel[i]->BrakeLocked = 1;
+        if (s->wdmg[i])
+            g_pc->pWheel[i]->Damage = fb(s->wdmg[i]);
     }
     if (s->mass != 0)
         ((RigidBodyInfo *)g_pc->pBody->RBI)->Mass = fb(s->mass);

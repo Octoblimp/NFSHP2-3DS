@@ -242,7 +242,7 @@ struct Car {
     Gear              DispGear;                 // 1088
     float             FrictionBoost;            // 1092
     float             DraftFactor;              // 1096
-    float             fTractionBoostOverride;   // 1100
+    float             fTractionBoostOverride;   // 1100 retail reads it nowhere
     float             fDamageBoostOverride;     // 1104
     uint8_t           _hole1108[12];            // 1108 to align vOldVel
 

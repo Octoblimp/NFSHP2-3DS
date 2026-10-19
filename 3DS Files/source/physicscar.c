@@ -90,9 +90,7 @@ static bVector2 JumpStabilizationGraph[3];
 #define PC_MOVE_DAMP_TILT     0.15f               // gp-31860  3e19999a
 #define PC_MS_TO_MPH          2.237f              // gp-31856  400f2b02
 #define PC_EBRAKE_KNEE        0.2f                // gp-31852, gp-31844  3e4ccccd
-#define PC_EBRAKE_NFS         0.7f                // gp-31848  3f333333
 #define PC_EBRAKE_YAW         0.3f                // gp-31840  3e99999a
-#define PC_BLOWN_TRACTION     0.4f                // gp-31836  3ecccccd
 #define PC_EXTREME_YAW        0.1f                // gp-31832  3dcccccd
 #define PC_DAMAGE_DERATE      0.03f               // gp-31828  3cf5c28f
 #define PC_DYNO_STOPPED       0.8f                // gp-31812  3f4ccccd
@@ -103,6 +101,15 @@ static bVector2 JumpStabilizationGraph[3];
 // there. The second is retail's gp-31780 and gp-31772, the first gp-31768.
 #define PC_FLIP_SPEED         0.8f                // retail gp-31780  3f4ccccd
 #define PC_FLIP_UP            0.1f                // retail gp-31768  3dcccccd
+
+// Retail's Move (0x00137d90): the rear brakes with both pedals down (the
+// throttle past 0.8, the brake held 0.05 a mph), and the lurch's random
+// part of 0.15 s after 0.4. The demo's NFS handbrake extra of 0.7
+// (gp-31848) and blown-tyre traction of 0.4 (gp-31836) are gone.
+#define PC_LAUNCH_THROTTLE    0.8f                // retail gp-31740  3f4ccccd
+#define PC_LAUNCH_BRAKE       0.05f               // retail gp-31736  3d4ccccd
+#define PC_LURCH_RANDOM       0.15f               // retail gp-31708  3e19999a
+#define PC_LURCH_MIN          0.4f                // retail gp-31704  3ecccccd
 
 void physicscar_static_init(void)
 {
@@ -855,10 +862,10 @@ static void move_burn_out(PhysicsCar *pc, const CarDriver *d, CarState *cs,
 
 // Before the green light. From PRERACE on the front brakes hold the car
 // (BrakeStanding), and a press of the throttle after a release lets it
-// lurch: the brakes come off for a random time -- a quarter to a half
-// second while both lurches are left (the constructor gives two), then a
-// half to a whole second -- and go back on when the timer runs out or the
-// throttle is let go.
+// lurch: the brakes come off for 0.4 to 0.55 s (retail's; the demo's was
+// a quarter to a half second for the first of the constructor's two,
+// then a half to a whole one) and go back on when the timer runs out or
+// the throttle is let go. Retail rounds both stamps to the nearest tick.
 static void move_brake_stand(PhysicsCar *pc, eRaceStage stage)
 {
     const CarDriver *d = pc->Mover.Driver;
@@ -872,17 +879,17 @@ static void move_brake_stand(PhysicsCar *pc, eRaceStage stage)
 
         if (0.5f < d->Throttle) {
             if (pc->ThrottleReleased && pc->LurchsLeft) {
-                float lo = pc->LurchsLeft == 2 ? 0.25f : 0.5f;
-                float r = bRandomF(lo, &bDefaultSeed);
+                float r = bRandomF(PC_LURCH_RANDOM, &bDefaultSeed);
 
                 pc->BrakeStandTimer.PackedTime =
-                    (uint32_t)ee_trunc_w((r + lo) * 4000.0f);
+                    (uint32_t)ee_trunc_w((r + PC_LURCH_MIN) * 4000.0f
+                                         + 0.5f);
                 pc->LurchsLeft--;
                 pc->BrakeStanding = 0;
                 pc->ThrottleReleased = 0;
                 pc->BrakeStandTimerStart.PackedTime =
                     (uint32_t)ee_trunc_w((float)WorldTimer * PC_TICK
-                                         * 4000.0f);
+                                         * 4000.0f + 0.5f);
             }
         } else {
             pc->BrakeStanding = 1;
@@ -1043,17 +1050,25 @@ float physicscar_move(PhysicsCar *pc, float dt)
         float eb;
 
         // Before the race only the front brakes hold, and only while the
-        // car is brake-standing.
+        // car is brake-standing. Retail's: with the throttle past 0.8 and
+        // the brake past 0.5 under 10 mph, a rear brake holds by the speed
+        // alone, so a car standing on both pedals spins its rear wheels.
         if (race_get_race_stage(pCurrentRace) == RACE_STAGE_RACING
-            || (pc->BrakeStanding && i < 2))
-            w->Brake = d->Brake * BrakeSettings[i];
-        else
+            || (pc->BrakeStanding && i < 2)) {
+            if (PC_LAUNCH_THROTTLE < d->Throttle && 0.5f < d->Brake
+                && mph < 10.0f && i >= 2)
+                w->Brake = mph * PC_LAUNCH_BRAKE;
+            else
+                w->Brake = d->Brake * BrakeSettings[i];
+        } else {
             w->Brake = 0.0f;
+        }
 
+        // Retail adds the HP arm's 0.5 in NFS mode too; the demo's 0.7.
         eb = d->EBrake * EBrakeSettings[i];
         if (cs->DriverMode == 0) {
             if (PC_EBRAKE_KNEE < eb)
-                eb += PC_EBRAKE_NFS;
+                eb += 0.5f;
         } else if (PC_EBRAKE_KNEE < eb
                    && PC_EBRAKE_YAW < fabsf(carstate_get_yaw(cs))
                    && mph < 80.0f) {
@@ -1080,12 +1095,11 @@ float physicscar_move(PhysicsCar *pc, float dt)
                                : cs->BurnOutState == 2)
             w->TractionBoost = boost * cs->BurnOutTraction;
 
-        // The image's per-wheel test is `(1 << i) != 0`, which always
-        // holds, so one blown tyre cuts all four.
-        if (car->BlownTireBits != 0)
-            w->TractionBoost *= PC_BLOWN_TRACTION;
-        else if (car->fTractionBoostOverride != 0.0f)
-            w->TractionBoost *= car->fTractionBoostOverride;
+        // Retail's: a blown tyre is its wheel's Damage, which the wheel's
+        // spin reads as drag (wheel_get_derivative). The demo cut all
+        // four tractions for one blown tyre, and by fTractionBoostOverride
+        // otherwise, which retail reads nowhere.
+        w->Damage = (((int8_t)car->BlownTireBits >> i) & 1) ? 1.0f : 0.0f;
     }
 
     if (car->fDamageBoostOverride != 0.0f && car->BlownTireBits == 0)

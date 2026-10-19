@@ -249,7 +249,9 @@ no slip and no lateral velocity). Such a wheel keeps the force it guessed.
 ## Move
 
 0x00135c78, slot 16 of the Mover's table, once a frame with the frame's
-`dt`. It returns `dt`.
+`dt`. It returns `dt`. The port's is retail's (`0x00137d90`), which differs
+from the demo's in the brakes, the handbrake, the blown tyres and the
+brake-stand's lurch; each section below says how.
 
 1. **SetBoost** with the car's BoostFactor, then **Calibrate**.
 2. **The pedals are tidied**, in the driver's own fields. With the throttle
@@ -322,12 +324,19 @@ state 2 wheels 1 and 2's.
 ```
 Brake  = driver.Brake * BrakeSettings[i]       while racing, or brake-standing
                                                on wheels 0 and 1; else 0
+         rear wheels, throttle over 0.8, brake over 0.5, under 10 mph:
+                mph * 0.05 instead              (retail; the launch)
 eb     = driver.EBrake * EBrakeSettings[i]     {0, 0, 1, 1}
-         NFS mode: + 0.7 over 0.2
+         NFS mode: + 0.5 over 0.2               (retail; the demo's 0.7)
          HP mode:  + 0.5 over 0.2 with |yaw| over 0.3 and under 80 mph
-TractionBoost = boost, times BurnOutTraction on the burning pair,
-                times 0.4 with any tyre blown, else times the override if set
+TractionBoost = boost, times BurnOutTraction on the burning pair
+Damage = 1 if the wheel's own bit of BlownTireBits is set, else 0  (retail)
 ```
+
+Retail's launch: both pedals down at a standstill hold the rear wheels by a
+brake that grows with the speed (0.05 a mph, gp-31736), not the brake pedal,
+so the car can be revved against the brakes. The comparisons are strict:
+0.8 (gp-31740), 0.5 and 10 mph each hold the old brake.
 
 BrakeSettings is {1, 1, 0.6, 0.6} in .data at 0x002e8550 -- not
 GetBrakeSettings's answer, which nothing in Move asks for. At wheel 2 the
@@ -335,10 +344,15 @@ boost itself is multiplied, for wheel 2 and wheel 3 both, by
 `ym * (YawFrictionBoost(...) - 1) + 1`, with wheel 2's handbrake, the
 speed's magnitude and the post-collision yaw boost.
 
-**One blown tyre cuts all four.** The per-wheel test is `(1 << i) != 0`,
-which always holds, so any bit of BlownTireBits takes the 0.4, and the
-traction override is never applied to a car with a blown tyre. After the
-loop a damage boost override goes through SetBoost unless a tyre is blown.
+**A blown tyre drags its own wheel (retail).** The demo cut all four
+tractions to 0.4 for any blown tyre (its per-wheel test `(1 << i) != 0`
+always holds) and applied fTractionBoostOverride otherwise. Retail does
+neither: it writes each wheel's Damage from its own bit (`(int8_t)bits >> i
+& 1`, so bit 7 sign-extends but never reaches wheels 0 to 3), and
+Wheel::GetDerivative (`0x001a46b0`) takes `w * Damage * 0.1` (gp-29344) off
+the spin's torque after the rolling friction. Nothing in retail reads
+fTractionBoostOverride. After the loop a damage boost override goes through
+SetBoost unless a tyre is blown, as before.
 
 ### The sub-steps
 
@@ -360,9 +374,13 @@ n + 1, and the add wraps as `addiu` does. Each sub-step:
 ### The brake-stand
 
 From PRERACE on, the front brakes hold the car. A throttle over 0.5, after
-a release and with a lurch left, lets it go for a random time: `(r + lo) *
-4000` ticks, where r is bRandomF(lo) and lo is 0.25 for the first lurch and
-0.5 for the second. The constructor gives two. The brakes come back when the
+a release and with a lurch left, lets it go for a random time. Retail's is
+`(r + 0.4) * 4000 + 0.5` ticks, truncated, where r is bRandomF(0.15)
+(gp-31708, gp-31704): 0.4 to 0.55 s for both lurches. The demo's was `(r +
+lo) * 4000` with r bRandomF(lo), lo 0.25 for the first lurch and 0.5 for
+the second. Retail also rounds the start stamp (`WorldTimer * tick * 4000
++ 0.5`), which first differs from truncating at WorldTimer 4096691. The
+constructor gives two lurches. The brakes come back when the
 timer runs out or the throttle is let go. While the car is brake-standing,
 the body's momentum P is zeroed every sub-step: three words are stored, and
 the fourth is stack.

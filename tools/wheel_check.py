@@ -73,6 +73,8 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hostbuild
+import mipsdis
+import retail_model
 import bmath_check as BM
 import bvector_check as BV
 import engine_check as EN          # its Table model, not its Engine
@@ -213,6 +215,13 @@ K_PI = elf_f(0x003217BC)
 K_TWO_PI = elf_f(0x003217C0)
 K_REVERSE_DAMP = elf_f(0x003217C8)
 K_MPS_TO_MPH = elf_f(0x003217CC)
+
+# Retail's GetDerivative (0x001a46b0) takes off the spin times Damage * 0.1
+# after the rolling friction, its 0.1 a literal of its own (gp-29344), read
+# out of SLES_507.31.
+RETAIL_ELF = mipsdis.Elf(str(retail_model.RETAIL))
+K_DAMAGE_DRAG = struct.unpack(
+    "<f", RETAIL_ELF.read(retail_model.RETAIL_GP - 29344, 4))[0]
 K_RAD_TO_DEG = elf_f(0x003217D4)
 K_NO_SURFACE = f32(-100.0)        # `lui at,0xc2c8`, an immediate not a load
 
@@ -704,11 +713,13 @@ def check_terrain(w, pos, r):
 # ------------------------------------------------------------ GetDerivative
 
 def get_derivative(w, out):
-    """0x0019a3d0. Returns NULL, not the buffer."""
+    """Retail's 0x001a46b0 (the demo's 0x0019a3d0). Returns NULL, not the
+    buffer."""
     mul = rolling_mul(w)
     out[0] = w.w
     acc = fsub(w.AppliedTorque, fmul(w.GroundForce[0], w.WI.Radius))
     acc = fsub(acc, fmul(fmul(w.w, mul), f32(G_ROLLING_FRICTION)))
+    acc = fsub(acc, fmul(w.w, fmul(w.Damage, f32(K_DAMAGE_DRAG))))
     acc = fdiv(acc, w.MomentOfInertia)
     out[1] = acc
     if w.BrakeLocked != 0:
@@ -1527,6 +1538,19 @@ def s_derivative():
         pf("dvh%d" % h, out[1])
     g_ugly_timestep = saved
 
+    # Retail's damage drag: a blown tyre's Damage of 1, and two that are
+    # not, each way round.
+    dmgs = [1.0, 0.37, -0.5]
+    for s in range(len(spins)):
+        for d in range(len(dmgs)):
+            w = fresh()
+            out = [ZERO, ZERO]
+            w.w = f32(spins[s])
+            w.Damage = f32(dmgs[d])
+            w.Terrain = 3
+            get_derivative(w, out)
+            pf("dvd%d_%d" % (s, d), out[1])
+
 
 def s_brake_lock():
     vs = [0.0, 1.0, 40.0, 400.0, 4000.0]
@@ -2322,10 +2346,10 @@ MUTATIONS = [
      "    float     AppliedTorque;             // 256" + NL
      + "    float     Slip[2];                   // 260"),
     ("wh-terraininfo-static-dynamic-swapped", TT,
-     "    float       StaticFrictionMultiplier;    //  28" + NL
-     + "    float       DynamicFrictionMultiplier;   //  32",
-     "    float       DynamicFrictionMultiplier;   //  28" + NL
-     + "    float       StaticFrictionMultiplier;    //  32"),
+     "    float       StaticFrictionMultiplier;    //  32" + NL
+     + "    float       DynamicFrictionMultiplier;   //  36",
+     "    float       DynamicFrictionMultiplier;   //  32" + NL
+     + "    float       StaticFrictionMultiplier;    //  36"),
     ("wh-terraininfo-no-pad", TT,
      "    uint8_t     _pad0[2];                    //  14",
      "    uint8_t     _pad0[0];                    //  14"),
@@ -2539,6 +2563,23 @@ MUTATIONS = [
     ("wh-derivative-slip-added", WC,
      "        out[1] = out[1] - w->CurrentSlip / d;",
      "        out[1] = out[1] + w->CurrentSlip / d;"),
+    ("wh-derivative-damage-dropped", WC,
+     "    acc = acc - w->State.w * (w->Damage * WHEEL_DAMAGE_DRAG);" + NL,
+     ""),
+    ("wh-derivative-damage-scale", WC,
+     "    acc = acc - w->State.w * (w->Damage * WHEEL_DAMAGE_DRAG);",
+     "    acc = acc - w->State.w * (w->Damage * 0.2f);"),
+    ("wh-derivative-damage-sign", WC,
+     "    acc = acc - w->State.w * (w->Damage * WHEEL_DAMAGE_DRAG);",
+     "    acc = acc + w->State.w * (w->Damage * WHEEL_DAMAGE_DRAG);"),
+    ("wh-derivative-damage-unspun", WC,
+     "    acc = acc - w->State.w * (w->Damage * WHEEL_DAMAGE_DRAG);",
+     "    acc = acc - w->Damage * WHEEL_DAMAGE_DRAG;"),
+    ("wh-derivative-damage-after", WC,
+     "    acc = acc - w->State.w * (w->Damage * WHEEL_DAMAGE_DRAG);" + NL
+     + "    acc = acc / w->MomentOfInertia;",
+     "    acc = acc / w->MomentOfInertia;" + NL
+     + "    acc = acc - w->State.w * (w->Damage * WHEEL_DAMAGE_DRAG);"),
     ("wh-derivative-force-sign", WC,
      "    acc = w->AppliedTorque - w->GroundForce[0] * w->WI->Radius;",
      "    acc = w->AppliedTorque + w->GroundForce[0] * w->WI->Radius;"),

@@ -4637,12 +4637,31 @@ phases.
           (retail Car+2188), which no code in retail reads (the
           image's other `2188(` loads are a camera table's).
           Checked in Session 134.
+        - [x] PhysicsCar::Move: retail's (`0x00137d90`) against the
+          demo's (`0x00135c78`). Done in Session 134. Four changes:
+          - the launch: a rear wheel with the throttle over 0.8, the
+            brake over 0.5 and under 10 mph brakes by mph * 0.05, not
+            by the pedal;
+          - NFS mode's handbrake extra is 0.5 (the demo's 0.7);
+          - a blown tyre is its own wheel's Damage (1 by its bit, else
+            0), and Wheel::GetDerivative (`0x001a46b0`) takes
+            spin * Damage * 0.1 off the spin's torque. The demo cut all
+            four tractions to 0.4 for any blown tyre, and applied
+            fTractionBoostOverride otherwise; retail reads that nowhere;
+          - the brake-stand's lurch is (bRandomF(0.15) + 0.4) * 4000
+            + 0.5 ticks for both lurches, and the start stamp rounds too.
+          `physicscar_check` hooks the four into the demo image at
+          retail's places: 121 scenarios, 128464 lines, 0 differ; 306
+          mutations, 299 caught, 7 equivalent. `wheel_check` models the
+          drag: 19 scenarios, 10779 lines, 0 differ; 166 mutations, 156
+          caught, 10 equivalent. Twenty other checkers 0 differ (carmode,
+          mellowmover, carsnap, car, realdriver, playercop, ...). Left
+          for InitSkids: retail's MaybeMakeSkids takes the Car (a1).
         - Other demo-derived functions retail changed (TASKS 74's list):
-          PhysicsCar::Move, World::GetTimestep, Wheel's
-          GuessGroundForce and FinalizeGroundForce, InitSkids,
-          CarCollisionBody::AddDamage, FindWaferNormal and the
-          RectPolyhedron constructor. Retail's TerrainTypeInfoTable has
-          another layout.
+          World::GetTimestep, Wheel's GuessGroundForce and
+          FinalizeGroundForce, InitSkids, CarCollisionBody::AddDamage,
+          FindWaferNormal and the RectPolyhedron constructor. Retail's
+          TerrainTypeInfoTable has another layout.
         - [x] RealDriver's changed functions and the player's input.
           Done in Session 133. Retail's tunables and its steering and
           throttle handlers are the demo's; what changed:

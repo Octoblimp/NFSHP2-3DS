@@ -430,6 +430,7 @@ SCEN_FIELDS = [
     ("atq", "f4", (0.0, 0.0, 0.0, 0.0)),  # each wheel's AppliedTorque
     ("wterr", "i4", (-1, -1, -1, -1)),    # and its Terrain; -1 leaves it
     ("wlock", "int", 0),            # bit i locks wheel i's brake
+    ("wdmg", "f4", (0.0, 0.0, 0.0, 0.0)),  # each wheel's Damage, if not 0
     ("extreme", "f", 0.0),          # the CTI's MaxZMomentAccExtreme
     ("yawctl", "f", 0.0),           # and its YawControl
     ("mass", "f", 0.0),             # the body's RBI mass after the ctor
@@ -478,6 +479,20 @@ BURN = dict(MOVE, move=1, steps=1, car=3, dmode=1, ctrl=1, mat=IDENT,
 
 def bo(**kw):
     d = dict(BURN)
+    d.update(kw)
+    d.setdefault("dgear", d["gear"])
+    return d
+
+
+# Retail's launch: a slow straight car, 3 along x -- 6.7 mph -- with the
+# throttle and the brake both down. LN_10MPH is the forward speed whose
+# mph is 10.0 exactly, LN_UNDER the float below it.
+LN_10MPH, LN_UNDER = fbits_to(0x408f0c79), fbits_to(0x408f0c78)
+
+
+def ln(**kw):
+    d = dict(MOVE, move=1, steps=1, mat=IDENT, avel=(0.0, 0.0, 0.0),
+             vel=(3.0, 0.0, 0.0), fwd=3.0, thr=1.0, brk=0.8)
     d.update(kw)
     d.setdefault("dgear", d["gear"])
     return d
@@ -593,6 +608,20 @@ SCENARIOS = [
     Scen("mv-tidy-lift", **mo(thr=0.4, brk=0.4, ebrk=0.1, steps=1)),
     Scen("mv-tidy-brake", **mo(thr=0.6, brk=0.7, steps=1)),
     Scen("mv-tidy-tie", **mo(thr=0.6, brk=0.1, ebrk=0.6, steps=1)),
+    # Retail's launch: the throttle past 0.8 and the brake past 0.5 under
+    # 10 mph, and the rear brakes go by the speed. Each test at its edge
+    # and the float past it, the brake over the throttle (both kept), from
+    # rest (no rear brake at all), and backing up (a rear brake below 0).
+    Scen("ln-launch", **ln(steps=2)),
+    Scen("ln-thr-edge", **ln(thr=0.8, brk=0.6)),
+    Scen("ln-thr-past", **ln(thr=fbits_to(0x3f4cccce), brk=0.6)),
+    Scen("ln-brk-edge", **ln(brk=0.5)),
+    Scen("ln-brk-past", **ln(brk=fbits_to(0x3f000001))),
+    Scen("ln-10mph", **ln(vel=(LN_10MPH, 0.0, 0.0), fwd=LN_10MPH)),
+    Scen("ln-under-10", **ln(vel=(LN_UNDER, 0.0, 0.0), fwd=LN_UNDER)),
+    Scen("ln-brake-over", **ln(thr=0.9, brk=1.0)),
+    Scen("ln-rest", **ln(thr=1.0, brk=1.0, steps=2, **STILL)),
+    Scen("ln-backing", **ln(vel=(-3.0, 0.0, 0.0), fwd=-3.0)),
     # The body's motion damping.
     Scen("mv-damp-thr", **mo(thr=0.3, vel=(12.0, 0.0, 0.0), steps=1,
                              **STRAIGHT)),
@@ -612,6 +641,17 @@ SCENARIOS = [
                                  **STILL)),
     Scen("mv-countdown", **mo(stage=3, thr=0.0, brk=0.8, steps=1, **STILL)),
     Scen("mv-flyby", **mo(stage=1, thr=1.0, brk=0.3, steps=1)),
+    # A lurch 17 minutes into WorldTimer, where retail's rounding moves
+    # the start stamp: 4096691 * the tick * 4000 is 4096691.5 in float,
+    # so the stamp is 4096692, where truncating gave 4096691.
+    Scen("mv-prerace-late", **mo(stage=2, thr=1.0, brk=0.8, thrpat=0b10,
+                                 wtimer=4096691 - 1000, wstep=1000,
+                                 steps=2, **STILL)),
+    # A seed whose lurch is 1685.52 ticks: rounded 1686, truncated 1685.
+    # (The default seed's is 1685.33.)
+    Scen("mv-prerace-round", **mo(stage=2, thr=1.0, brk=0.8, thrpat=0b10,
+                                  seed=0x123e5678, wstep=1000, steps=2,
+                                  **STILL)),
 
     # The dyno.
     Scen("sd-stopped", **mo(sdebug=1, sd_t=-1.0, sd_disp=5.0,
@@ -645,6 +685,13 @@ SCENARIOS = [
     # The tyres, the overrides and the damage.
     Scen("mv-blown", **mo(blown=4, tbo=0.75, dbo=1.25, steps=1)),
     Scen("mv-blown-nitro", **mo(blown=1, nitro=1, steps=1)),
+    # Retail's: each blown tyre is its wheel's Damage, which the spin's
+    # derivative drags by. Bit 7 alone blows none and still counts for
+    # the limiter and the damage boost; Damage left from before is
+    # cleared.
+    Scen("mv-blown-1-3", **mo(blown=0b1010, steps=2)),
+    Scen("mv-blown-high", **mo(blown=0x80, dbo=1.25, steps=1)),
+    Scen("mv-unblown-damaged", **mo(wdmg=(1.0, 0.5, 0.0, 1.0), steps=1)),
     Scen("mv-overrides", **mo(tbo=0.75, dbo=1.25, steps=1)),
     Scen("mv-damage", **mo(dmg=10240, dmgon=1, steps=1)),
     Scen("mv-damage-off", **mo(dmg=10240, steps=1)),
@@ -1095,6 +1142,106 @@ def retail_wheel_matrices(e):
         add(em, sp + 116, oy)       # BrakeMatrix.v3.y
         add(em, sp + 52, oy)        # WheelMatrix.v3.y
     e.hook(DEMO_WHEEL_ROW3, lift)
+
+
+# The port's Wheel::GetDerivative is retail's since TASKS 73 (0x001a46b0):
+# after the rolling friction it takes off the spin times Damage * 0.1. The
+# demo's (0x0019a3d0) has the rest in f0 at its `div.s`, with the wheel in
+# a2.
+DEMO_DERIV_DIV = 0x0019a42c
+RT_DAMAGE_DRAG = 0x3dcccccd         # retail gp-29344, 0.1
+
+
+def retail_wheel_derivative(e):
+    def drag(em):
+        w = em.reg[6] & M32
+        spin = fbits_to(em.u32(w + 32))
+        dmg = fbits_to(em.u32(w + 364))
+        k = f32(dmg * fbits_to(RT_DAMAGE_DRAG))
+        em.set_f(0, f32(em.f(0) - f32(spin * k)))
+    e.hook(DEMO_DERIV_DIV, drag)
+
+
+# The port's PhysicsCar::Move is retail's since TASKS 73 (0x00137d90), the
+# demo's (0x00135c78) with four changes, hooked in here where the demo has
+# the code they replace. In the wheel loop s5 is the wheel, s7 the
+# PhysicsCar's pWheel, a2 the driver and f25 the mph.
+#   * The brakes: with the throttle past 0.8 and the brake past 0.5 under
+#     10 mph, wheels 2 and 3 brake by mph * 0.05. A stub at the demo's
+#     brake arm makes either store and goes on to the handbrake.
+#   * The NFS handbrake extra is 0.5, not the demo's 0.7 (gp-31848): a
+#     hook on its `b`, after the load, before the add in the delay slot.
+#   * A blown tyre is its wheel's Damage, 1.0 or 0.0 by the bit, and the
+#     traction is left alone: a stub at the demo's blown-tyre test, which
+#     leaves the Car in a2 as the demo's `move a2,a0` does, for the
+#     damage boost after the loop.
+#   * The lurch: bRandom(0.15) + 0.4, and both stamps rounded (+ 0.5
+#     before the `cvt.w.s`). A stub after the LurchsLeft test sets the
+#     demo's call up with retail's range and minimum; two hooks round.
+DEMO_MV_BRAKE = 0x001362a4          # the brake arm's `sll s4,s5,2`
+DEMO_MV_EBRAKE = 0x001362c8         # the handbrake's first instruction
+DEMO_MV_NFS_ADD = 0x001362fc        # `b`, 0.7 in f0, `add.s` in its slot
+DEMO_MV_BLOWN = 0x0013644c          # `lb v0,1944(a0)`
+DEMO_MV_NEXT_WHEEL = 0x001364a4     # `addiu s5,s5,1`
+DEMO_MV_LURCH = 0x001367a8          # after `beq v1,zero` (LurchsLeft)
+DEMO_MV_LURCH_CALL = 0x001367c8     # `jal bRandom`, f12 and a0 set
+DEMO_MV_TIMER_CVT = 0x001367e4      # the timer's `cvt.w.s`
+DEMO_MV_START_CVT = 0x00136828      # the start's `cvt.w.s`
+DEMO_BRAKE_SETTINGS = 0x002e8550
+DEMO_DEFAULT_SEED = 0x00324f90      # gp-15456
+RT_LAUNCH_THR, RT_LAUNCH_BRAKE, RT_LAUNCH_MPH = 0x3f4ccccd, 0x3d4ccccd, \
+    0x41200000                      # gp-31740 0.8, gp-31736 0.05, 10.0
+RT_LURCH_RANDOM, RT_LURCH_MIN = 0x3e19999a, 0x3ecccccd  # 0.15, 0.4
+RT_HALF = 0x3f000000
+
+
+def retail_move(e):
+    half = fbits_to(RT_HALF)
+
+    def brake(em):
+        d = em.reg[6] & M32
+        i = s32(em.reg[21])
+        em.reg[20] = (i << 2) & M64
+        w = em.u32((em.reg[23] & M32) + 4 * i)
+        thr = fbits_to(em.u32(d + DRV_THROTTLE))
+        brk = fbits_to(em.u32(d + DRV_BRAKE))
+        mph = em.f(25)
+        if (fbits_to(RT_LAUNCH_THR) < thr and half < brk
+                and mph < fbits_to(RT_LAUNCH_MPH) and i >= 2):
+            v = f32(mph * fbits_to(RT_LAUNCH_BRAKE))
+        else:
+            v = f32(brk * fbits_to(em.u32(DEMO_BRAKE_SETTINGS + 4 * i)))
+        em.put32(w + 368, f_to_bits(v))
+        em.reg[31] = DEMO_MV_EBRAKE
+
+    def nfs(em):
+        em.fpr[0] = RT_HALF
+
+    def blown(em):
+        car = em.reg[4] & M32
+        i = s32(em.reg[21])
+        bits = em.mem[car + CAR_BLOWN]
+        bits -= (bits & 0x80) << 1
+        w = em.u32((em.reg[23] & M32) + 4 * i)
+        em.put32(w + 364, f_to_bits(1.0) if (bits >> i) & 1 else 0)
+        em.reg[6] = em.reg[4]
+        em.reg[31] = DEMO_MV_NEXT_WHEEL
+
+    def lurch(em):
+        em.fpr[12] = RT_LURCH_RANDOM
+        em.fpr[20] = RT_LURCH_MIN
+        em.reg[4] = DEMO_DEFAULT_SEED
+        em.reg[31] = DEMO_MV_LURCH_CALL
+
+    def rounded(em):
+        em.set_f(0, f32(em.f(0) + half))
+
+    e.stub(DEMO_MV_BRAKE, brake)
+    e.hook(DEMO_MV_NFS_ADD, nfs)
+    e.stub(DEMO_MV_BLOWN, blown)
+    e.stub(DEMO_MV_LURCH, lurch)
+    e.hook(DEMO_MV_TIMER_CVT, rounded)
+    e.hook(DEMO_MV_START_CVT, rounded)
 REALDRIVER_SIZE = 568
 PC_SIZE = 116
 
@@ -1284,10 +1431,13 @@ class Model(object):
         # and a fourth word nothing wrote, and stores all four in the
         # body's momentum; the port writes 0 there too. Retail changed
         # PhysicsCar::Move (TASKS 73), so no offset maps, and no retail
-        # model runs it yet.
+        # model runs it yet: the demo's runs with retail's changes hooked
+        # in (retail_move), and so does Wheel::GetDerivative.
         if not retail:
             e.hook(BRAKE_STAND_P, zero_words(12))
             retail_wheel_matrices(e)
+            retail_move(e)
+            retail_wheel_derivative(e)
 
         e.stub(WHEEL_SKIDS, self.skids)
         self.race = e.alloc(16, 16)
@@ -1782,6 +1932,9 @@ class Model(object):
             if s.wlock >> i & 1:
                 self.put(self.comp("pWheel", i) + OFF("Wheel", "BrakeLocked"),
                          1)
+            if fb(s.wdmg[i]):
+                self.put(self.comp("pWheel", i) + OFF("Wheel", "Damage"),
+                         fb(s.wdmg[i]))
         if fb(s.mass):
             rbi = self.w(self.comp("pBody") + OFF("RigidBody", "RBI"))
             self.put(rbi, fb(s.mass))
@@ -2210,6 +2363,12 @@ PCC = "3DS Files/source/physicscar.c"
 JOYC = "3DS Files/source/joystick.c"
 CDMC = "3DS Files/source/cardamage.c"
 RACEC = "3DS Files/source/race.c"
+
+DMG_TOTAL = ("float bodydamage_get_visible_total_damage(const BodyDamage *b)"
+             + NL + "{" + NL)
+MV_BLOWN = ("        w->Damage = (((int8_t)car->BlownTireBits >> i) & 1)"
+            " ? 1.0f : 0.0f;")
+WHC = "3DS Files/source/wheel.c"
 
 MUTATIONS = [
     # -- the static initialiser ---------------------------------------------
@@ -2906,8 +3065,51 @@ MUTATIONS = [
      "            w->Brake = d->Brake * BrakeSettings[i];",
      "            w->Brake = d->Brake;"),
     ("mv-brake-kept-off", PCC,
-     "        else" + NL + "            w->Brake = 0.0f;",
-     "        else" + NL + "            (void)0;"),
+     "        } else {" + NL + "            w->Brake = 0.0f;",
+     "        } else {" + NL + "            (void)0;"),
+    # Retail's launch.
+    ("mv-launch-thr-inclusive", PCC,
+     "            if (PC_LAUNCH_THROTTLE < d->Throttle && 0.5f < d->Brake",
+     "            if (PC_LAUNCH_THROTTLE <= d->Throttle && 0.5f < d->Brake"),
+    ("mv-launch-no-thr", PCC,
+     "            if (PC_LAUNCH_THROTTLE < d->Throttle && 0.5f < d->Brake",
+     "            if (0.5f < d->Brake"),
+    ("mv-launch-thr-half", PCC,
+     "            if (PC_LAUNCH_THROTTLE < d->Throttle && 0.5f < d->Brake",
+     "            if (0.5f < d->Throttle && 0.5f < d->Brake"),
+    ("mv-launch-brk-inclusive", PCC,
+     "PC_LAUNCH_THROTTLE < d->Throttle && 0.5f < d->Brake",
+     "PC_LAUNCH_THROTTLE < d->Throttle && 0.5f <= d->Brake"),
+    ("mv-launch-no-brk", PCC,
+     "PC_LAUNCH_THROTTLE < d->Throttle && 0.5f < d->Brake",
+     "PC_LAUNCH_THROTTLE < d->Throttle"),
+    ("mv-launch-speed-inclusive", PCC,
+     "                && mph < 10.0f && i >= 2)",
+     "                && mph <= 10.0f && i >= 2)"),
+    ("mv-launch-any-speed", PCC,
+     "                && mph < 10.0f && i >= 2)",
+     "                && i >= 2)"),
+    ("mv-launch-all-wheels", PCC,
+     "                && mph < 10.0f && i >= 2)",
+     "                && mph < 10.0f)"),
+    ("mv-launch-front", PCC,
+     "                && mph < 10.0f && i >= 2)",
+     "                && mph < 10.0f && i < 2)"),
+    ("mv-launch-wheel-3", PCC,
+     "                && mph < 10.0f && i >= 2)",
+     "                && mph < 10.0f && i == 3)"),
+    ("mv-launch-rate", PCC,
+     "                w->Brake = mph * PC_LAUNCH_BRAKE;",
+     "                w->Brake = mph * 0.1f;"),
+    ("mv-launch-off", PCC,
+     "                w->Brake = mph * PC_LAUNCH_BRAKE;",
+     "                w->Brake = 0.0f;"),
+    ("mv-launch-unsigned", PCC,
+     "                w->Brake = mph * PC_LAUNCH_BRAKE;",
+     "                w->Brake = fabsf(mph) * PC_LAUNCH_BRAKE;"),
+    ("mv-launch-with-settings", PCC,
+     "                w->Brake = mph * PC_LAUNCH_BRAKE;",
+     "                w->Brake = mph * PC_LAUNCH_BRAKE * BrakeSettings[i];"),
     ("mv-ebrake-no-settings", PCC,
      "        eb = d->EBrake * EBrakeSettings[i];",
      "        eb = d->EBrake;"),
@@ -2918,8 +3120,11 @@ MUTATIONS = [
      + "            if (PC_EBRAKE_KNEE < eb)"),
     ("mv-ebrake-nfs-no-knee", PCC,
      "            if (PC_EBRAKE_KNEE < eb)" + NL
-     + "                eb += PC_EBRAKE_NFS;",
-     "            eb += PC_EBRAKE_NFS;"),
+     + "                eb += 0.5f;",
+     "            eb += 0.5f;"),
+    ("mv-ebrake-nfs-demo-add", PCC,
+     "                eb += 0.5f;",
+     "                eb += 0.7f;"),
     ("mv-ebrake-hp-any-yaw", PCC,
      "        } else if (PC_EBRAKE_KNEE < eb" + NL
      + "                   && PC_EBRAKE_YAW < fabsf(carstate_get_yaw(cs))" + NL
@@ -2931,8 +3136,8 @@ MUTATIONS = [
      + "                   && mph < 80.0f) {",
      "                   && PC_EBRAKE_YAW < fabsf(carstate_get_yaw(cs))) {"),
     ("mv-ebrake-hp-add", PCC,
-     "            eb += 0.5f;",
-     "            eb += 0.7f;"),
+     "                   && mph < 80.0f) {" + NL + "            eb += 0.5f;",
+     "                   && mph < 80.0f) {" + NL + "            eb += 0.7f;"),
     ("mv-ebrake-unshaped", PCC,
      "        w->EBrake = eb;",
      "        w->EBrake = d->EBrake;"),
@@ -2967,17 +3172,35 @@ MUTATIONS = [
     ("mv-tb-burnout-no-traction", PCC,
      "            w->TractionBoost = boost * cs->BurnOutTraction;",
      "            w->TractionBoost = boost;"),
-    ("mv-blown-per-wheel", PCC,
-     "        if (car->BlownTireBits != 0)" + NL
-     + "            w->TractionBoost *= PC_BLOWN_TRACTION;",
-     "        if (car->BlownTireBits & (1 << i))" + NL
-     + "            w->TractionBoost *= PC_BLOWN_TRACTION;"),
-    ("mv-blown-and-override", PCC,
-     "        else if (car->fTractionBoostOverride != 0.0f)",
-     "        if (car->fTractionBoostOverride != 0.0f)"),
-    ("mv-override-ignored", PCC,
-     "            w->TractionBoost *= car->fTractionBoostOverride;",
-     "            (void)0;"),
+    # Retail's blown tyres: the wheel's Damage, by its own bit.
+    ("mv-blown-any", PCC, MV_BLOWN,
+     "        w->Damage = car->BlownTireBits != 0 ? 1.0f : 0.0f;"),
+    ("mv-blown-reversed", PCC,
+     "car->BlownTireBits >> i) & 1)",
+     "car->BlownTireBits >> (3 - i)) & 1)"),
+    ("mv-blown-half", PCC,
+     "& 1) ? 1.0f : 0.0f;",
+     "& 1) ? 0.5f : 0.0f;"),
+    ("mv-blown-not-cleared", PCC, MV_BLOWN,
+     "        if (((int8_t)car->BlownTireBits >> i) & 1)" + NL
+     + "            w->Damage = 1.0f;"),
+    ("mv-blown-ignored", PCC, MV_BLOWN, "        (void)0;"),
+    ("mv-blown-demo-traction", PCC, MV_BLOWN,
+     MV_BLOWN + NL + "        if (car->BlownTireBits != 0)" + NL
+     + "            w->TractionBoost *= 0.4f;"),
+    ("mv-override-read", PCC, MV_BLOWN,
+     MV_BLOWN + NL + "        if (car->fTractionBoostOverride != 0.0f)" + NL
+     + "            w->TractionBoost *= car->fTractionBoostOverride;"),
+    # Retail's GetDerivative: the damage drag.
+    ("wh-damage-drag-dropped", WHC,
+     "    acc = acc - w->State.w * (w->Damage * WHEEL_DAMAGE_DRAG);" + NL,
+     ""),
+    ("wh-damage-drag-scale", WHC,
+     "    acc = acc - w->State.w * (w->Damage * WHEEL_DAMAGE_DRAG);",
+     "    acc = acc - w->State.w * (w->Damage * 0.2f);"),
+    ("wh-damage-drag-sign", WHC,
+     "    acc = acc - w->State.w * (w->Damage * WHEEL_DAMAGE_DRAG);",
+     "    acc = acc + w->State.w * (w->Damage * WHEEL_DAMAGE_DRAG);"),
     ("mv-damage-override-when-blown", PCC,
      "    if (car->fDamageBoostOverride != 0.0f && car->BlownTireBits == 0)",
      "    if (car->fDamageBoostOverride != 0.0f)"),
@@ -3097,12 +3320,21 @@ MUTATIONS = [
     ("bs-lurches-unlimited", PCC,
      "            if (pc->ThrottleReleased && pc->LurchsLeft) {",
      "            if (pc->ThrottleReleased) {"),
-    ("bs-lo-swapped", PCC,
-     "                float lo = pc->LurchsLeft == 2 ? 0.25f : 0.5f;",
-     "                float lo = pc->LurchsLeft == 2 ? 0.5f : 0.25f;"),
-    ("bs-timer-without-lo", PCC,
-     "                    (uint32_t)ee_trunc_w((r + lo) * 4000.0f);",
-     "                    (uint32_t)ee_trunc_w(r * 4000.0f);"),
+    ("bs-random-range", PCC,
+     "                float r = bRandomF(PC_LURCH_RANDOM, &bDefaultSeed);",
+     "                float r = bRandomF(0.25f, &bDefaultSeed);"),
+    ("bs-random-demo", PCC,
+     "                float r = bRandomF(PC_LURCH_RANDOM, &bDefaultSeed);",
+     "                float r = bRandomF(pc->LurchsLeft == 2 ? 0.25f : 0.5f," + NL
+     + "                                   &bDefaultSeed);"),
+    ("bs-timer-without-min", PCC,
+     "                    (uint32_t)ee_trunc_w((r + PC_LURCH_MIN) * 4000.0f" + NL
+     + "                                         + 0.5f);",
+     "                    (uint32_t)ee_trunc_w(r * 4000.0f + 0.5f);"),
+    ("bs-timer-truncated", PCC,
+     "                    (uint32_t)ee_trunc_w((r + PC_LURCH_MIN) * 4000.0f" + NL
+     + "                                         + 0.5f);",
+     "                    (uint32_t)ee_trunc_w((r + PC_LURCH_MIN) * 4000.0f);"),
     ("bs-lurch-not-counted", PCC,
      "                pc->LurchsLeft--;",
      "                (void)0;"),
@@ -3115,8 +3347,13 @@ MUTATIONS = [
     ("bs-start-zero", PCC,
      "                pc->BrakeStandTimerStart.PackedTime =" + NL
      + "                    (uint32_t)ee_trunc_w((float)WorldTimer * PC_TICK" + NL
-     + "                                         * 4000.0f);",
+     + "                                         * 4000.0f + 0.5f);",
      "                pc->BrakeStandTimerStart.PackedTime = 0;"),
+    ("bs-start-truncated", PCC,
+     "                    (uint32_t)ee_trunc_w((float)WorldTimer * PC_TICK" + NL
+     + "                                         * 4000.0f + 0.5f);",
+     "                    (uint32_t)ee_trunc_w((float)WorldTimer * PC_TICK" + NL
+     + "                                         * 4000.0f);"),
     ("bs-release-not-noted", PCC,
      "            pc->BrakeStanding = 1;" + NL
      + "            pc->ThrottleReleased = 1;",
@@ -3179,11 +3416,12 @@ MUTATIONS = [
      "    return CurrentJoystickTypes[port];",
      "    return CurrentJoystickTypes[0];"),
     ("dmg-always-enabled", CDMC,
-     "    if (RaceParametersDamageEnabled == 0)" + NL + "        return 0.0f;",
-     "    (void)0;"),
+     DMG_TOTAL + "    if (RaceParametersDamageEnabled == 0)" + NL
+     + "        return 0.0f;",
+     DMG_TOTAL + "    (void)0;"),
     ("dmg-enabled-is-one", CDMC,
-     "    if (RaceParametersDamageEnabled == 0)",
-     "    if (RaceParametersDamageEnabled != 1)"),
+     DMG_TOTAL + "    if (RaceParametersDamageEnabled == 0)",
+     DMG_TOTAL + "    if (RaceParametersDamageEnabled != 1)"),
     ("dmg-scale", CDMC,
      "#define TOTAL_SCALE     0.000244140625f",
      "#define TOTAL_SCALE     0.00048828125f"),

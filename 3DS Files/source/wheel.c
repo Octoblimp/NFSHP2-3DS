@@ -29,6 +29,10 @@ float   gCorneringScale                 = 1.0f;
 int32_t gUseNewTireForces               = 1;
 float   gNewCorneringScale              = 2.5f;
 
+// Retail's GetDerivative reads a literal 0.002 (gp-29348) where the demo
+// read RollingFriction, the same value, and the damage drag's 0.1 beside it.
+#define WHEEL_DAMAGE_DRAG 0.1f                  // retail gp-29344  3dcccccd
+
 // Zero in the image; wheel_static_init writes 0.223402172f.
 float gMaxSlipAngleGlobal = 0.0f;
 
@@ -251,9 +255,11 @@ int32_t wheel_get_size(const Wheel *w)
     return WHEEL_STATE_FLOATS;
 }
 
-// 0x0019a3d0. Returns NULL rather than `out` -- Suspension's GetDerivative
-// returns its buffer and this one does not, and both are reached through
-// the same virtual slot.
+// Retail's 0x001a46b0 (the demo's 0x0019a3d0). Returns NULL rather than
+// `out` -- Suspension's GetDerivative returns its buffer and this one does
+// not, and both are reached through the same virtual slot. Retail's adds
+// the last drag: a blown tyre (Damage 1, from PhysicsCar::Move) slows its
+// spin by a tenth of it.
 float *wheel_get_derivative(Wheel *w, float *out)
 {
     float rollingMul = 1.0f;
@@ -266,6 +272,7 @@ float *wheel_get_derivative(Wheel *w, float *out)
 
     acc = w->AppliedTorque - w->GroundForce[0] * w->WI->Radius;
     acc = acc - (w->State.w * rollingMul) * gRollingFriction;
+    acc = acc - w->State.w * (w->Damage * WHEEL_DAMAGE_DRAG);
     acc = acc / w->MomentOfInertia;
     out[1] = acc;
 
