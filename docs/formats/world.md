@@ -103,7 +103,9 @@ host the tail moves; `world.h` checks its offsets only on the 3DS.
      PreviousTimeToWaste, 0))`, and it is stored back. If the wait is above
      0, the game spins on bGetTicker until bGetTickerDifference from the
      first reading, times 0.001, reaches it. Replays play back at the
-     speed they were recorded at.
+     speed they were recorded at. Retail's (0x0014d718) skips this step,
+     the store too, while the replay is in slow motion (SlowMotionFlag,
+     +20) or paused (PausedFlag, +16), read through the same pointer.
   4. If the time scale's timer is above 0, it loses `real`. At 0 or below
      it becomes 0, the scale becomes 1, and a callback runs once and is
      cleared (callback first, then the parameter).

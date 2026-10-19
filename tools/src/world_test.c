@@ -70,7 +70,7 @@ enum {
     OP_OBBDUMP, OP_OBBASSIGN, OP_OBBRENDER, OP_OBBHIDE, OP_OBBINIT,
     OP_OBBDTOR, OP_SETOBBS, OP_SETDTS, OP_RECPOT, OP_RECITER, OP_PREDDUMP,
     OP_CTL, OP_SETTABLE, OP_DDSET, OP_DEBUGDISP, OP_AITWEAK, OP_AIDEBUG,
-    OP_CUBES, OP_CUBE, OP_DSEED, OP_CLOCK, OP_VOTSET,
+    OP_CUBES, OP_CUBE, OP_DSEED, OP_CLOCK, OP_VOTSET, OP_RMODE,
 };
 
 #define NCAR 14
@@ -1239,6 +1239,11 @@ static void step(uint32_t op)
         rm.ReplayingFlag = (int32_t)next();
         rm.CapturingFlag = (int32_t)next();
         printf("replay %d %d\n", rm.ReplayingFlag, rm.CapturingFlag);
+        break;
+    case OP_RMODE:
+        rm.PausedFlag = (int32_t)next();
+        rm.SlowMotionFlag = (int32_t)next();
+        printf("rmode %d %d\n", rm.PausedFlag, rm.SlowMotionFlag);
         break;
     case OP_RGET:
         push(&rgetq, next());

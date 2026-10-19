@@ -27692,3 +27692,49 @@ tiresound: 0 differ. The CIA builds clean. `docs/formats/physics-car.md`'s
 Move section says what retail changed. Left for InitSkids: retail's
 MaybeMakeSkids takes the Car in a1 from every caller; the port's skid
 seam is still unbound. Next: World::GetTimestep.
+
+### TASKS 73, slice 8: World::GetTimestep
+
+Retail's GetTimestep (`0x0014d718`, 384 bytes) is the demo's
+(`0x0014aee8`, 360) with one test more. After the second ReplayingFlag
+test, retail reads the replay's SlowMotionFlag (+20) and PausedFlag
+(+16) through the same pointer. If either one is set, it jumps past the
+wait to the time scale, so a paused or slow-motion replay takes its step
+straight away and PreviousTimeToWaste keeps its value. The port, like the
+demo, spun on bGetTicker for up to 0.3 s a frame to match the recorded
+step (the pause from `replaymgr.c` and `replayscreen.c`'s slow motion).
+
+- `worldstep.c`: `rm = pReplayManager` is read again, and the wait needs
+  `ReplayingFlag && !SlowMotionFlag && !PausedFlag`.
+- `world_check.py`: `retail_timestep` stubs the demo image's first wait
+  instruction (`0x0014af64`). With either flag set, it loads
+  fTimeScaleTimer and returns to `0x0014afd4`; otherwise it loads the cap
+  and returns to the next instruction. New OP_RMODE (both sides) sets the
+  two flags. Its cases: each flag alone, both, -1 and 0x80000000, with a
+  clock under which a stored wait would be 0 rather than the kept 0.3,
+  then the same step with neither flag (which stores the 0), a wait, and
+  capturing with both set (no change). 32 scenarios, 2762 ops, 15164
+  lines, 0 differ. 336 mutations, 336 caught (6 new).
+- `docs/formats/world.md`'s GetTimestep says what retail adds. The CIA
+  builds clean.
+
+Next: Wheel's GuessGroundForce and FinalizeGroundForce. Read so far, not
+ported:
+- Retail's GuessGroundForce (`0x001a4930`, 1016 bytes; the demo's
+  `0x0019a638`, 996) takes a third argument. IterateForces
+  (`0x00138f38`) passes `(int8_t)pc->pCar->pDynamicCollisionBody->
+  NumCollisions` (Car+52, then the byte at 18) for all four wheels. When
+  it is nonzero, the "dragged backwards" cut is skipped: AppliedTorque *=
+  0.15 needs `slip < -gMaxStaticSlip`, torque < 0, no handbrake, and now no
+  collision (`bnel s2,zero` at `0x001a4ac8`). Otherwise only layout
+  changes: the terrain table's stride 144 and fields +4, and CarState's
+  920/892 at 924/896.
+- Retail's FinalizeGroundForce (`0x001a4ee0`, the same 1216 bytes)
+  differs only in that layout, which the port reads by name. Nothing to
+  port.
+- For the port: `wheel_guess_ground_force` gets the count. The
+  physicscar_check harness already has a collision body with a settable
+  NumCollisions (`physicscar_test.c` 458, 761). Hook the demo image at
+  `0x0019a7c8` (f23 is loaded; on a collision return to `0x0019a7d8`).
+  wheel_check's model, `guess_ground_force(w)`, and its nine harness calls
+  take the new argument.

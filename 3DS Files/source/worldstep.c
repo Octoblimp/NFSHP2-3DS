@@ -150,8 +150,12 @@ float world_get_timestep(World *w)
     }
     real = GetRealTimeElapsedFromQuantized(q);
 
-    // The flag is read again, through pReplayManager again.
-    if (pReplayManager->ReplayingFlag) {
+    // The flag is read again, through pReplayManager again. Retail's
+    // (0x0014d718) reads the slow motion and the pause beside it: a replay
+    // in either takes its step without the wait, and PreviousTimeToWaste
+    // stays as it was.
+    rm = pReplayManager;
+    if (rm->ReplayingFlag && !rm->SlowMotionFlag && !rm->PausedFlag) {
         float waste = min_s(MAX_TIME_TO_WASTE,
                             max_s((real - RealTimeElapsed)
                                   + w->PreviousTimeToWaste, 0.0f));

@@ -4657,9 +4657,17 @@ phases.
           caught, 10 equivalent. Twenty other checkers 0 differ (carmode,
           mellowmover, carsnap, car, realdriver, playercop, ...). Left
           for InitSkids: retail's MaybeMakeSkids takes the Car (a1).
+        - [x] World::GetTimestep: retail's (`0x0014d718`) is the demo's
+          (`0x0014aee8`) with one test more. Done in Session 134. A
+          replay in slow motion (SlowMotionFlag, +20) or paused
+          (PausedFlag, +16) takes its step without the wait for the
+          recorded time, and keeps PreviousTimeToWaste. The port spun up
+          to 0.3 s a frame there. `world_check` stubs retail's test into
+          the demo image: 32 scenarios, 15164 lines, 0 differ;
+          336 mutations, 336 caught (6 new).
         - Other demo-derived functions retail changed (TASKS 74's list):
-          World::GetTimestep, Wheel's GuessGroundForce and
-          FinalizeGroundForce, InitSkids, CarCollisionBody::AddDamage,
+          Wheel's GuessGroundForce and FinalizeGroundForce, InitSkids,
+          CarCollisionBody::AddDamage,
           FindWaferNormal and the RectPolyhedron constructor. Retail's
           TerrainTypeInfoTable has another layout.
         - [x] RealDriver's changed functions and the player's input.

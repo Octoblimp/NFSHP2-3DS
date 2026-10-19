@@ -45,7 +45,10 @@ reaches:
 
   * GetTimestep reads pReplayManager twice; the wait's 0.3 cap is
     `min.s 0.3, max(x, 0)`, and the wait compares the ticker's
-    milliseconds times 0.001.
+    milliseconds times 0.001. Retail's (0x0014d718) skips the wait, and
+    the store of PreviousTimeToWaste, while the replay is in slow motion
+    (+20) or paused (+16). The image is the demo's, so a stub puts
+    retail's test where retail has it (`retail_timestep`).
   * The time scale's callback is cleared after it runs; the pause's too.
     The pause counts down by RealTimeElapsed, the time scale by the step.
   * The car table is players, AI racers, cops and super cops, traffic,
@@ -178,7 +181,30 @@ FN = dict(
  OP_OBB, OP_OBBDUMP, OP_OBBASSIGN, OP_OBBRENDER, OP_OBBHIDE, OP_OBBINIT,
  OP_OBBDTOR, OP_SETOBBS, OP_SETDTS, OP_RECPOT, OP_RECITER, OP_PREDDUMP,
  OP_CTL, OP_SETTABLE, OP_DDSET, OP_DEBUGDISP, OP_AITWEAK, OP_AIDEBUG,
- OP_CUBES, OP_CUBE, OP_DSEED, OP_CLOCK, OP_VOTSET) = range(1, 84)
+ OP_CUBES, OP_CUBE, OP_DSEED, OP_CLOCK, OP_VOTSET,
+ OP_RMODE) = range(1, 85)
+
+# Retail's GetTimestep (0x0014d718) is the demo's (0x0014aee8) with one
+# test more. After the second ReplayingFlag test it reads the replay's
+# SlowMotionFlag (+20) and PausedFlag (+16) through the same pointer, and
+# either one jumps past the wait to the time scale.
+DEMO_TS_WAIT = 0x0014af64               # lwc1 f0, MAX_TIME_TO_WASTE
+DEMO_TS_SCALE = 0x0014afd4              # after lwc1 f0, fTimeScaleTimer
+
+def retail_timestep(e):
+    """Retail's test, in the demo image at DEMO_TS_WAIT: v1 still holds
+    pReplayManager and s1 the World. The stub takes the place of the wait's
+    first instruction and returns past it, or past the wait."""
+    def wait(em):
+        rm = em.reg[3] & M32
+        if em.u32(rm + 20) or em.u32(rm + 16):
+            em.fpr[0] = em.u32((em.reg[17] & M32) + 392)
+            em.reg[31] = DEMO_TS_SCALE
+        else:
+            em.fpr[0] = em.u32(GP - 20244)
+            em.reg[31] = DEMO_TS_WAIT + 4
+    e.stub(DEMO_TS_WAIT, wait)
+
 
 bits = me.f_to_bits
 NAN = 0x7FC00000
@@ -368,6 +394,27 @@ def time_script(sc):
     sc.op(OP_RGET, 60)
     sc.ticks([9, 9 + 294912 * 400])
     sc.op(OP_TIMESTEP)
+    # Retail's slow motion and pause: no wait, and PreviousTimeToWaste
+    # kept (the 0.3 above, where storing would make it max(-0.0167, 0)),
+    # then the same step with neither, which stores the 0; then a wait.
+    sc.realtime(1200 * Q, 1200)
+    for p, s in ((1, 0), (0, 1), (1, 1), (-1, 0), (0, 0x80000000)):
+        sc.op(OP_RMODE, p, s)
+        sc.op(OP_RGET, 60)
+        sc.op(OP_TIMESTEP)
+    sc.op(OP_RMODE, 0, 0)
+    sc.op(OP_RGET, 60)
+    sc.op(OP_TIMESTEP)
+    sc.realtime(0.0, 0)
+    sc.op(OP_RGET, 600)
+    sc.ticks([11, 11 + 294912 * 400])
+    sc.op(OP_TIMESTEP)
+    # Capturing, not replaying: the flags change nothing.
+    sc.op(OP_REPLAY, 0, 1)
+    sc.op(OP_RMODE, 1, 1)
+    sc.realtime(60 * Q, 60)
+    sc.op(OP_TIMESTEP)
+    sc.op(OP_RMODE, 0, 0)
     sc.realtime(0.0, 0)
     sc.op(OP_REPLAY, 1, 0)
     sc.scale(0.5, 1.0, 1, 21)
@@ -1451,6 +1498,7 @@ class Model(object):
         e.stub(0x0014c188, cdestroy)
         e.stub(0x0020b668, update)
         e.stub(0x0020b6a8, end)
+        retail_timestep(e)
         self.placeq = []
         self.shakeflip = -1
         self.stubs_init(arg, unlink)
@@ -1840,6 +1888,11 @@ class Model(object):
             elif op == OP_SHAKEFLIP:
                 self.shakeflip = s32(arg())
                 emit("shakeflip %d" % self.shakeflip)
+            elif op == OP_RMODE:
+                p, s = arg(), arg()
+                e.put32(self.rm + 16, p)
+                e.put32(self.rm + 20, s)
+                emit("rmode %d %d" % (s32(p), s32(s)))
             elif op == OP_RGET:
                 self.rgetq.append(arg())
             elif op == OP_JGET:
@@ -2256,10 +2309,25 @@ _m("step always records",
    "ReplayManager_AddData(rm, q, 8, 1);")
 _m("step records channel 2", "ReplayManager_AddData(rm, q, 8, 1);",
    "ReplayManager_AddData(rm, q, 8, 2);")
-_m("step waits always", "if (pReplayManager->ReplayingFlag) {",
+_m("step waits always",
+   "if (rm->ReplayingFlag && !rm->SlowMotionFlag && !rm->PausedFlag) {",
    "if (1) {")
-_m("step waits never", "if (pReplayManager->ReplayingFlag) {",
+_m("step waits never",
+   "if (rm->ReplayingFlag && !rm->SlowMotionFlag && !rm->PausedFlag) {",
    "if (0) {")
+_m("step waits without replay", "if (rm->ReplayingFlag && !rm->SlowMotionFlag",
+   "if (!rm->SlowMotionFlag")
+_m("step waits in slow motion", " && !rm->SlowMotionFlag && !rm->PausedFlag) {",
+   " && !rm->PausedFlag) {")
+_m("step waits paused", " && !rm->SlowMotionFlag && !rm->PausedFlag) {",
+   " && !rm->SlowMotionFlag) {")
+_m("step slow motion is one", "!rm->SlowMotionFlag && !rm->PausedFlag",
+   "rm->SlowMotionFlag != 1 && !rm->PausedFlag")
+_m("step paused is one", "!rm->SlowMotionFlag && !rm->PausedFlag",
+   "!rm->SlowMotionFlag && rm->PausedFlag != 1")
+_m("step pause skips only the spin",
+   "if (rm->ReplayingFlag && !rm->SlowMotionFlag && !rm->PausedFlag) {",
+   "if (rm->ReplayingFlag) {")
 _m("waste max for min", "float waste = min_s(MAX_TIME_TO_WASTE,",
    "float waste = max_s(MAX_TIME_TO_WASTE,")
 _m("waste min for max", "max_s((real - RealTimeElapsed)",
