@@ -160,6 +160,9 @@ POLY_CHUNK = 0x7fbe68
 # ---------------------------------------------------------------- the image
 
 GP = 0x00328bf0
+# CarCollisionBody::AddDamage's `lwc1 $f12,-28720(gp)`, and retail's word.
+DEMO_AD_SCALE = 0x001cdcf8
+RT_DAMAGE_SCALE = 0x3c54fdf4        # 0.013, SLES_507.31's gp-28324
 STATS = 0x00311ca0                  # TheCollisionStats
 ZV, IM, ZM = 0x00311cf0, 0x00311d00, 0x00311d40
 TABLE = GP - 18400                  # pCollisionBodyTable
@@ -2494,6 +2497,18 @@ class Model(object):
                           % (self.label(arg(0)), self.words(arg(1), 4),
                              f12()))
 
+        # Retail's AddDamage (0x001d83d0) scales the size for CarDamage by
+        # 0.013 (its gp-28324), where the demo's loads 0.03 (gp-28720):
+        # the load is stubbed with retail's word, and the demo's code goes
+        # on with the next instruction. The rest of retail's is the
+        # demo's, but for the cop manager's test, which is the port's
+        # seam (copmgr_car_impact) and is stubbed on both sides.
+        def retail_scale(em):
+            em.fpr[12] = RT_DAMAGE_SCALE
+            em.reg[31] = DEMO_AD_SCALE + 4
+
+        e.stub(DEMO_AD_SCALE, retail_scale)
+
         for sym, fn in (("Move__3Carf", move), ("IsBlinking__3Car", blinking),
                         ("IsPoofed__3Car", poofed),
                         ("SetToPhysicsMode__3CarP3Car", stpm),
@@ -4564,8 +4579,10 @@ MUTATIONS = [
        "#define CAR_MASS_INVERSE_MAX 0.76923084f", CCB),
     _m("ccb_inertia_scale", "#define CAR_INERTIA_SCALE    0.4f",
        "#define CAR_INERTIA_SCALE    0.41f", CCB),
-    _m("ccb_damage_scale", "#define CAR_DAMAGE_SCALE     0.03f",
-       "#define CAR_DAMAGE_SCALE     0.031f", CCB),
+    _m("ccb_damage_scale", "#define CAR_DAMAGE_SCALE     0.0130000003f",
+       "#define CAR_DAMAGE_SCALE     0.0130000012f", CCB),
+    _m("ccb_damage_scale_demo", "#define CAR_DAMAGE_SCALE     0.0130000003f",
+       "#define CAR_DAMAGE_SCALE     0.03f", CCB),
     _m("ccb_friction", "#define CAR_FRICTION         0.3f",
        "#define CAR_FRICTION         0.31f", CCB),
     _m("ccb_bounciness", "#define CAR_BOUNCINESS       0.1f",

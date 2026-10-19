@@ -251,7 +251,7 @@ slack.
 | gp-18304 | `CollisionBodyWitnessSlotPool` | made by Init |
 | gp-23156 | `BoringAIForCameraTuningOn` | an AI tuning switch: no car collides while it is set |
 | gp-16016 | `WilliamsAITuningMode` | the other |
-| gp-28760 .. gp-28712 | | CarCollisionBody's floats: the box, 1/1.3 twice, 0.4 twice, 0.03, 0.3 and 0.1 |
+| gp-28760 .. gp-28712 | | CarCollisionBody's floats: the box, 1/1.3 twice, 0.4 twice, 0.03 (retail's 0.013), 0.3 and 0.1 |
 | 0x003243d4 | `ContactSlotPool` | made by InitContact |
 | 0x003243d8 | `ContactThreshold` | 0.05: bodies parted by less are touching |
 | 0x003243e0 | `WaferBias` | 0.5 |
@@ -778,10 +778,12 @@ NULL for any other body, or with no `other`.
 3. Its length is summed (x² + y²) + z², and a root is taken. AddDamage gets
    it with `at`, and AnimateCollisionReaction with the scaled impulse.
 
-**AddDamage** (0x001cdca0) has three parts:
+**AddDamage** (0x001cdca0; retail's 0x001d83d0) has three parts:
 
-- **The damage.** With `pCarDamage` set, `at` in the car's frame and 0.03
-  of the size go to `CarDamage::AddDamage`. The frame is the transpose of
+- **The damage.** With `pCarDamage` set, `at` in the car's frame and 0.013
+  of the size go to `CarDamage::AddDamage`: retail's gp-28324. The demo's
+  is 0.03 (gp-28720), which the port had until TASKS 73, so each hit
+  dented a car 2.3 times as much as on the PS2. The frame is the transpose of
   the RigidBody's rotation, applied by bMulMatrixVec3 with a w of 1. The w
   brings in the transpose's fourth row, which is zero because R's fourth
   column is, and it is written into the pad.
@@ -800,7 +802,11 @@ NULL for any other body, or with no `other`.
   twice. The port subtracts unsigned too; as an int32 the subtraction
   would overflow at INT_MIN.
 - **The pursuit.** With a cop manager, the whole size goes to
-  `tCopManager::MonitorImpact`.
+  `tCopManager::MonitorImpact`. Retail calls it only for a size of 1 or
+  more, and passes whether any of the body's NumCollisions collisions is
+  a two-car one (GetCollision, then IsTwoCarCollision, stopping at the
+  first). The port has that in the seam, `copmgr_car_impact`
+  (`copmgr.c`).
 
 **AnimateCollisionReaction** (0x001cddc0):
 

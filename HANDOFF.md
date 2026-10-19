@@ -27788,3 +27788,35 @@ bytes; the demo's `0x001cdca0`, 288). Read so far: retail calls tCopManager::
 MonitorImpact only for an amount of 1.0 or more, and passes a third
 argument, whether any of the body's collisions is a two-car one
 (GetCollision, then IsTwoCarCollision over NumCollisions).
+
+## Session 135, continued -- the collision damage scale (TASKS 73, slice 10)
+
+Retail's CarCollisionBody::AddDamage (`0x001d83d0`, 380 bytes) is the
+demo's (`0x001cdca0`, 288) with two changes:
+
+- **The damage scale.** The size times 0.013 (`lwc1 $f12,-28324(gp)`,
+  0x3c54fdf4) goes to CarDamage::AddDamage; the demo's is 0.03 (gp-28720).
+  `retail_consts.py` finds no other value changed. `carcollisionbody.c`'s
+  `CAR_DAMAGE_SCALE` is 0.0130000003f now, so a hit dents a car 0.43 times
+  what it did (the demo dented 2.3 times as much as the PS2).
+- **The pursuit.** MonitorImpact only for a size of 1.0 or more, with a
+  third argument, whether any of the body's NumCollisions collisions is a
+  two-car one. The port has had that in the seam since TASKS 51
+  (`copmgr.c`'s copmgr_car_impact). Nothing to port.
+
+`collisionbody_check.py`: `retail_scale` stubs the demo image's load
+(`0x001cdcf8`) with retail's word and goes on at the next instruction.
+81 scenarios, 35427 lines, 0 differ. `ccb_damage_scale` (now one ulp off
+retail's), the new `ccb_damage_scale_demo` (the demo's 0.03) and
+`ccb_ad_damage_scale`: 3 caught. The full pass was not re-run.
+`docs/formats/collision-body.md` gives both values and retail's pursuit
+test.
+
+carmode, carsnap, carinit and aisnap: 0 differ. The CIA builds clean.
+
+Next in TASKS 73: FindWaferNormal (retail `0x001d4950`; the demo's
+`0x001ca460`). `retail_consts.py` says its one difference is WaferBias's
+initial value in .sdata, 0.5 in the demo and 0 in retail; find who sets
+it in retail before porting. The RectPolyhedron constructor's three
+differences are loads past its end into SoundScape's ReverbAreaArray,
+which look like the matcher's, not retail's: check, then close.

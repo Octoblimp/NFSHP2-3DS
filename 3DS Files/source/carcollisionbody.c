@@ -39,8 +39,11 @@ CarStartForceImpactFn          gCarStartForceImpactFn;
 #define CAR_MASS_INVERSE_MAX 0.769230783f
 // gp-28732 and gp-28724: the inertia's share of an impulse.
 #define CAR_INERTIA_SCALE    0.4f
-// gp-28720.
-#define CAR_DAMAGE_SCALE     0.03f
+// AddDamage's share of the size for CarDamage. Retail's gp-28324 (in
+// AddDamage at 0x001d83d0) is 0.013 (0x3c54fdf4); the demo's gp-28720 was
+// 0.03, which the port had until TASKS 73, so every hit dented the car
+// 2.3 times as much as on the PS2.
+#define CAR_DAMAGE_SCALE     0.0130000003f
 // gp-28716 and gp-28712.
 #define CAR_FRICTION         0.3f
 #define CAR_BOUNCINESS       0.1f
@@ -264,6 +267,9 @@ void carcollisionbody_apply_impulse(CollisionBody *b, bVector3 *j,
     carcollisionbody_animate_collision_reaction(c, &s, amount);
 }
 
+// Retail's 0x001d83d0, the demo's 0x001cdca0 with two changes: the damage
+// scale (CAR_DAMAGE_SCALE), and MonitorImpact's test and third argument,
+// which are in the seam (copmgr.c's copmgr_car_impact, since TASKS 51).
 // The rumble's test is RaceCoordinator's IsReplaying and IsDemoMode inlined:
 // instant replay, the post-race, auto replay, or IsReplayDemoMode called
 // out of line; then the state re-read, less AI_DEMO_MODE, unsigned below 2.

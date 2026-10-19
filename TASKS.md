@@ -4677,10 +4677,16 @@ phases.
           stubs retail's test into the demo image under four braking
           Move scenarios: 125 scenarios, 0 differ; its 4 new mutations
           caught.
+        - [x] CarCollisionBody::AddDamage: retail's (`0x001d83d0`)
+          scales a hit by 0.013 for CarDamage, where the demo's (and the
+          port's) had 0.03. Done in Session 135. Its other change, the
+          cop manager's test and two-car argument, was already in the
+          seam (copmgr_car_impact, TASKS 51). `collisionbody_check` stubs
+          retail's word into the demo image: 81 scenarios, 0 differ; 3
+          damage-scale mutations caught.
         - Other demo-derived functions retail changed (TASKS 74's list):
-          InitSkids, CarCollisionBody::AddDamage,
-          FindWaferNormal and the RectPolyhedron constructor. Retail's
-          TerrainTypeInfoTable has another layout.
+          InitSkids, FindWaferNormal and the RectPolyhedron constructor.
+          Retail's TerrainTypeInfoTable has another layout.
         - [x] RealDriver's changed functions and the player's input.
           Done in Session 133. Retail's tunables and its steering and
           throttle handlers are the demo's; what changed:
