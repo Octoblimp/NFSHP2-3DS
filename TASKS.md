@@ -4629,10 +4629,17 @@ phases.
           mutations, 132 caught, 2 equivalent. The bush stands still
           while its leaves fly: nothing in the port draws a rigid
           animation (TASKS 76).
+        - [x] Car::CalcForceParameters (`0x001346f8`): nothing to port.
+          It is the PS2 force-feedback wheel's: its calls are
+          PortSetForceConditionData, PortSetForcePeriodicData,
+          PortPlayShake and PortSetOverallForceGain, and the 3DS has
+          no such motors. Its one write to the Car is ForceBuzzTime
+          (retail Car+2188), which no code in retail reads (the
+          image's other `2188(` loads are a camera table's).
+          Checked in Session 134.
         - Other demo-derived functions retail changed (TASKS 74's list):
-          Car::CalcForceParameters, PhysicsCar::Move,
-          World::GetTimestep, Wheel's GuessGroundForce and
-          FinalizeGroundForce, InitSkids,
+          PhysicsCar::Move, World::GetTimestep, Wheel's
+          GuessGroundForce and FinalizeGroundForce, InitSkids,
           CarCollisionBody::AddDamage, FindWaferNormal and the
           RectPolyhedron constructor. Retail's TerrainTypeInfoTable has
           another layout.

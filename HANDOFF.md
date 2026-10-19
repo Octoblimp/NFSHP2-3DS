@@ -27624,3 +27624,15 @@ start of 0 read while the clock's low bits fall inside the animation.
 loadertable_check counts slot 7 as ported: 0 differ on both images.
 carinit, car, world, carsnap, physicscar and realdriver 0 differ. The CIA
 builds clean.
+
+### TASKS 73: CalcForceParameters, nothing to port
+
+Retail's Car::CalcForceParameters (`0x001346f8`, 1728 bytes, listing in
+`out/calcforce_retail.txt`) drives the PS2 force-feedback wheel. It
+calls PortSetForceConditionData, PortSetForcePeriodicData, PortPlayShake
+and PortSetOverallForceGain, and reads IsReplayDemoMode,
+IsGameFlowPaused, GetSteering, GetWheelTraction and GetWheelsOnGround.
+Its only write to the Car is ForceBuzzTime (retail Car+2188, after the
+shake). In `out/retail_full.dis` the only loads at that offset are a
+camera table's (`0x0019b0c4`). The 3DS has no such motors, so the item
+is closed with nothing ported.
