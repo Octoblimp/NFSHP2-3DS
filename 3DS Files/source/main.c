@@ -7547,6 +7547,15 @@ int main(int argc, char** argv)
     gBaseCarSoundStartHonkHornFn = basecarsound_start_honk_horn;
     gBaseCarSoundStopHonkHornFn = basecarsound_stop_honk_horn;
     gBaseCarSoundIsHonkingFn = basecarsound_is_honking;
+    // RealDriver's Player calls (TASKS 73): until these, the reset button
+    // did nothing and an automatic box's shift buttons went nowhere.
+    // Retail's NitroAvailable asks about the NIS, and its horn ends in
+    // Easter egg 5's chopper attack.
+    gPlayerRerouteJoyEventFn = player_reroute_joy_event;
+    gPlayerIsAllowedToResetFn = player_is_allowed_to_reset;
+    gPlayerSelectedResetFn = player_selected_reset;
+    gPlayerIsNisPlayingFn = player_is_nis_playing;
+    gChopperHonkAttackFn = chopper_honk_attack;
     // Their engines (14-4), which BaseCarSound's constructors make.
     gCreatePlayerEngineFn = enginesound_create_player;
     gCreateAIEngineFn = enginesound_create_ai;

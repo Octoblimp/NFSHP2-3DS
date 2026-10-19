@@ -13,6 +13,7 @@
 #include "cartypeinfo.h"
 #include "collisionbody.h"
 #include "copmanager.h"
+#include "drivecam.h"
 #include "eefpu.h"
 #include "hudnis.h"
 #include "nisinfo.h"
@@ -250,6 +251,23 @@ int32_t player_is_allowed_to_reset(struct Player *p)
         return 1;
     t = (float)(int32_t)pCurrentRace->RaceTime.PackedTime * SECONDS_PER_TICK;
     return !(t < 5.0f);
+}
+
+void player_selected_reset(struct Player *p)
+{
+    CameraMover *m;
+
+    p->TimeToDisplayResetPrompt.PackedTime = 0;
+    p->LastTimeCarInTrouble.PackedTime = 0;
+    m = p->pCameraMover;
+    if (m != NULL) {
+        m->vtbl->ResetState(m);
+        m = p->pCameraMover;
+        if (m != NULL && m->Type == CM_DRIVE)
+            ((DriveCameraMover *)(void *)m)->DesiredLookBackParam =
+                p->bLookBack ? 1.0f : 0.0f;
+    }
+    p->HangTime = 0.0f;
 }
 
 void player_choose_to_display_reset(struct Player *p)

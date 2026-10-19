@@ -20,11 +20,13 @@
 
 #include "average.h"
 #include "bmath.h"
+#include "cammover.h"
 #include "car.h"
 #include "carstate.h"
 #include "cartypeinfo.h"
 #include "collisionbody.h"
 #include "copmanager.h"
+#include "drivecam.h"
 #include "hudnis.h"
 #include "nisinfo.h"
 #include "nismanager.h"
@@ -109,6 +111,9 @@ static NisInfo          table[NREC];
 static char             cm[16];
 static char             pursuit[16];
 static char             coord[16];
+static DriveCameraMover movers[NPL + 1];
+static CameraMoverVtbl  mvt;
+static int              rs_mode[NPL];
 
 static int32_t  tickets, free_run, dbg_loop, demo, pursued, zone_ok;
 static int      route_on, point_on;
@@ -179,6 +184,10 @@ static void names(void)
     name(&route, "RT");
     name(&point, "PT");
     name(&bDefaultSeed, "SEED");
+    for (k = 0; k <= NPL; k++) {
+        snprintf(b, 16, "MV%d", k);
+        name(&movers[k], b);
+    }
 }
 
 // ---------------------------------------------------------------- stubs
@@ -341,6 +350,26 @@ static void bust(const bVector3 *pos)
     printf("  bust %s\n", sym(pos));
 }
 
+// The camera's ResetState. A mode changes what the player reads after:
+// 1 drops its mover, 2 swaps in the spare, 3 and 4 retype it.
+static void reset_state(CameraMover *m)
+{
+    int k;
+
+    printf("  resetstate %s\n", sym(m));
+    for (k = 0; k < NPL; k++) {
+        if (players[k].pCameraMover == m) {
+            if (rs_mode[k] == 1)
+                players[k].pCameraMover = NULL;
+            else if (rs_mode[k] == 2)
+                players[k].pCameraMover = &movers[NPL].base;
+            else if (rs_mode[k] == 3 || rs_mode[k] == 4)
+                m->Type = (CameraMoverType)(rs_mode[k] - 2);
+            break;
+        }
+    }
+}
+
 static void done_cb(int32_t param)
 {
     printf("  cb %d\n", (int)param);
@@ -363,6 +392,10 @@ static void reset(void)
     memset(&route, 0, sizeof route);
     memset(&point, 0, sizeof point);
     memset(table, 0, sizeof table);
+    memset(movers, 0, sizeof movers);
+    memset(rs_mode, 0, sizeof rs_mode);
+    for (k = 0; k <= NPL; k++)
+        movers[k].base.vtbl = &mvt;
     TheRaceParameters.BeACop = 0;
     TheRaceParameters.nNumTicketsBeforeArrest = 0;
     for (k = 0; k < NPL; k++) {
@@ -425,6 +458,15 @@ static void dump(void)
         printf("M%d play %d end %d cam %d nis %d\n", k, (int)m->Playing,
                (int)m->EndTime, (int)m->CamNumber, (int)m->NisNumber);
     }
+    printf("V");
+    for (k = 0; k < NPL; k++)
+        printf(" %s/%d/%08x", sym(players[k].pCameraMover),
+               (int)players[k].bLookBack,
+               (unsigned)fb(players[k].HangTime));
+    for (k = 0; k <= NPL; k++)
+        printf(" %d/%08x", (int)movers[k].base.Type,
+               (unsigned)fb(movers[k].DesiredLookBackParam));
+    printf("\n");
 }
 
 static Car *car_or_null(const char *s)
@@ -557,6 +599,21 @@ static void run(char **t, int n)
         c->pCarTypeInfo->CarClass = (int8_t)ix(t[12]);
         c->pDynamicCollisionBody->LastPenetrationTime.PackedTime = hx(t[13]);
         return;
+    } else if (strcmp(o, "mv") == 0) {
+        // mv|k|on|type|lb|dlb|hang|mode
+        int k = ix(t[1]);
+
+        players[k].pCameraMover = hx(t[2]) ? &movers[k].base : NULL;
+        movers[k].base.Type = (CameraMoverType)hx(t[3]);
+        players[k].bLookBack = (int32_t)hx(t[4]);
+        movers[k].DesiredLookBackParam = bf(hx(t[5]));
+        players[k].HangTime = bf(hx(t[6]));
+        rs_mode[k] = ix(t[7]);
+        return;
+    } else if (strcmp(o, "mvx") == 0) {
+        movers[NPL].base.Type = (CameraMoverType)hx(t[1]);
+        movers[NPL].DesiredLookBackParam = bf(hx(t[2]));
+        return;
     } else if (strcmp(o, "dl") == 0) {
         route.DrivingLineInfoTable[ix(t[1])].Flags = hx(t[2]);
         return;
@@ -645,6 +702,9 @@ static void run(char **t, int n)
     } else if (strcmp(o, "upgs") == 0) {
         printf("upgs\n");
         player_update_players_game_state();
+    } else if (strcmp(o, "psr") == 0) {
+        printf("psr P%s\n", t[1]);
+        player_selected_reset(&players[ix(t[1])]);
     } else {
         fprintf(stderr, "unknown op %s\n", o);
         exit(2);
@@ -671,6 +731,7 @@ int main(int argc, char **argv)
     gRadialBlurOffFn = blur_off;
     gCollisionSoundPlayBustRoadBlockFn = bust;
     gNisCreateCameraCoordinatorFn = create_coord;
+    mvt.ResetState = reset_state;
     reset();
     while (fgets(line, sizeof line, f) != NULL) {
         char *e = line + strlen(line);

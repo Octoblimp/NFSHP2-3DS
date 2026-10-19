@@ -306,6 +306,33 @@ void player_racing_joy_handler(struct Player *p, JoystickPort port,
     }
 }
 
+void player_reroute_joy_event(struct Player *p, JoystickPort port,
+                              JoyEvent ev, uint8_t value)
+{
+    JoyEvent to;
+
+    if (ev == JOY_EVENT_SHIFTUP) {
+        if (RaceParametersBeACop) {
+            if (!is_player_cop_car(p))
+                return;
+            to = JOY_EVENT_REQUEST_ROADBLOCK;
+        } else {
+            to = JOY_EVENT_ZONE_PREVIEW;
+        }
+    } else if (ev == JOY_EVENT_SHIFTDOWN) {
+        if (RaceParametersBeACop) {
+            if (!is_player_cop_car(p))
+                return;
+            to = JOY_EVENT_REQUEST_HELICOPTER;
+        } else {
+            to = JOY_EVENT_ZONE_FREEZE;
+        }
+    } else {
+        return;
+    }
+    player_racing_joy_handler(p, port, to, value);
+}
+
 void player_pre_race_joy_handler(JoystickPort port, JoyEvent ev,
                                  uint8_t value, void *obj)
 {

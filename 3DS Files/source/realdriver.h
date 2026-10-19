@@ -114,6 +114,8 @@ typedef char realdriver_layout_check[
 #define RD_GEAR_REVERSE  0
 #define RD_GEAR_AUTO    (-1)
 #define RD_GEAR_SPORT   (-2)
+// Gear's SECOND_GEAR: the sport shift's first press down stops above it.
+#define RD_GEAR_SECOND   3
 
 // ------------------------------------------------------------ the tables
 
@@ -196,8 +198,9 @@ void realdriver_do_throttle_brake_reverse(RealDriver *d, float dt);// 0x00139d48
 void realdriver_do_brake(RealDriver *d, float dt);        // 0x00139ff0, no caller
 int32_t realdriver_nitro_was_active(RealDriver *d);       // 0x0013a410
 int32_t realdriver_nitro_active(RealDriver *d);           // 0x0013a490
-int32_t realdriver_nitro_available(RealDriver *d);        // 0x0013a4f0
-void realdriver_start_honk_horn(RealDriver *d);           // 0x0013a558
+// Retail's (0x0013c378): never while the car's player has a NIS playing.
+int32_t realdriver_nitro_available(RealDriver *d);
+void realdriver_start_honk_horn(RealDriver *d);           // 0x0013c420
 void realdriver_stop_honk_horn(RealDriver *d);            // 0x0013a598
 
 JoystickPort realdriver_get_port(RealDriver *d);          // 0x0013ac10
@@ -228,14 +231,19 @@ void realdriver_joy_brake(JoystickPort port, JoyEvent ev, uint8_t value,
                           void *obj);                     // 0x00139f18
 void realdriver_joy_ebrake(JoystickPort port, JoyEvent ev, uint8_t value,
                            void *obj);                    // 0x00139f98
+// Retail's (0x0013be88, 0x0013bf68): the sport shift's first press
+// starts from the car's gear, one up but not past the top, one down but
+// not below first.
 void realdriver_joy_shift_up(JoystickPort port, JoyEvent ev, uint8_t value,
-                             void *obj);                  // 0x0013a060
+                             void *obj);
 void realdriver_joy_shift_down(JoystickPort port, JoyEvent ev, uint8_t value,
-                               void *obj);                // 0x0013a118
+                               void *obj);
 void realdriver_joy_reset_car(JoystickPort port, JoyEvent ev, uint8_t value,
                               void *obj);                 // 0x0013a1c0
+// Retail's (0x0013c158): a racer's horn holds its headlights on
+// (HeadlightsState), and a cop's switches its lights to the fast flash, 2.
 void realdriver_joy_honk_horn(JoystickPort port, JoyEvent ev, uint8_t value,
-                              void *obj);                 // 0x0013a2e8
+                              void *obj);
 void realdriver_joy_nitro_boost(JoystickPort port, JoyEvent ev, uint8_t value,
                                 void *obj);               // 0x0013a3a0
 
@@ -278,12 +286,21 @@ extern void (*gReplayRegisterInterestingEventFn)(struct ReplayManager *rm,
                                                  float weight,
                                                  const char *name);
 
-// Player::RerouteJoyEvent (0x001721b8), IsAllowedToReset (0x0017aab8),
-// PlayerSelectedReset (0x0017ab08). Task 26.
+// Player::RerouteJoyEvent (retail's 0x001788b8), IsAllowedToReset
+// (0x00181e98) and PlayerSelectedReset (0x00182208); main.c binds
+// playerinput.h's and playernis.h's (TASKS 73). Player::IsNisPlaying
+// (0x00176520), which retail's NitroAvailable asks first; main.c binds
+// playerhud.h's, and NULL is "no NIS", as the demo's had no test.
 extern void    (*gPlayerRerouteJoyEventFn)(struct Player *p, JoystickPort port,
                                            JoyEvent ev, uint8_t value);
 extern int32_t (*gPlayerIsAllowedToResetFn)(struct Player *p);
 extern void    (*gPlayerSelectedResetFn)(struct Player *p);
+extern int32_t (*gPlayerIsNisPlayingFn)(const struct Player *p);
+
+// Retail's StartHonkHorn ends in a jump to Chopper.obj's 0x001ead40 where
+// the demo's ended in HandyDebuggingFunction: Easter egg 5's chopper
+// attacks when the horn goes. main.c binds chopper.h's.
+extern void (*gChopperHonkAttackFn)(void);
 
 // tCopManager::GetResetDirection (the demo's 0x00214740, retail's
 // 0x00228ae8; main.c binds copmgr.h's) and BeACopToggleSirenAndLights

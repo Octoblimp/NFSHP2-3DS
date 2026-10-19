@@ -219,6 +219,18 @@ int32_t chopper_attack_car(struct Chopper *h, ChopperAttackType type)
     return 1;
 }
 
+void chopper_honk_attack(void)
+{
+    struct Chopper *h;
+
+    if (pCurrentWorld == NULL)
+        return;
+    h = pCurrentWorld->Helicopter;
+    if (h == NULL || h->New960 == 0)
+        return;
+    chopper_attack_car(h, CHOPATTACK_SMOKE_BOMB_1);
+}
+
 void chopper_adjust_bomb_target(struct Chopper *h)
 {
     const BombRunBehaviour *b = &BombRunBehaviours[h->BombRunType];

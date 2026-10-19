@@ -27431,3 +27431,53 @@ too). mellowmover_check 0 differ, and `--demo` 0 differ. carsnap_check
 drivetrain_check 18 scenarios, 507 lines, 0 differ. physicscar,
 realdriver, realcontroller, carsnap, mellowmover, carinfo, drivingchoice,
 loadertable, nearbycar and physcomp 0 differ. The CIA builds clean.
+
+### TASKS 73, slice 3: RealDriver and the player's buttons
+
+- Retail's RealDriver tunables, DoSteering, DoThrottleBrakeReverse and
+  the steer, throttle, brake, e-brake, reset and nitro handlers are the
+  demo's. Its offsets are the demo's too (DesiredGear 544 ... pCar 560).
+- `realdriver.c`:
+  - ShiftUp (`0x0013be88`) and ShiftDown (`0x0013bf68`): in sport, a
+    press only counts. The first press (DesiredGear to SPORT) starts from
+    CurrentGear: up adds one unless it is past NumGears + 1, and down
+    takes one off unless it is in first (`slti 3`).
+  - HonkHorn (`0x0013c158`): a racer's press sets HeadlightsState 1 and
+    its release 0. A cop car outside Be A Cop reads Car+2056 as a word
+    (`cop_lights_word`) and stores 2 there (`set_cop_lights` zeroes the
+    three bytes after).
+  - StartHonkHorn (`0x0013c420`) tail-jumps to `0x001ead40`, Easter egg
+    5's `chopper_honk_attack` (the world's helicopter with New960 drops
+    smoke bomb 1). The demo's went to HandyDebuggingFunction.
+  - NitroAvailable (`0x0013c378`) returns 0 while the car's player's
+    NIS plays (`gPlayerIsNisPlayingFn`).
+- `playerinput.c`: `player_reroute_joy_event` (`0x001788b8`). SHIFTUP
+  becomes REQUEST_ROADBLOCK in Be A Cop (cop cars only) or ZONE_PREVIEW;
+  SHIFTDOWN becomes REQUEST_HELICOPTER or ZONE_FREEZE. It feeds
+  `player_racing_joy_handler`.
+- **The reset button.** `gPlayerRerouteJoyEventFn`,
+  `gPlayerIsAllowedToResetFn` and `gPlayerSelectedResetFn` were never
+  bound in main.c, so ResetCar did nothing on the 3DS. main.c binds them
+  now, with the two new seams. `player_selected_reset` (`0x00182208`)
+  was already retail's.
+- `realdriver_check.py`: two images. The demo run keeps the new seams
+  NULL; a retail run (`RetailRun`) drives retail's handlers with the
+  new seams stubbed, through `hdump`. Its retail scenarios: the sport
+  entry over 3, 5 and 6 gears, the other boxes, the horn (usage, Be A
+  Cop, seven CopLights words, the sound and egg masks), the nitro (NIS
+  answers, the timing grid), and a 2000-step fuzz. The mutation pass
+  uses mutpar now (`--jobs`); three patterns were made unique.
+- `playernis_check.py`: `psr` runs PlayerSelectedReset with a camera
+  mover per player and a spare. ResetState is a stub through the
+  vtable's +88/+92 that can drop, swap or retype the mover, to test the
+  re-read.
+- Not covered by a tool: `player_reroute_joy_event` (no playerinput
+  checker) and `chopper_honk_attack`, both read against retail by eye.
+  The zone preview and freeze cameras are not ported. Retail's
+  Car::ResetToRoutePoint (`0x00132f20`) takes one more argument than
+  the demo's, which `carreset.c` has. That is the next slice.
+
+realdriver_check: 215871 ops, 50499 lines, 0 differ; 165 mutations, 161
+caught, 4 equivalent, 0 unexplained. playernis_check: 180125 ops,
+100348 lines, 0 differ; its 9 PlayerSelectedReset mutations caught.
+chopper_check and realcontroller_check 0 differ. The CIA builds clean.

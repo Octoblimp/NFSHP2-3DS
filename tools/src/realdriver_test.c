@@ -43,7 +43,7 @@ int32_t WorldLoopCounter = 100000;
 enum {
     OP_TAG, OP_FILL, OP_INIT, OP_DUMP, OP_CARF, OP_DRVF, OP_GLOB, OP_PTR,
     OP_ANSWER, OP_MASK, OP_CALL, OP_HANDLER, OP_VT, OP_TABLE, OP_INV,
-    OP_STATIC, OP_TARGET, OP_RETAIL, OP_EBDUMP
+    OP_STATIC, OP_TARGET, OP_RETAIL, OP_EBDUMP, OP_HDUMP
 };
 
 enum {
@@ -56,13 +56,13 @@ enum {
 };
 
 enum { P_PLAYER, P_COP, P_SOUND, P_REPLAY };
-enum { A_PLUGGED, A_WHEEL, A_STIFF, A_ALLOWED, A_DIRECTION, A_COUNT };
+enum { A_PLUGGED, A_WHEEL, A_STIFF, A_ALLOWED, A_DIRECTION, A_NIS, A_COUNT };
 
 enum {
     S_ROUTE_POINT, S_CANCEL_TUNING, S_BLUR_ON, S_BLUR_OFF, S_BLUR_ALPHA,
     S_REPLAY_EVENT, S_REROUTE, S_ALLOWED_RESET, S_SELECTED_RESET,
     S_RESET_DIRECTION, S_SIREN_TOGGLE, S_RESET_TO_POINT, S_HONK_START,
-    S_HONK_STOP
+    S_HONK_STOP, S_NIS_PLAYING, S_HONK_EGG
 };
 
 #define CTRL_VT   0x01E03200u
@@ -313,6 +313,17 @@ static void s_honk_stop(struct BaseCarSound *s)
     printf("  seam honk-stop %s\n", label(s));
 }
 
+static int32_t s_nis_playing(const struct Player *p)
+{
+    printf("  seam nis-playing %s -> %d\n", label(p), (int)ans[A_NIS]);
+    return ans[A_NIS];
+}
+
+static void s_honk_egg(void)
+{
+    printf("  seam honk-egg -\n");
+}
+
 #define ON(bit) ((mask >> (bit)) & 1u)
 
 static void set_mask(uint32_t m)
@@ -339,6 +350,8 @@ static void set_mask(uint32_t m)
                                                         : NULL;
     gBaseCarSoundStartHonkHornFn = ON(S_HONK_START) ? s_honk_start : NULL;
     gBaseCarSoundStopHonkHornFn  = ON(S_HONK_STOP) ? s_honk_stop : NULL;
+    gPlayerIsNisPlayingFn        = ON(S_NIS_PLAYING) ? s_nis_playing : NULL;
+    gChopperHonkAttackFn         = ON(S_HONK_EGG) ? s_honk_egg : NULL;
 }
 
 // ------------------------------------------------------ the controller
@@ -400,6 +413,11 @@ static void set_carf(int32_t field, int32_t v)
     case 21: cti.Control.Steering = f; break;
     case 22: cti.UsageType = v; break;
     case 23: player.PlayerNumber = v; break;
+    case 24: car.HeadlightsState = v; break;
+    case 25:
+        // CopLights and the three bytes after it, as retail's word.
+        memcpy((uint8_t *)&car + offsetof(Car, CopLights), &v, 4);
+        break;
     default:
         fprintf(stderr, "carf %d\n", (int)field);
         exit(2);
@@ -536,6 +554,24 @@ static void ebdump(int slot)
            bitsf(d->BrakeInput), (int)d->ManualTransmission,
            vtname(d->Base._vtable, buf), label(d->pCar),
            bitsf(car.State.Throttle));
+}
+
+// What retail's sport entry, horn and nitro read and write, for the retail
+// run. The lights print as retail's word.
+static void hdump(int slot)
+{
+    RealDriver *d = &drv[slot];
+    char        buf[16];
+    uint32_t    cl;
+
+    memcpy(&cl, (const uint8_t *)&car + offsetof(Car, CopLights), 4);
+    printf("h%d dg %d sg %d ni %d lnr %d mt %d vt %s car %s | cl %08x "
+           "sm %d hs %d\n",
+           slot, (int)d->Base.DesiredGear, (int)d->Base.SportGear,
+           (int)d->Base.NitroFlag, (int)d->LastNitroRequest,
+           (int)d->ManualTransmission, vtname(d->Base._vtable, buf),
+           label(d->pCar), (unsigned)cl, (int)car.TheSirenMode,
+           (int)car.HeadlightsState);
 }
 
 static const struct {
@@ -912,6 +948,9 @@ int main(int argc, char **argv)
             break;
         case OP_EBDUMP:
             ebdump(next());
+            break;
+        case OP_HDUMP:
+            hdump(next());
             break;
         default:
             fprintf(stderr, "op %d\n", (int)op);

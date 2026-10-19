@@ -4603,9 +4603,40 @@ phases.
           CarCollisionBody::AddDamage, FindWaferNormal and the
           RectPolyhedron constructor. Retail's TerrainTypeInfoTable has
           another layout.
-        - RealDriver's changed functions, the player's input (the joy
-          handlers, DoSteering, DoThrottleBrakeReverse, NitroAvailable):
-          the port's are the demo's.
+        - [x] RealDriver's changed functions and the player's input.
+          Done in Session 133. Retail's tunables and its steering and
+          throttle handlers are the demo's; what changed:
+          - The sport shift's first press starts from the car's gear:
+            up stops past the top gear, down keeps first. Later
+            presses only count.
+          - An automatic box's shift buttons go to the player again
+            (Player::RerouteJoyEvent, `0x001788b8`): Be A Cop's
+            roadblock and helicopter calls for a cop car, zone
+            preview and freeze in a race. **Bug fixed:** the reset
+            button did nothing. The Player calls (RerouteJoyEvent,
+            IsAllowedToReset, SelectedReset) were NULL seams main.c
+            never bound.
+          - The horn: a racer's holds its headlights on. A cop car
+            outside Be A Cop reads CopLights as a word and turns the
+            lights on at 2. StartHonkHorn ends in Easter egg 5's
+            chopper smoke bomb (`0x001ead40`).
+          - NitroAvailable answers no while the car's player watches
+            a NIS.
+          `realdriver_check` runs the demo's image for the old seams
+          and retail's image for the new ones (sport entry, horn,
+          nitro, a 2000-step fuzz): 215871 ops, 0 differ; 165
+          mutations, 161 caught, 4 equivalent. PlayerSelectedReset
+          (`0x00182208`) is in `playernis_check` (a fake camera
+          mover per player): 0 differ, 9 new mutations caught.
+          Not checked by a tool: `player_reroute_joy_event` (read
+          against retail by eye) and the chopper egg (6 lines, by eye).
+          Still missing: the zone preview and freeze cameras the
+          automatic's shift buttons now ask for (the events arrive,
+          nothing handles them yet).
+        - Car::ResetToRoutePoint: retail's (`0x00132f20`, 336 bytes)
+          takes one more argument than the demo's (`0x00131480`, 252
+          bytes); `carreset.c` has the demo's. Next, now that the reset
+          button calls it.
         - CarState's layout: retail adds DistanceMoved after Odometer, and
           the fields from TractionUsage to BurnOutAllow move on by 4. The
           port keeps the demo's layout, with DistanceMoved in the padding.

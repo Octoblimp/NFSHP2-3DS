@@ -14,10 +14,10 @@ harness runs the same op script on the port and prints the same lines.
 RemoveJoyHandler, IsJoystickPluggedIn, IsJoystickTypeWheel and
 DoesJoystickHaveStiffThrottle) are joystick_check's to verify; here each is
 stubbed by symbol in the model and defined in the harness, logs what it was
-handed, and answers what the script says. The same goes for the fourteen
+handed, and answers what the script says. The same goes for the sixteen
 seams, which are other tasks' classes: the replay's event log, the render's
-radial blur, the route editor, Player, tCopManager, Car::ResetToRoutePoint
-and BaseCarSound.
+radial blur, the route editor, Player, tCopManager, Car::ResetToRoutePoint,
+BaseCarSound and the chopper.
 
 **The seam mask.** The image calls a seam unconditionally; the port skips
 one that is NULL, and a NULL query answers "not allowed" or a forward-facing
@@ -41,12 +41,23 @@ the two drivers, the position and velocity vectors, the target.
 **The retail run.** Retail's ForcedEBrakeStop is a float timer, where the
 demo's is an on/off int, so the port has retail's ForceEBrakeStop
 (0x0013b558) and DoThrottleBrakeReverse (0x0013bb40). The demo scenarios
-keep the stop at 0, where the two agree, and a last scenario runs on the
+keep the stop at 0, where the two agree, and the last scenarios run on the
 retail image: OP_RETAIL routes the ops after it to a retail emulator
 (the harness ignores it), where the constructor (0x0013ad90, its
 DriveTarget calls silent), the setter and DoThrottleBrakeReverse run as
 shipped, and OP_EBDUMP prints what DoThrottleBrakeReverse reads and
 writes.
+
+The gearbox's sport entry, the horn and NitroAvailable are retail's too
+(TASKS 73): the first sport press starts from the car's gear capped at the
+top and floored at first; the horn holds a racer's headlights on and turns
+a cop's lights on at 2, reading them as a word; StartHonkHorn ends in
+Easter egg 5's chopper attack; and there is no nitro while the player
+watches a NIS. Those run on the retail image as well, with two seams the
+demo has no call for (Player::IsNisPlaying and the egg, 0x001ead40), and
+OP_HDUMP prints what they read and write. The demo run leaves both seams
+NULL, keeps the car's gear where the two sport entries agree, and leaves
+the horn and the shift buttons out of its fuzz.
 
 Scenarios: the tunables and tables as built, and the vtable slot by slot;
 GetValue and InverseLookup over every table; the constructor over two fills;
@@ -56,7 +67,9 @@ the horn and the nitro over their guards; DoThrottleBrakeReverse and DoBrake
 over a grid; DoSteering over random states and held-stick sequences; Drive
 over random states and nitro transitions; every vtable slot through the
 table; a fuzz of everything interleaved; the destructor; and, on retail,
-the e-brake stop over a grid and as timed countdowns.
+the e-brake stop over a grid and as timed countdowns, the sport entry over
+every gear and three gearboxes, the horn over its guards and the lights'
+four bytes, the nitro over the NIS guard, and a fuzz of the four.
 
     python tools/realdriver_check.py
     python tools/realdriver_check.py --mutate
@@ -69,10 +82,12 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hostbuild
+import mutpar
 import physicscar_check as pcc
 import retail_model
 from mipsemu import Emu, M32, s32
@@ -194,6 +209,11 @@ CARF = [
     ("Control.Steering", CTI + 768, 4),
     ("UsageType", CTI + 1336, 4),
     ("PlayerNumber", PLAYER + 16, 4),
+    # The retail run's alone (R_CARF has their addresses): HeadlightsState,
+    # and CopLights as retail reads and writes it, a word over the byte and
+    # the three after it.
+    ("HeadlightsState", None, 4),
+    ("CopLightsWord", None, 4),
 ]
 C = {name: i for i, (name, _, _) in enumerate(CARF)}
 
@@ -221,7 +241,7 @@ D = {name: i for i, (name, _, _) in enumerate(DRVF)}
 
 (OP_TAG, OP_FILL, OP_INIT, OP_DUMP, OP_CARF, OP_DRVF, OP_GLOB, OP_PTR,
  OP_ANSWER, OP_MASK, OP_CALL, OP_HANDLER, OP_VT, OP_TABLE, OP_INV,
- OP_STATIC, OP_TARGET, OP_RETAIL, OP_EBDUMP) = range(19)
+ OP_STATIC, OP_TARGET, OP_RETAIL, OP_EBDUMP, OP_HDUMP) = range(20)
 
 (F_DESTROY, F_DRIVE, F_ADD, F_REMOVE, F_DISABLE_SL, F_ENABLE_SL, F_SET_MANUAL,
  F_SET_LOW_GEAR, F_FORCE_EBRAKE, F_RESET_JOY, F_DO_STEERING, F_DTBR,
@@ -274,7 +294,7 @@ EV = dict(STEER=110, STEER_ANALOG=111, THROTTLE=112, THROTTLE_ANALOG=113,
 # managers.
 P_PLAYER, P_COP, P_SOUND, P_REPLAY = range(4)
 # Answers the stand-ins give.
-A_PLUGGED, A_WHEEL, A_STIFF, A_ALLOWED, A_DIRECTION = range(5)
+A_PLUGGED, A_WHEEL, A_STIFF, A_ALLOWED, A_DIRECTION, A_NIS = range(6)
 
 # The seams, in mask order, and each one's symbol in the image.
 SEAMS = [
@@ -293,9 +313,15 @@ SEAMS = [
      "ResetToRoutePoint__3CarP10TrackRouteP15TrackRoutePointfbf"),
     ("honk-start", "StartHonkHorn__12BaseCarSound"),
     ("honk-stop", "StopHonkHorn__12BaseCarSound"),
+    # Retail's alone: the demo's NitroAvailable asks no player, and its
+    # StartHonkHorn ends in HandyDebuggingFunction, an empty one.
+    ("nis-playing", 0x00176520),
+    ("honk-egg", 0x001ead40),
 ]
 S = {n: i for i, (n, _) in enumerate(SEAMS)}
-ALL_SEAMS = (1 << len(SEAMS)) - 1
+# The demo run's mask leaves the last two NULL, as the demo has no call.
+ALL_SEAMS = (1 << S["nis-playing"]) - 1
+R_ALL_SEAMS = (1 << len(SEAMS)) - 1
 
 # The port's function for each image symbol a table slot holds.
 FNMAP = {
@@ -331,7 +357,8 @@ VT_SLOTS = [8, 16, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128,
 ARGS = {OP_TAG: 1, OP_FILL: 2, OP_INIT: 1, OP_DUMP: 1, OP_CARF: 2,
         OP_DRVF: 3, OP_GLOB: 2, OP_PTR: 2, OP_ANSWER: 2, OP_MASK: 1,
         OP_CALL: 5, OP_HANDLER: 5, OP_VT: 5, OP_TABLE: 2, OP_INV: 2,
-        OP_STATIC: 0, OP_TARGET: 1, OP_RETAIL: 1, OP_EBDUMP: 1}
+        OP_STATIC: 0, OP_TARGET: 1, OP_RETAIL: 1, OP_EBDUMP: 1,
+        OP_HDUMP: 1}
 
 # ---- the retail run --------------------------------------------------------
 
@@ -345,15 +372,40 @@ R_REPLAY_EVENT = 0x0013e270     # RegisterInterestingEvent
 R_VT_RD = 0x002aee30
 R_REPLAY = R_GP - 22440         # pReplayManager
 # The tunables DoThrottleBrakeReverse reads. 0.6, 0.2 and 20 mph
-# (gp-31528, gp-31524, gp-31532) are literals.
+# (gp-31528, gp-31524, gp-31532) are literals. The rest are the nitro's
+# and the horn's; the three nitro ticks (gp-31504..31512) are 0.00025 as
+# the demo's.
 R_GLOBS = {"WorldLoopCounter": R_GP - 19552,
            "MaxSpeedForReverse": R_GP - 22480,
            "MinSpeedForThrottle": R_GP - 22476,
-           "MinSpeedForThrottleWhenReversing": R_GP - 22472}
-# Retail's State is at car+64 too, but ForwardSpeed is 4 bytes on.
+           "MinSpeedForThrottleWhenReversing": R_GP - 22472,
+           "WorldTimer": R_GP - 19576,
+           "WorldTimeElapsed": R_GP - 19560,
+           "RaceParametersBeACop": 0x0031AB0C,
+           "NitrousActiveTime": R_GP - 22448,
+           "NitrousRechargeTime": R_GP - 22444}
+# Retail's State is at car+64 too, but ForwardSpeed is 4 bytes on; the
+# lights, the headlights and the siren are 176 and 180 bytes on from the
+# demo's.
 R_CARF = {"ForwardSpeed": CAR + 960, "VelocityMagnitude": CAR + 964,
-          "Throttle": CAR + 972}
-R_CALLS = (F_FORCE_EBRAKE, F_DTBR)
+          "Throttle": CAR + 972, "CurrentGear": CAR + 968,
+          "TheMovementMode": CAR + 36, "CopLightsWord": CAR + 2056,
+          "HeadlightsState": CAR + 2100, "TheSirenMode": CAR + 2104,
+          "UsageType": CTI + 1336, "NumGears": CTI + 648}
+R_PLAYER_AT = CAR + 24
+R_SOUND_AT = CAR + 2132
+R_COP_AT = R_GP - 15620         # pCopManager
+R_CALL = {F_FORCE_EBRAKE: R_FORCE_EBRAKE, F_DTBR: R_DTBR,
+          F_NITRO_WAS: 0x0013c298, F_NITRO_ACTIVE: 0x0013c318,
+          F_NITRO_AVAIL: 0x0013c378, F_START_HONK: 0x0013c420,
+          F_STOP_HONK: 0x0013c460}
+R_HANDLER = {"ShiftUp": 0x0013be88, "ShiftDown": 0x0013bf68,
+             "HonkHorn": 0x0013c158, "NitroBoost": 0x0013c228}
+R_REROUTE = 0x001788b8
+R_CANCEL_TUNING = 0x001c5eb8
+R_SIREN_TOGGLE = 0x002289b8
+R_SND_START = 0x0018d780
+R_SND_STOP = 0x0018d7c0
 
 
 def fb(x):
@@ -660,8 +712,10 @@ def scenario_gearbox(sc):
             sc.handler("ShiftUp", 122, 1)
     sc.carf("NumGears", 5)
     # The sport shift from a gear it has not taken yet, and from its own.
+    # Retail caps the first press at the top and floors it at first; the
+    # retail run has the gears where that differs from the demo.
     sc.drvf(0, "ManualTransmission", 2)
-    for cg in (-1, 0, 1, 4, 7):
+    for cg in (3, 4, 5):
         sc.carf("CurrentGear", cg)
         sc.drvf(0, "DesiredGear", -1)
         sc.handler("ShiftUp", 122, 1)
@@ -761,41 +815,6 @@ def scenario_reset(sc, rnd):
         sc.carf("PathDirection.y", math.sin(b))
         sc.carf("UsageType", rnd.choice((0, 1)))
         sc.handler("ResetCar", 124, 1, port=rnd.choice((0, 1)))
-
-
-def scenario_horn(sc):
-    sc.tag("horn")
-    fresh(sc)
-    for usage in (0, 1, 2):
-        for beacop in (0, 1):
-            for cl in (0, 1, -1, 5, -128):
-                for snd in (1, 0):
-                    for mask in (ALL_SEAMS, 0,
-                                 ALL_SEAMS & ~(1 << S["siren-toggle"])):
-                        for v in (1, 0):
-                            sc.carf("UsageType", usage)
-                            sc.glob("RaceParametersBeACop", beacop)
-                            sc.carf("CopLights", cl & 0xFF)
-                            sc.carf("TheSirenMode", 3)
-                            sc.op(OP_PTR, P_SOUND, snd)
-                            sc.op(OP_MASK, mask)
-                            sc.handler("HonkHorn", 125, v)
-    sc.op(OP_MASK, ALL_SEAMS)
-    sc.op(OP_PTR, P_SOUND, 1)
-    sc.glob("RaceParametersBeACop", 0)
-    for usage in (0, 1, 2):
-        sc.carf("UsageType", usage)
-        sc.call(F_START_HONK)
-        sc.call(F_STOP_HONK)
-    sc.carf("UsageType", 0)
-    # The cop manager's pointer is passed as it is, NULL or not.
-    sc.carf("UsageType", 1)
-    sc.glob("RaceParametersBeACop", 1)
-    sc.op(OP_PTR, P_COP, 0)
-    sc.handler("HonkHorn", 125, 1)
-    sc.op(OP_PTR, P_COP, 1)
-    sc.glob("RaceParametersBeACop", 0)
-    sc.carf("UsageType", 0)
 
 
 def scenario_nitro(sc):
@@ -1071,6 +1090,12 @@ def scenario_vtable(sc):
     sc.vt(1, 8, 0)
 
 
+# The handlers whose demo and retail agree everywhere; the shift buttons'
+# sport entry and the horn are retail's, fuzzed on the retail run.
+CHAOS_HANDLERS = [H[n] for n in ("Steer", "Throttle", "Reverse", "Brake",
+                                 "EBrake", "ResetCar", "NitroBoost")]
+
+
 def scenario_chaos(sc, rnd):
     sc.tag("chaos")
     fresh(sc, 0)
@@ -1080,7 +1105,7 @@ def scenario_chaos(sc, rnd):
         slot = rnd.choice((0, 0, 1))
         r = rnd.random()
         if r < 0.3:
-            h = rnd.randrange(len(HANDLERS))
+            h = rnd.choice(CHAOS_HANDLERS)
             ev = rnd.choice((rnd.randrange(110, 127), rnd.randrange(110, 127),
                              0, 127))
             v = rnd.choice(PEDAL_VALUES + [rnd.randrange(256)])
@@ -1225,6 +1250,210 @@ def scenario_retail_ebrake(sc, rnd):
                      wlc=1000 + k)
 
 
+R_EVENT = {"ShiftUp": EV["SHIFTUP"], "ShiftDown": EV["SHIFTDOWN"],
+           "HonkHorn": EV["HONK_HORN"], "NitroBoost": EV["NITRO_BOOST"]}
+
+
+def rhandler(sc, h, v, slot=0, port=0, ev=None):
+    sc.handler(h, R_EVENT[h] if ev is None else ev, v, slot=slot, port=port,
+               dump=False)
+    sc.op(OP_HDUMP, slot)
+
+
+def rcall(sc, fn, slot=0):
+    sc.call(fn, slot, dump=False)
+    sc.op(OP_HDUMP, slot)
+
+
+def scenario_retail_handlers(sc, rnd):
+    """Retail's sport entry, horn and nitro, on the retail image: OP_RETAIL
+    is still on from the e-brake run. Every field they read is set here
+    first; the rest of the retail car is poison."""
+    sc.tag("retail: the handlers' fields")
+    sc.op(OP_MASK, R_ALL_SEAMS)
+    for p in (P_PLAYER, P_COP, P_SOUND, P_REPLAY):
+        sc.op(OP_PTR, p, 1)
+    sc.op(OP_ANSWER, A_NIS, 0)
+    for name, v in (("TheMovementMode", 0), ("CurrentGear", 3),
+                    ("CopLightsWord", 0), ("HeadlightsState", 0),
+                    ("TheSirenMode", 0), ("UsageType", 0), ("NumGears", 5)):
+        sc.carf(name, v)
+    w = 100000
+    for name, v in (("WorldTimer", w), ("WorldTimeElapsed", 1.0 / 60.0),
+                    ("RaceParametersBeACop", 0), ("NitrousActiveTime", 4.0),
+                    ("NitrousRechargeTime", 0.0)):
+        sc.glob(name, v)
+    fresh(sc, 0, 0xA5)
+    sc.op(OP_HDUMP, 0)
+
+    # The first press from every gear, in three gearboxes, out of a mellow
+    # car and in one; then a second press from where the first left it.
+    sc.tag("retail: the sport entry")
+    sc.drvf(0, "ManualTransmission", 2)
+    for ng in (3, 5, 6):
+        sc.carf("NumGears", ng)
+        for cg in range(-2, ng + 4):
+            sc.carf("CurrentGear", cg)
+            for h in ("ShiftUp", "ShiftDown"):
+                for dg in (-1, 0, 3, -2):
+                    for mm in (0, 4):
+                        sc.carf("TheMovementMode", mm)
+                        sc.drvf(0, "DesiredGear", dg)
+                        sc.drvf(0, "SportGear", 4)
+                        rhandler(sc, h, 1)
+                sc.carf("TheMovementMode", 0)
+                sc.drvf(0, "DesiredGear", -1)
+                rhandler(sc, h, 255)
+                rhandler(sc, h, 1)
+                rhandler(sc, h, 0)
+    sc.carf("NumGears", 5)
+    sc.carf("CurrentGear", 3)
+
+    # The manual and automatic arms, which retail left as they were.
+    sc.tag("retail: the other boxes")
+    for mt in (0, 1, 3):
+        for dg in (-1, 0, 1, 2, 5, 6, 7):
+            for pl in (1, 0):
+                for mask in (R_ALL_SEAMS, R_ALL_SEAMS & ~(1 << S["reroute"])):
+                    for h in ("ShiftUp", "ShiftDown"):
+                        for v in (1, 0):
+                            sc.op(OP_PTR, P_PLAYER, pl)
+                            sc.op(OP_MASK, mask)
+                            sc.drvf(0, "ManualTransmission", mt)
+                            sc.drvf(0, "DesiredGear", dg)
+                            rhandler(sc, h, v, port=1)
+    sc.op(OP_PTR, P_PLAYER, 1)
+    sc.op(OP_MASK, R_ALL_SEAMS)
+    sc.drvf(0, "ManualTransmission", 0)
+
+    # The horn over its guards. The lights are a word: a byte of 0 with
+    # the next byte set counts as on, and turning them off clears all four.
+    sc.tag("retail: the horn")
+    for usage in (0, 1, 2):
+        for beacop in (0, 1):
+            for cl in (0, 1, 2, 0x100, 0x80, 0xFF000000, 0x7F):
+                for snd in (1, 0):
+                    for mask in (R_ALL_SEAMS, 0,
+                                 R_ALL_SEAMS & ~(1 << S["siren-toggle"])):
+                        for v in (1, 0):
+                            sc.carf("UsageType", usage)
+                            sc.glob("RaceParametersBeACop", beacop)
+                            sc.carf("CopLightsWord", cl)
+                            sc.carf("TheSirenMode", 3)
+                            sc.carf("HeadlightsState", 7)
+                            sc.op(OP_PTR, P_SOUND, snd)
+                            sc.op(OP_MASK, mask)
+                            rhandler(sc, "HonkHorn", v)
+    # A press and its release, twice: on, held, off.
+    sc.op(OP_MASK, R_ALL_SEAMS)
+    sc.op(OP_PTR, P_SOUND, 1)
+    sc.glob("RaceParametersBeACop", 0)
+    for usage in (1, 0):
+        sc.carf("UsageType", usage)
+        sc.carf("CopLightsWord", 0)
+        for v in (1, 0, 1, 0, 255, 0):
+            rhandler(sc, "HonkHorn", v)
+    # The table's two slots, with and without the sound and the egg.
+    for usage in (0, 1, 2):
+        for snd in (1, 0):
+            for mask in (R_ALL_SEAMS, R_ALL_SEAMS & ~(1 << S["honk-egg"]),
+                         R_ALL_SEAMS & ~(1 << S["honk-start"])
+                         & ~(1 << S["honk-stop"])):
+                sc.carf("UsageType", usage)
+                sc.op(OP_PTR, P_SOUND, snd)
+                sc.op(OP_MASK, mask)
+                rcall(sc, F_START_HONK)
+                rcall(sc, F_STOP_HONK)
+    sc.op(OP_MASK, R_ALL_SEAMS)
+    sc.op(OP_PTR, P_SOUND, 1)
+    # The cop manager's pointer is passed as it is, NULL or not.
+    sc.carf("UsageType", 1)
+    sc.glob("RaceParametersBeACop", 1)
+    sc.op(OP_PTR, P_COP, 0)
+    rhandler(sc, "HonkHorn", 1)
+    sc.op(OP_PTR, P_COP, 1)
+    sc.glob("RaceParametersBeACop", 0)
+    sc.carf("UsageType", 0)
+
+    # The nitro: none while the player watches a NIS, asked only with a
+    # player; then the three queries over the ticks, as the demo run has
+    # them, for retail's own constants.
+    sc.tag("retail: the nitro")
+    lnrs = [0, 0x7FFFFFFF, w, w - 1, w - 15999, w - 16000, w - 16001,
+            w + 1, w + 100, 1, -1, 0x7FFFFFFE, -0x80000000]
+    for pl in (1, 0):
+        for nis in (0, 1, 2):
+            for mask in (R_ALL_SEAMS, R_ALL_SEAMS & ~(1 << S["nis-playing"])):
+                sc.op(OP_PTR, P_PLAYER, pl)
+                sc.op(OP_ANSWER, A_NIS, nis)
+                sc.op(OP_MASK, mask)
+                for lnr in lnrs:
+                    sc.drvf(0, "LastNitroRequest", lnr)
+                    for fn in (F_NITRO_WAS, F_NITRO_ACTIVE, F_NITRO_AVAIL):
+                        sc.call(fn, dump=False)
+                    for usage, beacop in ((1, 1), (0, 1), (1, 0)):
+                        sc.carf("UsageType", usage)
+                        sc.glob("RaceParametersBeACop", beacop)
+                        sc.drvf(0, "LastNitroRequest", lnr)
+                        sc.drvf(0, "NitroFlag", 0)
+                        rhandler(sc, "NitroBoost", 1)
+                        rhandler(sc, "NitroBoost", 0)
+    sc.op(OP_PTR, P_PLAYER, 1)
+    sc.op(OP_ANSWER, A_NIS, 0)
+    sc.op(OP_MASK, R_ALL_SEAMS)
+    for el in (1.0 / 60.0, 0.0, 0.25, 4.0, -0.5):
+        sc.glob("WorldTimeElapsed", el)
+        for lnr in lnrs + [w - 16066, w - 16067, w - 266, w - 267]:
+            sc.drvf(0, "LastNitroRequest", lnr)
+            for fn in (F_NITRO_WAS, F_NITRO_ACTIVE, F_NITRO_AVAIL):
+                sc.call(fn, dump=False)
+    sc.glob("WorldTimeElapsed", 1.0 / 60.0)
+    for nat, nrt in ((2.0, 0.0), (4.0, 3.0), (0.0, 0.0), (4.0, -1.0),
+                     (1000.0, 0.0)):
+        sc.glob("NitrousActiveTime", nat)
+        sc.glob("NitrousRechargeTime", nrt)
+        for lnr in (w - 8000, w - 16000, w - 28000, w - 28001, w - 4, w + 4,
+                    w - 3999900, w - 3999999, w - 4000000):
+            sc.drvf(0, "LastNitroRequest", lnr)
+            for fn in (F_NITRO_WAS, F_NITRO_ACTIVE, F_NITRO_AVAIL):
+                sc.call(fn, dump=False)
+    sc.glob("NitrousActiveTime", 4.0)
+    sc.glob("NitrousRechargeTime", 0.0)
+
+    sc.tag("retail: fuzz")
+    fresh(sc, 0, 0x3C)
+    sc.op(OP_HDUMP, 0)
+    for _ in range(2000):
+        r = rnd.random()
+        if r < 0.45:
+            h = rnd.choice(("ShiftUp", "ShiftDown", "HonkHorn", "NitroBoost"))
+            v = rnd.choice((0, 1, 255, rnd.randrange(256)))
+            rhandler(sc, h, v, port=rnd.choice((0, 1)))
+        elif r < 0.55:
+            rcall(sc, rnd.choice((F_NITRO_WAS, F_NITRO_ACTIVE, F_NITRO_AVAIL,
+                                  F_START_HONK, F_STOP_HONK)))
+        elif r < 0.7:
+            sc.carf("CurrentGear", rnd.randrange(-2, 9))
+            sc.carf("TheMovementMode", rnd.choice((0, 4, 3)))
+            sc.carf("NumGears", rnd.choice((3, 5, 6)))
+            sc.drvf(0, "ManualTransmission", rnd.choice((0, 1, 2, 2)))
+            if rnd.random() < 0.3:
+                sc.drvf(0, "DesiredGear", rnd.choice((-2, -1, 0, 3, 6)))
+        elif r < 0.82:
+            sc.carf("UsageType", rnd.choice((0, 1, 2)))
+            sc.glob("RaceParametersBeACop", rnd.randrange(2))
+            if rnd.random() < 0.5:
+                sc.carf("CopLightsWord", rnd.choice(
+                    (0, 1, 2, 0x100, rnd.randrange(1 << 32))))
+        elif r < 0.9:
+            sc.op(OP_MASK, rnd.randrange(R_ALL_SEAMS + 1))
+            sc.op(OP_PTR, rnd.randrange(3), rnd.choice((0, 1, 1)))
+        else:
+            sc.op(OP_ANSWER, A_NIS, rnd.randrange(2))
+            sc.glob("WorldTimer", w + rnd.randrange(-20000, 40000))
+    sc.op(OP_MASK, R_ALL_SEAMS)
+
+
 def script():
     rnd = random.Random(0x5EA1)
     sc = Script()
@@ -1238,7 +1467,6 @@ def script():
     scenario_pedals(sc, rnd)
     scenario_gearbox(sc)
     scenario_reset(sc, rnd)
-    scenario_horn(sc)
     scenario_nitro(sc)
     scenario_dtbr(sc, rnd)
     scenario_steering(sc, rnd)
@@ -1247,6 +1475,7 @@ def script():
     scenario_chaos(sc, rnd)
     scenario_teardown(sc)
     scenario_retail_ebrake(sc, rnd)
+    scenario_retail_handlers(sc, rnd)
     return sc
 
 
@@ -1262,7 +1491,7 @@ class Model(object):
         # Clear leaves retail's -1 in LastPointToScore.
         pcc.retail_clear(e)
         self.mask = ALL_SEAMS
-        self.ans = [1, 0, 0, 1, fb(-1.0)]
+        self.ans = [1, 0, 0, 1, fb(-1.0), 0]
         self.retail = None
         self.glob_addr = [e.addr_of(a) for _, a in GLOBS]
         self.table_addr = [e.addr_of(t) for t in TABLES]
@@ -1467,7 +1696,8 @@ class Model(object):
             if code == OP_RETAIL:
                 self.retail = RetailRun(self) if a[0] else None
                 continue
-            if self.retail is not None and code not in (OP_TAG, OP_MASK):
+            if self.retail is not None and code not in (OP_TAG, OP_MASK,
+                                                        OP_ANSWER):
                 self.retail.op(code, a)
                 continue
             if code == OP_TAG:
@@ -1607,29 +1837,75 @@ def ebdump(e, slot, cth, vtname, label):
                vtname(u32(d + 556)), label(u32(d + 560)), u32(cth)))
 
 
+def r_to_demo(ev):
+    """A retail JoyEvent as the demo numbers it (see the harness's to_demo)."""
+    return ev - 1 if ev > 110 else ev
+
+
 class RetailRun(object):
-    """The retail image, for the ops the e-brake stop reads. Anything
-    else raises: its fields were never set here."""
+    """The retail image, for the ops the e-brake stop and the four retail
+    handlers read. Anything else raises: its fields were never set here."""
 
     def __init__(self, m):
         self.m = m
         e = self.e = retail_model.RetailEmu(ieee=True)
         e.mem[CAR:CAR + 0x1000] = bytes([FILL]) * 0x1000
+        e.mem[CTI:CTI + 0x600] = bytes([FILL]) * 0x600
+        e.mem[PLAYER:PLAYER + 0x100] = bytes([FILL]) * 0x100
+        e.put32(CAR + 12, CTI)
         e.put32(R_REPLAY, RM)
         e.stub(R_DT_CTOR, lambda em: None)
         e.stub(R_DT_CLEAR, lambda em: None)
+        lab = m.label
 
         def replay(em):
             if m.on("replay-event"):
                 p = em.reg[5] & M32
                 name = e.mem[p:e.mem.index(b"\0", p)].decode("latin-1")
                 m.emit("  seam replay-event %s %08x %s"
-                       % (m.label(em.reg[4] & M32), em.fpr[12], name))
+                       % (lab(em.reg[4] & M32), em.fpr[12], name))
 
         e.stub(R_REPLAY_EVENT, replay)
 
+        def seam(name, fmt):
+            def f(em):
+                if m.on(name):
+                    m.emit("  seam %s %s" % (name, fmt(em)))
+            return f
+
+        e.stub(R_REROUTE, seam("reroute", lambda em: "%s %d %d %d" % (
+            lab(em.reg[4] & M32), s32(em.reg[5] & M32),
+            r_to_demo(s32(em.reg[6] & M32)), em.reg[7] & 0xFF)))
+        e.stub(R_CANCEL_TUNING, seam("cancel-tuning", lambda em: "-"))
+        e.stub(R_SIREN_TOGGLE, seam("siren-toggle",
+                                    lambda em: lab(em.reg[4] & M32)))
+        e.stub(R_SND_START, seam("honk-start", lambda em: lab(em.reg[4] & M32)))
+        e.stub(R_SND_STOP, seam("honk-stop", lambda em: lab(em.reg[4] & M32)))
+        e.stub(SEAMS[S["honk-egg"]][1], seam("honk-egg", lambda em: "-"))
+
+        def nis(em):
+            if not m.on("nis-playing"):
+                return 0
+            m.emit("  seam nis-playing %s -> %d"
+                   % (lab(em.reg[4] & M32), s32(m.ans[A_NIS])))
+            return m.ans[A_NIS]
+
+        e.stub(SEAMS[S["nis-playing"]][1], nis)
+
     def vtname(self, v):
         return "rd" if v == R_VT_RD else "%08x" % v
+
+    def hdump(self, slot):
+        u32 = self.e.u32
+        d = DRV[slot]
+        return ("h%d dg %d sg %d ni %d lnr %d mt %d vt %s car %s | cl %08x "
+                "sm %d hs %d"
+                % (slot, s32(u32(d + 544)), s32(u32(d + 548)),
+                   s32(u32(d + 552)), s32(u32(d + 632)), s32(u32(d + 588)),
+                   self.vtname(u32(d + 556)), self.m.label(u32(d + 560)),
+                   u32(R_CARF["CopLightsWord"]),
+                   s32(u32(R_CARF["TheSirenMode"])),
+                   s32(u32(R_CARF["HeadlightsState"]))))
 
     def op(self, code, a):
         e = self.e
@@ -1641,6 +1917,8 @@ class RetailRun(object):
         elif code == OP_EBDUMP:
             self.m.emit(ebdump(e, a[0], R_CARF["Throttle"], self.vtname,
                                self.m.label))
+        elif code == OP_HDUMP:
+            self.m.emit(self.hdump(a[0]))
         elif code == OP_CARF:
             e.put32(R_CARF[CARF[a[0]][0]], a[1])
         elif code == OP_DRVF:
@@ -1649,13 +1927,23 @@ class RetailRun(object):
             e.put32(DRV[a[0]] + off, a[2])
         elif code == OP_GLOB:
             e.put32(R_GLOBS[GLOBS[a[0]][0]], a[1])
-        elif code == OP_PTR and a[0] == P_REPLAY:
-            e.put32(R_REPLAY, RM if a[1] else 0)
-        elif code == OP_CALL and a[0] in R_CALLS:
+        elif code == OP_PTR:
+            at, obj = {P_PLAYER: (R_PLAYER_AT, PLAYER), P_COP: (R_COP_AT, COP),
+                       P_SOUND: (R_SOUND_AT, SND),
+                       P_REPLAY: (R_REPLAY, RM)}[a[0]]
+            e.put32(at, obj if a[1] else 0)
+        elif code == OP_CALL and a[0] in R_CALL:
             fn, slot, x = a[0], a[1], a[2]
-            d = DRV[slot]
             e.fpr[12] = x & M32
-            e.call(R_FORCE_EBRAKE if fn == F_FORCE_EBRAKE else R_DTBR, d)
+            r = e.call(R_CALL[fn], DRV[slot])
+            if fn in (F_NITRO_WAS, F_NITRO_ACTIVE, F_NITRO_AVAIL):
+                self.m.emit("ret %d" % r)
+        elif code == OP_HANDLER and HANDLERS[a[1]] in R_HANDLER:
+            slot, h, port, ev, v = a
+            # The script's events are the demo's; retail's are one up from
+            # STEER on.
+            ev = ev + 1 if ev >= 110 else ev
+            e.call(R_HANDLER[HANDLERS[h]], port, ev, v & 0xFF, DRV[slot])
         else:
             raise ValueError("op %d %r has no retail run" % (code, a))
 
@@ -1717,14 +2005,23 @@ MUTATIONS = [
      "= 4.5f;        // 0x00323208"),
 
     # -- InverseLookup ------------------------------------------------------
-    ("inv-eps", TBC, "1e-6f", "1e-5f", ),
+    ("inv-eps", TBC, "if (fabsf(value - first) < 1e-6f)",
+     "if (fabsf(value - first) < 1e-5f)"),
+    ("inv-eps-loop", TBC, "if (fabsf(value - v) < 1e-6f)",
+     "if (fabsf(value - v) < 1e-5f)"),
 
     # -- the constructor and destructor -------------------------------------
     ("ctor-port", RDC, "d->Port             = -1;", "d->Port             = 0;"),
     ("ctor-start", RDC, "d->StartLineState     = 1;",
      "d->StartLineState     = 0;"),
-    ("ctor-gear", RDC, "d->Base.DesiredGear   = RD_GEAR_AUTO;",
-     "d->Base.DesiredGear   = 1;"),
+    ("ctor-gear", RDC, "    d->StartLineState     = 1;" + NL
+     + "    d->Base.DesiredGear   = RD_GEAR_AUTO;",
+     "    d->StartLineState     = 1;" + NL
+     + "    d->Base.DesiredGear   = 1;"),
+    ("manual-auto-gear", RDC, "    d->Base.DesiredGear   = RD_GEAR_AUTO;" + NL
+     + "    d->ManualTransmission = (m == 0)",
+     "    d->Base.DesiredGear   = 1;" + NL
+     + "    d->ManualTransmission = (m == 0)"),
     ("ctor-reset", RDC, "    realdriver_reset_joy_values(d);" + NL + NL
      + "    d->StartLineState", "    d->StartLineState"),
     ("ctor-mt", RDC, "d->ManualTransmission = RD_AUTOMATIC;",
@@ -1925,21 +2222,45 @@ MUTATIONS = [
     # -- the gearbox ----------------------------------------------------------
     ("up-reverse", RDC, "        if (g == RD_GEAR_REVERSE)" + NL + "            return;" + NL
      + "        if (g < d->pCar", "        if (g < d->pCar"),
-    ("up-top", RDC, "DriveTrain.NumGears + 1)", "DriveTrain.NumGears)"),
+    ("up-top", RDC,
+     "if (g < d->pCar->pCarTypeInfo->DriveTrain.NumGears + 1)",
+     "if (g < d->pCar->pCarTypeInfo->DriveTrain.NumGears)"),
     ("up-mellow", RDC, "        if (car->TheMovementMode == MELLOW_MOVEMENT)" + NL
      + "            return;" + NL + "        if (d->Base.DesiredGear == RD_GEAR_SPORT) {" + NL
-     + "            g = d->Base.SportGear;" + NL + "        } else {" + NL
-     + "            d->Base.DesiredGear = RD_GEAR_SPORT;" + NL
-     + "            g = car->State.CurrentGear;" + NL + "        }" + NL
-     + "        d->Base.SportGear = g + 1;",
+     + "            d->Base.SportGear++;",
      "        if (d->Base.DesiredGear == RD_GEAR_SPORT) {" + NL
-     + "            g = d->Base.SportGear;" + NL + "        } else {" + NL
-     + "            d->Base.DesiredGear = RD_GEAR_SPORT;" + NL
-     + "            g = car->State.CurrentGear;" + NL + "        }" + NL
-     + "        d->Base.SportGear = g + 1;"),
+     + "            d->Base.SportGear++;"),
+    ("down-mellow", RDC, "        if (car->TheMovementMode == MELLOW_MOVEMENT)" + NL
+     + "            return;" + NL + "        if (d->Base.DesiredGear == RD_GEAR_SPORT) {" + NL
+     + "            d->Base.SportGear--;",
+     "        if (d->Base.DesiredGear == RD_GEAR_SPORT) {" + NL
+     + "            d->Base.SportGear--;"),
     ("down-floor", RDC, "        if (g < 2)" + NL, "        if (g < 1)" + NL),
-    ("down-sport", RDC, "        d->Base.SportGear = g - 1;",
-     "        d->Base.SportGear = g + 1;"),
+    ("up-sport-step", RDC, "            d->Base.SportGear++;",
+     "            d->Base.SportGear += 2;"),
+    ("down-sport-step", RDC, "            d->Base.SportGear--;",
+     "            d->Base.SportGear++;"),
+    # -- retail's sport entry (TASKS 73), which only the retail run reaches --
+    ("up-entry-demo", RDC,
+     "(g < car->pCarTypeInfo->DriveTrain.NumGears + 1) ? g + 1 : g;",
+     "g + 1;"),
+    ("up-entry-le", RDC,
+     "(g < car->pCarTypeInfo->DriveTrain.NumGears + 1) ? g + 1 : g;",
+     "(g <= car->pCarTypeInfo->DriveTrain.NumGears + 1) ? g + 1 : g;"),
+    ("up-entry-top", RDC,
+     "(g < car->pCarTypeInfo->DriveTrain.NumGears + 1) ? g + 1 : g;",
+     "(g < car->pCarTypeInfo->DriveTrain.NumGears) ? g + 1 : g;"),
+    ("up-entry-mode", RDC,
+     "        d->Base.DesiredGear = RD_GEAR_SPORT;" + NL
+     + "        g = car->State.CurrentGear;" + NL
+     + "        d->Base.SportGear =" + NL,
+     "        g = car->State.CurrentGear;" + NL
+     + "        d->Base.SportGear =" + NL),
+    ("down-entry-demo", RDC, "(g < RD_GEAR_SECOND) ? g : g - 1;", "g - 1;"),
+    ("down-entry-le", RDC, "(g < RD_GEAR_SECOND) ? g : g - 1;",
+     "(g <= RD_GEAR_SECOND) ? g : g - 1;"),
+    ("down-entry-first", RDC, "(g < RD_GEAR_SECOND) ? g : g - 1;",
+     "(g < RD_GEAR_SECOND - 1) ? g : g - 1;"),
     ("reroute-player", RDC, "    if (pl != NULL && gPlayerRerouteJoyEventFn != NULL)",
      "    if (gPlayerRerouteJoyEventFn != NULL && pl != NULL && 0)"),
 
@@ -1976,7 +2297,29 @@ MUTATIONS = [
      + "        if (gCopManagerBeACopToggleSirenAndLightsFn"),
     ("honk-siren", RDC, "        car->TheSirenMode = SIREN_MODE_01;",
      "        car->TheSirenMode = SIREN_MODE_02;"),
-    ("honk-lights-off", RDC, "        car->CopLights    = 0;" + NL, ""),
+    ("honk-siren-off", RDC, "        car->TheSirenMode = SIREN_MODE_NONE;",
+     "        car->TheSirenMode = SIREN_MODE_01;"),
+    ("honk-lights-off", RDC, "        set_cop_lights(car, 0);" + NL, ""),
+    # -- retail's horn (TASKS 73), which only the retail run reaches ----------
+    ("honk-lights-2", RDC, "set_cop_lights(car, 2);", "set_cop_lights(car, 1);"),
+    ("honk-lights-byte", RDC, "    return (p[0] | p[1] | p[2] | p[3]) != 0;",
+     "    return p[0] != 0;"),
+    ("honk-lights-hole", RDC,
+     "    memset(car->_hole2025, 0, sizeof car->_hole2025);" + NL, ""),
+    ("honk-head-on", RDC, "        car->HeadlightsState = 1;",
+     "        car->HeadlightsState = 2;"),
+    ("honk-head-off", RDC, "            car->HeadlightsState = 0;" + NL, ""),
+    ("honk-head-off-cop", RDC, "        if (ti->UsageType != 1)" + NL
+     + "            car->HeadlightsState = 0;",
+     "        car->HeadlightsState = 0;"),
+    ("honk-racer-falls", RDC, "        car->HeadlightsState = 1;" + NL
+     + "        return;" + NL, "        car->HeadlightsState = 1;" + NL),
+    ("honk-racer-cancel", RDC, "    if (gCancelTuningDrivingLinesFn != NULL)" + NL
+     + "        gCancelTuningDrivingLinesFn();" + NL + NL
+     + "    // Retail's: a racer's horn",
+     "    // Retail's: a racer's horn"),
+    ("start-honk-egg", RDC, "    if (gChopperHonkAttackFn != NULL)" + NL
+     + "        gChopperHonkAttackFn();" + NL, ""),
     ("start-honk-cop", RDC, "    if (car->pCarTypeInfo->UsageType != 1 && car->pBaseCarSound != NULL" + NL
      + "        && gBaseCarSoundStartHonkHornFn",
      "    if (car->pBaseCarSound != NULL" + NL
@@ -2006,6 +2349,14 @@ MUTATIONS = [
      "return NitrousActiveTime <= nitro_age(d);"),
     ("nitro-avail-invalid", RDC, "    if (!nitro_valid(d))" + NL + "        return 1;",
      "    if (!nitro_valid(d))" + NL + "        return 0;"),
+    # -- retail's NIS guard (TASKS 73), which only the retail run reaches -----
+    ("nitro-nis", RDC, "    if (pl != NULL && gPlayerIsNisPlayingFn != NULL" + NL
+     + "            && gPlayerIsNisPlayingFn(pl))" + NL + "        return 0;" + NL, ""),
+    ("nitro-nis-player", RDC, "    if (pl != NULL && gPlayerIsNisPlayingFn != NULL",
+     "    if (gPlayerIsNisPlayingFn != NULL"),
+    ("nitro-nis-answer", RDC, "            && gPlayerIsNisPlayingFn(pl))" + NL
+     + "        return 0;", "            && gPlayerIsNisPlayingFn(pl))" + NL
+     + "        return 1;"),
 
     # -- the table ------------------------------------------------------------
     ("vt-lowgear", RDC, "    E(realdriver_set_low_gear),             //  48",
@@ -2036,99 +2387,38 @@ EQUIVALENT = {
 }
 
 
-def mutate_pass(only=None):
-    sc = script()
-    base = model(sc)
-    caught = 0
-    survived = []
-    missing = []
-    equivalent = []
+def mutate_pass(only=None, jobs=None):
+    """Out of the tree and in parallel (tools/mutpar.py): the tree is never
+    touched, so a build may run alongside."""
     todo = [m for m in MUTATIONS if only is None or m[0] in only]
     if only is not None:
         unknown = sorted(set(only) - {m[0] for m in MUTATIONS})
         if unknown:
             sys.exit("no such mutation: " + " ".join(unknown))
-
+    sc = script()
+    base = model(sc)
     opsdir = tempfile.TemporaryDirectory()
     ops = Path(opsdir.name) / "ops.bin"
     ops.write_bytes(sc.encode())
     with tempfile.TemporaryDirectory() as tmp:
         exe = build_harness(tmp)
         out = Path(tmp) / "base.txt"
+        t0 = time.monotonic()
         run_harness(exe, ops, out)
-        if diff(base, out.read_text().splitlines(), quiet=True):
+        took = time.monotonic() - t0
+        got = out.read_text().splitlines()
+        if diff(base, got, quiet=True):
             print("base already differs -- fix that before mutating")
             return 1
+        print("base: %d lines, 0 differ" % len(got), flush=True)
 
-    for m in todo:
-        name, rel = m[0], m[1]
-        edits = m[2] if len(m) == 3 else [(m[2], m[3], 1)]
-        path = ROOT / rel
-        text = path.read_text(encoding="utf-8", newline="")
-        crlf = "\r\n" in text
-        new = text
-        ok = True
-        for before, after, count in edits:
-            probe = before.replace(NL, "\r\n") if crlf else before
-            repl = after.replace(NL, "\r\n") if crlf else after
-            if new.count(probe) < count:
-                ok = False
-                break
-            new = new.replace(probe, repl, count)
-        if not ok:
-            missing.append(name)
-            print("  %-44s PATTERN NOT FOUND" % name)
-            continue
-        try:
-            hostbuild.write_source(path, new)
-            with tempfile.TemporaryDirectory() as tmp:
-                try:
-                    exe = build_harness(tmp)
-                except SystemExit:
-                    print("  %-44s did not compile (caught)" % name)
-                    caught += 1
-                    continue
-                out = Path(tmp) / "m.txt"
-                if run_harness(exe, ops, out) != 0:
-                    print("  %-44s crashed the harness (caught)" % name)
-                    caught += 1
-                    continue
-                n = diff(base, out.read_text().splitlines(), quiet=True)
-                if n:
-                    print("  %-44s caught, %d lines" % (name, n))
-                    caught += 1
-                elif name in EQUIVALENT:
-                    print("  %-44s survived, equivalent by construction" % name)
-                    equivalent.append(name)
-                else:
-                    print("  %-44s SURVIVED" % name)
-                    survived.append(name)
-        finally:
-            try:
-                hostbuild.write_source(path, text)
-            except OSError:
-                sys.exit("could not restore %s -- it still holds the "
-                         "mutation %s. Put the original line back before "
-                         "trusting anything printed above." % (rel, name))
+    limit = mutpar.timeout_for(took)
+    tally = mutpar.run_pass(
+        todo, SOURCES, "realdriver_test",
+        lambda exe, out: mutpar.run_exe([exe, ops], out, limit),
+        base, diff, EQUIVALENT, jobs)
     opsdir.cleanup()
-
-    real = [m for m in todo if m[0] not in missing]
-    holes = [s for s in survived if s not in EQUIVALENT]
-    # An entry whose mutant was caught is a wrong reason, not a spare one.
-    # --only leaves the others unrun, so only the ones that ran are judged.
-    ran = {m[0] for m in todo}
-    stale = [n for n in EQUIVALENT
-             if n not in equivalent and n not in missing
-             and (n in ran or only is None)]
-    if missing:
-        print("%d PATTERN NOT FOUND -- the tally above is over %d of %d"
-              % (len(missing), len(real), len(todo)))
-    print("%d mutations, %d caught, %d equivalent, %d unexplained"
-          % (len(real), caught, len(equivalent), len(holes)))
-    for name in stale:
-        print("  listed as equivalent but %s: %s"
-              % ("caught" if name in ran else "names no mutation", name))
-    return 1 if (holes or missing or stale) else 0
+    return mutpar.summarize(todo, only, EQUIVALENT, tally)
 
 
 def main():
@@ -2136,11 +2426,15 @@ def main():
     ap.add_argument("--mutate", action="store_true")
     ap.add_argument("--only", metavar="NAME,...",
                     help="with --mutate, only these mutations")
+    ap.add_argument("--jobs", type=int, metavar="N",
+                    help="with --mutate, mutants at once (default %d)"
+                    % mutpar.JOBS)
     ap.add_argument("--dump", metavar="PREFIX")
     args = ap.parse_args()
 
     if args.mutate:
-        sys.exit(mutate_pass(args.only.split(",") if args.only else None))
+        sys.exit(mutate_pass(args.only.split(",") if args.only else None,
+                             args.jobs))
 
     sc = script()
     lines = model(sc)

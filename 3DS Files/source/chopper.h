@@ -221,6 +221,13 @@ int32_t chopper_follow_this_car(struct Chopper *h, struct Car *car);
 // is one, and 0.
 int32_t chopper_attack_car(struct Chopper *h, ChopperAttackType type);
 
+// 0x001ead40, unnamed (TASKS 73): retail's RealDriver::StartHonkHorn ends
+// in a jump here, where the demo's ended in HandyDebuggingFunction. With
+// the world's helicopter one of Easter egg 5's (New960), the player's horn
+// sends it on a smoke bomb run (AttackCar 1). Nothing otherwise, nor with
+// no world or helicopter.
+void chopper_honk_attack(void);
+
 // 0x001e8140. The run's lead is Ahead seconds of the car's speed, at least
 // 100. A target nearer than that less 24 is shifted to it, then moved on
 // to open ground.

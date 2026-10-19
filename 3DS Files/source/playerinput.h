@@ -89,6 +89,15 @@ void player_change_debug_camera_joy_handler_bridge(JoystickPort port,
 void player_racing_joy_handler(struct Player *p, JoystickPort port,
                                JoyEvent ev, uint8_t value);
 
+// 0x001788b8 (TASKS 73). RealDriver hands it an automatic box's shift
+// buttons (realdriver.h's gPlayerRerouteJoyEventFn). Retail's makes them
+// RacingJoyHandler's: SHIFTUP the preview zone and SHIFTDOWN the freeze
+// zone, or in Be A Cop the roadblock and the helicopter calls when the
+// player's car is the player cop's (nothing when it is not). Any other
+// event does nothing; the demo's passed nothing on at all.
+void player_reroute_joy_event(struct Player *p, JoystickPort port,
+                              JoyEvent ev, uint8_t value);
+
 // 0x00178540. With DebugCamerasEnabled, the next camera in the mode's
 // cycle: none, orbit, debug world in the AI demo (the demo cameras
 // suspended off none and resumed on it), else drive, orbit, debug world,

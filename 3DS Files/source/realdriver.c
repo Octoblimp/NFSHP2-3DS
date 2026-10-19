@@ -4,6 +4,7 @@
 
 #include <math.h>
 #include <stddef.h>
+#include <string.h>
 
 #include "bmem.h"
 #include "car.h"
@@ -35,6 +36,8 @@ void    (*gPlayerRerouteJoyEventFn)(struct Player *, JoystickPort, JoyEvent,
                                     uint8_t);
 int32_t (*gPlayerIsAllowedToResetFn)(struct Player *);
 void    (*gPlayerSelectedResetFn)(struct Player *);
+int32_t (*gPlayerIsNisPlayingFn)(const struct Player *);
+void    (*gChopperHonkAttackFn)(void);
 float (*gCopManagerGetResetDirectionFn)(struct tCopManager *);
 void  (*gCopManagerBeACopToggleSirenAndLightsFn)(struct tCopManager *);
 void (*gCarResetToRoutePointFn)(struct Car *, struct TrackRoute *,
@@ -752,17 +755,21 @@ void realdriver_joy_shift_up(JoystickPort port, JoyEvent ev, uint8_t value,
         if (car->TheMovementMode == MELLOW_MOVEMENT)
             return;
         if (d->Base.DesiredGear == RD_GEAR_SPORT) {
-            g = d->Base.SportGear;
-        } else {
-            d->Base.DesiredGear = RD_GEAR_SPORT;
-            g = car->State.CurrentGear;
+            d->Base.SportGear++;
+            return;
         }
-        d->Base.SportGear = g + 1;
+        // Retail's: the first press starts from the car's gear, one up
+        // unless that is already past the top (the demo's always added
+        // one).
+        d->Base.DesiredGear = RD_GEAR_SPORT;
+        g = car->State.CurrentGear;
+        d->Base.SportGear =
+            (g < car->pCarTypeInfo->DriveTrain.NumGears + 1) ? g + 1 : g;
         return;
     }
 
-    // An automatic box hands the button to the player (the camera, as a
-    // rule).
+    // An automatic box hands the button to the player: retail's turns it
+    // into a zone request, or a Be A Cop call.
     reroute(d, port, ev, value);
 }
 
@@ -791,12 +798,14 @@ void realdriver_joy_shift_down(JoystickPort port, JoyEvent ev, uint8_t value,
         if (car->TheMovementMode == MELLOW_MOVEMENT)
             return;
         if (d->Base.DesiredGear == RD_GEAR_SPORT) {
-            g = d->Base.SportGear;
-        } else {
-            d->Base.DesiredGear = RD_GEAR_SPORT;
-            g = car->State.CurrentGear;
+            d->Base.SportGear--;
+            return;
         }
-        d->Base.SportGear = g - 1;
+        // Retail's: one down from the car's gear, but first stays first
+        // (`slti 3`; the demo's always took one off).
+        d->Base.DesiredGear = RD_GEAR_SPORT;
+        g = car->State.CurrentGear;
+        d->Base.SportGear = (g < RD_GEAR_SECOND) ? g : g - 1;
         return;
     }
 
@@ -867,6 +876,21 @@ void realdriver_joy_reset_car(JoystickPort port, JoyEvent ev, uint8_t value,
 
 // ---------------------------------------------------------- the horn
 
+// Car+2056 as retail reads and writes it, a word: CopLights and the three
+// bytes after.
+static int cop_lights_word(const Car *car)
+{
+    const uint8_t *p = (const uint8_t *)car + offsetof(Car, CopLights);
+
+    return (p[0] | p[1] | p[2] | p[3]) != 0;
+}
+
+static void set_cop_lights(Car *car, int8_t v)
+{
+    car->CopLights = v;
+    memset(car->_hole2025, 0, sizeof car->_hole2025);
+}
+
 void realdriver_joy_honk_horn(JoystickPort port, JoyEvent ev, uint8_t value,
                               void *obj)
 {
@@ -878,6 +902,9 @@ void realdriver_joy_honk_horn(JoystickPort port, JoyEvent ev, uint8_t value,
 
     if (value == 0) {
         call_void_slot(d, CARDRIVER_VT_STOP_HONK_HORN);
+        // Retail's: a racer's headlights go off with the horn.
+        if (ti->UsageType != 1)
+            car->HeadlightsState = 0;
         return;
     }
 
@@ -886,9 +913,12 @@ void realdriver_joy_honk_horn(JoystickPort port, JoyEvent ev, uint8_t value,
     if (gCancelTuningDrivingLinesFn != NULL)
         gCancelTuningDrivingLinesFn();
 
-    // A cop car's horn button is its lights and siren.
-    if (ti->UsageType != 1)
+    // Retail's: a racer's horn holds its headlights on (the demo's did
+    // nothing more). A cop car's horn button is its lights and siren.
+    if (ti->UsageType != 1) {
+        car->HeadlightsState = 1;
         return;
+    }
 
     if (RaceParametersBeACop) {
         if (gCopManagerBeACopToggleSirenAndLightsFn != NULL)
@@ -896,13 +926,13 @@ void realdriver_joy_honk_horn(JoystickPort port, JoyEvent ev, uint8_t value,
         return;
     }
 
-    // `lb`, so CopLights is tested as a signed byte; the 1 stored is the
-    // UsageType still in a0.
-    if (car->CopLights == 0) {
-        car->CopLights    = 1;
+    // Retail's reads CopLights as a word and turns the lights on at 2, the
+    // fast flash (the demo's tested a byte and stored 1).
+    if (!cop_lights_word(car)) {
         car->TheSirenMode = SIREN_MODE_01;
+        set_cop_lights(car, 2);
     } else {
-        car->CopLights    = 0;
+        set_cop_lights(car, 0);
         car->TheSirenMode = SIREN_MODE_NONE;
     }
 }
@@ -916,7 +946,10 @@ void realdriver_start_honk_horn(RealDriver *d)
         && gBaseCarSoundStartHonkHornFn != NULL)
         gBaseCarSoundStartHonkHornFn(car->pBaseCarSound);
 
-    // HandyDebuggingFunction (0x001dd478) is `jr ra`.
+    // Retail's jumps on to Chopper.obj's 0x001ead40 where the demo's went
+    // to HandyDebuggingFunction, an empty one: Easter egg 5's attack.
+    if (gChopperHonkAttackFn != NULL)
+        gChopperHonkAttackFn();
 }
 
 void realdriver_stop_honk_horn(RealDriver *d)
@@ -985,6 +1018,12 @@ int32_t realdriver_nitro_active(RealDriver *d)
 
 int32_t realdriver_nitro_available(RealDriver *d)
 {
+    Player *pl = d->pCar->pPlayer;
+
+    // Retail's: none while the car's player watches a NIS.
+    if (pl != NULL && gPlayerIsNisPlayingFn != NULL
+            && gPlayerIsNisPlayingFn(pl))
+        return 0;
     if (!nitro_valid(d))
         return 1;
     return NitrousActiveTime + NitrousRechargeTime <= nitro_age(d);

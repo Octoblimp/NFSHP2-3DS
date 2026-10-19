@@ -91,6 +91,7 @@ F_IAR = 0x00181e98
 F_CTDR = 0x00181f68
 F_UGS = 0x00180c28
 F_UPGS = 0x00181de8
+F_PSR = 0x00182208
 
 S_BLUR = 0x0010f1b0
 S_NOBLINK = 0x00133128
@@ -127,6 +128,9 @@ P_FRZ, P_AVG, P_AT, P_MAX = 156, 160, 164, 168
 P_TROUBLE, P_PROMPT, P_TS, P_TT = 172, 176, 180, 184
 P_COORD, P_AIDX, P_TIDX, P_PARAM, P_NM = 224, 232, 236, 240, 244
 P_TN, P_TC, P_AN, P_AC, P_WW, P_NIS = 248, 376, 504, 632, 760, 2560
+P_MV, P_LB, P_HANG = 200, 764, 1508
+# The camera mover's (CameraMover, then DriveCameraMover's).
+MV_TYPE, MV_VT, MV_DLB, MV_SIZE = 8, 40, 124, 144
 # Retail's car (its State 64 on, with four more bytes than the demo's
 # before nWheelsTouchingGround, and its TrackPathCoordinate 32 on).
 C_TYPE, C_PLAYER, C_RC, C_BODY, C_STATE = 12, 24, 28, 52, 64
@@ -185,6 +189,14 @@ class Model(object):
             self.names[self.cars[k] + C_STATE] = "A%d.st" % k
             self.names[self.cars[k] + C_POS] = "A%d.pos" % k
         self.f_cb = block(16, None)
+        # A camera mover per player and a spare, ResetState a stub
+        # through the vtable's +88 delta, +92 function.
+        self.movers = [block(MV_SIZE, "MV%d" % k)
+                       for k in range(NPL + 1)]
+        self.mvt = block(128, None)
+        self.f_rs = block(16, None)
+        e.write(self.mvt + 88, struct.pack("<h", 0))
+        e.put32(self.mvt + 92, self.f_rs)
         for addr, fn in ((S_BLUR, self.s_blur),
                          (S_NOBLINK, self.s_noblink),
                          (S_ROUTE, self.s_route),
@@ -209,7 +221,8 @@ class Model(object):
                          (S_TICKETS, self.s_tickets),
                          (S_RAND, self.s_rand),
                          (S_ATAN, self.s_atan),
-                         (self.f_cb, self.s_cb)):
+                         (self.f_cb, self.s_cb),
+                         (self.f_rs, self.s_rs)):
             e.stub(addr, fn)
         self.reset()
 
@@ -234,6 +247,10 @@ class Model(object):
                      (self.route, 40 + 48 * 21 + 8), (self.point, 112),
                      (self.table, 160 * NREC)):
             e.write(p, bytes(n))
+        for p in self.movers:
+            e.write(p, bytes(MV_SIZE))
+            e.put32(p + MV_VT, self.mvt)
+        self.rs_mode = [0] * NPL
         e.put32(RP + RP_BEACOP, 0)
         e.put32(RP + RP_TICKETS, 0)
         for k in range(NPL):
@@ -378,6 +395,22 @@ class Model(object):
     def s_bust(self, em):
         self.emit("  bust %s" % self.sym(em.reg[4]))
 
+    def s_rs(self, em):
+        e = self.e
+        m = em.reg[4] & M32
+        self.emit("  resetstate %s" % self.sym(m))
+        for k in range(NPL):
+            p = self.players[k]
+            if e.u32(p + P_MV) == m:
+                mode = self.rs_mode[k]
+                if mode == 1:
+                    e.put32(p + P_MV, 0)
+                elif mode == 2:
+                    e.put32(p + P_MV, self.movers[NPL])
+                elif mode in (3, 4):
+                    e.put32(m + MV_TYPE, mode - 2)
+                break
+
     def s_cb(self, em):
         self.emit("  cb %d" % s32(em.reg[4]))
 
@@ -408,6 +441,12 @@ class Model(object):
             self.emit("M%d play %d end %d cam %d nis %d" % (
                 k, s32(e.u32(m + NM_PLAYING)), s32(e.u32(m + NM_END)),
                 s32(e.u32(m + NM_CAM)), s32(e.u32(m + NM_NIS))))
+        self.emit("V" + "".join(
+            " %s/%d/%08x" % (self.sym(e.u32(p + P_MV)),
+                             s32(e.u32(p + P_LB)), e.u32(p + P_HANG))
+            for p in self.players) + "".join(
+            " %d/%08x" % (s32(e.u32(m + MV_TYPE)), e.u32(m + MV_DLB))
+            for m in self.movers))
 
     # ---- ops
 
@@ -503,6 +542,22 @@ class Model(object):
         if o == "sp":
             e.write(self.point + PT_SPEEDS + int(a[1]), bytes([v(2) & 0xff]))
             return
+        if o == "mv":
+            # mv|k|on|type|lb|dlb|hang|mode
+            k = int(a[1])
+            p, m = self.players[k], self.movers[k]
+            e.put32(p + P_MV, m if v(2) else 0)
+            e.put32(m + MV_TYPE, v(3))
+            e.put32(p + P_LB, v(4))
+            e.put32(m + MV_DLB, v(5))
+            e.put32(p + P_HANG, v(6))
+            self.rs_mode[k] = sv(7)
+            return
+        if o == "mvx":
+            m = self.movers[NPL]
+            e.put32(m + MV_TYPE, v(1))
+            e.put32(m + MV_DLB, v(2))
+            return
         if o == "atan":
             self.atans = [sv(j) for j in range(1, min(len(a), NATAN + 1))]
             return
@@ -557,6 +612,9 @@ class Model(object):
         elif o == "upgs":
             self.emit("upgs")
             call(F_UPGS)
+        elif o == "psr":
+            self.emit("psr P%s" % a[1])
+            call(F_PSR, self.players[int(a[1])])
         else:
             raise ValueError(o)
         self.dump()
@@ -947,6 +1005,37 @@ def upgs_cases(rng):
     return out
 
 
+def mv(k, on=1, typ=1, lb=0, dlb=0.5, hang=3.25, mode=0):
+    return "mv|%d|%d|%d|%d|%s|%s|%d" % (k, on, typ, lb & M32, F(dlb),
+                                      F(hang), mode)
+
+
+def psr_cases(rng):
+    """The reset button: the prompt and trouble timers, the camera's
+    ResetState, its look back again, HangTime."""
+    out = []
+    for on in (0, 1):
+        for typ in (0, 1, 2, 5):
+            for lb in (0, 1, 2, -1):
+                for mode in range(5):
+                    out += base() + [
+                        pt(0, trouble=12345, prompt=777),
+                        "mvx|%d|%s" % (rng.choice((0, 1, 2)), F(0.25)),
+                        mv(0, on, typ, lb, mode=mode), "psr|0"]
+    for _ in range(150):
+        k = rng.randrange(NPL)
+        out += base() + [
+            pt(k, trouble=rng.randrange(1 << 32),
+               prompt=rng.randrange(1 << 32)),
+            "mvx|%d|%s" % (rng.randrange(4), F(rng.uniform(-2, 2))),
+            mv(k, rng.randrange(2), rng.randrange(4), rng.randrange(3),
+               rng.uniform(-2, 2), rng.uniform(0, 9), rng.randrange(5)),
+            "psr|%d" % k]
+        if rng.random() < 0.5:
+            out.append("psr|%d" % k)
+    return out
+
+
 def sequences(rng):
     """Races: the two players' NISes picked at the start, then frames of
     world time with pullovers played and serviced to their end."""
@@ -983,6 +1072,7 @@ def script():
             + svc_cases(random.Random(0xa3)) + dww_cases(random.Random(0xa4))
             + iar_cases(random.Random(0xa5)) + ctdr_cases(random.Random(0xa6))
             + ugs_cases(random.Random(0xa7)) + upgs_cases(random.Random(0xa8))
+            + psr_cases(random.Random(0xaa))
             + sequences(random.Random(0xa9)))
 
 
@@ -1022,6 +1112,22 @@ def write_inputs(d):
 
 P = PN
 MUTATIONS = [
+    # ---- PlayerSelectedReset
+    ("psr-prompt", P, "    p->TimeToDisplayResetPrompt.PackedTime = 0;" + NL
+     + "    p->LastTimeCarInTrouble.PackedTime = 0;" + NL + "    m = ",
+     "    p->LastTimeCarInTrouble.PackedTime = 0;" + NL + "    m = "),
+    ("psr-trouble", P, "    p->LastTimeCarInTrouble.PackedTime = 0;" + NL
+     + "    m = ", "    m = "),
+    ("psr-call", P, "        m->vtbl->ResetState(m);" + NL, ""),
+    ("psr-reread", P, "        m = p->pCameraMover;" + NL
+     + "        if (m != NULL && m->Type == CM_DRIVE)",
+     "        if (m != NULL && m->Type == CM_DRIVE)"),
+    ("psr-type", P, "m->Type == CM_DRIVE)", "m->Type != CM_NONE)"),
+    ("psr-lb", P, "p->bLookBack ? 1.0f : 0.0f;", "1.0f;"),
+    ("psr-lb0", P, "p->bLookBack ? 1.0f : 0.0f;", "0.0f;"),
+    ("psr-hang", P, "    p->HangTime = 0.0f;" + NL, ""),
+    ("psr-hang-in", P, "    }" + NL + "    p->HangTime = 0.0f;" + NL,
+     "        p->HangTime = 0.0f;" + NL + "    }" + NL),
     # ---- the constants
     ("k_mph", P, "#define MPH_PER_MPS     2.237f", "#define MPH_PER_MPS     2.2f"),
     ("k_deg", P, "#define DEG_PER_RAD     57.2957763671875f",

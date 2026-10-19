@@ -80,6 +80,13 @@ int32_t player_detect_wrong_way(struct Player *p, int32_t was);
 // mph; in Be A Cop only from 5 s into the race.
 int32_t player_is_allowed_to_reset(struct Player *p);
 
+// Player::PlayerSelectedReset, 0x00182208 (TASKS 73): RealDriver's reset
+// button, once the car is back on the route. Both reset timers cleared;
+// the camera mover's ResetState; a drive camera's DesiredLookBackParam
+// back to bLookBack (1 or 0); and HangTime 0, so the stunt score does not
+// count the drop. The demo's did the first timer and ResetState.
+void player_selected_reset(struct Player *p);
+
 // Player::ChooseToDisplayReset, 0x00181f68: the trouble watch.
 // LastTimeCarInTrouble is WorldTimer when the car, within 3 s of its last
 // penetration, is above 60 mph and yawing more than 50 degrees a second,
