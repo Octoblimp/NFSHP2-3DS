@@ -21,9 +21,19 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "bmath.h"
 #include "bmem.h"
 #include "espresso.h"
 #include "vclip.h"
+
+// Retail's VClip restart draws World::Random; here a world seed of its own,
+// vclip_check.py's WORLD_SEED0, printed after each VClip.
+static uint32_t world_seed = 0x2468ace1u;
+
+static int32_t world_random(int32_t range)
+{
+    return bRandomI(range, &world_seed);
+}
 
 // realtime.c's clock, which ReplaySnapshot_Init stamps; not linked here.
 int32_t WorldTimer;
@@ -509,6 +519,7 @@ int main(int argc, char **argv)
     gEspCreateUserMeshFn = f_mesh;
     gEspSetUserMeshFaceFn = f_face;
     gEspSetObjectPositionFn = f_pos;
+    gVClipWorldRandomFn = world_random;
 
     while (fscanf(script, "%x", &w0) == 1) {
         op = (uint32_t)w0;
@@ -754,8 +765,8 @@ int main(int argc, char **argv)
             wits[i].CP2.pad = as_float(CP_SENTINEL);
             tainted[i][0] = tainted[i][1] = 0;
             st = vcwitness_vclip(&wits[i], &r1, &t1, &r2, &t2);
-            printf("vclip %d -> %d printing %s\n", i, (int)st,
-                   name_poly(pPrintingPolygon));
+            printf("vclip %d -> %d printing %s seed %08x\n", i, (int)st,
+                   name_poly(pPrintingPolygon), (unsigned)world_seed);
             dump_wit(i, st);
             break;
         }

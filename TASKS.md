@@ -4693,8 +4693,28 @@ phases.
           wafer mutations caught.
         - [x] The RectPolyhedron constructor: the same code in both, but
           for relocated table addresses. Nothing to port (Session 135).
+        - [x] Retail's TerrainTypeInfoTable has another layout. The
+          port's is retail's already: TerrainType's pass (Session 31)
+          made `terraintype.h` retail's 144 bytes, with
+          SkidWidthMultiplier at 20 and DynamicFrictionMultiplier at 36.
+          Nothing to port (Session 135).
+        - [x] VClip: retail's (`0x001d2390`) restarts a walk that comes
+          back to a pair; the demo's (`0x001c8200`), the port's until
+          now, does not. Done in Session 135. After each step the pair
+          goes in a list, and a pair one of the ten steps before it held
+          starts the walk again from a random vertex of each polyhedron
+          (World::Random on pCurrentWorld), at most three times, with 80
+          steps from each start. That test comes before the status's, so
+          a walk of two steps or more mostly ends on a repeat: the
+          answer stands, but the witness keeps two random vertices and
+          the world's seed moves by two draws, both of which the replays
+          snapshot. `vclip_check` puts retail's restart into the demo
+          image: 53 scenarios, 0 differ; 301 mutations, 300 caught, 1
+          equivalent (20 new). polyhedra and collisionbody (whose models
+          take the restart too), carmode, carsnap and loadertable: 0
+          differ.
         - Other demo-derived functions retail changed (TASKS 74's list):
-          InitSkids. Retail's TerrainTypeInfoTable has another layout.
+          InitSkids.
         - [x] RealDriver's changed functions and the player's input.
           Done in Session 133. Retail's tunables and its steering and
           throttle handlers are the demo's; what changed:
@@ -4745,9 +4765,12 @@ phases.
           caught. carmode_check had been failing since BottomOut
           (physicscar_check's PleaseResetMeLater stub hid the image's
           from its "later" case); fixed.
-        - CarState's layout: retail adds DistanceMoved after Odometer, and
-          the fields from TractionUsage to BurnOutAllow move on by 4. The
-          port keeps the demo's layout, with DistanceMoved in the padding.
+        - [x] CarState's layout: retail adds DistanceMoved after
+          Odometer, and the fields from TractionUsage to BurnOutAllow move
+          on by 4. The port keeps the demo's layout, with DistanceMoved in
+          the padding. Nothing to port (Session 135): every reader goes
+          by name, the replay's checksums go field by field, and the
+          lock hash uses the port's own offsets.
         - CollisionBodyWitness: retail's pCollision is at 108, the demo's
           at 104.
         - CarCollisionBody's retail fields.

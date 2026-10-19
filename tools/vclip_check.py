@@ -32,6 +32,12 @@ The script covers:
     and vertex touching, coincident, nested), random poses of every pair
     of shapes from every kind of starting feature, and coherent runs where
     each call starts from the last one's answer;
+  * retail's restart (0x001d2390, TASKS 73), hooked into the demo's VClip
+    at its loop's start and end: walks that settle, rings of vertices
+    whose planes all lead to the next (2, 10 and 11 long, either side of
+    the ten steps looked back over), and polyhedra typed all faces, which
+    reach the third restart. Both sides draw from one world seed, printed
+    after each VClip;
   * VClip's checks one step at a time (OP_CHECK, set up as VClip sets
     them up). The walk settles on the same pair whichever way a step
     goes, so some of a step is only seen here: VV and VF either side of
@@ -76,7 +82,8 @@ SOURCES = [
     "tools/src/vclip_test.c",
     "3DS Files/source/vclip.c",
     "3DS Files/source/replay.c", "3DS Files/source/p32.c",
-    "3DS Files/source/bmatrix.c",
+    "3DS Files/source/bmatrix.c", "3DS Files/source/bmath.c",
+    "3DS Files/source/bmathtab.c",
     "3DS Files/source/bmem.c",
     "3DS Files/source/espresso.c",
 ]
@@ -106,6 +113,17 @@ KIND_CHAR = "vef"
 G_PRINT_THIS_TIME = 0x00324448
 G_PLOT_CLOSEST = 0x00324438
 G_PRINTING = 0x00324358
+
+# Retail's VClip (0x001d2390) is the demo's (0x001c8200) with a restart at
+# the end of each step. The demo's loop: the `lui s7,0x0001` before it, its
+# head, the `bne s4,zero` every step ends at, and the exit's `move v0,s4`.
+DEMO_VC_START = 0x001c8320
+DEMO_VC_LOOP = 0x001c8330
+DEMO_VC_END = 0x001c8504
+DEMO_VC_EXIT = 0x001c8518
+# The world's seed, World::Random's (retail's gp-22120 + 376), the same in
+# tools/src/vclip_test.c.
+WORLD_SEED0 = 0x2468ace1
 
 bits = me.f_to_bits
 fbits = me.fbits_to
@@ -350,6 +368,50 @@ def edge_of(shape, a, b):
 def face_of(shape, n):
     return max(range(len(shape.faces)),
                key=lambda i: vdot(shape.normals[i][0], n))
+
+
+# ---------------------------------------------------------------- retail
+
+
+def install_retail_vclip(e, draw):
+    """Retail's VClip (0x001d2390) over the demo's, in Python. Before the
+    loop the two lists and the counts start again. At the end of each step,
+    0x001d2778 puts the witness's pair at the step's index and looks for it
+    among the ten before; a repeat draws World::Random -- `draw(n)` here --
+    on P1's vertex count and then P2's, puts those vertices in F1 and F2,
+    and counts the steps from 0 again. The loop goes on unless the status is
+    set, the third restart is done or the step count is 80 (0x001d2728).
+    Returns the state the two hooks share."""
+    st = {"l1": [0] * 80, "l2": [0] * 80, "n": 0, "restarts": 0}
+
+    def vc_start(em):
+        em.reg[23] = 0x10000          # the `lui s7,0x0001` this replaces
+        st.update(l1=[0] * 80, l2=[0] * 80, n=0, restarts=0)
+        em.reg[31] = DEMO_VC_START + 4
+
+    def vc_end(em):
+        wa = em.reg[16] & M32
+        f1, f2 = em.u32(wa + 4), em.u32(wa + 8)
+        n = st["n"]
+        st["l1"][n], st["l2"][n] = f1, f2
+        seen = any(st["l1"][i] == f1 and st["l2"][i] == f2
+                   for i in range(n - 1, max(n - 11, -1), -1))
+        if seen:
+            st["restarts"] += 1
+            st["n"] = 0
+            for slot, poly in ((4, 12), (8, 16)):
+                p = em.u32(wa + poly)
+                r = draw(s16(em.u16(p + 16)))
+                em.put32(wa + slot, (em.u32(p + 32) + 20 * r) & M32)
+        else:
+            st["n"] = n + 1
+        done = (s32(em.reg[20]) != 0 or st["restarts"] >= 3
+                or st["n"] >= 80)
+        em.reg[31] = DEMO_VC_EXIT if done else DEMO_VC_LOOP
+
+    e.stub(DEMO_VC_START, vc_start)
+    e.stub(DEMO_VC_END, vc_end)
+    return st
 
 
 # ---------------------------------------------------------------- the script
@@ -1139,6 +1201,70 @@ def plot_section(sc):
     sc.op(OP_FLAGS, 0, 0)
 
 
+def restart_section(sc):
+    """Retail's restart. A walk that settles in one step draws nothing; one
+    that takes two or more ends on a repeat and keeps two random vertices.
+    A ring of vertices whose planes all lead to the next repeats every
+    ring-length steps: 2 and 10 are inside the ten steps looked back over,
+    11 is not and runs out the 80. Polyhedra whose every feature is typed a
+    face repeat at once from any vertex, so the walk stops at its third
+    restart. A ring of all 24 vertices, started from two faces, restarts
+    once onto it whatever the draw, and then runs its 80 steps from 0."""
+    sc.tag("restart: a walk that settles at once")
+    sc.build(0, box(1.0, 1.0, 1.0), dump=False)
+    sc.build(1, box(1.0, 1.0, 1.0), dump=False)
+    I = identity()
+    sc.op(OP_WIT_INIT, 0, 0, 1)
+    sc.op(OP_WIT_SET, 0, ref(0, 0, bv(1, 1, 1)), ref(1, 0, bv(-1, -1, -1)))
+    sc.vclip(0, I, [0, 0, 0], I, [3.0, 2.5, 2.25])
+    sc.vclip(0, I, [0, 0, 0], I, [3.0, 2.5, 2.25])
+    sc.op(OP_WIT_SET, 0, ref(0, 0, bv(-1, 1, 1)), ref(1, 0, bv(-1, -1, -1)))
+    sc.vclip(0, I, [0, 0, 0], I, [3.0, 2.5, 2.25])
+
+    shape = wafer(12, 2.0, 0.25)
+    for name, ring in (("2", [10, 23]),
+                       ("10", [0, 13, 2, 15, 4, 17, 6, 19, 8, 21]),
+                       ("11", [1, 14, 3, 16, 5, 18, 7, 20, 9, 22, 11])):
+        sc.tag("restart: a ring of %s vertices" % name)
+        sc.build(2, shape, dump=False)
+        sc.build(3, box(0.1, 0.1, 0.1), dump=False)
+        base = sc.plane_base[2]
+        for k, vi in enumerate(ring):
+            nxt = ref(2, 0, ring[(k + 1) % len(ring)])
+            for j in range(len(shape.vert_edges[vi])):
+                sc.op(OP_SET_NB, 2, base[("v", vi)] + j, nxt)
+        sc.op(OP_WIT_INIT, 1, 3, 2)
+        sc.op(OP_WIT_SET, 1, ref(3, 0, bv(-1, -1, -1)), ref(2, 0, ring[0]))
+        for _ in range(3):
+            sc.vclip(1, I, [0.05, -0.03, 3.0], I, [0, 0, 0])
+        sc.op(OP_WIT_SET, 1, ref(3, 0, bv(1, -1, -1)), ref(2, 0, ring[-1]))
+        sc.vclip(1, I, [-0.4, 0.2, 1.5], I, [0, 0, 0])
+
+    sc.tag("restart: the third one")
+    for pi in (4, 5):
+        sc.build(pi, tetra(1.0), dump=False)
+        for vi in range(4):
+            sc.op(OP_POKE_TYPE, ref(pi, 0, vi), 2)
+    sc.op(OP_WIT_INIT, 2, 4, 5)
+    sc.op(OP_WIT_SET, 2, ref(4, 2, 0), ref(5, 2, 1))
+    sc.vclip(2, I, [0, 0, 0], I, [3.0, 0.5, 0.25])
+    sc.vclip(2, I, [0, 0, 0], I, [0.5, 0.25, 0.1])
+
+    sc.tag("restart: then the 80 steps")
+    sc.build(6, shape, dump=False)
+    sc.build(7, box(0.1, 0.1, 0.1), dump=False)
+    base = sc.plane_base[6]
+    ring = [vi for k in range(12) for vi in (k, 12 + k)]
+    for k, vi in enumerate(ring):
+        nxt = ref(6, 0, ring[(k + 1) % len(ring)])
+        for j in range(len(shape.vert_edges[vi])):
+            sc.op(OP_SET_NB, 6, base[("v", vi)] + j, nxt)
+    sc.op(OP_WIT_INIT, 3, 7, 6)
+    sc.op(OP_WIT_SET, 3, ref(7, 2, 0), ref(6, 2, 0))
+    for _ in range(2):
+        sc.vclip(3, I, [0.05, -0.03, 3.0], I, [0, 0, 0])
+
+
 def script(count=900):
     rnd = random.Random(20260925)
     sc = Script()
@@ -1155,6 +1281,7 @@ def script(count=900):
     # the same numbers they always did
     clip_limits_section(sc)
     steps_section(sc)
+    restart_section(sc)
     return sc
 
 
@@ -1320,6 +1447,22 @@ class Model(object):
         e.stub("espCreateUserMesh__FUii", mesh)
         e.stub("espSetUserMeshFace__FUiiP11FloatVector", face)
         e.stub("espSetObjectPosition__FUiP11FloatVector", pos)
+
+        self.seed = WORLD_SEED0
+        self.vc = install_retail_vclip(e, self.world_random)
+
+    def world_random(self, n):
+        """bRandom(n, &seed) (retail's 0x0025a3d0): the seed's old value mod
+        n, and the seed shifted on. The port's bRandomI answers 0 for n 0,
+        where the original traps."""
+        s = self.seed
+        if n == 0:
+            return 0
+        t = s ^ 0x1d872b41
+        u = t ^ (t >> 5)
+        v = (t ^ (u << 27)) & M32
+        self.seed = (u ^ v) & M32
+        return s % (n & M32)
 
     # ---- memory helpers
 
@@ -1674,8 +1817,9 @@ class Model(object):
                 e.put32(wa + 60, CP_SENTINEL)
                 self.tainted[wi] = [False, False]
                 st = self.call("vclip", wa, S, S + 64, S + 128, S + 192)
-                out.append("vclip %d -> %d printing %s"
-                           % (wi, st, self.name_poly(e.u32(G_PRINTING))))
+                out.append("vclip %d -> %d printing %s seed %08x"
+                           % (wi, st, self.name_poly(e.u32(G_PRINTING)),
+                              self.seed))
                 self.dump_wit(wi, st)
             elif op == OP_DUMP_WIT:
                 self.dump_wit(arg(), -1)
@@ -2403,12 +2547,62 @@ MUTATIONS = [
     _m("vc-print-p1-twice", "        vcpoly_print(w->P2);",
        "        vcpoly_print(w->P1);"),
     _m("vc-print-always", "    if (PrintThisTime) {", "    if (1) {"),
-    _m("vc-runs-on", "        if (status != 0 || !(i < VC_MAX_ITERATIONS))",
-       "        if (!(i < VC_MAX_ITERATIONS))"),
+    _m("vc-runs-on",
+       "        if (status != 0 || !(restarts < VC_MAX_RESTARTS)",
+       "        if (!(restarts < VC_MAX_RESTARTS)"),
     _m("vc-step-limit", "VC_MAX_ITERATIONS     80",
        "VC_MAX_ITERATIONS     79", VH),
-    _m("vc-step-limit-le", "        if (status != 0 || !(i < VC_MAX_ITERATIONS))",
-       "        if (status != 0 || !(i <= VC_MAX_ITERATIONS))"),
+    _m("vc-step-limit-le", "            || !(i < VC_MAX_ITERATIONS))",
+       "            || !(i <= VC_MAX_ITERATIONS))"),
+    # retail's restart
+    _m("vc-restarts-2", "VC_MAX_RESTARTS       3", "VC_MAX_RESTARTS       2",
+       VH),
+    _m("vc-restarts-4", "VC_MAX_RESTARTS       3", "VC_MAX_RESTARTS       4",
+       VH),
+    _m("vc-lookback-9", "VC_CYCLE_LOOKBACK     10",
+       "VC_CYCLE_LOOKBACK     9", VH),
+    _m("vc-lookback-11", "VC_CYCLE_LOOKBACK     10",
+       "VC_CYCLE_LOOKBACK     11", VH),
+    _m("vc-no-restart", "        if (vclip_pair_seen(w, seen1, seen2, i)) {",
+       "        if (0 && vclip_pair_seen(w, seen1, seen2, i)) {"),
+    _m("vc-status-first", "        if (vclip_pair_seen(w, seen1, seen2, i)) {",
+       "        if (status == 0 && vclip_pair_seen(w, seen1, seen2, i)) {"),
+    _m("vc-restart-uncounted", _lines("            restarts++;",
+                                      "            i = 0;"),
+       "            i = 0;"),
+    _m("vc-restart-keeps-step", _lines("            restarts++;",
+                                       "            i = 0;"),
+       _lines("            restarts++;", "            (void)0;")),
+    _m("vc-restart-step-1", _lines("            restarts++;",
+                                   "            i = 0;"),
+       _lines("            restarts++;", "            i = 1;")),
+    _m("vc-restart-p2-first",
+       _lines("            w->F1 = vclip_random_vertex(w->P1);",
+              "            w->F2 = vclip_random_vertex(w->P2);"),
+       _lines("            w->F2 = vclip_random_vertex(w->P2);",
+              "            w->F1 = vclip_random_vertex(w->P1);")),
+    _m("vc-restart-f2-on-p1",
+       "            w->F2 = vclip_random_vertex(w->P2);",
+       "            w->F2 = vclip_random_vertex(w->P1);"),
+    _m("vc-restart-keeps-f1",
+       "            w->F1 = vclip_random_vertex(w->P1);",
+       "            (void)vclip_random_vertex(w->P1);"),
+    _m("vc-random-next", "    return &p->pVertices[r].Feature;",
+       "    return &p->pVertices[(r + 1) % p->NumVertices].Feature;"),
+    _m("vc-random-range", "? gVClipWorldRandomFn(p->NumVertices) : 0;",
+       "? gVClipWorldRandomFn(p->NumVertices - 1) : 0;"),
+    _m("vc-seen-either", "        if (l1[i] == w->F1 && l2[i] == w->F2)",
+       "        if (l1[i] == w->F1 || l2[i] == w->F2)"),
+    _m("vc-seen-f1-only", "        if (l1[i] == w->F1 && l2[i] == w->F2)",
+       "        if (l1[i] == w->F1)"),
+    _m("vc-seen-skips-last", "    for (i = n - 1, k = 0;",
+       "    for (i = n - 2, k = 0;"),
+    _m("vc-seen-itself", "    for (i = n - 1, k = 0;",
+       "    for (i = n, k = 0;"),
+    _m("vc-seen-not-first", "i >= 0 && k < VC_CYCLE_LOOKBACK;",
+       "i > 0 && k < VC_CYCLE_LOOKBACK;"),
+    _m("vc-seen-not-stored", _lines("    l1[n] = w->F1;", "    l2[n] = w->F2;"),
+       _lines("    l1[n] = w->F1;", "    (void)0;")),
     _m("vc-code-shift", "            + ((uint32_t)(int32_t)w->F2->Type << 16);",
        "            + ((uint32_t)(int32_t)w->F2->Type << 8);"),
 
@@ -2637,7 +2831,13 @@ for _name in EQUIVALENT:
 write_source = hostbuild.write_source
 
 
-def mutate_pass(sc):
+def mutate_pass(sc, only=None):
+    todo = [m for m in MUTATIONS if not only or m[0] in only]
+    if only:
+        unknown = sorted(set(only) - set(m[0] for m in MUTATIONS))
+        if unknown:
+            print("no such mutation: %s" % " ".join(unknown))
+            return 1
     base_model = model(sc)
     survived, missing, equivalent, caught = [], [], [], 0
 
@@ -2651,7 +2851,7 @@ def mutate_pass(sc):
             print("base already differs -- fix that before mutating")
             return 1
 
-    for name, rel, before, after in MUTATIONS:
+    for name, rel, before, after in todo:
         path = ROOT / rel
         text = path.read_text(encoding="utf-8", newline="")
         crlf = (chr(13) + NL) in text
@@ -2702,14 +2902,15 @@ def mutate_pass(sc):
                          "mutation %s. Put the original line back before "
                          "trusting anything printed above." % (rel, name))
 
-    real = [m for m in MUTATIONS if m[0] not in missing]
+    real = [m for m in todo if m[0] not in missing]
     holes = [s for s in survived if s not in EQUIVALENT]
     # An entry whose mutant was caught is a wrong reason, not a spare one.
     stale = [n for n in EQUIVALENT
-             if n not in equivalent and n not in missing]
+             if n not in equivalent and n not in missing
+             and any(m[0] == n for m in todo)]
     if missing:
         print("%d PATTERN NOT FOUND -- the tally below is over %d of %d"
-              % (len(missing), len(real), len(MUTATIONS)))
+              % (len(missing), len(real), len(todo)))
     print("%d mutations, %d caught, %d equivalent, %d unexplained"
           % (len(real), caught, len(equivalent), len(holes)))
     for name in holes:
@@ -2724,6 +2925,8 @@ def mutate_pass(sc):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mutate", action="store_true")
+    ap.add_argument("--only", metavar="A,B",
+                    help="with --mutate, only these mutations")
     ap.add_argument("--dump", metavar="DIR")
     ap.add_argument("--count", type=int, default=900,
                     help="random VClip poses (default 900)")
@@ -2731,7 +2934,7 @@ def main():
 
     sc = script(args.count)
     if args.mutate:
-        sys.exit(mutate_pass(sc))
+        sys.exit(mutate_pass(sc, args.only.split(",") if args.only else None))
 
     lines = model(sc)
     with tempfile.TemporaryDirectory() as tmp:

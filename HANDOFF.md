@@ -27893,3 +27893,74 @@ Next: TASKS 73 slice 12. The terrain table's layout is already retail's
 CarState's and CollisionBodyWitness's layouts (the port reaches every
 field by name, so check whether anything copies them as bytes), then
 CarCollisionBody's retail fields and InitSkids (skids are not ported).
+
+## Session 135, continued -- VClip's restart (TASKS 73, slice 12)
+
+CarState's layout first: nothing to port. Every reader reaches its fields
+by name, `replay.c` checksums them field by field, and the lock hash uses
+the port's offsets. TASKS 73's terrain-table line is closed as stale
+(Session 31 made it retail's).
+
+Then `retail_match --diff` on the witness's functions turned up VClip.
+Retail's (`0x001d2390`) is the demo's (`0x001c8200`) plus a restart:
+
+- After each step, `0x001d2778(w, l1, l2, n)` puts the witness's pair (F1
+  at +4, F2 at +8) at index n of two lists of 80, then looks for it among
+  entries n-1 down to n-10. A match answers 1.
+- A repeat counts a restart, sets n back to 0, and draws F1 =
+  `P1->pVertices + 20 * World::Random(pCurrentWorld, P1->NumVertices)`,
+  then F2 the same on P2. World::Random is `0x0014e520`, bRandom on
+  World+376; all 14 retail callers pass gp-22120, pCurrentWorld.
+- The walk stops at a non-zero status, at the third restart, or after 80
+  steps from its last start. The repeat test comes first, so a step that
+  settles without moving, after one that moved, still scrambles the
+  witness and takes two draws. CheckVertexFace's deepest-face search moves
+  the face and settles in one step, so that ending is no repeat.
+
+The port:
+
+- `vclip.c`: `vclip_pair_seen` and `vclip_random_vertex`; VClip keeps the
+  two lists on its stack. `vclip.h`: VC_MAX_RESTARTS (3),
+  VC_CYCLE_LOOKBACK (10), and the seam `gVClipWorldRandomFn`, NULL drawing
+  vertex 0.
+- `main.c` binds it to `world_random_i(pCurrentWorld, n)`.
+- This moves the world's seed and the witnesses' features in a replay, so
+  it may be part of the disc replays' drift (72h-2c).
+
+Checks:
+
+- `vclip_check`: `install_retail_vclip` hooks the demo image's loop start
+  (`0x001c8320`) and step end (`0x001c8504`), with a bRandom model on
+  seed `0x2468ace1`, the harness's too. A new restart scenario: a walk
+  that settles at once, rings of 2, 10 and 11 vertices, faces-only
+  tetrahedra that stop at the third restart, and a restart onto a ring of
+  all 24 of a wafer's vertices that runs its 80 steps. 53 scenarios,
+  23513 lines, 0 differ; the seed moved in most calls. 301 mutations, 300
+  caught, 1 equivalent. vc-restart-step-1 survived the first run; the
+  80-step scenario catches it.
+- `polyhedra_check` and `collisionbody_check` take the same hook, drawing
+  vertex 0 (their harnesses bind no random). collisionbody had 94 lines
+  differ before it: 82 scenarios, 0 differ now. polyhedra, carmode,
+  carsnap and loadertable: 0 differ.
+
+The CIA builds clean.
+
+Next: TASKS 73 slice 13, read ahead and not yet written:
+
+- Retail's TestForContact (`0x001d65f8`) asks AreCollisionsEnabled
+  (slot 136) of pBody1, then pBody2, before VClip, and returns if either
+  says no. The blink stamp goes to +264 and the yaw stamp to +268, and
+  every car body in a penetration (byte 12, Type, 0) gets the time at a
+  new +260 too.
+- So retail's CarCollisionBody is: +260 the new stamp, +264
+  LastPenetrationTime, +268 LastYawControlCollisionTime. Its six inline
+  accessors (`0x001d8e08` .. `0x001d8e48`) agree; retail_syms names them
+  by their bytes, one off. The port has LastPenetrationTime at 260,
+  LastYawControlCollisionTime at 264 and ThirdTime at 268, so the replay
+  moves the right words under the wrong names.
+- Car::GetLastPenetrationTime reads +264 and
+  GetPostCollisionYawControlBoost +268: the port's names are right
+  there. Player::ChooseToDisplayReset (`0x00181f68`) reads +260, the new
+  stamp, where the port reads LastPenetrationTime.
+- The witness's new word at 104: no witness function in retail touches
+  it; check the rest of the image.

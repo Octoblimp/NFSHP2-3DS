@@ -33,7 +33,9 @@ NFSHP2.ELF with bWare's slot pools, track.cpp's tree and polyhedra.cpp's
 wafers beneath them, the harness (tools/src/collisionbody_test.c) runs the
 port with track.c, polyhedra.c and vclip.c beneath it, both walk the same
 op script, and the two transcripts are diffed. Every float goes both ways
-as its bits.
+as its bits. VClip is retail's: vclip_check's hook puts its restart into
+the demo's, and as the harness binds no World::Random, a restart takes
+vertex 0 of each polyhedron on both sides.
 
 **Labels, not pointers.** H0..H15 are bodies made in the checker's memory,
 Tn, Wn, Kn and Pn slot n of the TrackPolygon-body, witness, car-body and
@@ -136,6 +138,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hostbuild
 from hostbuild import write_source
 import mipsemu as me
+import vclip_check
 
 ROOT = Path(__file__).resolve().parent.parent
 NL = chr(10)
@@ -2540,6 +2543,8 @@ class Model(object):
                          "19DriverAnimationTypei", begin),
                         ("StartForceImpact__3CarG8bVector3f", force)):
             e.stub(sym, fn)
+        # The port's VClip is retail's, with its restart (TASKS 73).
+        vclip_check.install_retail_vclip(e, lambda n: 0)
 
     def ct_init(self):
         """E0..E3 and what testC's stubs answer for them, testC, B0..B3 and

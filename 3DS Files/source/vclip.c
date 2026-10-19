@@ -30,6 +30,7 @@
 int32_t       PrintThisTime;
 int32_t       PlotClosestFeatures;
 VCPolyhedron *pPrintingPolygon;
+int32_t     (*gVClipWorldRandomFn)(int32_t range);
 
 // ---------------------------------------------------------------- helpers
 
@@ -905,22 +906,61 @@ int32_t vcwitness_check_edge_face(VCWitness *w, VCTransform *x12,
     return 0;
 }
 
-// 0x001c8200. The two transforms, then up to 80 steps of whichever check
-// the pair of feature types calls for. The first-listed type of each check
-// is the "first" feature, so SwitchState says which of F1 and F2 that is,
-// and the transforms and transformed features are passed swapped when it
-// is F2. A pair no check handles (a bad Type) spins out the 80 steps.
+// Retail's 0x001d2778, VClip's own: puts the pair the witness holds at `n`
+// in the two lists, and answers 1 if one of the ten before it was the same
+// pair. Most steps that settle move neither feature, so most walks of two
+// steps or more end with a yes. CheckVertexFace's search for the deepest
+// face moves the face as it settles, and that ends with a no.
+static int32_t vclip_pair_seen(const VCWitness *w, VCFeature **l1,
+                               VCFeature **l2, int32_t n)
+{
+    int32_t i, k;
+
+    l1[n] = w->F1;
+    l2[n] = w->F2;
+    for (i = n - 1, k = 0; i >= 0 && k < VC_CYCLE_LOOKBACK; i--, k++)
+        if (l1[i] == w->F1 && l2[i] == w->F2)
+            return 1;
+    return 0;
+}
+
+static VCFeature *vclip_random_vertex(VCPolyhedron *p)
+{
+    int32_t r = gVClipWorldRandomFn != NULL
+        ? gVClipWorldRandomFn(p->NumVertices) : 0;
+
+    return &p->pVertices[r].Feature;
+}
+
+// Retail's 0x001d2390 (the demo's 0x001c8200). The two transforms, then up
+// to 80 steps of whichever check the pair of feature types calls for. The
+// first-listed type of each check is the "first" feature, so SwitchState
+// says which of F1 and F2 that is, and the transforms and transformed
+// features are passed swapped when it is F2.
+//
+// Retail added the restart. After each step the pair goes in two lists of
+// 80, and a pair one of the ten steps before it held starts the walk again
+// from a random vertex of P1 and then of P2, World::Random's on each
+// polyhedron's vertex count, with the lists and the step count from 0.
+// That is tested before the status, so a step that settles without moving
+// a feature, after one that did, is a repeat too: the answer stands (the
+// contact points and the distance are the check's), but the witness keeps
+// the two random vertices, the next call walks from them, and the world's
+// seed has moved twice. A walk stops at a status, at its third restart, or after 80
+// steps. A pair no check handles (a bad Type) repeats at its second step.
 //
 // PlotClosestFeatures, when set, has the original build the two placement
 // matrices and then use neither: the plot call is compiled out. PrintMatrix
-// (0x00192450) is a bare `jr ra`.
+// (retail's 0x0019c160) is a bare `jr ra`.
 int32_t vcwitness_vclip(VCWitness *w, bMatrix4 *r1, bVector3 *t1,
                         bMatrix4 *r2, bVector3 *t2)
 {
     VCTransformedFeature xf1, xf2;
     VCTransform x12, x21;
+    VCFeature *seen1[VC_MAX_ITERATIONS], *seen2[VC_MAX_ITERATIONS];
     int32_t status = 0;
-    int32_t i;
+    int32_t restarts = 0;
+    int32_t i = 0;
 
     if (PrintThisTime) {
         vcpoly_print(w->P1);
@@ -931,7 +971,7 @@ int32_t vcwitness_vclip(VCWitness *w, bMatrix4 *r1, bVector3 *t1,
     vctransform_init(&x12, r2, t2, r1, t1);
     vctransform_init(&x21, r1, t1, r2, t2);
 
-    for (i = 1;; i++) {
+    for (;;) {
         uint32_t code = (uint32_t)(int32_t)w->F1->Type
             + ((uint32_t)(int32_t)w->F2->Type << 16);
 
@@ -979,7 +1019,16 @@ int32_t vcwitness_vclip(VCWitness *w, bMatrix4 *r1, bVector3 *t1,
         default:
             break;
         }
-        if (status != 0 || !(i < VC_MAX_ITERATIONS))
+        if (vclip_pair_seen(w, seen1, seen2, i)) {
+            restarts++;
+            i = 0;
+            w->F1 = vclip_random_vertex(w->P1);
+            w->F2 = vclip_random_vertex(w->P2);
+        } else {
+            i++;
+        }
+        if (status != 0 || !(restarts < VC_MAX_RESTARTS)
+            || !(i < VC_MAX_ITERATIONS))
             return status;
     }
 }

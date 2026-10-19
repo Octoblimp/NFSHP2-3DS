@@ -263,6 +263,7 @@
 #include "trafficdriver.h"
 #include "traffictele.h"
 #include "uirender.h"
+#include "vclip.h"
 #include "vtable.h"
 #include "warp.h"
 #include "wheel.h"
@@ -7460,6 +7461,13 @@ static void barricade_mark_body_fading_seam(CollisionBody* body)
     smokeable_set_blinking((Smokeable*)(void*)body, 1);
 }
 
+// Retail's VClip restart: World::Random (0x0014e520) on pCurrentWorld,
+// which a walk only reaches inside a world's step.
+static int32_t vclipWorldRandom(int32_t range)
+{
+    return pCurrentWorld != NULL ? world_random_i(pCurrentWorld, range) : 0;
+}
+
 int main(int argc, char** argv)
 {
     (void)argc; (void)argv;
@@ -7569,6 +7577,9 @@ int main(int argc, char** argv)
     gPlayerSelectedResetFn = player_selected_reset;
     gPlayerIsNisPlayingFn = player_is_nis_playing;
     gChopperHonkAttackFn = chopper_honk_attack;
+    // Retail's VClip restarts a walk from vertices World::Random draws on
+    // pCurrentWorld (TASKS 73).
+    gVClipWorldRandomFn = vclipWorldRandom;
     // Their engines (14-4), which BaseCarSound's constructors make.
     gCreatePlayerEngineFn = enginesound_create_player;
     gCreateAIEngineFn = enginesound_create_ai;

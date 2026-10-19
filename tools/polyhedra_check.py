@@ -48,6 +48,9 @@ never loaded prints as not loaded: its array pointers are the tool's junk.
 TestCubes leaves the fourth lane of both translations as stack junk, so the
 translations are printed three lanes wide; the contact points likewise.
 
+VClip is retail's: vclip_check's hook puts its restart into the demo's,
+drawing vertex 0 as the harness's unbound World::Random does.
+
 The model runs with the EE's divide on, and the run fails if any divide
 anywhere took its divide-by-zero path: the ports follow IEEE there, so the
 script keeps clear of it.
@@ -70,6 +73,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hostbuild
 import mipsemu as me
+import vclip_check
 
 ROOT = Path(__file__).resolve().parent.parent
 NL = chr(10)
@@ -779,6 +783,10 @@ class Model(object):
             e.hook(a, vclip_ret)
         e.hook(self.fn["wit_dtor"], wit_dtor)
         e.hook(self.fn["poly_dtor"], poly_dtor)
+        # The port's VClip is retail's, with its restart (TASKS 73). The
+        # harness binds no World::Random, so a restart takes vertex 0 of
+        # each polyhedron; here too.
+        vclip_check.install_retail_vclip(e, lambda n: 0)
 
     # ---- output
 

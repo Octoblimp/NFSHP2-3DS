@@ -89,17 +89,52 @@ buffers are passed swapped. Each check answers 0 if a feature moved, 1 if
 the pair is closest and disjoint, and 2 if they touch or penetrate. The
 walk returns the first non-zero answer, or the last answer after step 80.
 
+### Retail's restart
+
+Retail's VClip (`0x001d2390`, ported in TASKS 73) restarts a walk that
+comes back to a pair. The demo's (`0x001c8200`) has no restart. After each
+step, `0x001d2778` puts the pair the witness now holds into two lists of 80
+at the step's index. It then looks for the same pair among the ten entries
+before it. A repeat does three things:
+
+- it counts a restart;
+- it sets the step index back to 0;
+- it puts a random vertex in each slot: first
+  `World::Random(pCurrentWorld, P1->NumVertices)` for F1, then the same on
+  P2 for F2.
+
+The walk stops at a non-zero status, after its third restart, or 80 steps
+after it last started.
+
+The repeat test comes before the status test, which has these effects:
+
+- **A walk that settles on its first step** draws nothing and keeps its
+  pair.
+- **A walk that moves and then settles without moving ends on a repeat.**
+  The status, the contact points and the distance stand: they are the last
+  check's. The witness is left holding two random vertices, though, so the
+  next call walks from them, and the world's seed has moved by two draws.
+  That is most walks of two steps or more. The replay snapshots both, in
+  the witness's section and in the world's seed.
+- **CheckVertexFace's search for the deepest face** moves its face and
+  settles in the same step, so a walk that ends that way is not a repeat.
+
+The port draws through `gVClipWorldRandomFn`, which `main.c` binds to
+`world_random_i` on `pCurrentWorld`. Unbound, it draws vertex 0.
+
 **Face against face has no case.** Code 0x20002 falls through the switch,
-the status stays 0, and the call spins out its 80 steps and returns 0 with
-nothing changed. A bad `Type` does the same. The walk never steps into a
-face-face pair itself: every check moves one feature at a time, and a
-face's neighbours are edges. Only a caller that starts from two faces can
-reach it. The port does the same.
+so the status stays 0 and the pair is unchanged. In the demo the call spins
+out its 80 steps and returns 0. In retail the second step is a repeat, and
+the walk starts again from two vertices. A bad `Type` does the same; a
+polyhedron with every feature typed a face stops at the third restart. The
+walk never steps into a face-face pair itself: every check moves one
+feature at a time, and a face's neighbours are edges. Only a caller that
+starts from two faces can reach it.
 
 **The step limit is observable.** The checker's walk scenario starts a
 small box on the far side of a hundred-sided wafer. The walk round the rim
-takes more than 80 steps, so the first call returns 0 partway round and the
-next call carries on from there.
+takes more than 80 steps and never repeats a pair, so the first call
+returns 0 partway round and the next call carries on from there.
 
 ### The checks
 
@@ -239,6 +274,11 @@ The script covers:
 - exact contacts between unit boxes, boxes turned onto an edge and a
   vertex, and parallel edges;
 - a walk longer than the step limit;
+- retail's restart: a walk that settles at once, rings of 2, 10 and 11
+  vertices whose planes all lead to the next (the last outside the ten
+  steps looked back over), polyhedra typed all faces that stop at the
+  third restart, and a restart onto a ring of every vertex that then runs
+  its 80 steps;
 - 900 random poses of every pair of shapes from every kind of starting
   pair, with coherent runs where each call starts from the previous
   answer;
@@ -256,10 +296,16 @@ The script covers:
     its answer;
 - the plots, the witness's destructor and the Print walk's one store.
 
-Across 2001 VClips the statuses were 0 ×32, 1 ×1046 and 2 ×923. The 938
+The demo image gets retail's restart from Python hooks at the loop's
+start and each step's end (`install_retail_vclip`), drawing from a model
+of bRandom on its own seed, which the harness binds the same way.
+`polyhedra_check` and `collisionbody_check` use the same hook, drawing
+vertex 0 as their harnesses bind no World::Random.
+
+Across 2020 VClips the statuses were 0 ×23, 1 ×1055 and 2 ×942. The 938
 single checks returned 0 ×662, 1 ×44 and 2 ×232. 0 lines differ overall.
 
-`--mutate` runs 281 mutations: 280 are caught and 1 is equivalent, with 0
+`--mutate` runs 301 mutations: 300 are caught and 1 is equivalent, with 0
 unexplained. The equivalent one drops `GetFeature`'s test for the "none"
 code, `0xffffffff`. That code's type nibble is 15, and the switch's default
 answers 15 with NULL anyway. The test is the image's, so the port keeps it.

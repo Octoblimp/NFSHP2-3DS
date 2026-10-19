@@ -10,7 +10,9 @@
 // until each lies in the other's region: then the pair is closest, the two
 // points on them are the contact points, and the distance between is the
 // separation. The walk reports 1 for disjoint, 2 for penetrating, and 0 if
-// it has not settled after 80 steps.
+// it has not settled after 80 steps. Retail's (0x001d2390) also restarts a
+// walk that comes back to a pair from one of its last ten steps: from a
+// random vertex of each, at most three times.
 //
 // The record layouts are the stabs', to the byte:
 //
@@ -45,7 +47,8 @@
 // The Caffeine plot helpers and the Print family are development code: the
 // plots have no callers at all, and every Print does nothing but store the
 // polyhedron it was given (PrintFeature, PrintMatrix and PrintState are
-// each a bare `jr ra`). DoSnapshot is retail's (0x001d0948), TASKS 72b.
+// each a bare `jr ra`). DoSnapshot is retail's (0x001d0948), TASKS 72b, and
+// VClip is retail's (0x001d2390), TASKS 73.
 //
 // docs/formats/vclip.md has the decode.
 
@@ -220,8 +223,15 @@ typedef char vclip_layout_check[
 #define VC_DIRECTION_SCALE    1.22070312e-04f
 #define VC_DIRECTION_UNSCALE  8192.0f
 
-// VClip's step limit, the `slti v0,v0,80` at 0x001c850c.
+// VClip's step limit, retail's `slti v0,s6,80` at 0x001d2734 (the demo's
+// at 0x001c850c), counted again from 0 after each restart.
 #define VC_MAX_ITERATIONS     80
+
+// Retail's restarts: a walk stops after its third (`slti v0,s7,3` at
+// 0x001d272c), and a pair is looked for among the ten steps before it
+// (0x001d2778's count from 9).
+#define VC_MAX_RESTARTS       3
+#define VC_CYCLE_LOOKBACK     10
 
 // The feature code for "no feature", GetFeatureCode's answer for NULL.
 #define VC_NO_FEATURE         0xffffffffu
@@ -232,6 +242,12 @@ typedef char vclip_layout_check[
 extern int32_t       PrintThisTime;        // 0x00324448
 extern int32_t       PlotClosestFeatures;  // 0x00324438
 extern VCPolyhedron *pPrintingPolygon;     // 0x00324358
+
+// Retail's restart draws each vertex with World::Random (0x0014e520) on
+// pCurrentWorld (gp-22120), so it takes from the world's seed, which the
+// replays depend on. main.c binds world_random_i on pCurrentWorld; the
+// cross-checker binds its own seed. NULL draws vertex 0.
+extern int32_t (*gVClipWorldRandomFn)(int32_t range);
 
 // ---------------------------------------------------------------- transform
 
@@ -321,7 +337,8 @@ int32_t vcwitness_check_edge_face(VCWitness *w, VCTransform *x12,
                                   VCTransformedFeature *xf1,
                                   VCTransformedFeature *xf2);    // 0x001c7ab0
 
-// 0x001c8200. r1/t1 place P1 in the world and r2/t2 place P2.
+// Retail's 0x001d2390 (the demo's 0x001c8200). r1/t1 place P1 in the
+// world and r2/t2 place P2.
 int32_t vcwitness_vclip(VCWitness *w, bMatrix4 *r1, bVector3 *t1,
                         bMatrix4 *r2, bVector3 *t2);
 
