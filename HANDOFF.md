@@ -28024,3 +28024,33 @@ The CIA builds clean.
 
 Next: TASKS 73 slice 14, InitSkids (retail's MaybeMakeSkids takes the Car
 in a1). The skids aren't ported, so it may be a note.
+
+## Session 135, continued -- TASKS 73 closes, and the skid marks (TASKS 78)
+
+TASKS 73's last item was InitSkids. The port has no skid marks at all:
+wheel_maybe_make_skids is a seam no one fills, and World's gInitSkidsFn,
+gCloseSkidsFn, gInitClansFn, gCloseClansFn and gFlushClansFn are NULL. So
+there was no demo copy to put retail's beside, and TASKS 73 is done.
+
+The skid marks are TASKS 78, from retail's code (see TASKS.md for the
+functions). Read so far:
+
+- MaybeMakeSkids (`0x001a5520`) takes (Wheel, Car). It makes a skid when
+  Wheel byte 340 is set or 344 * 360 passes 8, byte 341 is set, the car's
+  byte at 2124 has no bit for the wheel (its number at Wheel+12's +20),
+  and the wheel's ground speed (240, 244) is over 1; otherwise
+  MakeNoSkid. Field names to find.
+- RenderClans (`0x001ab810`), from eDisplayFrame after StuffSun, walks
+  the clan list (gp-19160). A clan of 11 pixels or more that is visible
+  draws its sets (RenderSkids, `0x001ab248`), and goes to the head first
+  when gp-19568's count is over 300 past its stamp.
+- RenderSkids draws nothing when eView byte 6 is set. A set is drawn when
+  its box is visible, its car (SkidSet+36), if any, has the view's bit
+  (eView+0) in Car+1300, and 1 m at its distance is over 4 pixels, faded
+  in up to 10. A drawn set goes to the head of SkidSetList (gp-19208); a
+  full pool frees the tail.
+- SkidSet (retail's 272 bytes, the demo's 256: a centre at 256 is new)
+  holds eight 16-byte segments at 112, its count at 240. Render draws
+  each pair as an ePoly through Render3D with the terrain's texture
+  (0x00311520 by TheTerrainType, the 33 InitSkids finds), raised by
+  gp-29156, alpha (intensity - fade) / 2, 0 at least.

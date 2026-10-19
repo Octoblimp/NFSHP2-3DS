@@ -4563,7 +4563,7 @@ phases.
               73's car physics; then "DemoReplays 1" and
               `tools/run_azahar_attract.ps1 -Replays` measure it again.
 
-73. [ ] **The car's retail pass: where 72b found retail and the port
+73. [x] **The car's retail pass: where 72b found retail and the port
         apart.** The port's car physics is the demo's code. Porting
         retail's DoSnapshots (72b) showed where retail changed the objects
         they move. `carsnap_check` sets each such field the same on both
@@ -4713,8 +4713,11 @@ phases.
           equivalent (20 new). polyhedra and collisionbody (whose models
           take the restart too), carmode, carsnap and loadertable: 0
           differ.
-        - Other demo-derived functions retail changed (TASKS 74's list):
-          InitSkids.
+        - [x] Other demo-derived functions retail changed (TASKS 74's
+          list): InitSkids. The port has no skid marks: MaybeMakeSkids,
+          the SkidSets and the clans that hold them were never ported, so
+          there is no demo copy to set retail's beside (Session 135).
+          They are TASKS 78, from retail's code.
         - [x] RealDriver's changed functions and the player's input.
           Done in Session 133. Retail's tunables and its steering and
           throttle handlers are the demo's; what changed:
@@ -4801,6 +4804,7 @@ phases.
         It comes after TASKS 72, unless the replays need it sooner. The
         disc's demo replays need it (72h-2b): they miss the checksum from
         their first frame on the 3DS.
+        Done in Session 135, in fourteen slices (the last a note).
 
 74. [x] **The AI's retail pass.** Asked for on 2026-10-17, during 72h-2b:
         "I think the AI in general is somewhat stupid sometimes, would
@@ -4883,6 +4887,30 @@ phases.
         "START Back to menu, Y Help" (`main.c`'s kReplayNote and
         kReplayHint). The HUD is down in a replay, so the panel loses
         nothing. Not yet seen on a screen.
+
+78. [ ] **Skid marks.** Found in TASKS 73's last slice: the port draws
+        none. On the PS2 a wheel sliding on the ground lays a trail
+        textured by its terrain's SkidTextureName, darkening the road
+        (the texture's blend is 0x42, Cd - Cs * As, which georender has
+        as GEO_BLEND_SUBTRACT). What retail has, all in its own code:
+        - Wheel::MaybeMakeSkids (`0x001a5520`), which takes the Car too,
+          called from PhysicsCar::Move, BeltMover::Move and
+          MellowMover::UpdateCar; the port's wheel_maybe_make_skids is a
+          seam no one fills;
+        - SkidMaker's MakeSkid and MakeNoSkid, CreateNewSkidSet, the
+          SkidSet (`0x001aa8f8` ..: 16-byte segments, eight to a set, in
+          a slot pool of 128 kept in least-recently-drawn order) and its
+          Render, an ePoly per segment through Render3D;
+        - InitSkids, CloseSkids and DeleteThisSkid, and World's seams
+          for them (gInitSkidsFn, gCloseSkidsFn);
+        - the clans (`0x001ab510` .. `0x001ab9f0`): the cells a set is
+          kept in by position, with InitClans, FlushClans (World's
+          snapshot), CloseClans, GetClan and RenderClans, which
+          eDisplayFrame calls after StuffSun (`0x001132c4`), and
+          RenderSkids for each clan.
+        The first step is the sets and the clans against retail in
+        mipsemu, then MaybeMakeSkids, then the drawing on the 3DS. It
+        comes right after TASKS 73.
 
 ### The retail frontend
 
