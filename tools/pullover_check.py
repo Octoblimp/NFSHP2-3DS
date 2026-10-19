@@ -32,9 +32,9 @@ both timers), each car's drawing, map, lights, siren and tyres, each
 controller's action and pull-over timeout, and each cop's desired state,
 sub-state and timer.
 
-**The divergences**: none in what is compared. The port's
-ResetToRoutePoint has no last bool; retail passes 0, which the model
-checks (" ?t0" if not). The NIS (Player::PlayNextNis) is a seam here.
+**The divergences**: none in what is compared. ResetToRoutePoint's
+last bool (t0, JustResetFrames) is printed as "jr". The NIS
+(Player::PlayNextNis) is a seam here.
 
     python tools/pullover_check.py
     python tools/pullover_check.py --mutate [--only a,b]
@@ -352,10 +352,10 @@ class Model(object):
             self.e.put32(a, self.routes[1])
 
     def s_reset(self, em):
-        self.emit("  reset %s %s %s %08x %d %08x%s" % (
+        self.emit("  reset %s %s %s %08x %d %08x jr %d" % (
             self.sym(em.reg[4]), self.sym(em.reg[5]), self.sym(em.reg[6]),
             em.fpr[12] & M32, s32(em.reg[7]), em.fpr[13] & M32,
-            "" if em.reg[8] & 0xff == 0 else " ?t0"))
+            em.reg[8] & 0xff))
 
     def s_resetdmg(self, em):
         self.emit("  resetdmg %s %s" % (self.sym(em.reg[4]),
@@ -1206,6 +1206,7 @@ MUTATIONS = [
      "        at.Point = car_get_route_point(car, 0);"),
     ("e_next", P, "        ai_get_next_route_point(&at);\n", ""),
     ("e_blink_reset", P, "at.Point, RESET_SPEED, 1,", "at.Point, RESET_SPEED, 0,"),
+    ("e_just_reset", P, "RESET_DIRECTION, 0);", "RESET_DIRECTION, 1);"),
     ("e_bac", P, "    if (TheRaceParameters.BeACop == 0)\n        return;",
      "    if (TheRaceParameters.BeACop != 0)\n        return;"),
     ("e_busted", P, "        if (pl->bShouldDisplayBustedText != 0)\n"

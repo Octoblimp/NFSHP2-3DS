@@ -457,10 +457,12 @@ void car_set_control_mode(Car *c, ControlMode mode)
 
 void car_reset_to_route_point(Car *c, TrackRoute *route,
                               TrackRoutePoint *point, float speed,
-                              int32_t blink, float direction)
+                              int32_t blink, float direction,
+                              int32_t just_reset)
 {
-    printf("  resetto %s %s %s speed %08x blink %d dir %08x\n", lab(c),
-           lab(route), lab(point), bitsf(speed), blink, bitsf(direction));
+    printf("  resetto %s %s %s speed %08x blink %d dir %08x jr %d\n",
+           lab(c), lab(route), lab(point), bitsf(speed), blink,
+           bitsf(direction), just_reset);
 }
 
 void car_switch_skin(Car *c, uint32_t skin)

@@ -310,10 +310,12 @@ extern void (*gChopperHonkAttackFn)(void);
 extern float (*gCopManagerGetResetDirectionFn)(struct tCopManager *m);
 extern void  (*gCopManagerBeACopToggleSirenAndLightsFn)(struct tCopManager *m);
 
-// Car::ResetToRoutePoint (0x00131480). Task 26.
+// Car::ResetToRoutePoint (retail 0x00132f20). Task 26. ResetCar passes
+// blink 1 and just_reset 1 (`addiu t0,zero,1`, 0x0013c124).
 extern void (*gCarResetToRoutePointFn)(struct Car *c, struct TrackRoute *r,
                                        struct TrackRoutePoint *p, float speed,
-                                       int32_t flag, float direction);
+                                       int32_t flag, float direction,
+                                       int32_t just_reset);
 
 // BaseCarSound::StartHonkHorn / StopHonkHorn (0x00185330, 0x00185370).
 // Task 29.

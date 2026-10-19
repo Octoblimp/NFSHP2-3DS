@@ -271,11 +271,12 @@ void ai_get_next_route_point(NearestRoutePointInfo *info)
 
 void car_reset_to_route_point(Car *c, TrackRoute *route,
                               TrackRoutePoint *point, float speed,
-                              int32_t blink, float direction)
+                              int32_t blink, float direction,
+                              int32_t just_reset)
 {
-    printf("  reset %s %s %s %08x %d %08x\n", sym(c), sym(route),
+    printf("  reset %s %s %s %08x %d %08x jr %d\n", sym(c), sym(route),
            sym(point), (unsigned)fb(speed), (int)blink,
-           (unsigned)fb(direction));
+           (unsigned)fb(direction), (int)just_reset);
 }
 
 void nisoverlay_start_busted(NISOverlayManager *o)

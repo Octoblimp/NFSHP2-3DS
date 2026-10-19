@@ -178,7 +178,7 @@ float car_move(Car *c, float dt)
         route = car_get_route(c, 1);
         point = car_get_route_point(c, 1);
         car_reset_to_route_point(c, route, point, CAR_RESET_ME_SPEED, 1,
-                                 1.0f);
+                                 1.0f, 0);
         c->ResetMe = 0;
         return r;
     }

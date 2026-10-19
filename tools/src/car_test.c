@@ -1379,16 +1379,22 @@ static void scenario_think(void)
 static void scenario_drive(void)
 {
     static const float kDt[2] = { 0.0333333351f, 2.5f };
-    int v, d;
+    static const int32_t kJr[4] = { 0, 1, 2, -3 };
+    int v, d, j;
 
     printf("[drive]\n");
     for (v = 0; v < 2; v++) {
         for (d = 0; d < 2; d++) {
-            fresh2();
-            if (v)
-                g_car.pCarDriver = &g_driver2;
-            printf("  driver %d dt %.9g\n", v, (double)kDt[d]);
-            car_drive(&g_car, kDt[d]);
+            for (j = 0; j < 4; j++) {
+                fresh2();
+                if (v)
+                    g_car.pCarDriver = &g_driver2;
+                g_car.JustResetFrames = kJr[j];
+                printf("  driver %d dt %.9g jr %d\n", v, (double)kDt[d],
+                       (int)kJr[j]);
+                car_drive(&g_car, kDt[d]);
+                printf("    jr %d\n", (int)g_car.JustResetFrames);
+            }
         }
     }
 }

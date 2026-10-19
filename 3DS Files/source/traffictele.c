@@ -185,7 +185,7 @@ void traffic_teleporter_try_to_teleport_car(TrafficTeleporter *t, Car *c)
             if (ahead < 0.0f)
                 return;
             car_reset_to_route_point(c, info.Route, info.Point,
-                                     TELEPORT_SPEED, 0, 1.0f);
+                                     TELEPORT_SPEED, 0, 1.0f, 0);
             car_set_movement_mode(c, TRAFFIC_MOVEMENT);
             traffic_teleporter_switch_skin(t, c);
             return;

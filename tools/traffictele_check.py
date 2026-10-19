@@ -1639,9 +1639,10 @@ class Model(object):
             self.emit("  control %s %d" % (self.label(arg(0)), s32(arg(1))))
 
         def reset_to(em):
-            self.emit("  resetto %s %s %s speed %s blink %d dir %s" % (
-                self.label(arg(0)), self.label(arg(1)), self.label(arg(2)),
-                fx(e.fpr[12]), s32(arg(3)), fx(e.fpr[13])))
+            self.emit("  resetto %s %s %s speed %s blink %d dir %s jr %d"
+                      % (self.label(arg(0)), self.label(arg(1)),
+                         self.label(arg(2)), fx(e.fpr[12]), s32(arg(3)),
+                         fx(e.fpr[13]), e.reg[8] & 0xFF))
 
         def car_switch(em):
             self.emit("  switchskin %s %d" % (self.label(arg(0)),
@@ -2099,8 +2100,12 @@ MUTATIONS = [
       "if (0.0f < carAhead || carAhead < ahead)"),
     M("try_ahead_le", "            if (ahead < 0.0f)\n",
       "            if (ahead <= 0.0f)\n"),
-    M("try_blink", "TELEPORT_SPEED, 0, 1.0f);", "TELEPORT_SPEED, 1, 1.0f);"),
-    M("try_dir", "TELEPORT_SPEED, 0, 1.0f);", "TELEPORT_SPEED, 0, -1.0f);"),
+    M("try_blink", "TELEPORT_SPEED, 0, 1.0f, 0);",
+      "TELEPORT_SPEED, 1, 1.0f, 0);"),
+    M("try_dir", "TELEPORT_SPEED, 0, 1.0f, 0);",
+      "TELEPORT_SPEED, 0, -1.0f, 0);"),
+    M("try_just", "TELEPORT_SPEED, 0, 1.0f, 0);",
+      "TELEPORT_SPEED, 0, 1.0f, 1);"),
     M("try_movement", "    car_set_movement_mode(c, TRAFFIC_MOVEMENT);",
       "    car_set_movement_mode(c, eNO_MOVEMENT);"),
     M("try_no_skin", "            traffic_teleporter_switch_skin(t, c);\n", ""),

@@ -4633,10 +4633,24 @@ phases.
           Still missing: the zone preview and freeze cameras the
           automatic's shift buttons now ask for (the events arrive,
           nothing handles them yet).
-        - Car::ResetToRoutePoint: retail's (`0x00132f20`, 336 bytes)
+        - [x] Car::ResetToRoutePoint: retail's (`0x00132f20`, 336 bytes)
           takes one more argument than the demo's (`0x00131480`, 252
-          bytes); `carreset.c` has the demo's. Next, now that the reset
-          button calls it.
+          bytes). Done in Session 133. Retail first puts the track path
+          near the point, by its position and its distance around the
+          track (ResetPositionNear, `0x00208848`), so a reset where the
+          road crosses itself lands on the right road. The last bool
+          sets JustResetFrames to 2, and only the reset button passes
+          it. Car::Drive (`0x00131a80`) counts it down after the
+          driver's Drive; tPursuit reads it, so a cop could not stop a
+          player just after a reset. The port never set it.
+          `carmode_check` runs retail's listing as Python over the demo
+          image, with a crossing (four path points moved beside the
+          route point): 0 differ; 82 mutations, 79 caught, 3 equivalent as before, and Move's flag (mv-reset-just) caught. car_check's
+          Drive (4 values of the count), pullover, traffictele and
+          realdriver print the flag: 0 differ, their 6 new mutations
+          caught. carmode_check had been failing since BottomOut
+          (physicscar_check's PleaseResetMeLater stub hid the image's
+          from its "later" case); fixed.
         - CarState's layout: retail adds DistanceMoved after Odometer, and
           the fields from TractionUsage to BurnOutAllow move on by 4. The
           port keeps the demo's layout, with DistanceMoved in the padding.

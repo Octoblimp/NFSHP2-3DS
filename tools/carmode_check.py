@@ -99,6 +99,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import difficulty_check as dcc
 import hostbuild
 import mellowmover_check as mmc
+import mipsemu
 import physicscar_check as pcc
 import trackpath_check as tpc
 from mipsemu import M32, s32
@@ -461,13 +462,46 @@ RESETS = [
     ("pos", 0, 0, None, (50.0, 90.0, 0.0, 0.0), 3.0, 0x3000),
 ]
 # (control mode, movement mode, player, route?, point?, speed, blink,
-# direction)
+# direction, just reset, the point's x and y, its DistanceAroundTrack,
+# ReverseTrackDirection, WARP on)
+RPT_AT = (150.0, 40.0)             # rpt_bytes' position
+RPT_DIST = 99.0                    # and its DistanceAroundTrack
+JRF0 = 7                           # JustResetFrames before each reset
+# A road over another, for retail's ResetPositionNear: points 6 to 9,
+# from the far side of the circle (distances about 628 to 942), moved
+# into a line beside the route point, 40, 30, 20 and 10 from it. The
+# splines stay the circle's. Every UpdatePosition walks one neighbour at
+# a time once within 128 of where it was, so from 6 it takes ResetToRoute
+# Point's three updates to reach 9.
+WARP = [(6, 150.0, 80.0), (7, 150.0, 70.0), (8, 150.0, 60.0),
+        (9, 150.0, 50.0)]
 ROUTE_RESETS = [
-    (0, 0, None, False, True, 5.0, 1, 1.0),
-    (0, 0, None, True, False, 5.0, 1, 1.0),
-    (2, 1, None, True, True, 5.0, 1, 1.0),
-    (2, 4, "cap", True, True, 20.0, 0, -1.0),
-    (0, 1, "idle", True, True, 0.0, 1, 0.5),
+    (0, 0, None, False, True, 5.0, 1, 1.0, 1, RPT_AT, RPT_DIST, 0, 0),
+    (0, 0, None, True, False, 5.0, 1, 1.0, 1, RPT_AT, RPT_DIST, 0, 0),
+    (2, 1, None, True, True, 5.0, 1, 1.0, 0, RPT_AT, RPT_DIST, 0, 0),
+    (2, 4, "cap", True, True, 20.0, 0, -1.0, 1, RPT_AT, RPT_DIST, 0, 0),
+    (0, 1, "idle", True, True, 0.0, 1, 0.5, 0, RPT_AT, RPT_DIST, 0, 0),
+    # From the circle's centre every point is as far, so the distance
+    # around the track picks the near one: 640 is the far side, 1200 the
+    # last point, -300 wraps, and the reversed track measures from the
+    # other end. The second update, 200 from that point, searches again,
+    # so these only show that nothing else moves.
+    (0, 1, None, True, True, 3.0, 0, 1.0, 1, (0.0, 0.0), 640.0, 0, 0),
+    (0, 1, None, True, True, 3.0, 1, 1.0, 1, (0.0, 0.0), 1200.0, 0, 0),
+    (2, 4, None, True, True, 3.0, 0, 1.0, 0, (0.0, 0.0), -300.0, 0, 0),
+    (0, 1, None, True, True, 3.0, 0, 1.0, 1, (0.0, 0.0), 99.0, 1, 0),
+    (0, 1, None, True, True, 3.0, 0, -1.0, 1, (0.0, 0.0), 1150.0, 1, 0),
+    (0, 1, None, True, True, 3.0, 0, 1.0, 1, RPT_AT, 640.0, 0, 0),
+    (2, 1, "idle", True, True, 8.0, 1, 1.0, 1, (-180.0, 60.0), 99.0, 0, 0),
+    # Over the crossing. 628 picks point 6, which walks to 9; a plain
+    # search would go straight to 9, and two updates stop at 8. 99 picks
+    # point 1, which walks to 0, where the last reset's 9 would stay. 640
+    # goes back over, and the reversed track's 1157 is 99 from its end.
+    (0, 1, None, True, True, 3.0, 0, 1.0, 1, RPT_AT, 628.0, 0, 1),
+    (2, 4, None, True, True, 6.0, 1, 1.0, 1, RPT_AT, 99.0, 0, 1),
+    (0, 1, "idle", True, True, 3.0, 0, -1.0, 0, RPT_AT, 640.0, 0, 1),
+    (0, 1, None, True, True, 3.0, 0, 1.0, 1, RPT_AT, 1157.0, 1, 1),
+    (0, 1, None, True, True, 3.0, 0, 1.0, 1, RPT_AT, 640.0, 1, 1),
 ]
 # Two named INSTANT_REPLAY, so that the walk has to go on past the first.
 SNAPS = [("INSTANT_REPLAY", 10.0), ("LAP", 20.0),
@@ -1018,13 +1052,23 @@ def generate(cti):
             pcc.c_u32_list([fb(v) for v in pos]), fb(speed), angle))
     w("};")
     w("typedef struct CmRouteReset { int ctrl, move, player, route, point; "
-      "uint32_t speed; int blink; uint32_t dir; } CmRouteReset;")
+      "uint32_t speed; int blink; uint32_t dir; int just; uint32_t x, y, "
+      "dist; int rev, warp; } CmRouteReset;")
     w("static const CmRouteReset cm_route_resets[] = {")
-    for ctl, mv, pl, route, point, speed, blink, d in ROUTE_RESETS:
-        w("    { %d, %d, %d, %d, %d, 0x%08xu, %d, 0x%08xu }," % (
-            ctl, mv, PLAYERS.index(pl), int(route), int(point), fb(speed),
-            blink, fb(d)))
+    for (ctl, mv, pl, route, point, speed, blink, d, just, at, dist,
+         rev, warp) in ROUTE_RESETS:
+        w("    { %d, %d, %d, %d, %d, 0x%08xu, %d, 0x%08xu, %d, 0x%08xu, "
+          "0x%08xu, 0x%08xu, %d, %d }," % (
+              ctl, mv, PLAYERS.index(pl), int(route), int(point), fb(speed),
+              blink, fb(d), just, fb(at[0]), fb(at[1]), fb(dist), rev,
+              warp))
     w("};")
+    w("typedef struct CmWarp { int pt; uint32_t x, y; } CmWarp;")
+    w("static const CmWarp cm_warp[] = {")
+    for pt, x, y in WARP:
+        w("    { %d, 0x%08xu, 0x%08xu }," % (pt, fb(x), fb(y)))
+    w("};")
+    w("#define CM_JRF0 %d" % JRF0)
     w("")
     w("#define CM_MOVE_DT 0x%08xu" % fb(MOVE_DT))
     w("#define CM_MOVE_RET0 0x%08xu" % fb(MOVE_RET0))
@@ -1139,6 +1183,10 @@ class Model(mmc.Model):
         # The demo image, with retail's MellowMover changes hooked in.
         mmc.Model.__init__(self, [cti], retail=False)
         e = self.e
+        # physicscar_check stubs PleaseResetMeLater for its BottomOut; the
+        # "later" scenario here runs the image's. The harness binds
+        # BottomOut's seam to the port's, so both reach the real one.
+        del e.stubs[e.addr_of(SYM["later"])]
         self.inuse.append(0)
         base = pcc.POOL_BASE + 0x100 * 9
         e.put32(G_NULLMOVER_POOL, base)
@@ -1181,13 +1229,18 @@ class Model(mmc.Model):
                       ("jumpcam", self.on_jump_cam),
                       ("cleanup", self.on_clean_up)):
             e.stub(SYM[k], fn)
+        # The demo's ResetToRoutePoint is retail's here: see on_reset_route.
+        e.stub(SYM["reset-route"], self.on_reset_route)
+        self.rr_just = 0           # its fifth argument, which the demo's
+        self.jrf = JRF0            # Car has no room for, nor JustResetFrames
         # Clear leaves retail's -1 in LastPointToScore.
         pcc.retail_clear(e)
         self.install_fakes()
         self.put(pcc.G_USENEWCAL, 1)
         self.put(pcc.G_UGLY, fb(1.0))
+        self.fill = None
         if poison is not None:
-            fill = struct.pack("<I", poison) * (SCRUB // 4)
+            fill = self.fill = struct.pack("<I", poison) * (SCRUB // 4)
 
             def scrub(em):
                 sp = em.reg[29] & M32
@@ -1980,6 +2033,7 @@ class Model(mmc.Model):
                  1 if player in ("cap", "bystander") else 0)
         self.put(c + CAR["BlinkTimer"], BLINK0[0])
         self.put(c + CAR["BlinkDuration"], fb(BLINK0[1]))
+        self.jrf = JRF0
 
     def reset_dump(self):
         self.step("after")
@@ -1995,6 +2049,86 @@ class Model(mmc.Model):
             s32(self.w(c + CAR["BlinkTimer"])), self.w(c + CAR["BlinkDuration"])))
         self.say("replay tiv=%s" % hexw([self.w(s + SNAP_TIV)
                                          for s in self.snaps]))
+        self.say("jrf %d" % self.jrf)
+
+    def near_point(self, px, py, dist):
+        """TrackPathManager::FindClosestPointNear (retail 0x00207d48), as
+        trackpath.c has it and trackpath_check holds to retail: the
+        distance from `px, py` plus a quarter of the distance around the
+        track, the first of equals."""
+        F = mipsemu.f32
+        length = self.f(TP_MGR)
+        if self.w(TP_MGR + 4):
+            dist = F(length - dist)
+        half = F(length * 0.5)
+        paths, pts = self.w(TP_MGR + 12), self.w(TP_MGR + MGR_POINTS)
+        best, bestd = 0, 0.0
+        for i in range(s32(self.w(TP_MGR + TP_NUMPATHS))):
+            h = self.e.read(paths + 40 * i + 2, 4)
+            begin, end = struct.unpack("<hh", h)
+            for j in range(begin, end):
+                if j < 0:
+                    continue
+                p = pts + 20 * j
+                dx, dy = F(self.f(p) - px), F(self.f(p + 4) - py)
+                d = F(mipsemu.ieee_sqrt(F(F(dx * dx) + F(dy * dy))))
+                cd = F(self.f(p + 16) - dist)
+                if cd < -half:
+                    cd = F(cd + length)
+                elif half < cd:
+                    cd = F(cd - length)
+                d = F(d + abs(F(cd * 0.25)))
+                if best == 0 or d < bestd:
+                    best, bestd = p, d
+        return best
+
+    def on_reset_route(self, em):
+        """Retail's Car::ResetToRoutePoint (0x00132f20) over the demo's
+        car: its listing's calls, in its order, into the demo image. The
+        position is three stores into a 160-byte frame, whose fourth word
+        is the scrub's poison. Then ResetPositionNear (retail only, so
+        modelled: pTrackPoint zeroed, UpdatePosition at the near point
+        and then at the route point), bATan, ResetCore, UpdatePosition
+        from the state, SetCurrentRoute and JustReset through the
+        controller's vtable (read again for each), StartBlinking(2.0)
+        if `blink`, and JustResetFrames = 2 if the fifth argument is set.
+        The demo image has no fifth argument: `rr_just` holds it, 0 but
+        for s_reset's calls. |Distance - the point's| is left out; retail
+        never reads it."""
+        c, route, pt = em.reg[4] & M32, em.reg[5] & M32, em.reg[6] & M32
+        blink = em.reg[7] & 0xFF
+        speed, d = em.fpr[12] & M32, em.fpr[13] & M32
+        if route == 0 or pt == 0:
+            return None
+        sp = em.reg[29] & M32
+        frame = sp - 160
+        for k in range(3):
+            self.put(frame + 4 * k, self.w(pt + 4 * k))
+        em.reg[29] = frame
+        tpc = c + CAR["TheTrackPathCoordinate"]
+        upd = "UpdatePosition__19TrackPathCoordinatePC8bVector2"
+        self.put(tpc + 8, 0)
+        near = self.near_point(self.f(pt), self.f(pt + 4), self.f(pt + 40))
+        if near:
+            self.nested(upd, tpc, near)
+        self.nested(upd, tpc, pt)
+        F = mipsemu.f32
+        dirf = mipsemu.fbits_to(d)
+        ang, _ = self.nested("bATan__Fff", floats=(
+            fb(F(self.f(pt + 12) * dirf)), fb(F(self.f(pt + 16) * dirf))))
+        self.nested(SYM["reset-core"], c, frame, ang, floats=(speed,))
+        self.nested(upd, tpc, c + 96)       # State.Position
+        for slot, args in ((40, (route, pt)), (80, ())):
+            ctl = self.w(c + CAR["pCarController"])
+            vt = self.w(ctl + 8)
+            delta = struct.unpack("<h", self.e.read(vt + slot, 2))[0]
+            self.nested(self.w(vt + slot + 4), (ctl + delta) & M32, *args)
+        if blink:
+            self.nested("StartBlinking__3Carf", c, floats=(fb(2.0),))
+        if self.rr_just:
+            self.jrf = 2
+        em.reg[29] = sp
+        return None
 
     def s_reset(self):
         self.reset_setup()
@@ -2007,14 +2141,34 @@ class Model(mmc.Model):
                    "debug": "debug-pos"}[kind]
             self.fcall(SYM[sym], self.car, self.vec, angle, floats=[speed])
             self.reset_dump()
-        for i, (ctl, mv, pl, route, point, speed, blink, d) in enumerate(
-                ROUTE_RESETS):
+        pts = self.w(TP_MGR + MGR_POINTS)
+        kept = [(pts + 20 * pt, self.w(pts + 20 * pt),
+                 self.w(pts + 20 * pt + 4)) for pt, _, _ in WARP]
+        for i, (ctl, mv, pl, route, point, speed, blink, d, just, at, dist,
+                rev, warp) in enumerate(ROUTE_RESETS):
             self.say("== reset route %d" % i)
             self.reset_prep(ctl, mv, pl)
+            self.put(self.rpt, fb(at[0]))
+            self.put(self.rpt + 4, fb(at[1]))
+            self.put(self.rpt + 40, fb(dist))
+            self.put(TP_MGR + 4, rev)
+            for (pt, x, y), (a, _, _) in zip(WARP, kept):
+                if warp:
+                    self.put(a, fb(x))
+                    self.put(a + 4, fb(y))
+            self.rr_just = just
             self.fcall(SYM["reset-route"], self.car,
                        self.route if route else 0, self.rpt if point else 0,
                        blink, floats=[speed, d])
+            self.rr_just = 0
             self.reset_dump()
+            self.put(TP_MGR + 4, 0)
+            for a, x, y in kept:
+                self.put(a, x)
+                self.put(a + 4, y)
+        self.put(self.rpt, fb(RPT_AT[0]))
+        self.put(self.rpt + 4, fb(RPT_AT[1]))
+        self.put(self.rpt + 40, fb(RPT_DIST))
         self.set_ctrl(0)
         self.set_move(0)
 
@@ -2070,16 +2224,17 @@ class Model(mmc.Model):
             self.put(rc + RC_LAPS, fb(lap))
         self.put(cs + OFF("CarState", "BoostFactor"), fb(BOOST_MARK))
         self.put(G_WORLD_TIMER, now)
+        self.jrf = JRF0
         self.fcall(SYM["car-move"], c, floats=[MOVE_DT])
         r = self.f0()
         self.say("moved -> %08x gear=%d disp=%d resetme=%d blink=%d/%08x "
-                 "boost=%08x" % (
+                 "boost=%08x jrf=%d" % (
                      r, s32(self.w(cs + OFF("CarState", "CurrentGear"))),
                      s32(self.w(c + CAR["DispGear"])),
                      s32(self.w(c + CAR["ResetMe"])),
                      s32(self.w(c + CAR["BlinkTimer"])),
                      self.w(c + CAR["BlinkDuration"]),
-                     self.w(cs + OFF("CarState", "BoostFactor"))))
+                     self.w(cs + OFF("CarState", "BoostFactor")), self.jrf))
         if full:
             self.step("after")
 
@@ -2930,6 +3085,49 @@ MUTATIONS = [
      "    if (blink)" + NL + "        car_start_blinking(c, 2.0f);",
      "    if (blink)" + NL + "        car_start_blinking(c, 2.0f);" + NL
      + "    else" + NL + "        car_stop_blinking(c);"),
+    # Retail's: ResetPositionNear first, and JustResetFrames.
+    ("rr-no-near", CRC,
+     "    trackpath_coord_reset_position_near(&c->TheTrackPathCoordinate," + NL
+     + "                                        &point->Position," + NL
+     + "                                        point->DistanceAroundTrack);"
+     + NL, ""),
+    ("rr-near-plain", CRC,
+     "    trackpath_coord_reset_position_near(&c->TheTrackPathCoordinate," + NL
+     + "                                        &point->Position," + NL
+     + "                                        point->DistanceAroundTrack);",
+     "    trackpath_coord_reset_position(&c->TheTrackPathCoordinate," + NL
+     + "                                   &point->Position);"),
+    ("rr-near-dist-zero", CRC,
+     "                                        point->DistanceAroundTrack);",
+     "                                        0.0f);"),
+    ("rr-near-dist-length", CRC,
+     "                                        point->DistanceAroundTrack);",
+     "                                        point->Length);"),
+    ("rr-near-after-core", CRC, [
+        ("    trackpath_coord_reset_position_near(&c->TheTrackPathCoordinate,"
+         + NL + "                                        &point->Position,"
+         + NL + "                                        point->DistanceAroundTrack);"
+         + NL, "", 1),
+        ("    car_reset_core(c, &pos, speed, (uint16_t)angle);" + NL
+         + "    trackpath_coord_update_position(",
+         "    car_reset_core(c, &pos, speed, (uint16_t)angle);" + NL
+         + "    trackpath_coord_reset_position_near(&c->TheTrackPathCoordinate,"
+         + NL + "                                        &point->Position,"
+         + NL + "                                        point->DistanceAroundTrack);"
+         + NL + "    trackpath_coord_update_position(", 1)]),
+    ("rr-jr-never", CRC,
+     "    if (just_reset)" + NL + "        c->JustResetFrames = 2;" + NL, ""),
+    ("rr-jr-always", CRC,
+     "    if (just_reset)" + NL + "        c->JustResetFrames = 2;",
+     "    c->JustResetFrames = 2;"),
+    ("rr-jr-one", CRC, "        c->JustResetFrames = 2;",
+     "        c->JustResetFrames = 1;"),
+    ("rr-jr-else-zero", CRC,
+     "    if (just_reset)" + NL + "        c->JustResetFrames = 2;",
+     "    c->JustResetFrames = just_reset ? 2 : 0;"),
+    ("rr-jr-with-blink", CRC,
+     "    if (just_reset)" + NL + "        c->JustResetFrames = 2;",
+     "    if (blink)" + NL + "        c->JustResetFrames = 2;"),
 
     # ---- DebugSetPosition
     ("dp-no-null-mode", CRC,
@@ -3038,8 +3236,11 @@ MUTATIONS = [
     ("mv-reset-no-blink", CVC, "CAR_RESET_ME_SPEED, 1,",
      "CAR_RESET_ME_SPEED, 0,"),
     ("mv-reset-backwards", CVC,
-     "CAR_RESET_ME_SPEED, 1," + NL + "                                 1.0f);",
-     "CAR_RESET_ME_SPEED, 1," + NL + "                                 -1.0f);"),
+     "CAR_RESET_ME_SPEED, 1," + NL + "                                 1.0f, 0);",
+     "CAR_RESET_ME_SPEED, 1," + NL + "                                 -1.0f, 0);"),
+    ("mv-reset-just", CVC,
+     "CAR_RESET_ME_SPEED, 1," + NL + "                                 1.0f, 0);",
+     "CAR_RESET_ME_SPEED, 1," + NL + "                                 1.0f, 1);"),
     ("mv-reset-point-first", CVC, swap(
         "        route = car_get_route(c, 1);",
         "        point = car_get_route_point(c, 1);")),

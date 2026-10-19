@@ -119,10 +119,18 @@ void car_reset_to_position(Car *c, const bVector3 *pos, float speed,
     car_stop_blinking(c);
 }
 
-// 0x00131480. At `point`, heading along its direction times `direction`
-// (so -1 faces back down the route), with the controller put on `route` at
-// `point`. Nothing happens without a route or without a point. `blink`
-// starts two seconds of blinking.
+// Retail's 0x00132f20 (the demo's was 0x00131480). At `point`, heading
+// along its direction times `direction` (so -1 faces back down the route),
+// with the controller put on `route` at `point`. Nothing happens without a
+// route or without a point. `blink` starts two seconds of blinking, and
+// `just_reset` sets JustResetFrames to 2, which Car::Drive counts down.
+// Only the player's reset button passes it.
+//
+// Retail first puts the track path near the point: ResetPositionNear from
+// the point's position and its DistanceAroundTrack, so that a road that
+// passes over itself puts the car on the right lap of it. The demo's went
+// straight to ResetCore. Retail then takes |Distance - the point's| and
+// never uses it.
 //
 // The position is the point's x, y and elevation. Its fourth lane is a
 // stack word nothing wrote, and ResetCore copies it into Position; it is 0
@@ -130,7 +138,8 @@ void car_reset_to_position(Car *c, const bVector3 *pos, float speed,
 // Unlike ResetToPosition this one does not call FindWhereIAm.
 void car_reset_to_route_point(Car *c, TrackRoute *route,
                               TrackRoutePoint *point, float speed,
-                              int32_t blink, float direction)
+                              int32_t blink, float direction,
+                              int32_t just_reset)
 {
     CarController *ctrl;
     const VtEntry *e;
@@ -143,6 +152,9 @@ void car_reset_to_route_point(Car *c, TrackRoute *route,
     pos.y = point->Position.y;
     pos.z = point->Elevation;
     pos.pad = 0.0f;
+    trackpath_coord_reset_position_near(&c->TheTrackPathCoordinate,
+                                        &point->Position,
+                                        point->DistanceAroundTrack);
     angle = bATan(point->Direction.x * direction,
                   point->Direction.y * direction);
     car_reset_core(c, &pos, speed, (uint16_t)angle);
@@ -156,6 +168,8 @@ void car_reset_to_route_point(Car *c, TrackRoute *route,
 
     if (blink)
         car_start_blinking(c, 2.0f);
+    if (just_reset)
+        c->JustResetFrames = 2;
 }
 
 // 0x001317d0. The debug warp: x and y from `pos`, z from the ground, and

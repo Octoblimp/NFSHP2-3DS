@@ -577,8 +577,8 @@ void     car_reset_to_position(Car *c, const bVector3 *pos, float speed,
                                uint16_t angle);          // 0x00131418
 void     car_reset_to_route_point(Car *c, TrackRoute *route,
                                   TrackRoutePoint *point, float speed,
-                                  int32_t blink, float direction);
-                                                         // 0x00131480
+                                  int32_t blink, float direction,
+                                  int32_t just_reset);   // 0x00132f20
 void     car_debug_set_position(Car *c, const bVector3 *pos, float speed,
                                 uint16_t angle);         // 0x001317d0
 

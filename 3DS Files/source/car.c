@@ -599,13 +599,17 @@ void car_think(Car *c, float dt)
     ((VtVoidFloatFn)e->fn)(vt_this(ctl, e), dt);
 }
 
-// 0x001301d0. The driver's vptr is at 556, after the embedded DriveTarget.
+// 0x001301d0; retail's is 0x00131a80. The driver's vptr is at 556, after
+// the embedded DriveTarget. Retail then counts JustResetFrames down to 0,
+// one a frame, after the drive.
 void car_drive(Car *c, float dt)
 {
     CarDriver *d = c->pCarDriver;
     const VtEntry *e = vt_slot(d->_vtable, CARDRIVER_VT_DRIVE);
 
     ((VtVoidFloatFn)e->fn)(vt_this(d, e), dt);
+    if (c->JustResetFrames != 0)
+        c->JustResetFrames--;
 }
 
 // 0x00131740.

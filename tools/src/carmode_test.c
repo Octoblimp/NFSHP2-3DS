@@ -1306,6 +1306,7 @@ static void reset_prep(int ctrl, int move, int player)
     g_rm->CapturingFlag = player == 2 || player == 4;
     g_car->BlinkTimer = CM_BLINK0_TIMER;
     g_car->BlinkDuration = fb(CM_BLINK0_DURATION);
+    g_car->JustResetFrames = CM_JRF0;
 }
 
 static void reset_dump(void)
@@ -1327,11 +1328,13 @@ static void reset_dump(void)
     for (i = 0; i < CM_NSNAPS; i++)
         printf("%s%08x", i ? " " : "", bf(g_snaps[i].TotalInterestingValue));
     printf("\n");
+    printf("jrf %d\n", (int)g_car->JustResetFrames);
 }
 
 static void s_reset(void)
 {
-    int i;
+    int i, k;
+    bVector2 kept[CM_N(cm_warp)];
 
     reset_setup();
     for (i = 0; i < CM_N(cm_resets); i++) {
@@ -1359,13 +1362,30 @@ static void s_reset(void)
 
         printf("== reset route %d\n", i);
         reset_prep(r->ctrl, r->move, r->player);
+        g_rpt.Position.x = fb(r->x);
+        g_rpt.Position.y = fb(r->y);
+        g_rpt.DistanceAroundTrack = fb(r->dist);
+        TheTrackPathManager.ReverseTrackDirection = r->rev;
+        for (k = 0; k < (int)CM_N(cm_warp); k++) {
+            TrackPathPoint *p = &TheTrackPathManager.pPoints[cm_warp[k].pt];
+
+            kept[k] = p->Position;
+            if (r->warp) {
+                p->Position.x = fb(cm_warp[k].x);
+                p->Position.y = fb(cm_warp[k].y);
+            }
+        }
         car_reset_to_route_point(g_car,
                                  r->route ? (TrackRoute *)(void *)g_route
                                           : NULL,
                                  r->point ? &g_rpt : NULL, fb(r->speed),
-                                 r->blink, fb(r->dir));
+                                 r->blink, fb(r->dir), r->just);
         reset_dump();
+        TheTrackPathManager.ReverseTrackDirection = 0;
+        for (k = 0; k < (int)CM_N(cm_warp); k++)
+            TheTrackPathManager.pPoints[cm_warp[k].pt].Position = kept[k];
     }
+    memcpy(&g_rpt, cm_rpt, sizeof cm_rpt);
     car_set_control_mode(g_car, eNO_CONTROL);
     car_set_movement_mode(g_car, eNO_MOVEMENT);
 }
@@ -1455,11 +1475,13 @@ static void move_case(int i, const CmMove *m)
         g_rc[k].CurrentLapNumberExact = fb(m->laps[k]);
     cs->BoostFactor = fb(CM_BOOST_MARK);
     WorldTimer = (int32_t)m->now;
+    g_car->JustResetFrames = CM_JRF0;
     r = car_move(g_car, fb(CM_MOVE_DT));
     printf("moved -> %08x gear=%d disp=%d resetme=%d blink=%d/%08x "
-           "boost=%08x\n", bf(r), (int)cs->CurrentGear, (int)g_car->DispGear,
-           (int)g_car->ResetMe, (int)g_car->BlinkTimer,
-           bf(g_car->BlinkDuration), bf(cs->BoostFactor));
+           "boost=%08x jrf=%d\n", bf(r), (int)cs->CurrentGear,
+           (int)g_car->DispGear, (int)g_car->ResetMe, (int)g_car->BlinkTimer,
+           bf(g_car->BlinkDuration), bf(cs->BoostFactor),
+           (int)g_car->JustResetFrames);
     if (m->full)
         step("after", 0);
 }
@@ -1856,6 +1878,7 @@ int main(void)
     vt_reset();
     physicssystem_install_vtables();
     physcomp_install_vtables();
+    gPhysicsCarPleaseResetMeLaterFn = car_please_reset_me_later;
     physicscar_install_vtables();
     mellowmover_install_vtables();
     nullmover_install_vtables();

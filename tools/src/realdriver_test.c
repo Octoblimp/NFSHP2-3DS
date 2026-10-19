@@ -296,11 +296,12 @@ static void s_siren_toggle(struct tCopManager *m)
 
 static void s_reset_to_point(struct Car *c, struct TrackRoute *r,
                              struct TrackRoutePoint *p, float speed,
-                             int32_t flag, float direction)
+                             int32_t flag, float direction,
+                             int32_t just_reset)
 {
-    printf("  seam reset-to-point %s %s %s %08x %d %08x\n", label(c),
+    printf("  seam reset-to-point %s %s %s %08x %d %08x jr %d\n", label(c),
            label(r), label(p), bitsf(speed), (int)(flag & 0xff),
-           bitsf(direction));
+           bitsf(direction), (int)just_reset);
 }
 
 static void s_honk_start(struct BaseCarSound *s)

@@ -240,10 +240,10 @@ void copmanager_end_pullover(tCopManager *m, int32_t i)
         at.Route = car_get_route(car, 1);
         at.Point = car_get_route_point(car, 1);
         ai_get_next_route_point(&at);
-        // Retail's ResetToRoutePoint takes one more bool, 0 here; it is
-        // the one that would set JustResetFrames.
+        // The last bool is 0: only the player's reset button sets
+        // JustResetFrames.
         car_reset_to_route_point(car, at.Route, at.Point, RESET_SPEED, 1,
-                                 RESET_DIRECTION);
+                                 RESET_DIRECTION, 0);
     }
 
     if (TheRaceParameters.BeACop == 0)

@@ -1598,8 +1598,10 @@ class Model(object):
             "selected-reset", lambda: lab(arg(0))))
         e.stub(SEAMS[S["siren-toggle"]][1], seam(
             "siren-toggle", lambda: lab(arg(0))))
+        # The demo's call has no fifth argument. Retail's ResetCar puts 1
+        # in t0 (`addiu t0,zero,1`, 0x0013c124): JustResetFrames.
         e.stub(SEAMS[S["reset-to-point"]][1], seam(
-            "reset-to-point", lambda: "%s %s %s %08x %d %08x"
+            "reset-to-point", lambda: "%s %s %s %08x %d %08x jr 1"
             % (lab(arg(0)), lab(arg(1)), lab(arg(2)), e.fpr[12],
                arg(3) & 0xFF, e.fpr[13])))
         e.stub(SEAMS[S["honk-start"]][1], seam(
@@ -2279,8 +2281,10 @@ MUTATIONS = [
      + "        && gCopManagerGetResetDirectionFn"),
     ("reset-blur", RDC, "    direction = 1.0f;" + NL + "    radial_blur_off(pl->PlayerNumber);",
      "    direction = 1.0f;"),
-    ("reset-flag", RDC, "gCarResetToRoutePointFn(d->pCar, route, point, speed, 1, direction);",
-     "gCarResetToRoutePointFn(d->pCar, route, point, speed, 0, direction);"),
+    ("reset-flag", RDC, "gCarResetToRoutePointFn(d->pCar, route, point, speed, 1, direction,",
+     "gCarResetToRoutePointFn(d->pCar, route, point, speed, 0, direction,"),
+    ("reset-just", RDC, "speed, 1, direction," + NL + "                                1);",
+     "speed, 1, direction," + NL + "                                0);"),
     ("reset-selected", RDC, "    if (gPlayerSelectedResetFn != NULL)" + NL
      + "        gPlayerSelectedResetFn(pl);" + NL, ""),
 

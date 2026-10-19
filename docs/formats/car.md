@@ -909,7 +909,8 @@ never read, and GetElevation's only use of the pointer is the store.
 The reset group, in `carreset.c`:
 - `ResetCore` (`0x001312c0`, 340 bytes);
 - `ResetToPosition` (`0x00131418`, 104);
-- `ResetToRoutePoint` (`0x00131480`, 252);
+- `ResetToRoutePoint` (`0x00131480`, 252; retail's is `0x00132f20`,
+  336, below);
 - `DebugSetPosition` (`0x001317d0`, 228).
 
 Each one takes the car out of its movement mode, stands it on the ground
@@ -970,6 +971,19 @@ if (pPlayer) pReplayManager->InvalidateInterestingEvents()
   After `ResetCore` and the second `UpdatePosition`, the controller gets
   `SetCurrentRoute(route, point)` (40) and `JustReset`. There is no
   `FindWhereIAm`. With `blink`, `StartBlinking(2.0)` follows.
+
+  Retail's (`0x00132f20`, the port's) adds two things. Before bATan it
+  calls `TrackPathCoordinate::ResetPositionNear(&point->Position,
+  point->DistanceAroundTrack)` (`0x00208848`): the track path's point
+  is cleared, then found by distance plus a quarter of the difference
+  in distance around the track, so where the road crosses itself the
+  car lands on the route's own road. And a fifth argument, in `t0`:
+  set, it stores 2 in JustResetFrames (Car+2140) at the end. Only
+  RealDriver's reset handler passes 1; Move, the pull-over and the
+  traffic teleporter pass 0. `Car::Drive` (`0x00131a80`) takes one off
+  after the driver's Drive while it is not 0, and tPursuit's
+  IsChasedCarStoppable reads it. Retail also takes |Distance - the
+  point's| after the last UpdatePosition and never uses it.
 - **`DebugSetPosition`** is the debug warp, and does none of `ResetCore`'s
   clearing. The state, the wheels, the driver and the replay are left as
   they were. `x` and `y` come from `pos`, and the track path is measured
@@ -1008,6 +1022,14 @@ logged heap already, so it runs the resets too, after everything else.
   `x` and `y` are the first update's.
 - The stand-in controller's entries 40, 72 and 80 log, and so does its
   driver's 48.
+- Retail's `ResetToRoutePoint` runs as Python over the demo image
+  (`on_reset_route`), with `ResetPositionNear` modelled. Twelve more
+  route resets set the point's position and distance, the reversed
+  track, and a crossing: points 6 to 9 moved into a line 40 to 10
+  units from the route point. From point 6 the walk needs all three
+  updates to reach 9, so the near search, its distance and the last
+  `UpdatePosition` each show. JustResetFrames is printed after every
+  reset and every move.
 - The ground is the physics checkers' plane, asked for with no normal.
   `ClearInterestBBox` logs.
 - The track path is a real one: a looping circle of twelve points, loaded

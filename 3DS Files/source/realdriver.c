@@ -42,7 +42,7 @@ float (*gCopManagerGetResetDirectionFn)(struct tCopManager *);
 void  (*gCopManagerBeACopToggleSirenAndLightsFn)(struct tCopManager *);
 void (*gCarResetToRoutePointFn)(struct Car *, struct TrackRoute *,
                                 struct TrackRoutePoint *, float, int32_t,
-                                float);
+                                float, int32_t);
 void (*gBaseCarSoundStartHonkHornFn)(struct BaseCarSound *);
 void (*gBaseCarSoundStopHonkHornFn)(struct BaseCarSound *);
 
@@ -868,7 +868,8 @@ void realdriver_joy_reset_car(JoystickPort port, JoyEvent ev, uint8_t value,
     route = car_get_route(d->pCar, 1);
     point = car_get_route_point(d->pCar, 1);
     if (gCarResetToRoutePointFn != NULL)
-        gCarResetToRoutePointFn(d->pCar, route, point, speed, 1, direction);
+        gCarResetToRoutePointFn(d->pCar, route, point, speed, 1, direction,
+                                1);
 
     if (gPlayerSelectedResetFn != NULL)
         gPlayerSelectedResetFn(pl);

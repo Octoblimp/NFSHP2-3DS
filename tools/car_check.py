@@ -1161,10 +1161,14 @@ def model_slice2():
     emit("[drive]")
     drv = {0: "driver+%d" % DELTA["_vt$10NullDriver"],
            1: "driver2+%d" % DELTA["_vt$9CarDriver"]}
+    # Retail's Drive (0x00131a80) counts JustResetFrames (2140) down
+    # after the driver's Drive, when it is not 0.
     for v in range(2):
         for dt in (f32(0.0333333351), f32(2.5)):
-            emit("  driver %d dt %s" % (v, g9(dt)))
-            emit("    Drive(%s, %s)" % (drv[v], g9(dt)))
+            for jr in (0, 1, 2, -3):
+                emit("  driver %d dt %s jr %d" % (v, g9(dt), jr))
+                emit("    Drive(%s, %s)" % (drv[v], g9(dt)))
+                emit("    jr %d" % (jr - 1 if jr else 0))
 
     # -- route --------------------------------------------------------------
     emit("[route]")
@@ -2249,6 +2253,15 @@ MUTATIONS = [
     ("drive-no-delta", CC,
      "    ((VtVoidFloatFn)e->fn)(vt_this(d, e), dt);",
      "    ((VtVoidFloatFn)e->fn)(d, dt);"),
+    ("drive-jr-no-test", CC,
+     "    if (c->JustResetFrames != 0)" + NL + "        c->JustResetFrames--;",
+     "    c->JustResetFrames--;"),
+    ("drive-jr-positive", CC,
+     "    if (c->JustResetFrames != 0)" + NL,
+     "    if (c->JustResetFrames > 0)" + NL),
+    ("drive-jr-gone", CC,
+     "    if (c->JustResetFrames != 0)" + NL + "        c->JustResetFrames--;" + NL,
+     ""),
     ("route-no-delta", CC,
      "    return ((VtRouteFn)e->fn)(vt_this(ctl, e), find);",
      "    return ((VtRouteFn)e->fn)(ctl, find);"),

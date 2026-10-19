@@ -27486,3 +27486,43 @@ The launch checklist is a new artifact, since the first URL is gone:
 https://claude.ai/artifact/BmUh9FxPwzKyCLRwGrP5w2 (source in session
 93f8c806's scratchpad, `launch_checklist.html`). Republish it after every
 finished task.
+
+### TASKS 73, slice 4: ResetToRoutePoint and JustResetFrames
+
+- `carreset.c`: `car_reset_to_route_point` is retail's `0x00132f20`.
+  It takes `just_reset` last. Before bATan and ResetCore it calls
+  `trackpath_coord_reset_position_near(&tpc, &point->Position,
+  point->DistanceAroundTrack)`. With `just_reset` it sets
+  JustResetFrames (retail Car+2140) to 2. Callers: the reset button
+  (`realdriver.c`, through `gCarResetToRoutePointFn`) passes 1; Car::
+  Move's ResetMe, the pull-over reset and the traffic teleporter pass
+  0, as retail's do.
+- `car.c`: `car_drive` decrements JustResetFrames when it is not 0,
+  after the driver's Drive (retail `0x00131aa8`). pursuit.c's two
+  readers see it now.
+- `carmode_check.py`: `on_reset_route` stubs the demo's
+  ResetToRoutePoint with retail's listing, calling into the image in
+  its order from a 160-byte frame (the w lane stays the scrub's
+  poison). ResetPositionNear is modelled (`near_point`, the port's
+  search as trackpath_check holds it to retail). `rr_just` carries
+  the fifth argument; the model keeps JustResetFrames in `self.jrf`.
+  Route resets now set the point's x, y and distance, the reversed
+  track, and `WARP`: points 6 to 9 moved into a line beside the route
+  point, so the near search's choice shows (on the plain circle the
+  128-unit re-search hides it). `reset_dump` and the moved line print
+  `jrf`.
+- carmode_check had been failing since 2ee7241: physicscar_check's
+  Model stubs PleaseResetMeLater (for its BottomOut), and carmode's
+  Model inherits it, so the "later" scenario never ran the image's.
+  carmode's Model deletes that stub now, and its harness binds
+  `gPhysicsCarPleaseResetMeLaterFn` to the real one.
+- `car_check`: `[drive]` sets JustResetFrames to 0, 1, 2 and -3 and
+  prints it after. pullover, traffictele and realdriver's stubs print
+  the flag (`jr`); realdriver's demo image has no fifth argument, so
+  its model prints retail's constant 1 (`addiu t0,zero,1`).
+
+carmode_check: 74 transitions, 31 resets, 41855 lines, 0 differ; the
+carreset.c and "later" mutations: 82 mutations, 79 caught, 3 equivalent as before, and Move's flag (mv-reset-just) caught. car_check 0 differ
+(3 new mutations caught), pullover_check, traffictele_check and
+realdriver_check 0 differ (3 new mutations caught). The CIA builds
+clean.
