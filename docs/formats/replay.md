@@ -1203,6 +1203,15 @@ event 32 the bar showed B, A, X and Y on its grey, and the one player's
 blank covered the L. The help named A for Play/Pause, X for Change view
 and B for Toggle play speed. The run passed.
 
+### Leaving it (TASKS 77)
+
+START (the bar's eject, retail's SKIP) leaves the replay for the menu it
+came from. Retail says so with the symbol alone, so on the 3DS the bottom
+screen says it in words while a ReplayScreen is up: the panel with "Press
+START to leave the replay and go back to the menu." and the hint START
+"Back to menu", Y "Help" (`main.c`'s kReplayNote and kReplayHint). The HUD
+is down in a replay, so the bottom screen has nothing else to show.
+
 ## 72h-1: the pause pages' special events
 
 `pausereplay.c` is retail's HandlePauseMenuReplaySpecialEvents

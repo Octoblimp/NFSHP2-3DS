@@ -27863,3 +27863,33 @@ Next in TASKS 73: retail's TerrainTypeInfoTable layout (stride 144, with
 DynamicFrictionMultiplier at +36; Session 135 saw it in GuessGroundForce).
 Find every retail reader and what the new fields are, then CarState's
 layout (DriverMode at 924, ForwardSpeed at 896).
+
+## Session 135, continued -- View Replay says how to leave it (TASKS 77)
+
+The user, mid-slice: "Make it to where pressing B ... on view replay screen
+exits back to that selection menu where you can quit race etc.", then,
+told START already does: "keep it on START then, just make it clear on the
+replay screen". TASKS 73 waited at slice 12 (nothing written for it yet).
+
+- START is the replay's SKIP already: scannertab.c's entry 92 is button 19,
+  the DualShock's START, which joyhid's menu layout (the replay's) gives
+  the 3DS's START. RC_SKIP_REPLAY goes back to POSTRACE from the end
+  screens and to PAUSE from the pause, as retail. B is Square there, the
+  play speed.
+- Nothing said so but the bar's retail eject symbol, and the bottom
+  screen showed the logo alone: playerhud.c answers no HUD features in
+  INSTANT_REPLAY.
+- `main.c`: while `pRaceCoordinator->pReplayScreen` is set, the bottom
+  screen skips the HUD's half and draws the panel with `kReplayNote`
+  ("Press START to leave the replay and go back to the menu.") and
+  `kReplayHint` (START's glyph "Back to menu", Circle's "Help", drawn as Y
+  by the scanners' help layout that uiHelpLayout answers in a replay).
+
+The CIA builds clean. Not seen on a screen: no Azahar run (a race and
+its replay is a long one); the user's next 3DS run shows it.
+
+Next: TASKS 73 slice 12. The terrain table's layout is already retail's
+(Session 31's TerrainType pass); TASKS 73's line on it is stale. Left:
+CarState's and CollisionBodyWitness's layouts (the port reaches every
+field by name, so check whether anything copies them as bytes), then
+CarCollisionBody's retail fields and InitSkids (skids are not ported).

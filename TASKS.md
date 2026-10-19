@@ -4825,6 +4825,18 @@ phases.
         solid as georender baked it), then which models on the disc
         carry one. It comes after TASKS 73.
 
+77. [x] **View Replay says how to leave it.** Asked for on 2026-10-19:
+        first B to leave the replay for the menu, then "keep it on START
+        then, just make it clear on the replay screen". START is retail's
+        SKIP (scannertab.c's 92), which goes back to the menu the replay
+        came from, the End Game Menu or the pause menu; retail marks it
+        on the bar with an eject symbol alone. Done in Session 135: while
+        a ReplayScreen is up, the bottom screen is the panel with "Press
+        START to leave the replay and go back to the menu." and the hint
+        "START Back to menu, Y Help" (`main.c`'s kReplayNote and
+        kReplayHint). The HUD is down in a replay, so the panel loses
+        nothing. Not yet seen on a screen.
+
 ### The retail frontend
 
 Asked for on 2026-09-28. The user sent seven PCSX2 photos of the retail

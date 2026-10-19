@@ -6520,6 +6520,17 @@ static const char* const kBlurbPlaceholders[] = {
 static const char kPlainScreenNote[] =
     "This screen is not available yet. Press \x87 to go back.";
 
+// While View Replay plays (the pause menu's or the End Game Menu's), the
+// panel says how to leave it: START is the replay's SKIP (scannertab.c's
+// 92), which goes back to the menu it came from, and retail marks it on
+// the bar with an eject symbol alone (the user's of 2026-10-19). The HUD
+// is down in a replay (playerhud.c), so the panel takes the whole bottom
+// screen. 0x80 is START's glyph and 0x89 Circle's, Y in the replay's
+// scanners layout (helpglyph.h).
+static const char kReplayNote[] =
+    "Press START to leave the replay and go back to the menu.";
+static const char kReplayHint[] = "\x80 Back to menu    \x89 Help";
+
 // The line the top screen would be drawing this frame. It is read out of
 // the object rather than remembered from the setBlurb hook because the hook
 // is not the only thing that writes it: tAnimatedBlurb resolves the
@@ -9396,7 +9407,10 @@ int main(int argc, char** argv)
             // the pause and its pages and not a black screen.
             bool racePaused = pRaceCoordinator != NULL
                 && pRaceCoordinator->CurrentRCState == RCSTATE_PAUSE;
-            if (!racePaused
+            // View Replay's panel (kReplayNote), whatever the HUD left up.
+            bool replayUp = pRaceCoordinator != NULL
+                && pRaceCoordinator->pReplayScreen != NULL;
+            if (!racePaused && !replayUp
                 && uirender_draw_visible_bottom(&ui, BOT_W, BOT_H, 1.0f)) {
                 // eDisplayFrame's RenderTrackMap for each player, after
                 // the Flailer layers: the minimap, made bigger under the
@@ -9434,6 +9448,11 @@ int main(int argc, char** argv)
                 if (g_flow.screen
                     && g_flow.screen->callback == bgf_plain_screen_callback) {
                     body = kPlainScreenNote;
+                    fade = frame = 1.0f;
+                }
+                if (replayUp) {
+                    body = kReplayNote;
+                    hint = kReplayHint;
                     fade = frame = 1.0f;
                 }
                 if (g_flow.screen
