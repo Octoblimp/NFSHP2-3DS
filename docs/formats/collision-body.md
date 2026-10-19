@@ -254,7 +254,7 @@ slack.
 | gp-28760 .. gp-28712 | | CarCollisionBody's floats: the box, 1/1.3 twice, 0.4 twice, 0.03 (retail's 0.013), 0.3 and 0.1 |
 | 0x003243d4 | `ContactSlotPool` | made by InitContact |
 | 0x003243d8 | `ContactThreshold` | 0.05: bodies parted by less are touching |
-| 0x003243e0 | `WaferBias` | 0.5 |
+| 0x003243e0 | `WaferBias` | 0.5; retail's (gp-17844) is 0 |
 | 0x003243ec | `MinimumContactImpulseFactor` | 0.3: the impulse's floor |
 | 0x003243f0 | `MinimumContactImpulseSpeed` | 0.1: the closing speed that earns the whole floor |
 | 0x003243f8 | `MaxFrictionScrapeSpeed` | 1.0: a slower slide fades the friction |
@@ -931,12 +931,15 @@ The zero it stores is a quadword whose fourth lane the image never writes,
 so on the console CrowbarVector's pad is whatever the stack held. The port
 writes it zero.
 
-**FindWaferNormal** (0x001ca460) gives the normal of a track body's wafer
-that faces a dynamic body. It starts from the plane of the wafer's first
-face. When the body's position dotted with the normal is above the plane's
-distance less `WaferBias`, the normal is kept. Otherwise x, y and z are
-negated and the fourth lane stays 0. So a body up to 0.5 below the plane is
-still taken to be above it.
+**FindWaferNormal** (0x001ca460; retail's 0x001d4950) gives the normal of a
+track body's wafer that faces a dynamic body. It starts from the plane of
+the wafer's first face. When the body's position dotted with the normal is
+above the plane's distance less `WaferBias`, the normal is kept. Otherwise
+x, y and z are negated and the fourth lane stays 0. With the demo's bias of
+0.5, a body up to 0.5 below the plane is still taken to be above it.
+Retail's code is the demo's, but its `WaferBias` is 0 (gp-17844 holds 0 in
+SLES_507.31's .sdata, and nothing writes it), so a body on or below the
+plane is taken to be below it. The port has had retail's 0 since TASKS 73.
 
 **Crowbar** (0x001ca538) pushes two bodies apart at t:
 
@@ -1380,8 +1383,9 @@ Slices D and E's scenarios come after slice C's. They cover:
 - FindContactTime and Crowbar against the flat quad and the leaning
   triangle, with the track body first and second, below the plane within
   `WaferBias` and past it, and with nothing moveable;
-- FindWaferNormal at fourteen positions, with the bias at 0.5 and -0.25,
-  and one position just inside it;
+- FindWaferNormal at nineteen positions, with the bias at retail's 0 (on
+  the plane and 1e-7 either side), the demo's 0.5 and -0.25, and one
+  position just inside it;
 - FindContactPointAndNormal:
   - two dynamic bodies, turned, with the closest points apart, one, 3e-8
     apart and 5e-6 apart;

@@ -4684,9 +4684,17 @@ phases.
           seam (copmgr_car_impact, TASKS 51). `collisionbody_check` stubs
           retail's word into the demo image: 81 scenarios, 0 differ; 3
           damage-scale mutations caught.
+        - [x] FindWaferNormal: retail's code is the demo's, but its
+          WaferBias (gp-17844) is 0, where the demo's is 0.5. Done in
+          Session 135: `contact.c`'s WaferBias is 0, so a body on or
+          below a wafer's plane gets the normal turned round.
+          `collisionbody_check` puts retail's 0 into the demo image and
+          probes it before any bias change: 82 scenarios, 0 differ; 7
+          wafer mutations caught.
+        - [x] The RectPolyhedron constructor: the same code in both, but
+          for relocated table addresses. Nothing to port (Session 135).
         - Other demo-derived functions retail changed (TASKS 74's list):
-          InitSkids, FindWaferNormal and the RectPolyhedron constructor.
-          Retail's TerrainTypeInfoTable has another layout.
+          InitSkids. Retail's TerrainTypeInfoTable has another layout.
         - [x] RealDriver's changed functions and the player's input.
           Done in Session 133. Retail's tunables and its steering and
           throttle handlers are the demo's; what changed:

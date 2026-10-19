@@ -1004,7 +1004,7 @@ extern BSlotPool *ContactSlotPool;
 // TestImpulse (1.0) and ContactFrictionCoefficient (0.3), which nothing
 // reads; CollisionImpulse's 0.3 and 0.1 are literals of their own.
 extern float ContactThreshold;              // 0.05
-extern float WaferBias;                     // 0.5
+extern float WaferBias;                     // retail's 0 (the demo's 0.5)
 extern float MinimumContactImpulseFactor;   // 0.3
 extern float MinimumContactImpulseSpeed;    // 0.1
 extern float MaxFrictionScrapeSpeed;        // 1.0
@@ -1055,9 +1055,10 @@ void contact_delete(void *p);
 // bodies are crowbarred apart there. CrowbarVector is zeroed first.
 float contact_find_contact_time(Contact *c);
 
-// 0x001ca460. The normal of t's wafer, facing d: the face's plane normal,
-// turned round unless d's position is more than WaferBias below the plane
-// -- that is, above it less the bias. The fourth lane is 0.
+// 0x001ca460 (retail's 0x001d4950). The normal of t's wafer, facing d: the
+// face's plane normal, kept while d's position is above the plane less
+// WaferBias and turned round otherwise. With retail's bias of 0, a body on
+// or below the plane gets the normal turned round. The fourth lane is 0.
 void find_wafer_normal(bVector3 *out, TrackPolygonCollisionBody *t,
                        DynamicCollisionBody *d);
 

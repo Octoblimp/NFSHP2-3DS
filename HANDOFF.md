@@ -27820,3 +27820,46 @@ initial value in .sdata, 0.5 in the demo and 0 in retail; find who sets
 it in retail before porting. The RectPolyhedron constructor's three
 differences are loads past its end into SoundScape's ReverbAreaArray,
 which look like the matcher's, not retail's: check, then close.
+
+## Session 135, continued -- the wafers' bias (TASKS 73, slice 11)
+
+Retail's FindWaferNormal (`0x001d4950`) is the demo's (`0x001ca460`)
+instruction for instruction, but the bias it reads is another value:
+retail's `lwc1 $f0,-17844(gp)` is `0x0033133c`, which holds 0 in
+SLES_507.31's .sdata, where the demo's WaferBias (`0x003243e0`) holds 0.5.
+The neighbours are the same in both (ContactThreshold 0.05 two words
+below, then 0.1, 1.0, 0.3 and 0.1 above), so it is the same variable.
+Nothing else in retail reads or writes it: no other `-17844(gp)`, no
+`lui`/`addiu` pair and no data word holding its address. So with retail's
+bias, a dynamic body on or below a wafer's plane gets the normal turned
+round, where the demo took a body up to 0.5 below it to be above.
+
+- `contact.c`: `WaferBias` is 0.0f, with the reason. `collisionbody.h`:
+  the extern's comment, and find_wafer_normal's, which had the test
+  backwards ("turned round unless ... more than WaferBias below").
+- `collisionbody_check.py`: `RT_WAFER_BIAS` goes into the demo image's
+  WaferBias before anything runs. A new section, before any
+  `OP_GLOBAL G_BIAS`, runs FindWaferNormal at retail's bias on the plane
+  and 1e-7 either side. The time section sets the demo's 0.5 for its
+  "within the bias" case (and sees retail's 0 turn it down first), and
+  both sections end back at 0. 82 scenarios, 35440 lines, 0 differ. New
+  mutations `ct_wafer_bias_demo` (0.5) and `ct_wafer_bias_tiny` (1e-7)
+  and the five older wafer ones: 7 caught. The tiny one survived until
+  the probe moved ahead of the time section, whose reset to 0 had masked
+  the start value. The full pass was not re-run.
+- `docs/formats/collision-body.md`: the table row, the FindWaferNormal
+  paragraph and the checker's list.
+
+The RectPolyhedron constructor (retail `0x00218290`, the demo's
+`0x00205058`, 1048 bytes each) is the same code: the 10 words that differ
+are `lui`/`addiu` pairs for its five tables, and the four index tables
+are the same 96 bytes in both. The fifth is its switch's jump table,
+whose code addresses move. `retail_consts.py`'s three differences there
+were its register tracking, not retail's. Nothing to port.
+
+carsnap, carmode, carinit and aisnap: 0 differ. The CIA builds clean.
+
+Next in TASKS 73: retail's TerrainTypeInfoTable layout (stride 144, with
+DynamicFrictionMultiplier at +36; Session 135 saw it in GuessGroundForce).
+Find every retail reader and what the new fields are, then CarState's
+layout (DriverMode at 924, ForwardSpeed at 896).

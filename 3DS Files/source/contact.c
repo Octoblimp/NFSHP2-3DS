@@ -31,7 +31,10 @@
 BSlotPool *ContactSlotPool;
 
 float ContactThreshold            = 0.05f;  // 0x003243d8  3d4ccccd
-float WaferBias                   = 0.5f;   // 0x003243e0  3f000000
+// Retail's WaferBias (gp-17844 of SLES_507.31, read only by FindWaferNormal
+// and never written) is 0; the demo's (0x003243e0) is 0.5, which the port
+// had until TASKS 73.
+float WaferBias                   = 0.0f;   // 0x003243e0  3f000000
 float MinimumContactImpulseFactor = 0.3f;   // 0x003243ec  3e99999a
 float MinimumContactImpulseSpeed  = 0.1f;   // 0x003243f0  3dcccccd
 float MaxFrictionScrapeSpeed      = 1.0f;   // 0x003243f8  3f800000

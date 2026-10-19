@@ -188,6 +188,7 @@ G_PRINT_AT = 0x00324448             # PrintThisTime
 POOL_CONTACT = GP - 18460           # ContactSlotPool
 G_THRESH_AT = GP - 18456            # ContactThreshold
 G_BIAS_AT = GP - 18448              # WaferBias
+RT_WAFER_BIAS = 0x00000000          # retail's: SLES_507.31's gp-17844 is 0
 G_MINFACTOR_AT = GP - 18436         # MinimumContactImpulseFactor
 G_MINSPEED_AT = GP - 18432          # MinimumContactImpulseSpeed
 G_SCRAPE_AT = GP - 18424            # MaxFrictionScrapeSpeed
@@ -1834,6 +1835,9 @@ def contact_time_section(sc, es):
               maxbackup=1.0)
     sc.op(OP_CT_NEW, W_TE)              # up off T0 in three steps
     es[2].put(sc, pos=(0.5, 0.25, -0.2, 0.0))
+    sc.op(OP_CT_TIME, NEWEST)           # below, with retail's bias: down
+    sc.op(OP_GLOBAL, G_BIAS, 0.5)       # the demo's
+    es[2].put(sc, pos=(0.5, 0.25, -0.2, 0.0))
     sc.op(OP_CT_TIME, NEWEST)           # below, but within the bias: up
     sc.op(OP_GLOBAL, G_BIAS, 0.125)
     sc.op(OP_CT_TIME, NEWEST)           # past it: down
@@ -1859,11 +1863,22 @@ def contact_time_section(sc, es):
     sc.op(OP_CT_TIME, NEWEST)           # nothing moves: twenty steps
     es[3].put(sc, moveable=1)
     sc.op(OP_CT_DEL, NEWEST, 1)
+    sc.op(OP_GLOBAL, G_BIAS, 0.0)       # retail's again
     sc.op(OP_CT_DUMP)
+
+
+def contact_wafer_start_section(sc, es):
+    """Before any OP_GLOBAL G_BIAS, so the bias is the one the image (and
+    the port) starts with: retail's 0, at the plane and 1e-7 either side."""
+    sc.tag("FindWaferNormal with the bias it starts with")
+    for z in (0.5, 0.0, 0.0000001, -0.0000001, -0.25):
+        es[2].put(sc, pos=(0.5, 0.5, z, 7.0))
+        sc.op(OP_CT_WAFER, T(0), E(2))
 
 
 def contact_wafer_section(sc, es):
     sc.tag("FindWaferNormal: the face's normal, towards the body")
+    sc.op(OP_GLOBAL, G_BIAS, 0.5)                          # the demo's
     for z in (1.0, 0.0, -0.25, -0.5, -0.75, -0.4999999):
         es[2].put(sc, pos=(0.5, 0.5, z, 7.0))
         sc.op(OP_CT_WAFER, T(0), E(2))
@@ -1876,6 +1891,7 @@ def contact_wafer_section(sc, es):
               (2.0, -3.0, -3.0), (0.0, 0.5, -0.25)):
         es[2].put(sc, pos=tuple(p) + (0.0,))
         sc.op(OP_CT_WAFER, T(1), E(2))
+    sc.op(OP_GLOBAL, G_BIAS, 0.0)                          # retail's again
 
 
 def contact_point_section(sc, es, rnd):
@@ -2177,6 +2193,7 @@ def contact_section(sc, chunk, rnd):
     es = contact_setup_section(sc, chunk)
     contact_test_section(sc, es)
     contact_list_section(sc, es)
+    contact_wafer_start_section(sc, es)
     contact_time_section(sc, es)
     contact_wafer_section(sc, es)
     contact_point_section(sc, es, rnd)
@@ -2255,6 +2272,10 @@ class Model(object):
                                (-5.0, 6.0, -7.0, 8.0))):
             for j in range(4):
                 e.put32(self.inv + 16 * k + 4 * j, bits(v[j]))
+        # Retail's WaferBias is 0 (gp-17844, which only FindWaferNormal
+        # reads), where the demo's .sdata has 0.5. The rest of retail's
+        # FindWaferNormal (0x001d4950) is the demo's.
+        e.put32(G_BIAS_AT, RT_WAFER_BIAS)
         self.stubs()
         self.dyn_init()
         self.car_init()
@@ -4972,6 +4993,12 @@ MUTATIONS = [
        "    if (r != VCLIP_PENETRATION)\n        contact_crowbar(c, t);", CTC),
 
     # FindWaferNormal and Crowbar
+    _m("ct_wafer_bias_demo",
+       "float WaferBias                   = 0.0f;",
+       "float WaferBias                   = 0.5f;", CTC),
+    _m("ct_wafer_bias_tiny",
+       "float WaferBias                   = 0.0f;",
+       "float WaferBias                   = 0.0000001f;", CTC),
     _m("ct_wafer_face", "    const VCFace *face = t->Static.Body.pPoly->pFaces;",
        "    const VCFace *face = t->Static.Body.pPoly->pFaces + 1;", CTC),
     _m("ct_wafer_bias_sign",
