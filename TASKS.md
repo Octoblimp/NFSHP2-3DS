@@ -4641,8 +4641,10 @@ phases.
           road crosses itself lands on the right road. The last bool
           sets JustResetFrames to 2, and only the reset button passes
           it. Car::Drive (`0x00131a80`) counts it down after the
-          driver's Drive; tPursuit reads it, so a cop could not stop a
-          player just after a reset. The port never set it.
+          driver's Drive. tPursuit reads it: a blinking player's car
+          that has just reset counts as stopped, so the reset button
+          no longer shakes off a chase. The port never set it, so it
+          did.
           `carmode_check` runs retail's listing as Python over the demo
           image, with a crossing (four path points moved beside the
           route point): 0 differ; 82 mutations, 79 caught, 3 equivalent as before, and Move's flag (mv-reset-just) caught. car_check's

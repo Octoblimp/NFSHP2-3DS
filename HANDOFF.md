@@ -27499,7 +27499,8 @@ finished task.
   0, as retail's do.
 - `car.c`: `car_drive` decrements JustResetFrames when it is not 0,
   after the driver's Drive (retail `0x00131aa8`). pursuit.c's two
-  readers see it now.
+  readers see it now: a player's car blinking from a button reset
+  counts as stopped, so the reset no longer escapes a chase.
 - `carmode_check.py`: `on_reset_route` stubs the demo's
   ResetToRoutePoint with retail's listing, calling into the image in
   its order from a 160-byte frame (the w lane stays the scrub's

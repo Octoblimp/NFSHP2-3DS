@@ -982,7 +982,8 @@ if (pPlayer) pReplayManager->InvalidateInterestingEvents()
   RealDriver's reset handler passes 1; Move, the pull-over and the
   traffic teleporter pass 0. `Car::Drive` (`0x00131a80`) takes one off
   after the driver's Drive while it is not 0, and tPursuit's
-  IsChasedCarStoppable reads it. Retail also takes |Distance - the
+  IsChasedCarStoppable reads it: a blinking player's car that has
+  just reset counts as stopped, so the button is no escape. Retail also takes |Distance - the
   point's| after the last UpdatePosition and never uses it.
 - **`DebugSetPosition`** is the debug warp, and does none of `ResetCore`'s
   clearing. The state, the wheels, the driver and the replay are left as
