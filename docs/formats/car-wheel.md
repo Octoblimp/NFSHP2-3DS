@@ -395,9 +395,24 @@ folds again.
 
 **Then the longitudinal slip**, `State.w * Radius - vx`, into both
 `CurrentSlip` and `OldSlip`. A slip more negative than `-gMaxStaticSlip`
-with a negative applied torque and *no handbrake* damps the torque by
-0.5 — a wheel being dragged backwards under power gets half of it, unless
-the handbrake is what is dragging it, in which case it gets all of it.
+with a negative applied torque and *no handbrake* cuts the torque to 0.15
+of itself (the pool's 0x3e19999a; this page said 0.5 until TASKS 73) — a
+wheel being dragged backwards under power keeps 15 per cent of it, unless
+the handbrake is what is dragging it, in which case it keeps all of it.
+
+Retail's (`0x001a4930`, 1016 bytes) takes a third argument, and the
+port's is retail's since TASKS 73. IterateForces (`0x00138f38`) reads the
+car's collision body's NumCollisions once, a signed byte (`lb s1,18(v1)`
+of Car+52), and passes it to all four wheels. A nonzero count leaves the
+torque alone too (`bnel s2,zero` at `0x001a4ac8`, after the demo's two
+tests): a car in a collision is not cut back. The rest of retail's is the
+demo's but for the layout, the terrain table's 144-byte stride with
+DynamicFrictionMultiplier at +36, and DriverMode and ForwardSpeed at
+CarState+924 and +896; the port reads all three by name.
+`wheel_check` passes four counts (0, 1, -128, 3) through the reverse
+cut's grid, and `physicscar_check` stubs retail's test into the demo
+image's cut (`0x0019a7c8`) under four braking Move scenarios
+(`mv-drag*`).
 
 **Two early-outs** then decide whether the tyre is even asked the question:
 a zero slide magnitude, or a car that is not moving in either direction.

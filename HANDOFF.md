@@ -27738,3 +27738,53 @@ ported:
   `0x0019a7c8` (f23 is loaded; on a collision return to `0x0019a7d8`).
   wheel_check's model, `guess_ground_force(w)`, and its nine harness calls
   take the new argument.
+
+## Session 135 -- the wheels' ground force (TASKS 73, slice 9)
+
+Retail's Wheel::GuessGroundForce (`0x001a4930`, 1016 bytes) is the demo's
+(`0x0019a638`, 1000) with a third argument, and retail's IterateForces
+(`0x00138f38`) passes it. Ported:
+
+- `wheel.c`, `wheel.h`: `wheel_guess_ground_force(w, unused,
+  numCollisions)`. The reverse cut (AppliedTorque * 0.15, for a slip under
+  -gMaxStaticSlip, a negative torque and no handbrake) needs
+  `numCollisions == 0` too (`bnel s2,zero` at `0x001a4ac8`). So a car in a
+  collision keeps its wheels' full torque.
+- `physicscar.c`, physicscar_iterate_forces: after GuessClutchTorque it
+  reads `pc->pCar->pDynamicCollisionBody->Dynamic.Body.NumCollisions` once
+  (Car+52, `lb s1,18(v1)`, a signed byte) and passes it to all four
+  wheels. It is the only caller, in both images.
+- The rest of retail's is the demo's but for the layout: the terrain
+  table's stride 144 with DynamicFrictionMultiplier at +36, CarState's
+  DriverMode at 924 and ForwardSpeed at 896. The port reads those by name.
+  `retail_consts.py` finds no other value changed.
+- Retail's FinalizeGroundForce (`0x001a4ee0`, the same 1216 bytes) differs
+  only in that layout. Nothing to port.
+- `docs/formats/car-wheel.md` said the reverse cut halves the torque. It is
+  0.15 (0x3e19999a), and the page says so now, with retail's test.
+
+`wheel_check.py`, `tools/src/wheel_test.c`: the model's
+`guess_ground_force(w, ncoll)`. The `gr` grid (3 torques x the handbrake)
+runs 4 counts: 0, 1, -128 and 3. 19 scenarios, 10815 lines, 0 differ. 169
+mutations, 159 caught, 10 equivalent (the same 10); 3 new ones on the
+count, all caught. The two older patterns on that line were updated.
+
+`physicscar_check.py`: `retail_guess_ground_force` stubs the demo image's
+cut (`0x0019a7c8`). It reads the count from the wheel's car (Wheel+24 is
+&Car.State, so the Car is 64 below), makes the cut with the demo's 0.15
+when the count is 0, and goes on at `0x0019a7d4`. New SCEN_FIELD `ncoll`
+sets the collision body's NumCollisions. New Move scenarios: `mv-drag`
+(braking hard at 12 m/s with the wheels at 2 rad/s, two frames),
+`mv-drag-coll` (1), `mv-drag-coll-neg` (-128) and `mv-drag-ebrake-coll`
+(the handbrake, no cut either way). 125 scenarios, 131782 lines, 0
+differ. 4 new mutations (the count as 0, as 1, as `> 0`, and the wheel's
+test dropped), all caught; all 310 patterns still match. The full pass was
+not re-run.
+
+aisnap, carinfo, carsnap, drivetrain, drivingchoice, loadertable, nearbycar, physcomp, suspension, carmode, mellowmover (and --demo), car, realdriver, physicssystem, rigidbody and beltmover: 0 differ. The CIA builds clean.
+
+Next in TASKS 73: CarCollisionBody::AddDamage (retail `0x001d83d0`, 380
+bytes; the demo's `0x001cdca0`, 288). Read so far: retail calls tCopManager::
+MonitorImpact only for an amount of 1.0 or more, and passes a third
+argument, whether any of the body's collisions is a two-car one
+(GetCollision, then IsTwoCarCollision over NumCollisions).

@@ -4665,9 +4665,20 @@ phases.
           to 0.3 s a frame there. `world_check` stubs retail's test into
           the demo image: 32 scenarios, 15164 lines, 0 differ;
           336 mutations, 336 caught (6 new).
+        - [x] Wheel::GuessGroundForce: retail's (`0x001a4930`) takes
+          the car's collision count. Done in Session 135. IterateForces
+          (`0x00138f38`) reads the collision body's NumCollisions once and
+          passes it to the four wheels. A wheel dragged backwards under a
+          negative torque with no handbrake has its torque cut to 0.15
+          only when the car is in no collision. FinalizeGroundForce
+          (`0x001a4ee0`) differs only in layout: nothing to port.
+          `wheel_check` runs 4 counts through the cut's grid: 0 differ,
+          169 mutations, 159 caught, 10 equivalent. `physicscar_check`
+          stubs retail's test into the demo image under four braking
+          Move scenarios: 125 scenarios, 0 differ; its 4 new mutations
+          caught.
         - Other demo-derived functions retail changed (TASKS 74's list):
-          Wheel's GuessGroundForce and FinalizeGroundForce, InitSkids,
-          CarCollisionBody::AddDamage,
+          InitSkids, CarCollisionBody::AddDamage,
           FindWaferNormal and the RectPolyhedron constructor. Retail's
           TerrainTypeInfoTable has another layout.
         - [x] RealDriver's changed functions and the player's input.

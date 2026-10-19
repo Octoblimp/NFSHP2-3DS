@@ -410,7 +410,10 @@ void  wheel_check_for_brake_lock(Wheel *w, float v);
 float wheel_get_pilot_factor(Wheel *w);
 
 // 0x0019a638 / 0x0019aa20 / 0x0019ab80 / 0x0019ac60. The tyre model.
-void  wheel_guess_ground_force(Wheel *w, const bVector2 *unused);
+// GuessGroundForce is retail's (0x001a4930), which takes the car's
+// collision count as well.
+void  wheel_guess_ground_force(Wheel *w, const bVector2 *unused,
+                               int32_t numCollisions);
 float wheel_get_lateral_force(Wheel *w, float zforce, float slipAngle);
 void  wheel_modify_ground_force(Wheel *w, const bVector2 *v);
 void  wheel_finalize_ground_force(Wheel *w, int32_t slider);

@@ -570,11 +570,15 @@ void physicscar_iterate_forces(PhysicsCar *pc)
 {
     bMatrix4 rt;
     bVector3 local, f;
-    int32_t pass, i;
+    int32_t pass, i, collisions;
 
     drivetrain_guess_clutch_torque(pc->pDriveTrain);
+    // Retail's (0x00138f38): the car's collision count, read once for the
+    // four wheels' GuessGroundForce.
+    collisions =
+        pc->pCar->pDynamicCollisionBody->Dynamic.Body.NumCollisions;
     for (i = 0; i < 4; i++)
-        wheel_guess_ground_force(pc->pWheel[i], NULL);
+        wheel_guess_ground_force(pc->pWheel[i], NULL, collisions);
 
     // The body's force accumulator in the body's own frame. The multiply
     // is bMulMatrixVec3's, the affine one, as RigidBody.obj's private

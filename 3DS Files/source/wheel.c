@@ -608,9 +608,13 @@ float wheel_get_lateral_force(Wheel *w, float zforce, float slipAngle)
     }
 }
 
-// 0x0019a638. The bVector2 argument is never read; the results go into
-// the wheel's own GroundForce and Slip.
-void wheel_guess_ground_force(Wheel *w, const bVector2 *unused)
+// Retail's 0x001a4930, the demo's 0x0019a638 with a third argument. The
+// bVector2 argument is never read; the results go into the wheel's own
+// GroundForce and Slip. numCollisions is the car's collision body's
+// NumCollisions, the signed byte IterateForces reads once for all four
+// wheels (`lb s1,18(v1)`), and it is only tested against zero.
+void wheel_guess_ground_force(Wheel *w, const bVector2 *unused,
+                              int32_t numCollisions)
 {
     bVector3 vel;
     float brakeTorque, ebrakeTorque, ebrakeMagnitude;
@@ -657,9 +661,12 @@ void wheel_guess_ground_force(Wheel *w, const bVector2 *unused)
     w->OldSlip = slip;
 
     // A wheel being dragged backwards hard, with no handbrake on, has its
-    // driving torque cut to fifteen per cent rather than fighting.
+    // driving torque cut to fifteen per cent rather than fighting. Retail
+    // leaves the torque alone while the car is in a collision (`bnel
+    // s2,zero` at 0x001a4ac8, after the demo's two tests).
     if (slip < -gMaxStaticSlip) {
-        if (w->AppliedTorque < 0.0f && ebrakeMagnitude == 0.0f)
+        if (w->AppliedTorque < 0.0f && ebrakeMagnitude == 0.0f
+            && numCollisions == 0)
             w->AppliedTorque = w->AppliedTorque * WHEEL_REVERSE_DAMP;
     }
 

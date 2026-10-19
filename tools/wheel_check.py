@@ -806,8 +806,11 @@ def get_lateral_force(w, zforce, slip):
     return fmul(k, tv(g_load[6], load))
 
 
-def guess_ground_force(w):
-    """0x0019a638."""
+def guess_ground_force(w, ncoll=0):
+    """Retail's 0x001a4930: the demo's 0x0019a638, which this was written
+    from, with a third argument. IterateForces passes the car's collision
+    body's NumCollisions (a signed byte), and a nonzero count keeps the
+    reverse cut off (`bnel s2,zero` at 0x001a4ac8)."""
     brake = fmul(fmul(f32(G_BRAKING_TORQUE), w.Brake), w.CI.Brake)
     ebrake_mag = fmul(fmul(f32(G_EBRAKING_TORQUE), w.EBrake), w.CI.EBrake)
 
@@ -828,7 +831,7 @@ def guess_ground_force(w):
     w.OldSlip = slip
 
     if slip < fneg(f32(G_MAX_STATIC_SLIP)):
-        if w.AppliedTorque < 0.0 and ebrake_mag == 0.0:
+        if w.AppliedTorque < 0.0 and ebrake_mag == 0.0 and ncoll == 0:
             w.AppliedTorque = fmul(w.AppliedTorque, f32(K_REVERSE_DAMP))
 
     slip = w.CurrentSlip
@@ -1662,20 +1665,23 @@ def s_guess():
                             pf(tag + " spin", w.w)
     g_cs.ForwardSpeed = f32(20.0)
 
+    # Retail's collision count: none, one, a negative byte, and a few.
     ats = [-400.0, 400.0, 0.0]
+    colls = [0, 1, -128, 3]
     for t in range(3):
         for eb in range(2):
-            w = fresh()
-            w.WorldMatrix = identity()
-            w.Velocity = (f32(12.0), f32(0.1), ZERO, ZERO)
-            w.w = ZERO
-            w.AppliedTorque = f32(ats[t])
-            w.EBrake = f32(0.5) if eb else ZERO
-            guess_ground_force(w)
-            tag = "gr%d_%d" % (t, eb)
-            pf(tag + " at", w.AppliedTorque)
-            emit("%s gf %s %s" % (tag, g9(w.GroundForce[0]),
-                                  g9(w.GroundForce[1])))
+            for c in range(len(colls)):
+                w = fresh()
+                w.WorldMatrix = identity()
+                w.Velocity = (f32(12.0), f32(0.1), ZERO, ZERO)
+                w.w = ZERO
+                w.AppliedTorque = f32(ats[t])
+                w.EBrake = f32(0.5) if eb else ZERO
+                guess_ground_force(w, colls[c])
+                tag = "gr%d_%d_%d" % (t, eb, c)
+                pf(tag + " at", w.AppliedTorque)
+                emit("%s gf %s %s" % (tag, g9(w.GroundForce[0]),
+                                      g9(w.GroundForce[1])))
 
     # The friction circle small enough to matter. With the fixture's
     # ZForce every demand CheckForBrakeLock sees is thousands of newtons and
@@ -2679,8 +2685,18 @@ MUTATIONS = [
      "    w->CurrentSlip = slip;" + NL + "    w->OldSlip = slip;",
      "    w->CurrentSlip = slip;"),
     ("wh-guess-reverse-damp-no-ebrake-test", WC,
-     "        if (w->AppliedTorque < 0.0f && ebrakeMagnitude == 0.0f)",
-     "        if (w->AppliedTorque < 0.0f)"),
+     "        if (w->AppliedTorque < 0.0f && ebrakeMagnitude == 0.0f" + NL,
+     "        if (w->AppliedTorque < 0.0f" + NL),
+    # Retail's collision count (0x001a4ac8).
+    ("wh-guess-reverse-damp-no-collision-test", WC,
+     "            && numCollisions == 0)",
+     "            && 1)"),
+    ("wh-guess-reverse-damp-collision-inverted", WC,
+     "            && numCollisions == 0)",
+     "            && numCollisions != 0)"),
+    ("wh-guess-reverse-damp-collision-positive", WC,
+     "            && numCollisions == 0)",
+     "            && numCollisions <= 0)"),
     ("wh-guess-reverse-damp-torque-sign", WC,
      "    if (slip < -gMaxStaticSlip) {",
      "    if (gMaxStaticSlip < slip) {"),
@@ -2939,8 +2955,8 @@ MUTATIONS = [
      "    float dynamic = 1.0f, maxForce = 0.0f, perSpeed = 0.0f, perMag = 0.0f;",
      "    float dynamic = 0.0f, maxForce = 0.0f, perSpeed = 0.0f, perMag = 0.0f;"),
     ("wh-guess-ebrake-magnitude-signed", WC,
-     "        if (w->AppliedTorque < 0.0f && ebrakeMagnitude == 0.0f)",
-     "        if (w->AppliedTorque < 0.0f && ebrakeTorque == 0.0f)"),
+     "        if (w->AppliedTorque < 0.0f && ebrakeMagnitude == 0.0f" + NL,
+     "        if (w->AppliedTorque < 0.0f && ebrakeTorque == 0.0f" + NL),
     ("wh-terrain-probe-w-junk", WC,
      "    probe.w = 0.0f;",
      "    probe.w = 1.0f;"),

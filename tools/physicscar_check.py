@@ -431,6 +431,7 @@ SCEN_FIELDS = [
     ("wterr", "i4", (-1, -1, -1, -1)),    # and its Terrain; -1 leaves it
     ("wlock", "int", 0),            # bit i locks wheel i's brake
     ("wdmg", "f4", (0.0, 0.0, 0.0, 0.0)),  # each wheel's Damage, if not 0
+    ("ncoll", "int", 0),            # the collision body's NumCollisions
     ("extreme", "f", 0.0),          # the CTI's MaxZMomentAccExtreme
     ("yawctl", "f", 0.0),           # and its YawControl
     ("mass", "f", 0.0),             # the body's RBI mass after the ctor
@@ -692,6 +693,21 @@ SCENARIOS = [
     Scen("mv-blown-1-3", **mo(blown=0b1010, steps=2)),
     Scen("mv-blown-high", **mo(blown=0x80, dbo=1.25, steps=1)),
     Scen("mv-unblown-damaged", **mo(wdmg=(1.0, 0.5, 0.0, 1.0), steps=1)),
+    # Retail's GuessGroundForce: braking hard, the wheels turn slower than
+    # the road and their torque is cut to 0.15, unless the car is in a
+    # collision. One, a negative byte, and the handbrake (no cut either
+    # way); two frames, so the second's slip shows the first's spin.
+    Scen("mv-drag", **mo(thr=0.0, brk=1.0, ww=2.0, vel=(12.0, 0.0, 0.0),
+                         fwd=12.0, steps=2, **STRAIGHT)),
+    Scen("mv-drag-coll", **mo(thr=0.0, brk=1.0, ww=2.0, ncoll=1,
+                              vel=(12.0, 0.0, 0.0), fwd=12.0, steps=2,
+                              **STRAIGHT)),
+    Scen("mv-drag-coll-neg", **mo(thr=0.0, brk=1.0, ww=2.0, ncoll=-128,
+                                  vel=(12.0, 0.0, 0.0), fwd=12.0, steps=1,
+                                  **STRAIGHT)),
+    Scen("mv-drag-ebrake-coll", **mo(thr=0.0, brk=1.0, ebrk=1.0, ww=2.0,
+                                     ncoll=3, vel=(12.0, 0.0, 0.0),
+                                     fwd=12.0, steps=1, **STRAIGHT)),
     Scen("mv-overrides", **mo(tbo=0.75, dbo=1.25, steps=1)),
     Scen("mv-damage", **mo(dmg=10240, dmgon=1, steps=1)),
     Scen("mv-damage-off", **mo(dmg=10240, steps=1)),
@@ -1162,6 +1178,31 @@ def retail_wheel_derivative(e):
     e.hook(DEMO_DERIV_DIV, drag)
 
 
+# The port's Wheel::GuessGroundForce is retail's since TASKS 73
+# (0x001a4930). Retail's IterateForces (0x00138f38) passes it the car's
+# collision body's NumCollisions, a signed byte read once for the four
+# wheels, and a nonzero count skips the reverse cut (`bnel s2,zero` at
+# 0x001a4ac8). The demo's IterateForces passes no count, so the stub at
+# the demo's cut reads it from the wheel's car: its CarState pointer
+# (Wheel+24) is &Car.State. It makes the cut itself when the count is 0,
+# with the demo's 0.15 (gp-29736), and goes on at the slip's reload.
+DEMO_GGF_CUT = 0x0019a7c8           # `lwc1 $f0,-29736(gp)`
+DEMO_GGF_SLIP = 0x0019a7d4          # `lwc1 $f23,352(s1)`
+
+
+def retail_guess_ground_force(e):
+    def cut(em):
+        w = em.reg[17] & M32
+        car = em.u32(w + 24) - CAR_STATE
+        ccb = em.u32(car + CAR_COLLISIONBODY)
+        if em.mem[ccb + CCB_NUMCOLL] == 0:
+            k = fbits_to(em.u32(GP - 29736))
+            em.set_f(0, f32(em.f(1) * k))
+            em.put32(w + 264, em.fpr[0])
+        em.reg[31] = DEMO_GGF_SLIP
+    e.stub(DEMO_GGF_CUT, cut)
+
+
 # The port's PhysicsCar::Move is retail's since TASKS 73 (0x00137d90), the
 # demo's (0x00135c78) with four changes, hooked in here where the demo has
 # the code they replace. In the wheel loop s5 is the wheel, s7 the
@@ -1438,6 +1479,7 @@ class Model(object):
             retail_wheel_matrices(e)
             retail_move(e)
             retail_wheel_derivative(e)
+            retail_guess_ground_force(e)
 
         e.stub(WHEEL_SKIDS, self.skids)
         self.race = e.alloc(16, 16)
@@ -1935,6 +1977,9 @@ class Model(object):
             if fb(s.wdmg[i]):
                 self.put(self.comp("pWheel", i) + OFF("Wheel", "Damage"),
                          fb(s.wdmg[i]))
+        if s.ncoll:
+            ccb = self.w(self.car + CAR_COLLISIONBODY)
+            self.e.mem[ccb + CCB_NUMCOLL] = s.ncoll & 0xff
         if fb(s.mass):
             rbi = self.w(self.comp("pBody") + OFF("RigidBody", "RBI"))
             self.put(rbi, fb(s.mass))
@@ -2749,6 +2794,20 @@ MUTATIONS = [
     ("pc-it-no-clutch-guess", PCC,
      "    drivetrain_guess_clutch_torque(pc->pDriveTrain);\n",
      ""),
+    # Retail's collision count, to each GuessGroundForce (mv-drag*).
+    ("pc-it-collisions-none", PCC,
+     "        wheel_guess_ground_force(pc->pWheel[i], NULL, collisions);",
+     "        wheel_guess_ground_force(pc->pWheel[i], NULL, 0);"),
+    ("pc-it-collisions-always", PCC,
+     "        wheel_guess_ground_force(pc->pWheel[i], NULL, collisions);",
+     "        wheel_guess_ground_force(pc->pWheel[i], NULL, 1);"),
+    ("pc-it-collisions-positive", PCC,
+     "        wheel_guess_ground_force(pc->pWheel[i], NULL, collisions);",
+     "        wheel_guess_ground_force(pc->pWheel[i], NULL,"
+     " collisions > 0);"),
+    ("wh-guess-collision-ignored", WHC,
+     "            && numCollisions == 0)",
+     "            && 1)"),
     ("pc-it-finalize-slider", PCC,
      "        wheel_finalize_ground_force(pc->pWheel[i], i);",
      "        wheel_finalize_ground_force(pc->pWheel[i], 0);"),

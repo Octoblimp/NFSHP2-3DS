@@ -544,6 +544,9 @@ static void after_ctor(const PcScen *s)
         if (s->wdmg[i])
             g_pc->pWheel[i]->Damage = fb(s->wdmg[i]);
     }
+    if (s->ncoll)
+        g_car->pDynamicCollisionBody->Dynamic.Body.NumCollisions =
+            (int8_t)s->ncoll;
     if (s->mass != 0)
         ((RigidBodyInfo *)g_pc->pBody->RBI)->Mass = fb(s->mass);
 }

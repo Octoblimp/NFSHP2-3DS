@@ -906,7 +906,7 @@ static void scenario_guess(void)
                             w->Brake = brakes[k];
                             w->EBrake = brakes[e];
                             g_cs->ForwardSpeed = speeds[f];
-                            wheel_guess_ground_force(w, &unused);
+                            wheel_guess_ground_force(w, &unused, 0);
                             sprintf(tag, "gg%u_%u_%u_%u_%u_%u", (unsigned)a,
                                     (unsigned)b, (unsigned)s, (unsigned)k,
                                     (unsigned)e, (unsigned)f);
@@ -929,26 +929,31 @@ static void scenario_guess(void)
     g_cs->ForwardSpeed = 20.0f;
 
     // The reverse-damp arm, which needs a negative torque, no handbrake
-    // and a slip past -gMaxStaticSlip all at once.
+    // and a slip past -gMaxStaticSlip all at once, and in retail no
+    // collision: none, one, a negative byte, and a few.
     {
         static const float ats[] = { -400.0f, 400.0f, 0.0f };
-        size_t t, eb;
+        static const int8_t colls[] = { 0, 1, -128, 3 };
+        size_t t, eb, c;
         for (t = 0; t < 3; t++) {
             for (eb = 0; eb < 2; eb++) {
-                Wheel *w = fresh();
-                bIdentity(&w->WorldMatrix);
-                w->Velocity.x = 12.0f;
-                w->Velocity.y = 0.1f;
-                w->Velocity.z = 0.0f;
-                w->Velocity.w = 0.0f;
-                w->State.w = 0.0f;
-                w->AppliedTorque = ats[t];
-                w->EBrake = eb ? 0.5f : 0.0f;
-                wheel_guess_ground_force(w, &unused);
-                sprintf(tag, "gr%u_%u", (unsigned)t, (unsigned)eb);
-                printf("%s at %.9g\n", tag, w->AppliedTorque);
-                printf("%s gf %.9g %.9g\n", tag, w->GroundForce[0],
-                       w->GroundForce[1]);
+                for (c = 0; c < sizeof colls; c++) {
+                    Wheel *w = fresh();
+                    bIdentity(&w->WorldMatrix);
+                    w->Velocity.x = 12.0f;
+                    w->Velocity.y = 0.1f;
+                    w->Velocity.z = 0.0f;
+                    w->Velocity.w = 0.0f;
+                    w->State.w = 0.0f;
+                    w->AppliedTorque = ats[t];
+                    w->EBrake = eb ? 0.5f : 0.0f;
+                    wheel_guess_ground_force(w, &unused, colls[c]);
+                    sprintf(tag, "gr%u_%u_%u", (unsigned)t, (unsigned)eb,
+                            (unsigned)c);
+                    printf("%s at %.9g\n", tag, w->AppliedTorque);
+                    printf("%s gf %.9g %.9g\n", tag, w->GroundForce[0],
+                           w->GroundForce[1]);
+                }
             }
         }
     }
@@ -995,7 +1000,7 @@ static void scenario_guess(void)
             w->Brake = gbk[k2];
             w->EBrake = gbk[k2];
             w->BrakeLocked = (int32_t)l2;
-            wheel_guess_ground_force(w, &unused);
+            wheel_guess_ground_force(w, &unused, 0);
             sprintf(tag, "gz%u_%u_%u_%u_%u_%u", (unsigned)a2, (unsigned)b2,
                     (unsigned)s2, (unsigned)z2, (unsigned)k2, (unsigned)l2);
             printf("%s gf %.9g %.9g\n", tag, w->GroundForce[0],
@@ -1040,7 +1045,7 @@ static void scenario_guess(void)
             w->ZForce = mzzf[q2];
             w->Brake = mzbk[q2];
             w->EBrake = mzbk[q2];
-            wheel_guess_ground_force(w, &unused);
+            wheel_guess_ground_force(w, &unused, 0);
             sprintf(tag, "gm%u_%u", (unsigned)d2, (unsigned)q2);
             printf("%s gf %.9g %.9g\n", tag, w->GroundForce[0],
                    w->GroundForce[1]);
@@ -1075,7 +1080,7 @@ static void scenario_guess(void)
             w->State.w = tbspin[d3];
             w->Brake = 0.0f;
             w->EBrake = 0.0f;
-            wheel_guess_ground_force(w, &unused);
+            wheel_guess_ground_force(w, &unused, 0);
             sprintf(tag, "gt%u", (unsigned)d3);
             printf("%s gf %.9g %.9g\n", tag, w->GroundForce[0],
                    w->GroundForce[1]);
@@ -1098,7 +1103,7 @@ static void scenario_guess(void)
             w->Velocity.z = 0.0f;
             w->Velocity.w = 0.0f;
             w->State.w = sspin[i2];
-            wheel_guess_ground_force(w, &unused);
+            wheel_guess_ground_force(w, &unused, 0);
             sprintf(tag, "gs%u", (unsigned)i2);
             printf("%s gf %.9g %.9g\n", tag, w->GroundForce[0],
                    w->GroundForce[1]);
@@ -1124,7 +1129,7 @@ static void scenario_guess(void)
             w->State.w = 10.0f;            // slip 3.2, well past the trigger
             w->TractionBoost = boosts[i2];
             g_cs->ForwardSpeed = 0.2f;
-            wheel_guess_ground_force(w, &unused);
+            wheel_guess_ground_force(w, &unused, 0);
             sprintf(tag, "gd%u", (unsigned)i2);
             printf("%s gf %.9g %.9g\n", tag, w->GroundForce[0],
                    w->GroundForce[1]);
@@ -1147,7 +1152,7 @@ static void scenario_guess(void)
                 w->Velocity.y = vys[j];
                 w->Velocity.z = 1.5f;
                 w->Velocity.w = 0.25f;
-                wheel_guess_ground_force(w, &unused);
+                wheel_guess_ground_force(w, &unused, 0);
                 sprintf(tag, "gw%u_%u", (unsigned)i, (unsigned)j);
                 dump(tag, w);
             }
@@ -1163,7 +1168,7 @@ static void scenario_guess(void)
         w->Velocity.y = 0.5f;
         w->Velocity.z = 0.0f;
         w->Velocity.w = 0.0f;
-        wheel_guess_ground_force(w, &unused);
+        wheel_guess_ground_force(w, &unused, 0);
         dump("gg_noterrain", w);
         gTerrainTypeInfoTable = g_terrain;
     }

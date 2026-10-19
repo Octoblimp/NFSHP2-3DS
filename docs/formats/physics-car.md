@@ -198,7 +198,7 @@ and desired, and the clutch engaged.
 makes of them:
 
 ```
-GuessClutchTorque; each wheel GuessGroundForce
+GuessClutchTorque; each wheel GuessGroundForce(NumCollisions)
 local = R^T * ForceAccumulator          (bMulMatrixVec3, w forced to 1)
 5 times:
     acc = local, yaw = 0
@@ -216,6 +216,13 @@ each wheel FinalizeGroundForce(i); FinalizeClutchTorque
 `rest` is each Suspension's RestPosition. The call the listing makes is
 `bMulMatrixVector`, RigidBody.obj's private one. That is an 8-byte `j` to
 bMulMatrixVec3.
+
+Retail's IterateForces (`0x00138f38`) reads the car's collision body's
+NumCollisions (Car+52, the signed byte at 18) once, after
+GuessClutchTorque, and passes it to each wheel's GuessGroundForce as a
+third argument; a nonzero count keeps the wheel's reverse cut off
+(`car-wheel.md`). The demo's passes nothing. The port's is retail's since
+TASKS 73.
 
 A wheel that is locked but not slipping is one whose lock outlived the
 frame that set it. CheckForBrakeLock sets Slipping whenever it locks, and
