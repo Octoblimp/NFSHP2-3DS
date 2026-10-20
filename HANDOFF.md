@@ -28539,3 +28539,43 @@ log from the curb turn on Ancient Ruins (track 31).
 The fix needs the user's run past that corner on the 3DS; work halts
 until they report. Next, after: 80b (the Zone Preview), 80d (the radial
 blur), 72h-2c and 75.
+
+## Session 140 -- the blink stays; PauseLog (TASKS 64)
+
+The user on 4803cfc's CIA (2026-10-20): "Unfortunately blink still
+happens". And: "I do want that little pause BIN write thingy to be a
+config flag, name it PauseLog, set to 0 by default if not declared".
+Then: "You're done working for tonight".
+
+- **PauseLog** (af182fb). The pause's 96 frames and the
+  `sdmc:/nfshp2_pause_N.bin` write need "PauseLog 1" in
+  `sdmc:/nfshp2_config.txt`, 0 when it is not there. It opens the debug
+  log itself, as GPULog does, for the "pause frame k" lines.
+  "PauseFrames" (on with "DebugLog 1") is gone. Built: the CIA in
+  `3DS Files/` is af182fb's.
+- **Session 139's cause was wrong.** GSP runs the GX commands in its
+  queue one after another, so no command list starts before a fill has
+  ended. The two fills of 4803cfc stay (no harm); c3dwrap.c's comment
+  now says they fixed nothing (comment only, in the docs commit).
+- **What is known.** The hole is the asphalt batch's area alone (texture
+  3, ST_NEWROAD4, of RD_SECTION20_CHOP3), and the sea under it shows
+  through. Not known: whether its colour was drawn and its depth lost,
+  or it was not drawn at all. The sea covers both the same way.
+- **Ruled out this session:** the near plane and the guard band, the
+  index offset's 28 bits, a texture let go of or a model skipped (0
+  evicted, 0 missing, 0 skipped at pause 1), the alpha test (the
+  texture's alpha is 252 in every texel), the early depth test (never
+  on). Also read: hangwatch_gpu_send splits with C3Di_SplitFrame and
+  flushes the whole linear heap first; nothing wrong seen.
+- **Next** (TASKS 64): two runs past the corner with no new build, one
+  line each in the config file, "GpuSends 0" then "ClusterCull 0". The
+  sends went on by default the day before the first report (b3b9bab),
+  so they are the first suspect. Then, if needed, a build that only
+  logs the asphalt batch's cull, runs and GPU state each frame. No
+  Azahar runs for this one.
+- The checklist is v24: 64 open again (the fix failed), the PauseLog
+  key noted.
+
+Work stopped for the night at the user's word. Next: TASKS 64 as
+above, then 80b (the Zone Preview), 80d (the radial blur), 72h-2c and
+75.

@@ -67,18 +67,13 @@
 //
 // And the clears (TASKS 64). C3D_FrameBufClear clears a target's colour
 // and depth with one GX_MemoryFill: the colour as its first buffer, on
-// the PSC's first fill unit, and the depth as its second, on the other,
-// side by side. For a fill with both buffers GSP signals the first unit's
-// end alone (3dbrew, "GSP Shared Memory"), and libctru's queue
-// (gxqueue.c) hands GSP up to three commands at once and ignores the
-// second unit's interrupt, so the command list queued behind a clear can
-// start while the depth fill is still going. A draw early in that list
-// keeps its colour and loses its depth to the fill's end, the target's
-// right side, and what is drawn behind it later shows through: the
-// user's road blink on track 31 (the asphalt, then the sea under it, at
-// the curb turn). Azahar's fills end at once. So __wrap_C3D_FrameBufClear
-// makes a clear of both two fills, each on the first unit, and what is
-// queued after waits for both.
+// the PSC's first fill unit, and the depth as its second, on the other.
+// __wrap_C3D_FrameBufClear makes a clear of both two fills, each on the
+// first unit (4803cfc). That was for the user's road blink on track 31,
+// on the theory that a list queued behind a clear could start while the
+// depth fill was still going. It cannot: GSP runs the GX commands in its
+// queue one after another. The blink stayed (the user, 2026-10-20); the
+// two fills cost nothing seen, and stay.
 
 #include <stdint.h>
 #include <string.h>

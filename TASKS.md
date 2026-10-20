@@ -3918,7 +3918,8 @@ phases.
           and its depth read-back, the fog texture writes, the GPU
           timing replays (off, GPULog 0).
         - [x] Session 138: the pause's frames. With "DebugLog 1" (and
-          "PauseFrames", on by default) a race keeps its last 96
+          "PauseFrames", on by default; since af182fb "PauseLog 1"
+          alone, off by default) a race keeps its last 96
           frames at 200 by 120 (a display transfer each frame start,
           before the clear) with each frame's numbers, and a pause
           writes them to `sdmc:/nfshp2_pause_N.bin` (8 a boot) and a
@@ -3940,12 +3941,15 @@ phases.
           baked shadows (SHD_S20_CHOP3) and the curb mark stay. The sea
           (WATER, order 1, depth written, alpha blended) is under the
           road everywhere and drawn after it, so the asphalt's colour
-          was drawn and its depth lost. Ruled out on the way: the
+          was drawn and its depth lost (Session 140: or not drawn at
+          all; the frames cannot tell the two apart). Ruled out on the
+          way: the
           cluster cull, a stale cull matrix, the run cache's pass and
           depth state, the alpha test (the asphalt is a gloss texture,
           so it has none), the shadow layer's depth, the texture
           cache, the lean draws' words, the command buffer guard.
-        - The cause: citro3d's `C3D_RenderTargetClear(top,
+        - The cause as Session 139 had it, wrong (Session 140):
+          citro3d's `C3D_RenderTargetClear(top,
           C3D_CLEAR_ALL, ...)` is one GX_MemoryFill, the colour on the
           PSC's first fill unit and the depth on the second. For a
           fill with both buffers GSP signals the first unit's end alone
@@ -3961,13 +3965,50 @@ phases.
           as when the view swings to the open sea and the sun, the CPU
           queues the list while the GPU is still on the mirror. Azahar's
           fills end at once.
-        - [x] The fix (4803cfc): c3dwrap.c wraps C3D_FrameBufClear, so
+        - [x] The change (4803cfc), which did not fix it: c3dwrap.c
+          wraps C3D_FrameBufClear, so
           a clear of both is two fills, each on the first unit, and the
           list queued after waits for both. Every target's clear goes
           through it: the view, the mirror, the envmap faces, the
           frontend's, and citro2d's C2D_TargetClear. A frame's GX queue
           gains up to 8 entries (14 of 32 used before).
-        - [ ] The user's run past the corner on 4803cfc's CIA.
+        - [x] The user's run past the corner on 4803cfc's CIA
+          (2026-10-20): "Unfortunately blink still happens". The fill
+          race cannot happen: GSP runs the GX commands in its queue
+          one after another (citro3d's FrameEnd queues the list and
+          the display transfer together), so no list starts before a
+          fill has ended. The two fills stay, as they cost nothing
+          seen; c3dwrap.c's comment says they fixed nothing.
+        - [x] Session 140, also ruled out: the near plane and the guard
+          band (the asphalt's triangles are 8.6 m or more from the
+          camera, |x/w| 2.7 at most); the index offset's 28 bits (the
+          linear heap ends at 0x27000000); a texture let go of, or a
+          model skipped by the command buffer guard (pause 1's log: 0
+          evicted, 0 missing, 0 skipped); the alpha test again
+          (ST_NEWROAD4's alpha is 252 in every texel, so no test cuts
+          it); the early depth test (the game never turns it on). The
+          pause notes' tris are the whole mesh's, so they cannot show a
+          dropped batch. The camera rebuilt from the logged pose is
+          off (IoU 0.31 against the asphalt's pixels), so labels per
+          pixel from it are not to be trusted.
+        - [x] PauseLog (af182fb): the pause's frames and their .bin need
+          "PauseLog 1" in nfshp2_config.txt, 0 when it is not there
+          (the user, 2026-10-20). It opens the debug log itself, as
+          GPULog does. "PauseFrames" is gone.
+        - [ ] Next, two runs past the corner with no new build, each
+          with one line added to nfshp2_config.txt: "GpuSends 0" (the
+          frame goes to the GPU as one list), then "ClusterCull 0"
+          (each batch drawn whole). The sends went on by default the
+          day before the first report (b3b9bab), so they are still the
+          first suspect, whatever the mechanism. Whichever run has no
+          blink names the part.
+        - [ ] Then a build that only logs: for the asphalt batch each
+          frame, whether render_model reached it, the cull's answer
+          (in, part, out), the runs and indices drawn, and the GPU
+          state at its draws (depth test and mask, alpha test, blend,
+          buffer offset, index registers) from a shadow of the
+          registers each send writes; blink frames against good ones.
+          No Azahar runs: "Azahar can't reproduce it".
 
 65. [x] **The FPS dip in the same race.** Reported with TASKS 64:
         "there was a minor FPS slowdown too at one point, locate that
