@@ -1,5 +1,6 @@
 // citro3d's uniforms and program binds, sent only when they change (step
-// 13b-4, 13b-5), and its draws written in one go (13b-6). See c3dwrap.c.
+// 13b-4, 13b-5), its draws written in one go (13b-6), and its clears of
+// colour and depth made two fills (TASKS 64). See c3dwrap.c.
 
 #ifndef C3DWRAP_H
 #define C3DWRAP_H

@@ -9563,6 +9563,8 @@ int main(int argc, char** argv)
                 trackview_draw_mirror(&g_track);
                 FRAMEPROF_STAMP(FRAMEPROF_MIRROR);
                 hangwatch_gpu_send();
+                // Two fills, the colour's and the depth's, so the view's
+                // draws wait for the depth's end (c3dwrap.c, TASKS 64).
                 C3D_RenderTargetClear(top, C3D_CLEAR_ALL,
                                       __builtin_bswap32(sky), 0);
                 C3D_FrameDrawOn(top);

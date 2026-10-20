@@ -1,4 +1,5 @@
 // citro3d's uniform upload, skipped when no uniform has changed (step 13b-4).
+// Its draws and its clears too, below.
 //
 // Every C3D_DrawArrays starts with C3Di_UpdateContext, which ends with
 // C3D_UpdateUniforms for the vertex shader and again for the geometry
@@ -63,6 +64,21 @@
 //   * __wrap_GPUCMD_Add writes a single register's command itself, the
 //     rest of citro3d's state does most of: the same two words libctru's
 //     writes, without its loop.
+//
+// And the clears (TASKS 64). C3D_FrameBufClear clears a target's colour
+// and depth with one GX_MemoryFill: the colour as its first buffer, on
+// the PSC's first fill unit, and the depth as its second, on the other,
+// side by side. For a fill with both buffers GSP signals the first unit's
+// end alone (3dbrew, "GSP Shared Memory"), and libctru's queue
+// (gxqueue.c) hands GSP up to three commands at once and ignores the
+// second unit's interrupt, so the command list queued behind a clear can
+// start while the depth fill is still going. A draw early in that list
+// keeps its colour and loses its depth to the fill's end, the target's
+// right side, and what is drawn behind it later shows through: the
+// user's road blink on track 31 (the asphalt, then the sea under it, at
+// the curb turn). Azahar's fills end at once. So __wrap_C3D_FrameBufClear
+// makes a clear of both two fills, each on the first unit, and what is
+// queued after waits for both.
 
 #include <stdint.h>
 #include <string.h>
@@ -82,6 +98,8 @@ void __real_C3D_DrawElements(GPU_Primitive_t primitive, int count, int type,
                              const void* indices);
 void __real_C3D_DrawArrays(GPU_Primitive_t primitive, int first, int size);
 void __real_GPUCMD_Add(u32 header, const u32* param, u32 paramlength);
+void __real_C3D_FrameBufClear(C3D_FrameBuf* fb, C3D_ClearBits clearBits,
+                              u32 clearColor, u32 clearDepth);
 
 void __wrap_C3D_UpdateUniforms(GPU_SHADER_TYPE type);
 void __wrap_C3Di_LoadShaderUniforms(shaderInstance_s* si);
@@ -91,6 +109,8 @@ void __wrap_C3D_DrawElements(GPU_Primitive_t primitive, int count, int type,
                              const void* indices);
 void __wrap_C3D_DrawArrays(GPU_Primitive_t primitive, int first, int size);
 void __wrap_GPUCMD_Add(u32 header, const u32* param, u32 paramlength);
+void __wrap_C3D_FrameBufClear(C3D_FrameBuf* fb, C3D_ClearBits clearBits,
+                              u32 clearColor, u32 clearDepth);
 
 // citro3d's own, from base.o.
 void C3Di_UpdateContext(void);
@@ -635,4 +655,18 @@ void __wrap_GPUCMD_Add(u32 header, const u32* param, u32 paramlength)
         return;
     }
     __real_GPUCMD_Add(header, param, paramlength);
+}
+
+// A clear of colour and depth, as two fills: the colour's, then the
+// depth's, each its fill's only buffer, so GSP signals each one's end
+// (the header's note). A target with no depth buffer has one fill.
+void __wrap_C3D_FrameBufClear(C3D_FrameBuf* fb, C3D_ClearBits clearBits,
+                              u32 clearColor, u32 clearDepth)
+{
+    if ((clearBits & C3D_CLEAR_ALL) == C3D_CLEAR_ALL && fb->depthBuf != NULL) {
+        __real_C3D_FrameBufClear(fb, C3D_CLEAR_COLOR, clearColor, clearDepth);
+        __real_C3D_FrameBufClear(fb, C3D_CLEAR_DEPTH, clearColor, clearDepth);
+        return;
+    }
+    __real_C3D_FrameBufClear(fb, clearBits, clearColor, clearDepth);
 }
