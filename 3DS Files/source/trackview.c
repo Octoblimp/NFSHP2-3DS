@@ -1533,12 +1533,13 @@ static int model_solid(TrackView* v, eModel* m)
     return i;
 }
 
-// eModel::Render (0x0010c7c8) returns at once for a model with no solid,
-// then sets up the rigid and vertex animation and the strips' visibility
-// and has RenderStrips (0x0010c8a0) put each strip on a list: the frame's
-// alpha list when its texture has ApplyAlphaSorting, its texture's own
-// otherwise. The port draws a solid as georender baked it, in the matrix
-// the cull gave -- local to world, then the view's -- and draws at once
+// eModel::Render (0x0010dc80) returns at once for a model with no solid,
+// then sets up the rigid and vertex animation (emodel_setup_animation) and
+// the strips' visibility and has RenderStrips put each strip on a list:
+// the frame's alpha list when its texture has ApplyAlphaSorting, its
+// texture's own otherwise. The port draws a solid as georender baked it,
+// in the matrix the animation and the cull gave -- the animation's frame,
+// local to world, then the view's -- and draws at once
 // only what the attach loops would draw first anyway: the order-0 textures
 // that are not sorted. The rest wait for trackview_draw. A lit or
 // environment-mapped batch draws alone, with the light context.
@@ -1557,6 +1558,8 @@ static void render_model(eModel* m, bMatrix4* matrix, void* light,
     uint32_t*   prof = FrameProfDraw.models[s_envFace    ? 1
                                             : s_mirrorView ? 2 : 0];
     uint32_t    words;
+    bool        inPlace = matrix == &eMathIdentityMatrix;
+    bMatrix4*   given = matrix;
 
     if (!v || m->Solid == NULL) {
         return;
@@ -1565,6 +1568,8 @@ static void render_model(eModel* m, bMatrix4* matrix, void* light,
     // part's start, and none once the model is done.
     CoreSamplePart = CS_PART_SOLID;
     words = gpuCmdBufOffset;
+    // A vertex animation's frame is a solid of its own, baked like any.
+    matrix = emodel_setup_animation(m, matrix);
     i = model_solid(v, m);
     if (i < 0) {
         CoreSamplePart = CS_PART_NONE;
@@ -1614,6 +1619,9 @@ static void render_model(eModel* m, bMatrix4* matrix, void* light,
         }
     }
     prof[FRAMEPROF_M_MODELS]++;
+    prof[FRAMEPROF_M_RIGID] += matrix != given;
+    prof[FRAMEPROF_M_VERTEX] +=
+        ((const eSolid*)m->Solid)->pVertexAnimator != NULL;
     prof[FRAMEPROF_M_NOW] += (uint32_t)__builtin_popcountll(now);
     prof[FRAMEPROF_M_LIT] += (uint32_t)__builtin_popcountll(lit);
     prof[FRAMEPROF_M_HELD] += (uint32_t)held;
@@ -1632,7 +1640,7 @@ static void render_model(eModel* m, bMatrix4* matrix, void* light,
     prof[FRAMEPROF_M_WORDS] += gpuCmdBufOffset - words;
     v->drawn++;
     v->drawnTris += r->mesh.numTris;
-    if (matrix == &eMathIdentityMatrix) {
+    if (inPlace) {
         v->drawnInPlace++;
     }
 
@@ -1644,7 +1652,7 @@ static void render_model(eModel* m, bMatrix4* matrix, void* light,
         if (len + 32 < sizeof v->drawList) {
             snprintf(v->drawList + len, sizeof v->drawList - len, "%s%.24s%s",
                      len ? " " : "", ((const eSolid*)m->Solid)->Name,
-                     matrix == &eMathIdentityMatrix ? "*" : "");
+                     inPlace ? "*" : "");
         }
     }
     CoreSamplePart = CS_PART_NONE;
@@ -1779,8 +1787,19 @@ void trackview_prepare(TrackView* v)
     // Their textures are the first into VRAM: the ones drawn the most.
     v->vramOk = true;
     for (n = ModelList.next; n != &ModelList; n = n->next) {
-        (void)model_solid(v, (eModel*)(void*)n);
+        eModel*                m  = (eModel*)(void*)n;
+        const eVertexAnimator* va = m->Solid ? (const eVertexAnimator*)
+            ((const eSolid*)m->Solid)->pVertexAnimator : NULL;
+
+        (void)model_solid(v, m);
         v->preparedModels++;
+        // And every frame of a vertex animation, which Render swaps in.
+        for (k = 0; va != NULL && k < va->NumSolids; k++) {
+            eModel frame = *m;
+
+            frame.Solid = va->SolidTable[k];
+            (void)model_solid(v, &frame);
+        }
     }
     prepare_flipbooks(v);
 

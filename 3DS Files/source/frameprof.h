@@ -128,6 +128,8 @@ enum {
     FRAMEPROF_M_INDICES,    // the batches' indices, three a triangle,
                             // held ones too
     FRAMEPROF_M_LIT_WORDS,  // the words the lit batches wrote
+    FRAMEPROF_M_RIGID,      // models a rigid animation moved
+    FRAMEPROF_M_VERTEX,     // models drawn in a vertex animation's frame
     FRAMEPROF_M_COUNT
 };
 

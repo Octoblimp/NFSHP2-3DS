@@ -191,4 +191,38 @@ int32_t emodel_get_rigid_animation_time(const eModel *m);
 // not 0x4000.
 void emodel_set_rigid_animation_frame_number(eModel *m, int32_t frame);
 
+// ---------------------------------------- the animations eModel::Render plays
+//
+// eModel::Render (0x0010dc80) sets these up before the strips: a rigid
+// animation moves the model by a matrix a frame, and a vertex animation
+// swaps the model's solid for the frame's. The port's renderer
+// (trackview.c's render_model) calls emodel_setup_animation where Render
+// does. Cross-check: tools/emodelanim_check.py.
+
+// eRigidAnimation::GetMatrixAtTime(bMatrix4 *, int), 0x001a7518: the
+// matrix of frame (time / FrameRateScale) % NumFrames, both signed, from
+// the frames that follow the 48-byte header. No blend between frames.
+void erigidanimation_get_matrix_at_time(const struct eRigidAnimation *a,
+                                        bMatrix4 *out, int32_t time);
+
+// eModel::SetupRigidAnimation(bMatrix4 *), 0x0010dbd0. An animation that
+// has run its course (GetRigidAnimationTime's -1) has its start cleared
+// and draws in `matrix`. Otherwise 64 bytes of eframe_malloc take the
+// frame's matrix times `matrix` (bMulMatrix(out, matrix, out)), and that
+// is what the model draws in. A frame malloc that fails draws in `matrix`.
+bMatrix4 *emodel_setup_rigid_animation(eModel *m, bMatrix4 *matrix);
+
+// eModel::SetupVertexAnimation, 0x0010db70: the solid becomes the frame's
+// one of its vertex animator's, at FrameRate frames a second from the
+// start's low 14 bits: ((WorldTimeFrames - start) * FrameRate / 60) mod
+// NumSolids, signed, then mod again unsigned.
+void emodel_setup_vertex_animation(eModel *m);
+
+// eModel::Render's setup, before DetermineVisibleStrips: for a model with
+// a solid, SetupRigidAnimation when the solid has a rigid animation and
+// the start is not 0, then SetupVertexAnimation when the solid (the one
+// after that) has a vertex animator. The matrix to draw in comes back; a
+// model with no solid gets `matrix` back and Render draws nothing.
+bMatrix4 *emodel_setup_animation(eModel *m, bMatrix4 *matrix);
+
 #endif

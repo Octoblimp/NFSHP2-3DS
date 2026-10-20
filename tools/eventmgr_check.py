@@ -71,7 +71,10 @@ EMC = "3DS Files/source/eventmgr.c"
 FSC = "3DS Files/source/fernshaker.c"
 EMA = "3DS Files/source/emodelanim.c"
 CEV = "3DS Files/source/carevents.c"
-SOURCES = [HARNESS, EMC, FSC, EMA, CEV]
+# emodelanim.c's Render setup, which these scenarios never reach, takes
+# bMulMatrix and the frame malloc's words.
+SOURCES = [HARNESS, EMC, FSC, EMA, CEV, "3DS Files/source/bmatrix.c",
+           "3DS Files/source/eframe.c"]
 
 HARNESS_TIMEOUT = 120
 LIMIT = 20000000

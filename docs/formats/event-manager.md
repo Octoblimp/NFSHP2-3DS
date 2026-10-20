@@ -12,6 +12,7 @@ Retail splits this over four objects:
 | EventManager.obj | `0x001ba078` .. `0x001ba898` | `eventmgr.{c,h}` |
 | FernShaker.obj's FernShaker half | `0x001d9b58` .. `0x001da5d8` | `fernshaker.{c,h}` |
 | eModel's rigid animation timing | `0x0010c8f0`, `0x0010c910`, `0x0010dae8` | `emodelanim.c` (prototypes in `emodel.h`) |
+| eModel::Render's animation setup | `0x0010dc80`, `0x0010dbd0`, `0x0010db70`, `0x001a7518` | `emodelanim.c`, called by `trackview.c`'s render_model |
 | Car::TriggerEvents, Player::TriggerVisibleDrivingLine | `0x001335c0`, `0x00180b78` | `carevents.c` (prototypes in `car.h`) |
 
 `tools/eventmgr_check.py` runs retail's code for all four against the
@@ -250,11 +251,53 @@ SetRigidAnimationFrameNumber(frame) (`0x0010c910`) sets the start to
 `WorldTimeFrames - 2 frame` (low 14 bits) with bit `0x8000` and not
 `0x4000`. It counts two to a frame whatever the scale.
 
+## The animations eModel::Render plays
+
+eModel::Render (`0x0010dc80`) sets up a model's animations before it culls
+and draws the strips (TASKS 76):
+
+1. With no solid it returns.
+2. If the solid has a rigid animation and the start's low 16 bits are not
+   0, SetupRigidAnimation (`0x0010dbd0`) may give it another matrix:
+   - with a time under 0 it clears the start and keeps the matrix;
+   - otherwise it takes 64 bytes of frame memory (inline, as eframe_malloc
+     does), keeping the matrix if there are none;
+   - GetMatrixAtTime (`0x001a7518`) copies the keyframe
+     `time / FrameRateScale % NumFrames` (both signed) from the matrices
+     at the animation's +48, with no blending between keyframes;
+   - and the result is that keyframe times the given matrix
+     (`bMulMatrix(out, matrix, out)`).
+3. If the solid, now perhaps another, has a vertex animator,
+   SetupVertexAnimation (`0x0010db70`) swaps in a frame's solid for good:
+   - `t = (WorldTimeFrames - (start & 0x3fff)) * FrameRate / 60`, the
+     product the EE's 32-bit one and the divide signed;
+   - `m->Solid = SolidTable[(u32)(t % n) % (u32)n]`.
+4. DetermineVisibleStrips gets the matrix the setup returned.
+
+What plays, from the retail bundles:
+
+- the car's wipers, 41, 61 or 36 frames looping, which `carrender.c`
+  starts at WiperOnTime each frame they run;
+- the shaken bush, BUSHSHAKE_A and _B in INGAMEB (30 frames, not
+  looping), which `fernshaker.c` starts and the shrubs name through
+  ExternalRigidAnimationNameHash;
+- the water wheels and turning belts on tracks 12, 13, 15 and 16,
+  XA_PROP_A and _B on 22, 23, 25 and 26, and the windmills' fans on 32,
+  33, 35 and 36, all looping from ReconnectSolid's start;
+- the waving flag, `XF_FLAG_1_00`, on tracks 61 to 66: 15 vertex frames,
+  each a solid, and a 15-frame rigid animation.
+
+The port's renderer draws a solid as georender baked it, so a vertex
+animation's frames are baked when the track is: `trackview_prepare` bakes
+every frame of each model's animator beside the model's own solid.
+
+`frameprof`'s models line counts, per view, the models a rigid animation
+moved ("rigid") and those drawn in a vertex animation's frame ("vertex").
+On Azahar, track 12's view had up to 1 model a frame moved by a rigid
+animation, with 0 bakes failed.
+
 ## What the port leaves out
 
-- **The bush's animation.** No renderer code reads RigidAnimationStartTime,
-  so no rigid animation plays: a shaken bush's WorldObject stands still at
-  the instance's place while its leaves fly. That is TASKS 76.
 - **VisibleDrivingLine**, which retail never shows (above).
 
 ## The check
@@ -292,3 +335,36 @@ makes 134 changes to the four port files: 132 caught, and 2 equivalent:
   gives 29.999998 and the next float 30.000002);
 - `shake-not-floored`: only speeds over 5 get that far, so the shake is
   never below 0.
+
+`emodelanim.c` takes bMulMatrix and the frame malloc's words since TASKS
+76, so the harness links `bmatrix.c` and `eframe.c` too; these scenarios
+never reach the Render setup.
+
+### Render's setup
+
+`tools/emodelanim_check.py` runs eModel::Render as shipped, with the two
+setups, GetRigidAnimationTime, GetMatrixAtTime and bMulMatrix under it.
+Only DetermineVisibleStrips, the renderer's, is stubbed: it records the
+matrix and the solid it is handed and returns 0. The harness
+(`tools/src/emodelanim_test.c`) runs `emodel_setup_animation` and prints
+the same lines: the matrix drawn in (the one passed, or the frame
+malloc's by its offset) and its 16 words, the solid, the start after, and
+the frame malloc's position and failures.
+
+The animations have the shapes retail's do: 30 frames at scale 2 (the
+bushes'), 41 (the wipers'), 120 (the water wheel's), 15 (the flag's), and
+a few at scales 1 and 3. The vertex animators are the flag's 15 solids,
+which share the first's rigid animation as the loader leaves them, one of
+4 and one of a single solid. Every start form runs: 0, a set start inside
+and past its length, a looping one, the flag's `0xc000` with a random low
+byte, and a clock behind the start; and the frame malloc full, one byte
+short, and with room. Ten facts are read from the image: the call sites
+and the frame malloc's and WorldTimeFrames' gp words.
+
+On retail's image: 3113 steps, 1087 lines, 0 differ, and 10 facts right;
+Render reached DetermineVisibleStrips 908 times. The mutation pass makes
+18 changes: 17 caught, and `setup-no-start-check` equivalent (with a
+start of 0, SetupRigidAnimation returns the matrix it was given).
+
+    python tools/emodelanim_check.py
+    python tools/emodelanim_check.py --mutate [--only a,b]

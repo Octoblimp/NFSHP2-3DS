@@ -5071,7 +5071,7 @@ phases.
         A paired literal can be an alignment artefact, so each needs
         reading beside the port's. It comes after TASKS 73.
 
-76. [ ] **Rigid animations: the shaken bush, and the rest.** Found in
+76. [x] **Rigid animations: the shaken bush, and the rest.** Found in
         TASKS 73's sixth slice. An eModel's rigid animation is its
         solid's keyframed transform, timed by RigidAnimationStartTime
         (`emodelanim.c` has retail's timing). Nothing in the port's
@@ -5085,6 +5085,25 @@ phases.
         setup, which `trackview.c`'s render_model skips (it draws each
         solid as georender baked it), then which models on the disc
         carry one. It comes after TASKS 73.
+
+        **Done in Session 145** (the user, 2026-10-20: the checklist's
+        three retail items before the launch, this one first).
+        eModel::Render is `0x0010dc80`, not `0x0010c7c8`. Its setup is
+        ported in `emodelanim.c`: SetupRigidAnimation (`0x0010dbd0`),
+        GetMatrixAtTime (`0x001a7518`) and SetupVertexAnimation
+        (`0x0010db70`), and render_model calls it where Render does, for
+        every view. What plays: the wipers, the shaken bush (BUSHSHAKE_A
+        and _B), the water wheels and belts on tracks 12/13/15/16, the
+        XA_PROP models on 22/23/25/26, the windmills' fans on
+        32/33/35/36, and the waving flag on 61..66 (15 vertex frames,
+        which `trackview_prepare` now bakes with the track).
+        `tools/emodelanim_check.py` runs retail's Render against it: 3113
+        steps, 1087 lines, 0 differ; 18 mutations, 17 caught, 1
+        equivalent. On Azahar, track 12's view drew up to 1 model a
+        frame moved by an animation (frameprof's new "rigid" count),
+        with 0 bakes failed and 30 FPS. The flags stand in zone 7 of
+        tracks 61..66, which neither 40 s run reached, so they are not
+        yet seen moving. Written up in `docs/formats/event-manager.md`.
 
 77. [x] **View Replay says how to leave it.** Asked for on 2026-10-19:
         first B to leave the replay for the menu, then "keep it on START

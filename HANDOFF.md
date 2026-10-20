@@ -28768,3 +28768,50 @@ The launch prep so far, for today's release (the user, 2026-10-20 morning).
 
 Next: the user's go on the release candidate and the GitHub repo's name;
 then the v1.0.0 tag, the push, and TASKS 31 closed.
+
+## Session 145 -- the models' own animations (TASKS 76)
+
+The user, 2026-10-20: no launch yet. The launch checklist's three retail
+items come first, in its order: TASKS 76, then 72h-2c, then 75. The
+release candidate is rebuilt after them, and the tag still waits for the
+user's go and the repo.
+
+- **eModel::Render's setup** (`0x0010dc80`; TASKS said `0x0010c7c8`).
+  Before it culls the strips it:
+  - moves a model whose solid has a rigid animation and a start:
+    SetupRigidAnimation (`0x0010dbd0`) takes 64 bytes of frame memory,
+    GetMatrixAtTime (`0x001a7518`) copies keyframe
+    `t / FrameRateScale % NumFrames` (no blending), and the matrix drawn
+    in is that keyframe times the given one;
+  - swaps in a vertex animation's frame for good: SetupVertexAnimation
+    (`0x0010db70`), `SolidTable[(t * FrameRate / 60) % n]`.
+  `emodelanim.c` has all three and `emodel_setup_animation`;
+  `trackview.c`'s render_model calls it first, for every view and the
+  cars, so the wipers play too. `trackview_prepare` bakes every frame of
+  a vertex animator with the track.
+- **What plays**, from a survey of the retail bundles: the wipers, the
+  shaken bush (BUSHSHAKE_A/B in INGAMEB, started by `fernshaker.c`), the
+  water wheels and belts on tracks 12/13/15/16, XA_PROP_A/B on
+  22/23/25/26, the windmills' fans on 32/33/35/36, and the waving flag
+  (`XF_FLAG_1_00`, 15 vertex frames) on 61..66.
+- **`frameprof`** counts, per view, the models a rigid animation moved
+  and those drawn in a vertex frame ("rigid", "vertex" on the models
+  line).
+- **Checks.**
+  - `tools/emodelanim_check.py` (new, harness
+    `tools/src/emodelanim_test.c`): retail's Render in mipsemu, only
+    DetermineVisibleStrips stubbed. 3113 steps, 1087 lines, 0 differ;
+    10 image facts right; 18 mutations, 17 caught, 1 equivalent.
+  - `eventmgr_check` links `bmatrix.c` and `eframe.c` now: 4 scenarios,
+    1090 ops, 11687 lines, 0 differ.
+  - Azahar, track 12, gas only for 40 s: the view drew up to 1 model a
+    frame moved by an animation, 0 bakes failed, about 30 FPS. Tracks 61
+    and 62: 0 bakes failed with the flag's 15 frames baked, but neither
+    route reached the flags (zone 7, sections 75 and 76, near
+    -1500 -480) in 40 s, so they are not yet seen moving.
+- **New: the car through the ground.** The user was driving the track 62
+  run and went through the ground. The log ends at about 58 s, when the
+  car hit the chevron sign at the corner near -1165 -336 (a 10 ms
+  collision resolve that second), before the fall; it lags a few
+  seconds. Render-only code cannot move the car. It comes next, before
+  72h-2c.

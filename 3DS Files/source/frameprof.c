@@ -97,11 +97,13 @@ static int models_part(const FrameProf *fp, int v, char *buf, size_t n)
 
     return snprintf(buf, n,
                     "%.0f models, %.0f batches at once, %.0f lit, %.0f held, "
-                    "%.0f words (%.0f lit), %.0f indices",
+                    "%.0f words (%.0f lit), %.0f indices, %.1f rigid, "
+                    "%.1f vertex",
                     m[FRAMEPROF_M_MODELS] / f, m[FRAMEPROF_M_NOW] / f,
                     m[FRAMEPROF_M_LIT] / f, m[FRAMEPROF_M_HELD] / f,
                     m[FRAMEPROF_M_WORDS] / f, m[FRAMEPROF_M_LIT_WORDS] / f,
-                    m[FRAMEPROF_M_INDICES] / f);
+                    m[FRAMEPROF_M_INDICES] / f, m[FRAMEPROF_M_RIGID] / f,
+                    m[FRAMEPROF_M_VERTEX] / f);
 }
 
 bool frameprof_line(FrameProf *fp, char *buf, size_t n)
