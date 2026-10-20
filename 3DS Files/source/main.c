@@ -270,6 +270,7 @@
 #include "wheel.h"
 #include "world.h"
 #include "worldobject.h"
+#include "zonecam.h"
 
 // The race's frame rates on the HUD (step 13b-2): Player::DisplayDebugInfo's
 // "C: %dfps" and "G: %dfps", with the car's position and odometer, which
@@ -1337,6 +1338,18 @@ static int32_t sndSampleIsPlaying(struct bSample* s)
 static void sndSamplePlay(struct bSample* s, float volume, float a, float b)
 {
     bsample_play((BSample*)s, volume, a, b);
+}
+static void sndSampleSetAzimuth(struct bSample* s, uint16_t azimuth)
+{
+    bsample_set_azimuth((BSample*)s, azimuth);
+}
+static void sndSampleSetPitch(struct bSample* s, float pitch)
+{
+    bsample_set_pitch((BSample*)s, pitch);
+}
+static void sndSampleSetVolume(struct bSample* s, float volume)
+{
+    bsample_set_volume((BSample*)s, volume);
 }
 static void sndTriggerFinishLine(struct Player* p)
 {
@@ -7978,6 +7991,9 @@ int main(int argc, char** argv)
     gCommonRegionSampleFn     = sndCommonRegionSample;
     gSampleIsPlayingFn        = sndSampleIsPlaying;
     gSamplePlayFn             = sndSamplePlay;
+    gSampleSetAzimuthFn       = sndSampleSetAzimuth;
+    gSampleSetPitchFn         = sndSampleSetPitch;
+    gSampleSetVolumeFn        = sndSampleSetVolume;
     gTriggerFinishLineSoundFn = sndTriggerFinishLine;
     gSpeechClearEventQueueFn  = speechClearEventQueue;
     gSpeechFlushQueueFn        = speechFlushQueue;
@@ -8039,6 +8055,10 @@ int main(int argc, char** argv)
     gPlayerClearZoneFn = player_clear_zone;
     gPlayerJumpCamMoverFn = player_jump_cam_mover;
     gPreviewRouteDeleteFn = preview_route_delete;
+    // The freeze zone's camera (zonecam.c, TASKS 80a). Its radial blur
+    // stays unbound, as the nitro's is (gRadialBlurOnFn).
+    gZoneFreezeCameraMoverFn = zone_freeze_camera_mover_new;
+    gZoneFreezeDurationFn = zone_freeze_camera_mover_duration;
 
     // Player::CleanupAfterRace takes the player's handlers off through
     // SetInputMode(NONE); playerinput.c has it.

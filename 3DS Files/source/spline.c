@@ -3,11 +3,15 @@
 #include "spline.h"
 
 #include <stddef.h>
+#include <string.h>
 
 #include "bmath.h"
 #include "bmem.h"
 #include "eefpu.h"
 #include "replay.h"
+
+// The allocations' file name, as retail's bMalloc gives it.
+#define SPLINE_CPP "..\\indep\\src\\spline.cpp"
 
 // GetControlPoint's answer past either end of an EXTRAPOLATE spline,
 // retail's 0x003341a0.
@@ -28,6 +32,25 @@ Spline *spline_init(Spline *s, SplineType type, int32_t n, bVector3 *points,
     return s;
 }
 
+Spline *spline_init_alloc(Spline *s, SplineType type, int32_t bufSize,
+                          int32_t tableSize)
+{
+    bVector3 *points;
+
+    s->Type = type;
+    s->TableSize = tableSize;
+    s->ControlPointBufferSize = bufSize;
+    s->NumControlPoints = 0;
+    s->Length = 0.0f;
+    s->pCalTable = NULL;
+    s->Dirty = 1;
+    points = (bVector3 *)bMalloc(bufSize * (int)sizeof(bVector3), SPLINE_CPP,
+                                 37, 16);
+    s->pControlPointArray = points;
+    s->pControlPoints = points;
+    return s;
+}
+
 void spline_destroy(Spline *s, int32_t flags)
 {
     if (s->pControlPointArray != NULL)
@@ -36,6 +59,27 @@ void spline_destroy(Spline *s, int32_t flags)
         bFree(s->pCalTable);
     if (flags & 1)
         bFree(s);
+}
+
+void spline_add_control_point(Spline *s, const bVector3 *v)
+{
+    s->Dirty = 1;
+    if (s->NumControlPoints == s->ControlPointBufferSize) {
+        int32_t size = s->NumControlPoints * 2;
+        bVector3 *points;
+
+        s->ControlPointBufferSize = size;
+        points = (bVector3 *)bMalloc(size * (int)sizeof(bVector3),
+                                     SPLINE_CPP, 120, 16);
+        // bMemCpy.
+        memcpy(points, s->pControlPoints,
+               (size_t)s->NumControlPoints * sizeof(bVector3));
+        if (s->pControlPointArray != NULL)
+            bFree(s->pControlPointArray);
+        s->pControlPointArray = points;
+        s->pControlPoints = points;
+    }
+    s->pControlPoints[s->NumControlPoints++] = *v;
 }
 
 // a*k + b, lane by lane, as VU0's vmulx then vadd.
@@ -136,6 +180,23 @@ void spline_get_point(const Spline *s, bVector3 *o, float t)
     c0 = (((u2 + u2) - u3) - u) * 0.5f;
     c1 = ((u3 * 3.0f - u2 * 5.0f) + 2.0f) * 0.5f;
     c2 = ((u2 * 4.0f - u3 * 3.0f) + u) * 0.5f;
+    spline_evaluate(s, o, base, c0, c1, c2, c3);
+}
+
+void spline_get_derivative(const Spline *s, bVector3 *o, float t)
+{
+    float base = (float)ee_trunc_w(t);
+    float u, u2, c0, c1, c2, c3;
+
+    if (t < base)
+        base = base - 1.0f;
+    u = t - base;
+    u2 = u * u;
+    // In the image's order, each weight halved last.
+    c0 = ((u2 * -3.0f + u * 4.0f) - 1.0f) * 0.5f;
+    c1 = (u2 * 9.0f - u * 10.0f) * 0.5f;
+    c2 = ((u2 * -9.0f + u * 8.0f) + 1.0f) * 0.5f;
+    c3 = (u2 * 3.0f - (u + u)) * 0.5f;
     spline_evaluate(s, o, base, c0, c1, c2, c3);
 }
 

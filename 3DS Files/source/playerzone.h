@@ -94,6 +94,12 @@ void player_clear_zone(struct Player *p, int32_t sound);
 // 0x00178470. With SoundEnabled, pZoneSample deleted and cleared.
 void player_clear_zone_sound(struct Player *p);
 
+// 0x001784c0, UpdateZoneSound. With SoundEnabled and a pZoneSample, its
+// azimuth, pitch and volume, and fZoneMuffleVolume `muffle`. The Zone
+// Freeze camera's Update (zonecam.c) calls it every frame.
+void player_update_zone_sound(struct Player *p, float muffle, float volume,
+                              uint16_t azimuth, float pitch);
+
 // 0x00177c80. ClearZone(p, 1), for World's pause and time scale to call
 // when they run out: `param` is the Player, as a word.
 void player_clear_zone_callback(int32_t param);
@@ -160,5 +166,11 @@ extern struct bSample *(*gNewSampleFn)(void);
 extern void (*gSampleInitializeFn)(struct bSample *s, struct bSample *from);
 extern void (*gSampleSetCategoryFn)(struct bSample *s, uint32_t category);
 extern struct bSample *(*gCommonRegionSampleFn)(const char *name);
+
+// bSample::SetAzimuth (0x00273e70), SetPitch (0x00273738) and SetVolume
+// (0x00273d50), which UpdateZoneSound calls. NULL skips them.
+extern void (*gSampleSetAzimuthFn)(struct bSample *s, uint16_t azimuth);
+extern void (*gSampleSetPitchFn)(struct bSample *s, float pitch);
+extern void (*gSampleSetVolumeFn)(struct bSample *s, float volume);
 
 #endif

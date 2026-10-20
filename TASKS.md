@@ -5028,6 +5028,34 @@ phases.
               run at 20 FPS, and the draw is TASKS 46's (this log's
               desert numbers are there).
 
+80. [ ] **The zone cameras: the freeze, the preview, the rest of
+        zonecameras.cpp, and the radial blur.** Found while TASKS 64
+        waited on the device. `playerzone.c` refused zones 1 and 2 as
+        dead buttons because their movers were not ported, so a car
+        hitting a roadblock at over 40 mph (`pursuit.c`) never froze
+        the world as retail does.
+        - [x] **80a, the Zone Freeze camera** (`zonecam.c`): retail's
+              constructor (`0x00160298`), destructor (`0x00161000`),
+              `Duration` (3 s) and `Update` (`0x001610a8`), with
+              `ConstrainToTopology` and `EnsureEyeAboveGround`, which
+              the other zone cameras share. Also new: `Spline`'s
+              allocating constructor, `AddControlPoint` and
+              `GetDerivative` (`spline.c`), `tCubic3D`'s setters
+              (`banim.c`), and `Player::UpdateZoneSound`, which sweeps
+              the wind round the listener (`playerzone.c`). The
+              constructor passes `CM_STILL`, as retail does.
+              `zonecam_check`: 12 scenarios, 1850 ops, 45410 lines, 0
+              differ; 99 mutations, 96 caught, 3 equivalent. Not yet
+              seen on a 3DS. Write-up: `docs/formats/camera.md`, "The
+              Zone Freeze camera".
+        - [ ] **80b, the Zone Preview camera** (type 14) and its three
+              calls (`gZonePreview*Fn`). Zone 2 stays refused until then.
+        - [ ] **80c, the Jumper and Cubic movers**, the rest of
+              zonecameras.cpp.
+        - [ ] **80d, the radial blur** (`RadialBlurOn`, `RadialBlurOff`
+              `0x0010f1b0`, `RadialBlurAlpha` `0x0010f238`), which the
+              nitro shares. Until then the zones are not blurred.
+
 ### The retail frontend
 
 Asked for on 2026-09-28. The user sent seven PCSX2 photos of the retail

@@ -1640,13 +1640,14 @@ clears 6 and 7 when a wheel touches down.
 
 `playerzone.c` has all of this. Some of it stays NULL in `main.c`:
 
-- **The freeze and the preview.** Their movers and calls
-  (`gZoneFreezeCameraMoverFn`, `gZonePreviewCameraMoverFn`,
-  `gZoneFreezeDurationFn` and the three `gZonePreview*Fn`) are NULL.
-  While they are, `RequestZone` refuses zones 1 and 2 before anything
-  changes, as a dead button.
-- **The radial blur and the zone's sound.** `gRadialBlurOn/OffFn` and
-  the sample seams are NULL, so the zones are silent and unblurred.
+- **The freeze** is bound since TASKS 80a: `gZoneFreezeCameraMoverFn`
+  and `gZoneFreezeDurationFn` are `zonecam.c`'s, below.
+- **The preview.** Its mover and calls (`gZonePreviewCameraMoverFn` and
+  the three `gZonePreview*Fn`) are NULL. While they are, `RequestZone`
+  refuses zone 2 before anything changes, as a dead button.
+- **The radial blur.** `gRadialBlurOn/Off/AlphaFn` are NULL, so the
+  zones are not blurred. The zone's sample plays, and the freeze's
+  `Update` sweeps it.
 - **The HUD.** It goes while a zone is up, as `DetermineHudFeatures`
   says (`playerhud.c`).
 
@@ -1881,6 +1882,90 @@ retail's vtable, with the four setters (ops K, k, u, e, l, p, f, g).
 The equivalent one, `st-dtor-vtbl`, drops the destructor's own vtable
 store: the base's destructor writes its vtable straight after, and
 nothing between reads it.
+
+## The Zone Freeze camera
+
+`ZoneFreezeCameraMover` (872 bytes, vtable `0x002b20d0`) is zone 1's
+camera, type 13 to `ChangeCameraMover`. The world stops for its
+`Duration` (`0x00161098`), 3 s, while the camera swings round the car
+and back. The port is `zonecam.c`.
+
+| Offset | Field |
+| --- | --- |
+| +44 | `fTime`, seconds since the freeze |
+| +48 | `fTanFov`, the camera's field of view as a tangent |
+| +52, +56 | the eye's blends in and out (`tCubic3D`, 0.4 s and 0.6 s) |
+| +60, +64 | the look point's |
+| +68 | `pFocusPull` (`tCubic1D`) |
+| +72 | `EyeSpline`, 32 points |
+| +120 | `LookSpline`, 32 points |
+| +168 | `Topology` |
+
+- **The constructor** (`0x00160298`) runs the base's with `CM_STILL`
+  (12), not `CM_ZONE_FREEZE` (13): `GetCameraMoverTypeName`
+  (`0x00157578`) names 12 "CM_STILL". Nothing reads a mover's type back
+  but for `CM_DRIVE` and `CM_BUMPER`, so the port passes 12 as well.
+  Then it lays out the swing:
+  - **The frame.** The car a frame on, its x the way the car goes, flat.
+    That is the velocity above 0.01 m/s. Below it, it is the nose, or
+    the roof turned round when the nose is within 0.001 of straight up.
+  - **The way round.** The camera's eye in that frame, turned round for
+    a camera inside the car (the saved mover's `IsExteriorView`), and
+    the camera's velocity against the car's say which way the eye is
+    going round. The swing goes on that way.
+  - **The points.** 32, from 0.15 of a turn past the eye, over 0.67 of
+    a turn. Each eye is on a circle of 8 at 2 up, pushed out of the
+    walls (`ConstrainToTopology`, `0x0015fd80`, 0.7 off a polygon) and
+    out of the ground (`EnsureEyeAboveGround`, `0x00160048`: an eye
+    within 1 of the ground goes to 1 above it). Each look point is on a
+    circle of 0.1 at 1.2, with the interest box 8.7 about it.
+  - **The blends.** In: from the camera's eye and target, at their
+    speeds against the car's, onto the splines' starts. Out: from the
+    splines' ends back onto the camera's course as it was. The splines'
+    tangents are scaled by 0.4 against their length in points.
+  - **The focus pull** starts at 1, going to 1 over 0.4 s. It never
+    moves off 1, so the eye's distance and the field of view stay as
+    the splines and the camera have them.
+  - Unless `Camera::StopUpdating` is set, the camera draws every car
+    (`CarNotToRender` NULL) and no dash.
+- **`Update`** (`0x001610a8`) does nothing while the game flow is
+  paused. Otherwise `fTime` goes on by `RealTimeElapsed`, then:
+  - before 0.4 s, the blends in, pushed out of the walls, with the
+    radial blur's alpha up at 2.5 a second to 0.84
+  - after 2.4 s, the blends out, the same, with the alpha down over the
+    last 0.6 s and the focus pull aimed at 1 for the rest of the time
+  - between, both splines from their starts at half their length a
+    second
+  - then the focus pull draws the eye in along the line of sight, the
+    field of view is set from it, and the camera takes the look-at
+    matrix
+  - with `SoundEnabled`, `Player::UpdateZoneSound` (`0x001784c0`) moves
+    the wind once round the listener, its pitch up and back down, at
+    the blur's volume
+- **The destructor** (`0x00161000`) turns the radial blur off and frees
+  the blends, the focus pull, the topology and both splines.
+
+### The check
+
+`tools/zonecam_check.py` runs retail's constructor, `Update`, the
+destructor through the vtable, and `Spline`'s allocating constructor,
+`AddControlPoint`, `GetPoint` and `GetDerivative` against the port. The
+topology, `bMalloc`, the radial blur and the zone sound are stubs on
+both sides that print their arguments. The cars move, stand still,
+stand on their tails, or sit at whole heights so the ground test meets
+its bounds exactly.
+
+    python tools/zonecam_check.py           # 12 scenarios, 1850 ops, 45410 lines, 0 differ
+    python tools/zonecam_check.py --mutate  # 99 mutations, 96 caught, 3 equivalent
+
+The equivalent ones:
+
+- `e-hi`: an eye exactly `clearance` above the ground is set to the
+  height it already has.
+- `pt-pad`: `eMulVector3` takes the point's fourth lane as 1, whatever
+  it holds. Retail leaves a stack word there.
+- `der-floor`: at a whole t, the end of one segment and the start of
+  the next weight the same two points by the same halves.
 
 ## Divergences from the disc
 

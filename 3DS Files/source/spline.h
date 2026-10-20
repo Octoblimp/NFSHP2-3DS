@@ -7,10 +7,12 @@
 // shake), built with the constructor that takes the array, and reads them
 // with GetPoint alone. That is what is ported: the constructor over an
 // array (0x00189238), the destructor (0x00189268), GetControlPoint
-// (0x001895c8), Evaluate (0x00189810) and GetPoint (0x00189948).
-// Calibrate, the length and parameter searches, the allocating constructor
-// and AddControlPoint wait for a caller. DoSnapshot (0x001892d8) is here
-// with the replay's, since TASKS 72c, though nothing in retail calls it.
+// (0x001895c8), Evaluate (0x00189810) and GetPoint (0x00189948). The Zone
+// Freeze camera (zonecam.c) builds two of its own as it goes, which brings
+// in the allocating constructor (0x00189198), AddControlPoint (0x00189480)
+// and GetDerivative (0x001899f8). Calibrate and the length and parameter
+// searches wait for a caller. DoSnapshot (0x001892d8) is here with the
+// replay's, since TASKS 72c, though nothing in retail calls it.
 //
 // The arithmetic is VU0's on all four lanes, so a control point's pad lane
 // is carried through to the result's, as it is on the disc.
@@ -56,6 +58,18 @@ typedef struct Spline {
 Spline *spline_init(Spline *s, SplineType type, int32_t n, bVector3 *points,
                     int32_t tableSize);
 
+// 0x00189198. An empty spline with an array of its own, room for `bufSize`
+// control points (bMalloc'd 16-byte aligned, as spline.cpp line 37):
+// Dirty is 1 and the length 0, and CalLevel, CalTableStep and CalTableSize
+// are not written.
+Spline *spline_init_alloc(Spline *s, SplineType type, int32_t bufSize,
+                          int32_t tableSize);
+
+// 0x00189480. Appends a copy of `v`, all four lanes, and sets Dirty. A full
+// array doubles first, into a new block (spline.cpp line 120) that the
+// points are copied to; the old one is freed when it was the spline's own.
+void spline_add_control_point(Spline *s, const bVector3 *v);
+
 // 0x00189268. Frees its own control point array and calibration table,
 // each if it has one; with flags bit 0, the spline as well.
 void spline_destroy(Spline *s, int32_t flags);
@@ -74,6 +88,10 @@ void spline_evaluate(const Spline *s, bVector3 *o, float t, float c0,
 // 0x00189948. The Catmull-Rom weights for u = t - floor(t), then
 // Evaluate at floor(t).
 void spline_get_point(const Spline *s, bVector3 *o, float t);
+
+// 0x001899f8. The Catmull-Rom weights' derivatives in u = t - floor(t),
+// then Evaluate at floor(t): the curve's tangent per unit of t.
+void spline_get_derivative(const Spline *s, bVector3 *o, float t);
 
 // 0x001892d8, a "Spline" section: the buffer size, the count and the type,
 // each control point, Dirty, TableSize, CalLevel, Length, CalTableStep,

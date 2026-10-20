@@ -49,6 +49,9 @@ struct bSample *(*gNewSampleFn)(void);
 void (*gSampleInitializeFn)(struct bSample *s, struct bSample *from);
 void (*gSampleSetCategoryFn)(struct bSample *s, uint32_t category);
 struct bSample *(*gCommonRegionSampleFn)(const char *name);
+void (*gSampleSetAzimuthFn)(struct bSample *s, uint16_t azimuth);
+void (*gSampleSetPitchFn)(struct bSample *s, float pitch);
+void (*gSampleSetVolumeFn)(struct bSample *s, float volume);
 
 // A zone's time limits: how soon one may start again without force, and
 // with it, after the last freeze or preview. Timer ticks are 0.00025 s.
@@ -506,6 +509,20 @@ void player_clear_zone_sound(struct Player *p)
         delete_zone_sample(p);
         p->pZoneSample = NULL;
     }
+}
+
+void player_update_zone_sound(struct Player *p, float muffle, float volume,
+                              uint16_t azimuth, float pitch)
+{
+    if (!SoundEnabled || p->pZoneSample == NULL)
+        return;
+    if (gSampleSetAzimuthFn != NULL)
+        gSampleSetAzimuthFn(p->pZoneSample, azimuth);
+    if (gSampleSetPitchFn != NULL)
+        gSampleSetPitchFn(p->pZoneSample, pitch);
+    if (gSampleSetVolumeFn != NULL)
+        gSampleSetVolumeFn(p->pZoneSample, volume);
+    p->fZoneMuffleVolume = muffle;
 }
 
 void player_clear_zone_callback(int32_t param)

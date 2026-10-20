@@ -223,6 +223,59 @@ void bspline2d_seek(BSpline2D* s, float dt)
     bspline_seek(&s->y, dt);
 }
 
+// --------------------------------------------------------------- tCubic3D
+
+void bspline3d_set_val(BSpline3D* s, const bVector3* v)
+{
+    s->x.val = v->x;
+    if (v->x != s->x.valDesired) s->x.state = 2;
+    s->y.val = v->y;
+    if (v->y != s->y.valDesired) s->y.state = 2;
+    s->z.val = v->z;
+    if (v->z != s->z.valDesired) s->z.state = 2;
+}
+
+void bspline3d_set_dval(BSpline3D* s, const bVector3* v)
+{
+    s->x.dval = v->x;
+    if (v->x != s->x.dvalDesired) s->x.state = 2;
+    s->y.dval = v->y;
+    if (v->y != s->y.dvalDesired) s->y.state = 2;
+    s->z.dval = v->z;
+    if (v->z != s->z.dvalDesired) s->z.state = 2;
+}
+
+void bspline3d_set_val_desired(BSpline3D* s, const bVector3* v)
+{
+    s->x.valDesired = v->x;
+    if (v->x != s->x.val) s->x.state = 2;
+    s->y.valDesired = v->y;
+    if (v->y != s->y.val) s->y.state = 2;
+    s->z.valDesired = v->z;
+    if (v->z != s->z.val) s->z.state = 2;
+}
+
+void bspline3d_set_dval_desired(BSpline3D* s, const bVector3* v)
+{
+    s->x.dvalDesired = v->x;
+    s->y.dvalDesired = v->y;
+    s->z.dvalDesired = v->z;
+}
+
+void bspline3d_get_val(const BSpline3D* s, bVector3* out)
+{
+    out->x = s->x.val;
+    out->y = s->y.val;
+    out->z = s->z.val;
+}
+
+void bspline3d_seek(BSpline3D* s, float dt)
+{
+    bspline_seek(&s->x, dt);
+    bspline_seek(&s->y, dt);
+    bspline_seek(&s->z, dt);
+}
+
 // ---------------------------------------------------------- AnimationGroup
 
 void banim_group_init(BAnim* a, BAnimGroup* g, uint32_t screen,

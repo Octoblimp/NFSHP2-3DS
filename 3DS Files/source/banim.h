@@ -209,6 +209,29 @@ void bspline2d_get_val(const BSpline2D* s, bVector2* out);
 void bspline2d_get_dval(const BSpline2D* s, bVector2* out);
 void bspline2d_seek(BSpline2D* s, float dt);
 
+// ------------------------------------------------------------- tCubic3D
+
+// Three tCubic1Ds, x at 0, y at 48 and z at 96: 144 bytes in the original.
+// The Zone Freeze camera's four (zonecam.c) are its users. Retail's
+// addresses: SetVal 0x001dabf8, SetdVal 0x001dac68, SetValDesired
+// 0x001dacd8, SetdValDesired 0x001dad48, GetVal 0x001dada8 and
+// cPoint::SplineSeek(tCubic3D *, float) 0x001db058. The setters are the
+// tCubic2D's with a third lane; SetdValDesired stores and marks nothing.
+// GetVal writes x, y and z, not the fourth lane. The seek is bspline_seek
+// on x, y and z.
+typedef struct BSpline3D {
+    BSpline x;
+    BSpline y;
+    BSpline z;
+} BSpline3D;
+
+void bspline3d_set_val(BSpline3D* s, const bVector3* v);
+void bspline3d_set_dval(BSpline3D* s, const bVector3* v);
+void bspline3d_set_val_desired(BSpline3D* s, const bVector3* v);
+void bspline3d_set_dval_desired(BSpline3D* s, const bVector3* v);
+void bspline3d_get_val(const BSpline3D* s, bVector3* out);
+void bspline3d_seek(BSpline3D* s, float dt);
+
 // ---------------------------------------------------------- AnimationGroup
 
 typedef struct BAnimGroup {
