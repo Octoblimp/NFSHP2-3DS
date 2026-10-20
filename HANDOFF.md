@@ -28640,3 +28640,18 @@ back and drops in behind the car.
 
 Next: 80c (the Jumper and Cubic movers), then TASKS 50 and the easter
 eggs, then the launch prep.
+
+## Session 142, continued -- the rest of the zone cameras (TASKS 80c)
+
+80c needs no code. The zone jumpers (types 15 and 16) were already ported
+as `TrackCarCameraMover`s. Retail never builds `CubicCameraMover` (type
+17): the callers of ChangeCameraMover pass constants (0, 1, 13 to 16),
+and the debug camera's cycles at `0x002b3c60` and `0x002b3c70` hold
+`{0, 4, 2}` and `{1, 4, 2, 3}`. A scan of the image finds no other
+reference to its constructor, and its destructor and Update only in its
+vtable; `DumpCubic` and `ConstrainCubic` have none at all. So TASKS 80
+is done, and `gCubicCameraMoverFn` stays NULL (noted in `playercam.h`,
+`zonecam.h` and camera.md).
+
+Next: TASKS 50, the cheat codes and the easter eggs, then the launch
+prep.

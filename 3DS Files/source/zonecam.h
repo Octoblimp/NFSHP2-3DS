@@ -17,7 +17,9 @@
 // functions they share with the other zone cameras, ConstrainToTopology
 // (0x0015fd80) and EnsureEyeAboveGround (0x00160048). The vtable is
 // 0x002b20d0: the base's but for the destructor and Update. The Zone
-// Preview, Jumper and Cubic movers in the same file are still to come.
+// Preview is zonepreview.c's, and the zone jumpers are TrackCarCameraMovers
+// (playercam.c). The file's other two, DumpCubic (0x0015fd78) and
+// ConstrainCubic (0x001600d8), have no caller in retail and are not ported.
 //
 // Written up in docs/formats/camera.md, "The Zone Freeze camera"; checked
 // on retail's image by tools/zonecam_check.py.

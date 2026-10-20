@@ -1223,6 +1223,15 @@ The zone preview takes the player's `pRoute`. Once the preview is built,
 the route is deleted (`PreviewRoute`'s destructor, flag 3) if there is
 one, and `pRoute` is cleared.
 
+Type 17 is never asked for. Every other caller of ChangeCameraMover
+passes a constant (0, 1 or 13 to 16), and the debug camera's two cycles,
+`0x002b3c60` and `0x002b3c70`, hold `{0, 4, 2}` and `{1, 4, 2, 3}`.
+`CubicCameraMover`'s constructor has no other reference, and its
+destructor and `Update` are reached only from its vtable, so the port
+leaves `gCubicCameraMoverFn` NULL. The same goes for zonecameras.cpp's
+`DumpCubic` (`0x0015fd78`) and `ConstrainCubic` (`0x001600d8`), which
+nothing calls or points at.
+
 The zone jumpers are two paths, 15 at `0x00176ddc` and 16 at
 `0x00177200`:
 

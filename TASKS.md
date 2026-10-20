@@ -5107,7 +5107,7 @@ phases.
               run at 20 FPS, and the draw is TASKS 46's (this log's
               desert numbers are there).
 
-80. [ ] **The zone cameras: the freeze, the preview, the rest of
+80. [x] **The zone cameras: the freeze, the preview, the rest of
         zonecameras.cpp, and the radial blur.** Found while TASKS 64
         waited on the device. `playerzone.c` refused zones 1 and 2 as
         dead buttons because their movers were not ported, so the
@@ -5155,8 +5155,18 @@ phases.
               the 3DS. Write-ups: `docs/formats/camera.md`, "The Zone
               Preview camera", and `preview-splines.md`,
               `preview-stops.md` and `preview-comet.md`.
-        - [ ] **80c, the Jumper and Cubic movers**, the rest of
-              zonecameras.cpp.
+        - [x] **80c, the Jumper and Cubic movers**, the rest of
+              zonecameras.cpp. Nothing left to port. The zone jumpers
+              (types 15 and 16) were already in, as
+              `TrackCarCameraMover`s (`playercam.c`). `CubicCameraMover`
+              (type 17) is never built in retail: ChangeCameraMover's
+              other callers pass constants, and the debug camera's two
+              cycles (`0x002b3c60`, `0x002b3c70`) hold types 0 to 4;
+              its constructor has no other reference, and its destructor
+              and Update only the vtable. `DumpCubic` and
+              `ConstrainCubic` have no reference at all. So
+              `gCubicCameraMoverFn` stays NULL. Written up in
+              `docs/formats/camera.md`, "The player's cameras".
         - [x] **80d, the radial blur** (`radialblur.c`), which the
               nitro, the zones and the replays share: retail's
               `GetPlayerView`, the view's on and off, `RadialBlurOn`,

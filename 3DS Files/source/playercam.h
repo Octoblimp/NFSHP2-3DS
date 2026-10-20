@@ -113,6 +113,9 @@ extern CameraMover *(*gZoneFreezeCameraMoverFn)(       // 872, 0x00160298
     void *mem, int viewID, struct Car *car, CameraMover *saved);
 extern CameraMover *(*gZonePreviewCameraMoverFn)(      // 1104, 0x00161f98
     void *mem, int viewID, struct PreviewRoute *route, bVector3 *pos);
+// Nothing in retail asks for type 17: ChangeCameraMover's other callers
+// pass constants, and the debug camera's cycles (0x002b3c60, 0x002b3c70)
+// hold types 0 to 4. So this one stays NULL (TASKS 80c).
 extern CameraMover *(*gCubicCameraMoverFn)(            // 160, 0x0015e7b0
     void *mem, int viewID, struct Car *car);
 
