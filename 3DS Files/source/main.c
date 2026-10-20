@@ -8658,14 +8658,15 @@ int main(int argc, char** argv)
     gMunitionEffectsDoTimestepFn  = munition_effects_do_timestep;
     // The skid marks (TASKS 78): the sets and the 64 m clans that keep
     // them, made and closed with the world and flushed by its snapshot; a
-    // wheel's destructor finishes its maker's set (skids.h). Nothing lays
-    // a skid until MaybeMakeSkids, 78b.
+    // wheel's destructor finishes its maker's set (skids.h). Each mover
+    // lays them through MaybeMakeSkids once a frame a wheel (78b).
     gInitClansFn                  = init_clans;
     gInitSkidsFn                  = init_skids;
     gCloseClansFn                 = close_clans;
     gCloseSkidsFn                 = close_skids;
     gFlushClansFn                 = flush_clans;
     gSkidSetFinishedAddingFn      = skidset_finished_adding_seam;
+    gWheelMaybeMakeSkidsFn        = skids_maybe_make_skids;
     // The race's cop drivers each get a car, in limbo -- unseen, parked,
     // not colliding -- until a radar trap or a roadblock calls it out
     // (copmgr.h).

@@ -288,8 +288,11 @@ static void *topology_of(void *carState)
 
 // Wheel::MaybeMakeSkids is the skid renderer's; the model's stub logs the
 // same line.
-static void fake_skids(Wheel *w, float dt)
+static void fake_skids(Wheel *w, struct Car *car, float dt)
 {
+    // The demo's MaybeMakeSkids took no car, so the model has none to
+    // print.
+    (void)car;
     printf("skids %s dt=%08x\n", label(w), bf(dt));
 }
 

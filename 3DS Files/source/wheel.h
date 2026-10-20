@@ -339,11 +339,14 @@ extern TerrainRoadNoiseFn     gTerrainRoadNoiseFn;
 typedef void *(*WheelTopologyOfCarStateFn)(void *carState);
 extern WheelTopologyOfCarStateFn gWheelTopologyOfCarStateFn;
 
-// 0x0019b2d0, MaybeMakeSkids(float). Unlike MaybeMakeSmoke it still has a
-// body -- MakeSkid and MakeNoSkid on the SkidMaker at +384 -- and the skid
-// trail is task 27's, so wheel_maybe_make_skids hands the wheel and the
-// time step to this. NULL makes no skids.
-typedef void (*WheelMaybeMakeSkidsFn)(Wheel *w, float dt);
+// Retail's 0x001a5520 (the demo's 0x0019b2d0), MaybeMakeSkids. Unlike
+// MaybeMakeSmoke it still has a body -- MakeSkid and MakeNoSkid on the
+// SkidMaker at +384 -- and the skid marks are skids.c's, so
+// wheel_maybe_make_skids hands the wheel, the mover's car and the time
+// step to this; main.c points it at skids_maybe_make_skids (TASKS 78b).
+// NULL makes no skids.
+struct Car;
+typedef void (*WheelMaybeMakeSkidsFn)(Wheel *w, struct Car *car, float dt);
 extern WheelMaybeMakeSkidsFn gWheelMaybeMakeSkidsFn;
 
 struct ReplaySnapshot;
@@ -426,9 +429,10 @@ bVector3 *wheel_get_horizontal_ground_force_car(Wheel *w, bVector3 *out);
 void wheel_maybe_make_smoke(Wheel *w, float v);
 void wheel_maybe_make_tire_spew(Wheel *w, float v);
 
-// 0x0019b2d0. Through gWheelMaybeMakeSkidsFn, above. PhysicsCar::Move
-// calls it for each wheel once a frame when the car's visual effects are on.
-void wheel_maybe_make_skids(Wheel *w, float dt);
+// 0x001a5520. Through gWheelMaybeMakeSkidsFn, above. PhysicsCar::Move,
+// BeltMover::Move and MellowMover's UpdateCar call it for each wheel once
+// a frame when the car's visual effects are on, with the mover's car.
+void wheel_maybe_make_skids(Wheel *w, struct Car *car, float dt);
 
 // 0x0019b230. A free function in this object file, not bVector.obj's:
 // out = M-transpose * v, the rotate-into-local-frame of a 3x3.

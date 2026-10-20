@@ -4919,9 +4919,14 @@ phases.
               own code: 5839 ops, 0 differ, 118 of 122 mutations
               caught and 4 equivalent. Write-up:
               `docs/formats/skids.md`.
-        - [ ] **78b, MaybeMakeSkids**, with the Car, filling
-              gWheelMaybeMakeSkidsFn. Retail's code is read (see
-              HANDOFF, the 78b entry); the port is not started.
+        - [x] **78b, MaybeMakeSkids** (`skids_maybe_make_skids` in
+              `skids.c`, retail's `0x001a5520`): the three movers pass
+              their car through `gWheelMaybeMakeSkidsFn`, which main.c
+              fills, so sliding wheels lay skid sets in the race now.
+              Nothing draws them until 78c. `skids_check` runs
+              retail's MaybeMakeSkids too: 8654 ops, 0 differ, all 47
+              new mutations caught (165 of 169 caught and 4 equivalent in all).
+              Write-up: `docs/formats/skids.md`.
         - [ ] **78c, the drawing**: SkidSet::Render, RenderSkids
               and RenderClans after StuffSun.
 

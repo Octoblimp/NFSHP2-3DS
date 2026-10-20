@@ -1534,6 +1534,12 @@ class Model(object):
         em.set_f(0, f32(f32(f32(0.25) * t) + f32(f32(0.001) * x)))
 
     def skids(self, em):
+        # Retail's passes the mover's car in a1; the demo's took none.
+        if self.retail:
+            self.say("skids %s car=%s dt=%08x" % (
+                self.label(em.reg[4] & M32), self.label(em.reg[5] & M32),
+                em.fpr[12] & M32))
+            return
         self.say("skids %s dt=%08x" % (self.label(em.reg[4] & M32),
                                        em.fpr[12] & M32))
 
@@ -3360,8 +3366,8 @@ MUTATIONS = [
      "    if (car_should_visual_effects_be_generated(pc->pCar))" + NL,
      "    if (1)" + NL),
     ("mv-skids-step", PCC,
-     "            wheel_maybe_make_skids(pc->pWheel[i], dt);",
-     "            wheel_maybe_make_skids(pc->pWheel[i], step);"),
+     "            wheel_maybe_make_skids(pc->pWheel[i], pc->pCar, dt);",
+     "            wheel_maybe_make_skids(pc->pWheel[i], pc->pCar, step);"),
     ("mv-returns-step", PCC,
      "    (void)bGetTickerDifference(t0, bGetTicker());" + NL + "    return dt;",
      "    (void)bGetTickerDifference(t0, bGetTicker());" + NL + "    return step;"),

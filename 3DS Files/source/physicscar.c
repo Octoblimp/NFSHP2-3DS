@@ -1188,7 +1188,7 @@ float physicscar_move(PhysicsCar *pc, float dt)
     physicscar_update_car(pc, dt);
     if (car_should_visual_effects_be_generated(pc->pCar))
         for (i = 0; i < 4; i++)
-            wheel_maybe_make_skids(pc->pWheel[i], dt);
+            wheel_maybe_make_skids(pc->pWheel[i], pc->pCar, dt);
 
     (void)bGetTickerDifference(t0, bGetTicker());
     return dt;

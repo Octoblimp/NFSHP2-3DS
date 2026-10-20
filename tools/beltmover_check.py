@@ -990,7 +990,9 @@ class Model(object):
                          arg(3) & 0xffff, fx(e.fpr[14])))
 
         def skids(em):
-            self.emit("  skids %s %s" % (self.label(arg(0)), fx(e.fpr[12])))
+            self.emit("  skids %s %s %s" % (self.label(arg(0)),
+                                          self.label(arg(1)),
+                                          fx(e.fpr[12])))
 
         def resample(em):
             self.emit("  resample %s %s" % (self.label(arg(0)),
@@ -1717,8 +1719,12 @@ MUTATIONS = [
     ("mv-vfx-le", BMC, "           < 200.0f)", "           <= 200.0f)"),
     ("mv-vfx", BMC, "    if (car_should_visual_effects_be_generated(m->pCar)\n        && ",
      "    if ("),
-    ("mv-skids-dt", BMC, "            wheel_maybe_make_skids(m->pWheels[i], dt);",
-     "            wheel_maybe_make_skids(m->pWheels[i], m->fTime);"),
+    ("mv-skids-dt", BMC,
+     "            wheel_maybe_make_skids(m->pWheels[i], m->pCar, dt);",
+     "            wheel_maybe_make_skids(m->pWheels[i], m->pCar, m->fTime);"),
+    ("mv-skids-no-car", BMC,
+     "            wheel_maybe_make_skids(m->pWheels[i], m->pCar, dt);",
+     "            wheel_maybe_make_skids(m->pWheels[i], NULL, dt);"),
     ("mv-rpm", BMC, "    car_compute_fake_rpm(m->pCar);\n", ""),
     ("mv-ret", BMC, "    car_compute_fake_rpm(m->pCar);\n    return dt;",
      "    car_compute_fake_rpm(m->pCar);\n    return 0.0f;"),

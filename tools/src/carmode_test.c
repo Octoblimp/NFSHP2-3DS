@@ -523,8 +523,10 @@ static void *topology_of(void *carState)
     return ((CarState *)carState)->pTopologyCoordinate;
 }
 
-static void fake_skids(Wheel *w, float dt)
+static void fake_skids(Wheel *w, struct Car *car, float dt)
 {
+    // The model is the demo's image, whose MaybeMakeSkids took no car.
+    (void)car;
     printf("skids %s dt=%08x\n", label(w), bf(dt));
 }
 

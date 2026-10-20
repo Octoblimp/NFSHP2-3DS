@@ -290,8 +290,9 @@ brake-stand's lurch; each section below says how.
 12. **The sub-steps**, below.
 13. The dyno's three display timers count down by WorldTimeElapsed while
     they are positive and the dyno is on. Then **UpdateCar(dt)**, and
-    MaybeMakeSkids(dt) on every wheel if the car's visual effects are
-    generated (it is rendering, not poofed, and not traffic).
+    MaybeMakeSkids(pCar, dt) on every wheel if the car's visual effects
+    are generated (it is rendering, not poofed, and not traffic). Retail
+    passes `pCar` (`lw a1,84(s3)`); the demo's took `dt` alone.
 
 ### The burn-out
 
@@ -458,7 +459,8 @@ field of every object the car owns.
 The dump is generated from the port's headers, and every offset is checked
 against the mdebug record before anything runs. The terrain, the allocator
 and the ticker are stubbed identically on both sides, and so are the skids
-(MaybeMakeSkids logs its wheel and dt). The race is a zeroed block whose
+(MaybeMakeSkids logs its wheel and dt, and on a retail model, as
+mellowmover_check's, the car). The race is a zeroed block whose
 first word is the stage, and the driver a RealDriver so Move can read its
 Port. The joystick table and BodyDamage are the ported ones, checked
 directly. The model zeroes the image's uninitialised words (the table

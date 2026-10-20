@@ -9,10 +9,10 @@ Ported to `3DS Files/source/skids.{c,h}`. Cross-checked by
 
 TASKS 78 comes in three slices:
 
-- **78a** (this write-up): the sets, the clans, the pools and lists, and
-  the world's calls into them.
+- **78a**: the sets, the clans, the pools and lists, and the world's
+  calls into them.
 - **78b**: `Wheel::MaybeMakeSkids`, which decides when a wheel slides and
-  gives its `SkidMaker` the point.
+  gives its `SkidMaker` the point (below, "MaybeMakeSkids").
 - **78c**: the drawing, `SkidSet::Render`, `RenderSkids` and
   `RenderClans`.
 
@@ -142,9 +142,64 @@ The seams were there before this slice, empty; `main.c` fills them:
 | `gCloseClansFn`, `gCloseSkidsFn` | World's destructor | `close_clans`, `close_skids` |
 | `gFlushClansFn` | `World::DoSnapshot` (`worldsnap.c`) | `flush_clans` |
 | `gSkidSetFinishedAddingFn` | `~Wheel`'s SkidMaker (`physcomp.c`) | `skidset_finished_adding_seam` |
+| `gWheelMaybeMakeSkidsFn` (78b) | `wheel_maybe_make_skids` (`wheel.c`), from each mover | `skids_maybe_make_skids` |
 
-Nothing makes a skid until 78b fills `gWheelMaybeMakeSkidsFn`, and nothing
-is drawn until 78c.
+Nothing is drawn until 78c.
+
+## MaybeMakeSkids
+
+Retail's `Wheel::MaybeMakeSkids` is at `0x001a5520` (the demo's,
+`0x0019b2d0`, took the time step alone). Its callers are PhysicsCar::Move
+(`0x00138c84`), BeltMover::Move (`0x0020533c`) and MellowMover's
+UpdateCar (`0x00219cb4`). Each passes the wheel in `a0`, the mover's car
+in `a1` (`lw a1,84(s3)`, `lw a1,8(s2)` and `lw a1,44(s1)`, the same car
+whose ShouldVisualEffectsBeGenerated gated the loop) and the step in
+`f12`, which the function never reads. It is Wheel.obj's, but the port
+writes it in `skids.c`, beside the makers it feeds, as
+`skids_maybe_make_skids(Wheel *, Car *, float)`, and wheel.c reaches it
+through the `gWheelMaybeMakeSkidsFn` seam. This keeps the skid pools out
+of every checker that links wheel.c.
+
+The wheel's fields are at retail's offsets: WI 12, CS 24, WorldMatrix
+112 (the place is its row 3, at 160), Velocity 240, Terrain 336,
+Slipping 340, TouchingGround 341, ZForce 344, TractionUsage 360, and the
+SkidMaker at 384. WheelInfo's Width is at 16 and WheelNumber at 20. The
+car's BlownTireBits is at 2124 in retail's Car (the port's field).
+
+1. **Hard**: `8 < ZForce * TractionUsage`.
+2. **Blown**: the car's BlownTireBits read with `lb`, so it is a signed
+   byte, shifted right by WheelNumber (`srav`), bit 0.
+3. A skid needs `(Slipping || hard) && TouchingGround && !blown` and the
+   speed in the plane, `sqrt(vx*vx + vy*vy)`, over 1. Otherwise
+   **MakeNoSkid** on the wheel's maker, and return.
+4. **Across** is `(-vy, vx, 0)`, made a unit vector on VU0: the squared
+   length `(x*x + y*y) + z*z`, then `vrsqrt` and a broadcast multiply
+   (`ee_div(1, sqrtf)` in the port). Its fourth word is the stack's,
+   multiplied along. Nothing reads it.
+5. **Ahead** is `bRotateVector(WorldMatrix, (0, 1, 0))` (`0x001a5488`),
+   and `d = |ahead . across|`: 0 when the wheel rolls straight, 1 when it
+   goes broadside.
+6. **The half-width** is `Width * SkidWidthMultiplier[Terrain]`, times
+   `max(d, 0.5)` (a NaN `d` stays NaN), times 0.5. `bNormalize`
+   (`0x00258958`, the port's `bNormalize3To`) scales Across to it. The
+   terrain record is read straight from `TerrainTypeInfoTable` (0x00318c00,
+   144 bytes each), not through Wheel's table pointer.
+7. **The edges**, A = place + Across and B = place - Across, as whole
+   quads. Each height comes from `GetElevation(CS->pTopologyCoordinate,
+   edge, NULL, NULL, NULL)`, which is `gTopologyGetElevationFn` in the
+   port. With no seam the height is 0.
+8. **The point** is `(place.x, place.y, (hA + hB) * 0.5)`. Its fourth
+   word is the stack's. Across.z becomes `hA * 0.5 - hB * 0.5`, and
+   Across is scaled to the half-width again.
+9. **The intensity** is `d`, times 1/3 (gp-29264, `0x3eaaaaab`) when the
+   wheel is not Slipping, so only pressing. It is 0 on a puddle (terrain
+   4). On any other terrain it is raised to at least 0.3 (gp-29260,
+   `0x3e99999a`).
+10. **MakeSkid** on the wheel's maker with the car, the point, Across as
+    the half-width, the wheel's Terrain and the intensity.
+
+MakeSkid then drops the point when it is over 4 m from the car's
+GeometryPosition, as above.
 
 ## The check
 
@@ -152,8 +207,14 @@ is drawn until 78c.
 (`retail_model.RetailEmu`, IEEE rounding and the EE's division by zero)
 and the port's in the host harness. Both sides stub the slot pools (lowest
 free slot first, `0xcd` or cleared by the pool's flags), bPNode's nodes
-and `GetTextureInfo`, each printing what it is given. `bStringHash`, the
-bounding box functions and the list destructors run as shipped. After
+and `GetTextureInfo`, and for MaybeMakeSkids `GetElevation`, which
+answers the two heights the op gives in turn. Each stub prints what it is
+given. `bStringHash`, the bounding box functions, the list destructors,
+`bRotateVector` and `bNormalize` run as shipped. The harness has its own
+copy of wheel.c's `bRotateVector`, because it does not link wheel.c;
+wheel_check holds wheel.c's copy to the image. The four wheels sit at
+retail's offsets on the model side, with their WheelInfos and CarStates,
+and the cars' blown tires at 2124. After
 every op both sides hash the whole state -- each maker's set, the pools,
 SkidSetList in order with every set and segment, ClanList in order with
 every clan and its sets, the textures and the switches -- and print it
@@ -176,14 +237,27 @@ The script:
   evicted ones, and a found clan's stamp.
 - **set pool**: 150 short legs in one square against the 128 sets.
 - **flush**: `FlushClans`, closing twice, reopening.
+- **wheels** (78b): MaybeMakeSkids' gates one at a time, each on its
+  edge: ZForce * TractionUsage at 8 and just past it, and both signs;
+  off the ground; speeds of 1 and just over; this wheel's blown bit,
+  another's, and the top bit under the signed shift. Then a wheel rolling
+  straight while pressing, a drift to broadside and back on tilted
+  ground, every terrain at 45 degrees, pitch and roll, edges far apart in
+  height, no width, and four wheels on two cars.
+- **wheel random**: 300 steps of two cars sliding about, each step both
+  of a car's wheels, with odd grip, a few blown tires and the ground's
+  height under each edge.
 - **random**: 1500 ops of four cars driving with eight makers, odd
   steps, turns, terrains, views and the occasional flush and delete.
 
-On retail's image: 5839 ops, 2653 skids, 1329 sets and 74 clans made,
-39503 lines, 0 differ. Every instruction of the 78a functions runs but
-GetEndPoints (78c's) and the destructors' paths with bit 0 of the flags
-clear, which no caller takes. The mutation pass (`--mutate`) makes 122
-changes to `skids.c`: 118 caught, and 4 equivalent:
+On retail's image: 8654 ops, 56726 lines, 0 differ. 761 of the ops are
+MaybeMakeSkids calls, and 593 of those lay a skid. Before 78b the same
+run without the wheels was 5839 ops, 2653 skids, 1329 sets and 74 clans
+made. Every instruction of the 78a functions runs but GetEndPoints
+(78c's) and the destructors' paths with bit 0 of the flags clear, which
+no caller takes. The mutation pass (`--mutate`) makes 169 changes to
+`skids.c`, 47 of them in MaybeMakeSkids: 165 caught (all 47 of those),
+and 4 equivalent:
 
 - `ct-centre`: the constructor ends in AddSegment, which sets the centre
   from the box whatever it was;

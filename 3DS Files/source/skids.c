@@ -26,6 +26,11 @@ static const float SkidTurnLimit      = 0.2f;
 static const float SkidStraightLimit  = 0.002f;
 static const float SkidIntensityScale = 1.0f / 255.0f;
 
+// MaybeMakeSkids' two, gp-29264 and gp-29260 (0x3eaaaaab and 0x3e99999a):
+// a pressing wheel's share of the intensity, and the least intensity.
+static const float SkidPressOnly      = 1.0f / 3.0f;
+static const float SkidMinIntensity   = 0.3f;
+
 static void add_head(bNode *list, bNode *n)
 {
     bNode *head = list->next;
@@ -295,6 +300,87 @@ void skidmaker_make_no_skid(SkidMaker *m)
 {
     if (m->pSkidSet != NULL)
         skidset_finished_adding_skids((SkidSet *)m->pSkidSet);
+}
+
+// The two edges' heights. GetElevation is passed no terrain, no normal
+// and no bool; with no topology system the ground is at 0.
+static float edge_height(const Wheel *w, const bVector3 *pos)
+{
+    if (gTopologyGetElevationFn == NULL)
+        return 0.0f;
+    return gTopologyGetElevationFn(
+        ((const CarState *)w->CS)->pTopologyCoordinate, pos, NULL, NULL);
+}
+
+void skids_maybe_make_skids(Wheel *w, Car *car, float dt)
+{
+    static const bVector3 ahead = { 0.0f, 1.0f, 0.0f, 0.0f };
+    const bVector4 *place = &w->WorldMatrix.v3;
+    bVector3        across, fwd, a, b, point;
+    float           len2, q, d, wide, half, ha, hb, intensity;
+    int32_t         hard, blown;
+
+    (void)dt;
+    hard = 8.0f < w->ZForce * w->TractionUsage;
+    // lb and srav: the bits as a signed byte.
+    blown = ((int32_t)(int8_t)car->BlownTireBits >> w->WI->WheelNumber) & 1;
+    if (!(w->Slipping || hard) || !w->TouchingGround || blown
+        || !(1.0f < sqrtf(w->Velocity.x * w->Velocity.x
+                          + w->Velocity.y * w->Velocity.y))) {
+        skidmaker_make_no_skid(&w->TheSkidMaker);
+        return;
+    }
+
+    // Across the wheel's way in the plane, as a unit vector: vrsqrt.
+    across.x = -w->Velocity.y;
+    across.y = w->Velocity.x;
+    across.z = 0.0f;
+    across.pad = 0.0f;
+    len2 = (across.x * across.x + across.y * across.y) + across.z * across.z;
+    q = ee_div(1.0f, sqrtf(len2));
+    across.x *= q;
+    across.y *= q;
+    across.z *= q;
+
+    // How much the wheel slides sideways: 0 rolling straight, 1 broadside.
+    bRotateVector(&fwd, &w->WorldMatrix, &ahead);
+    d = fabsf((fwd.x * across.x + fwd.y * across.y) + fwd.z * across.z);
+
+    wide = d;
+    if (d < 0.5f)
+        wide = 0.5f;
+    half = w->WI->Width * TerrainTypeInfoTable[w->Terrain].SkidWidthMultiplier;
+    half = half * wide;
+    half = half * 0.5f;
+    bNormalize3To(&across, &across, half);
+
+    // The two edges, on the ground under each.
+    a.x = place->x + across.x;
+    a.y = place->y + across.y;
+    a.z = place->z + across.z;
+    a.pad = place->w + across.pad;
+    b.x = place->x - across.x;
+    b.y = place->y - across.y;
+    b.z = place->z - across.z;
+    b.pad = place->w - across.pad;
+    ha = edge_height(w, &a);
+    hb = edge_height(w, &b);
+    point.x = place->x;
+    point.y = place->y;
+    point.z = (ha + hb) * 0.5f;
+    point.pad = 0.0f;
+    across.z = ha * 0.5f - hb * 0.5f;
+    bNormalize3To(&across, &across, half);
+
+    intensity = d;
+    if (!w->Slipping)
+        intensity = intensity * SkidPressOnly;
+    if (w->Terrain == TERRAIN_TYPE_PUDDLE)
+        intensity = 0.0f;
+    else if (intensity < SkidMinIntensity)
+        intensity = SkidMinIntensity;
+    skidmaker_make_skid(&w->TheSkidMaker, car, &point, &across, w->Terrain,
+                        intensity);
 }
 
 void init_skids(void)

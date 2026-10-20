@@ -28240,3 +28240,58 @@ the new `prof_mark(WSP_TESTS)`. The guard's mutations: collisionbody 3
 of 3, smokeable 4 of 4. The CIA is built.
 
 Next: 79c when the user sends a log; otherwise 78b as planned above.
+
+## Session 137 -- MaybeMakeSkids (TASKS 78b)
+
+Back to 78b after 79a and 79b (Session 136), as the user asked.
+
+**The port.** `skids_maybe_make_skids(Wheel *, Car *, float)` in
+skids.c, from retail's `0x001a5520` read instruction by instruction:
+
+- the gates: hard is `8 < ZForce * TractionUsage`; a skid needs Slipping
+  or hard, TouchingGround, the tire not blown (`lb` of the car's 2124,
+  `srav` by WheelNumber, bit 0) and the speed in the plane over 1;
+  otherwise MakeNoSkid;
+- Across is `(-vy, vx, 0)` through vrsqrt, and `d = |ahead . across|`
+  with ahead from bRotateVector(WorldMatrix, (0, 1, 0));
+- the half-width is `Width * SkidWidthMultiplier[Terrain] * max(d, 0.5)
+  * 0.5`, read straight from TerrainTypeInfoTable;
+- the two edges' heights come through gTopologyGetElevationFn with the
+  CarState's topology; the point is between them and Across takes the
+  tilt;
+- the intensity is d, a third of it when the wheel only presses
+  (gp-29264), 0 on a puddle, else at least 0.3 (gp-29260).
+
+The seam is now `(Wheel *, struct Car *, float)`. physicscar.c,
+beltmover.c and mellowmover.c pass their pCar, as retail's three callers
+do (`lw a1` from 84, 8 and 44: the car the visual-effects test read; the
+step stays in f12, unread). main.c sets gWheelMaybeMakeSkidsFn. The body
+is in skids.c rather than wheel.c so the many checkers that link wheel.c
+need not link the skid pools. belt-mover.md's note that the skids loop
+left `a1` to chance was wrong for retail: it loads the car.
+
+**Checks.**
+
+- skids_check runs retail's MaybeMakeSkids on four wheels at retail's
+  offsets. GetElevation is stubbed: it answers the op's two heights.
+  bRotateVector, bNormalize, MakeSkid and MakeNoSkid run as shipped, and
+  the harness has its own copy of wheel.c's bRotateVector.
+- Results: 8654 ops (761 MaybeMakeSkids, 593 of them skidding), 0
+  differ. All 47 new mutations caught; the whole pass is 165 of 169 caught and 4 equivalent.
+  `as-q` is re-anchored, since the new code has the same line.
+- beltmover and mellowmover (retail models) print the car on both sides.
+  physicscar and carmode run the demo's image, whose MaybeMakeSkids took
+  no car, so their fakes ignore it. All four: 0 differ.
+  mv-skids-no-car and mm-uc-skids-no-car are caught.
+- Stale patterns found on the way, older than this: physicscar's
+  `wh-damage-drag-dropped` and `joy-no-22` (not found), and beltmover's
+  `ddval-c1` (twice in banim.c).
+- The CIA is built.
+
+**The cost.** Each skidding wheel calls GetElevation twice a frame, for
+every car whose visual effects are on (BeltMover cars only within
+200 m). The sets are kept but not drawn, so the race looks the same until
+78c.
+
+Next: 78c, the drawing (the plan is in Session 135's entry), or 79c when
+the user's next log comes.

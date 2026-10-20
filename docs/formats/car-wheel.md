@@ -611,12 +611,12 @@ already decided that.
 
 ## Not ported
 
-`MaybeMakeSkids` (0x0019b2d0, 632 bytes) still has a body — it calls
-`MakeSkid` and `MakeNoSkid` on the `SkidMaker` — and belongs to task 27 with
-the rest of the skid trails. Until then `wheel_maybe_make_skids` passes the
-wheel and the time step to the `gWheelMaybeMakeSkidsFn` seam, which is NULL
-in the game and makes no skids. Retail's (`0x001a568c`) multiplies the
-terrain's `SkidWidthMultiplier` into `WheelInfo.Width`, so port that one.
+`MaybeMakeSkids` (0x0019b2d0, 632 bytes; retail's `0x001a5520`) still has
+a body — it calls `MakeSkid` and `MakeNoSkid` on the `SkidMaker` — and is
+ported with the skid marks, in `skids.c` (TASKS 78b,
+`docs/formats/skids.md`). `wheel_maybe_make_skids` passes the wheel, the
+mover's car and the time step to the `gWheelMaybeMakeSkidsFn` seam, which
+main.c points at `skids_maybe_make_skids`; NULL makes no skids.
 `MaybeMakeSmoke` (0x0019b2c8) and
 `MaybeMakeTireSpew` (0x0019b548) are each a bare `jr ra` in the shipped
 image: whatever particle work they used to do was compiled out, and the

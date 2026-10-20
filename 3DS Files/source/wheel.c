@@ -948,7 +948,8 @@ bVector3 *wheel_get_horizontal_ground_force_car(Wheel *w, bVector3 *out)
 
 // 0x0019b2c8 and 0x0019b548. Both are `jr ra` in the shipped image: the
 // particle work they used to do was compiled out, unlike MaybeMakeSkids,
-// which still has a body and is a seam until task 27.
+// which still has a body, skids.c's skids_maybe_make_skids, through the
+// seam.
 void wheel_maybe_make_smoke(Wheel *w, float v)
 {
     (void)w;
@@ -961,10 +962,10 @@ void wheel_maybe_make_tire_spew(Wheel *w, float v)
     (void)v;
 }
 
-void wheel_maybe_make_skids(Wheel *w, float dt)
+void wheel_maybe_make_skids(Wheel *w, struct Car *car, float dt)
 {
     if (gWheelMaybeMakeSkidsFn)
-        gWheelMaybeMakeSkidsFn(w, dt);
+        gWheelMaybeMakeSkidsFn(w, car, dt);
 }
 
 // Retail's 0x001a3f60 (the demo's 0x00199c90), the replay's. The int move

@@ -3,9 +3,9 @@
 // prints the transcript it diffs against the retail image, run in mipsemu
 // over the same script.
 //
-// The slot pools, bPNode's nodes and GetTextureInfo are stand-ins that
-// print what they are given, as the model's are. After each op the state
-// is hashed, and every so often printed.
+// The slot pools, bPNode's nodes, GetTextureInfo and the elevation seam
+// are stand-ins that print what they are given, as the model's are. After
+// each op the state is hashed, and every so often printed.
 //
 // A float prints as its bits.
 #include <stddef.h>
@@ -29,6 +29,7 @@
 #define NUM_MAKERS  8
 #define NUM_CARS    4
 #define NUM_TEX     4
+#define NUM_WHEELS  4
 #define FULL_EVERY  100
 #define WALK_CAP    2000
 #define MAX_LINES   4096
@@ -54,6 +55,12 @@ static int       s_node_used[NUM_NODES];
 static SkidMaker s_maker[NUM_MAKERS];
 static Car       s_car[NUM_CARS];
 static uint8_t   s_tex[NUM_TEX + 1][256] __attribute__((aligned(16)));
+static Wheel     s_wheel[NUM_WHEELS];
+static WheelInfo s_wi[NUM_WHEELS];
+static CarState  s_cs[NUM_WHEELS];
+static uint8_t   s_topo[NUM_WHEELS][16];
+static uint32_t  s_height[2];
+static int       s_nheight;
 
 static uint32_t bits(float f)
 {
@@ -155,6 +162,16 @@ static const char *label(const void *p)
         snprintf(o, 24, "t%d", (int)(((const uint8_t *)p - &s_tex[0][0])
                                      / 256));
         return o;
+    }
+    for (k = 0; k < NUM_WHEELS; k++) {
+        if (p == &s_wheel[k].TheSkidMaker) {
+            snprintf(o, 24, "wm%d", k);
+            return o;
+        }
+        if (p == s_topo[k]) {
+            snprintf(o, 24, "topo%d", k);
+            return o;
+        }
     }
     snprintf(o, 24, "?%p", p);
     return o;
@@ -321,6 +338,43 @@ static const char *vec(const bVector3 *v)
     return o;
 }
 
+// ------------------------------------------------------------- the wheel
+
+// GetElevation: the MM op's two heights in turn, then 0.
+static float elevation(void *topology, const bVector3 *pos,
+                       int32_t *terrainOut, bVector3 *normalOut)
+{
+    uint32_t h = s_nheight < 2 ? s_height[s_nheight++] : 0;
+
+    printf("elev %s %s t=%s n=%s -> %08x\n", label(topology), vec(pos),
+           label(terrainOut), label(normalOut), (unsigned)h);
+    return fl(h);
+}
+
+TopologyGetElevationFn gTopologyGetElevationFn = elevation;
+
+// wheel.c's, which the harness does not link (wheel_check holds it to the
+// image); the model runs the image's.
+void bRotateVector(bVector3 *o, const bMatrix4 *m, const bVector3 *v)
+{
+    float x, y, z;
+
+    x = m->v0.x * v->x;
+    x = x + m->v1.x * v->y;
+    x = x + m->v2.x * v->z;
+    o->x = x;
+
+    y = m->v0.y * v->x;
+    y = y + m->v1.y * v->y;
+    y = y + m->v2.y * v->z;
+    o->y = y;
+
+    z = m->v0.z * v->x;
+    z = z + m->v1.z * v->y;
+    z = z + m->v2.z * v->z;
+    o->z = z;
+}
+
 // The list's members in order, at most WALK_CAP and a NULL past them.
 static int walk(bNode *head, bNode **out)
 {
@@ -350,6 +404,8 @@ static void state(void)
     ADD(o, "makers");
     for (i = 0; i < NUM_MAKERS; i++)
         ADD(o, " m%d=%s", i, label(s_maker[i].pSkidSet));
+    for (i = 0; i < NUM_WHEELS; i++)
+        ADD(o, " wm%d=%s", i, label(s_wheel[i].TheSkidMaker.pSkidSet));
     o = new_line();
     ADD(o, "pools ");
     for (k = 0; k < s_npools; k++) {
@@ -453,7 +509,7 @@ static void put_vec(bVector3 *v, char **t)
 int main(int argc, char **argv)
 {
     FILE *f;
-    char  line[512];
+    char  line[1024];
     int   k = 0;
 
     if (argc < 2 || (f = fopen(argv[1], "r")) == NULL) {
@@ -465,7 +521,7 @@ int main(int argc, char **argv)
     PlotSkidsInCaffeine = (int32_t)0xa5a5a5a5u;
     PlotSkidPointsInCaffeine = (int32_t)0xa5a5a5a5u;
     while (fgets(line, sizeof line, f) != NULL) {
-        char *t[16];
+        char *t[24];
         int   n = 0, i;
         char *p;
 
@@ -473,7 +529,7 @@ int main(int argc, char **argv)
         if (line[0] == 0)
             continue;
         printf("> %s\n", line);
-        for (p = strtok(line, " "); p != NULL && n < 16;
+        for (p = strtok(line, " "); p != NULL && n < 24;
              p = strtok(NULL, " "))
             t[n++] = p;
         if (strcmp(t[0], "IC") == 0) {
@@ -503,6 +559,45 @@ int main(int argc, char **argv)
                                 &pos, &delta, atoi(t[9]), fl(hex(t[10])));
         } else if (strcmp(t[0], "MN") == 0) {
             skidmaker_make_no_skid(&s_maker[atoi(t[1])]);
+        } else if (strcmp(t[0], "WH") == 0) {
+            int    j = atoi(t[1]);
+            Wheel *w = &s_wheel[j];
+
+            w->WI = &s_wi[j];
+            w->CS = &s_cs[j];
+            s_cs[j].pTopologyCoordinate =
+                (TopologyCoordinate *)(void *)s_topo[j];
+            s_wi[j].WheelNumber = atoi(t[2]);
+            s_wi[j].Width = fl(hex(t[3]));
+            w->Terrain = atoi(t[4]);
+            w->Slipping = (uint8_t)atoi(t[5]);
+            w->TouchingGround = (uint8_t)atoi(t[6]);
+            w->ZForce = fl(hex(t[7]));
+            w->TractionUsage = fl(hex(t[8]));
+            w->Velocity.x = fl(hex(t[9]));
+            w->Velocity.y = fl(hex(t[10]));
+        } else if (strcmp(t[0], "WM") == 0) {
+            bVector4 *r[4];
+            int       j;
+
+            r[0] = &s_wheel[atoi(t[1])].WorldMatrix.v0;
+            r[1] = &s_wheel[atoi(t[1])].WorldMatrix.v1;
+            r[2] = &s_wheel[atoi(t[1])].WorldMatrix.v2;
+            r[3] = &s_wheel[atoi(t[1])].WorldMatrix.v3;
+            for (j = 0; j < 4; j++) {
+                r[j]->x = fl(hex(t[2 + 4 * j]));
+                r[j]->y = fl(hex(t[3 + 4 * j]));
+                r[j]->z = fl(hex(t[4 + 4 * j]));
+                r[j]->w = fl(hex(t[5 + 4 * j]));
+            }
+        } else if (strcmp(t[0], "BL") == 0) {
+            s_car[atoi(t[1])].BlownTireBits = (uint8_t)hex(t[2]);
+        } else if (strcmp(t[0], "MM") == 0) {
+            s_height[0] = hex(t[4]);
+            s_height[1] = hex(t[5]);
+            s_nheight = 0;
+            skids_maybe_make_skids(&s_wheel[atoi(t[1])], &s_car[atoi(t[2])],
+                                   fl(hex(t[3])));
         } else if (strcmp(t[0], "GC") == 0) {
             bVector3 pos;
 

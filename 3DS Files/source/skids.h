@@ -44,6 +44,7 @@
 
 struct Car;
 struct SkidMaker;
+struct Wheel;
 
 // SkidSegment, 16 bytes (type#1016). DeltaPosition is the half-width, from
 // the trail's centre to one edge, times 64.
@@ -204,6 +205,19 @@ void skidmaker_make_skid(struct SkidMaker *m, struct Car *car,
 
 // SkidMaker::MakeNoSkid, 0x001ab0f8: the maker's set, if any, finished.
 void skidmaker_make_no_skid(struct SkidMaker *m);
+
+// Wheel::MaybeMakeSkids, retail's 0x001a5520 (TASKS 78b), Wheel.obj's but
+// written here beside the makers it feeds; wheel.c reaches it through
+// gWheelMaybeMakeSkidsFn. A skid on the wheel's maker when the wheel is
+// slipping, or pressing hard (ZForce * TractionUsage over 8), on the
+// ground, its tire not blown, and moving over 1 m/s in the plane; else
+// MakeNoSkid. The trail runs across the wheel's way, as wide as the wheel
+// times the terrain's SkidWidthMultiplier and more when the wheel slides
+// sideways, tilted to the ground under each edge. Its intensity is how
+// sideways, a third of it when the wheel only presses, at least 0.3, and
+// 0 on a puddle. The demo's (0x0019b2d0) took the step and no car;
+// retail's callers pass the mover's car and still the step, unread.
+void skids_maybe_make_skids(struct Wheel *w, struct Car *car, float dt);
 
 // InitSkids, 0x001ab118. The pool, if there is none: 128 of 272 bytes in
 // memory pool 16, and not to grow. Then each terrain's skid texture, by

@@ -9,8 +9,10 @@ MakeSkid and MakeNoSkid, InitSkids, CloseSkids and DeleteThisSkid, and the
 clans -- Clan's constructor, destructor and ExpandBoundingBox, InitClans,
 FlushClans, CloseClans and GetClan (0x001aa788 .. 0x001abaa0) -- run as
 shipped, with bStringHash, the bounding box functions, ~bPNode and the
-list destructors under them. The harness (tools/src/skids_test.c) runs the
-port over the same script, and the two transcripts are diffed.
+list destructors under them -- and Wheel::MaybeMakeSkids (0x001a5520,
+TASKS 78b), with bRotateVector and bNormalize under it, on four wheels at
+retail's offsets. The harness (tools/src/skids_test.c) runs the port over
+the same script, and the two transcripts are diffed.
 
 Stubbed on both sides, each printing what it is given:
   - the slot pools (bNewSlotPool, bDeleteSlotPool, bMalloc(SlotPool *),
@@ -21,7 +23,11 @@ Stubbed on both sides, each printing what it is given:
     shows;
   - bPNode::Malloc and bPNode::Free, the lowest free of 1024 nodes;
   - GetTextureInfo, which answers one of four textures, or none, by the
-    hash.
+    hash;
+  - TopologyCoordinate::GetElevation (0x00152070), which answers the two
+    heights the MaybeMakeSkids op gives, in turn, and 0 past them.
+  The harness has its own copy of bRotateVector, wheel.c's, which it does
+  not link; wheel_check holds wheel.c's to the image.
 
 The script makes skids for eight makers on four cars (the Car's
 GeometryPosition and VisibleViewBits at retail's offsets on the model
@@ -29,7 +35,10 @@ side): trails straight and curved, turns sharp enough to end a set, steps
 of nothing, points past 4 m from the car, changes of terrain and of
 visibility, intensities and widths past a byte; the clans' squares at
 their edges and far off; a clan pool and a set pool run full; flushes,
-closes and reopens; and then a long random drive. After each op both
+closes and reopens; then MaybeMakeSkids' gates one at a time, wheels
+rolling, pressing, drifting and broadside, every terrain, the ground
+tilted under the edges, and a random drive of four wheels on two cars;
+and then a long random drive of MakeSkid alone. After each op both
 sides print a hash of the whole state: each maker's set, the pools'
 flags, SkidSetList in order with every set's fields and segments, ClanList
 in order with every clan's and its list, the textures and the two debug
@@ -92,6 +101,8 @@ BISFULL = 0x00257d10
 PNODE_MALLOC = 0x00250680           # Malloc__6bPNode
 PNODE_FREE = 0x002506b0             # Free__6bPNodePv
 GET_TEXTURE_INFO = 0x001abf48       # GetTextureInfo__FUii
+MAYBE_MAKE_SKIDS = 0x001a5520       # Wheel::MaybeMakeSkids(Car *, float)
+GET_ELEVATION = 0x00152070          # TopologyCoordinate::GetElevation
 
 G_WORLDTIME = GP - 19568
 G_SKIDLIST = GP - 19208
@@ -106,6 +117,20 @@ NUM_TERRAIN = 33
 # Retail's offsets.
 CAR_GEOMETRY_POSITION = 80
 CAR_VISIBLE_VIEW_BITS = 1300
+CAR_BLOWN_TIRE_BITS = 2124
+WHEEL_WI = 12
+WHEEL_CS = 24
+WHEEL_MATRIX = 112
+WHEEL_VELOCITY = 240
+WHEEL_TERRAIN = 336
+WHEEL_SLIPPING = 340
+WHEEL_TOUCHING = 341
+WHEEL_ZFORCE = 344
+WHEEL_TRACTION = 360
+WHEEL_MAKER = 384
+WI_WIDTH = 16
+WI_NUMBER = 20
+CS_TOPOLOGY = 4
 SET_LAST_NORMAL = 16
 SET_LAST_LENGTH = 32
 SET_CAR = 36
@@ -142,6 +167,11 @@ NUM_CARS = 4
 ARGS = 0x01330000                   # the position, then the delta
 TEX = 0x01340000                    # 0x100 a texture
 NUM_TEX = 4
+WHEELS = 0x01350000                 # 0x200 a wheel
+NUM_WHEELS = 4
+WIS = 0x01360000                    # 0x40 a WheelInfo
+CSS = 0x01370000                    # 0x40 a CarState
+TOPO = 0x01380000                   # 16 bytes a topology, never read
 
 SIZE_LABELS = {272: "skidset", 80: "clan"}
 POOL_PREFIX = {"SkidSetSlotPool": "s", "ClanSlotPool": "c"}
@@ -192,6 +222,8 @@ class Model(object):
         e.stub(PNODE_MALLOC, self.st_node_new)
         e.stub(PNODE_FREE, self.st_node_free)
         e.stub(GET_TEXTURE_INFO, self.st_tex)
+        e.stub(GET_ELEVATION, self.st_elev)
+        self.heights = []
         self.out = []
         self.pools = []
         self.nodes = [False] * NUM_NODES
@@ -243,6 +275,11 @@ class Model(object):
             return "m%d" % ((a - MAKERS) // 16)
         if CARS <= a < CARS + 0x1000 * NUM_CARS and a % 0x1000 == 0:
             return "car%d" % ((a - CARS) // 0x1000)
+        if WHEELS <= a < WHEELS + 0x200 * NUM_WHEELS \
+                and a % 0x200 == WHEEL_MAKER:
+            return "wm%d" % ((a - WHEELS) // 0x200)
+        if TOPO <= a < TOPO + 16 * NUM_WHEELS and a % 16 == 0:
+            return "topo%d" % ((a - TOPO) // 16)
         if TEX <= a < TEX + 0x100 * (NUM_TEX + 1) and a % 0x100 == 0:
             return "t%d" % ((a - TEX) // 0x100)
         return "?%08x" % a
@@ -317,6 +354,13 @@ class Model(object):
         self.emit("tex %08x def=%d unl=%d -> %s" % (h, d, u, self.label(a)))
         return a
 
+    def st_elev(self, em):
+        h = self.heights.pop(0) if self.heights else 0
+        self.emit("elev %s %s t=%s n=%s -> %08x" % (
+            self.label(self.arg(0)), self.vec(self.arg(1)),
+            self.label(self.arg(2)), self.label(self.arg(3)), h))
+        self.e.fpr[0] = h
+
     # ---- the state -------------------------------------------------------
 
     def vec(self, a):
@@ -336,8 +380,11 @@ class Model(object):
     def state(self):
         e = self.e
         out = ["makers " + " ".join(
-            "m%d=%s" % (m, self.label(self.w(MAKERS + 16 * m)))
-            for m in range(NUM_MAKERS))]
+            ["m%d=%s" % (m, self.label(self.w(MAKERS + 16 * m)))
+             for m in range(NUM_MAKERS)]
+            + ["wm%d=%s" % (i, self.label(self.w(WHEELS + 0x200 * i
+                                                 + WHEEL_MAKER)))
+               for i in range(NUM_WHEELS)])]
         out.append("pools " + " ".join(
             "p%d=%x/%d" % (k, self.w(POOL_H + 64 * k + 20),
                            sum(p["used"]))
@@ -435,6 +482,33 @@ class Model(object):
                           ARGS, ARGS + 16, int(t[9]))
             elif c == "MN":
                 self.call(MAKE_NO_SKID, MAKERS + 16 * int(t[1]))
+            elif c == "WH":
+                i = int(t[1])
+                wh, wi, cs = WHEELS + 0x200 * i, WIS + 0x40 * i, CSS + 0x40 * i
+                e.put32(wh + WHEEL_WI, wi)
+                e.put32(wh + WHEEL_CS, cs)
+                e.put32(cs + CS_TOPOLOGY, TOPO + 16 * i)
+                e.put32(wi + WI_NUMBER, int(t[2]))
+                e.put32(wi + WI_WIDTH, int(t[3], 16))
+                e.put32(wh + WHEEL_TERRAIN, int(t[4]))
+                e.write(wh + WHEEL_SLIPPING, bytes([int(t[5]), int(t[6])]))
+                e.put32(wh + WHEEL_ZFORCE, int(t[7], 16))
+                e.put32(wh + WHEEL_TRACTION, int(t[8], 16))
+                e.put32(wh + WHEEL_VELOCITY, int(t[9], 16))
+                e.put32(wh + WHEEL_VELOCITY + 4, int(t[10], 16))
+            elif c == "WM":
+                wh = WHEELS + 0x200 * int(t[1])
+                for j in range(16):
+                    e.put32(wh + WHEEL_MATRIX + 4 * j, int(t[2 + j], 16))
+            elif c == "BL":
+                e.write(CARS + 0x1000 * int(t[1]) + CAR_BLOWN_TIRE_BITS,
+                        bytes([int(t[2], 16)]))
+            elif c == "MM":
+                i, car = int(t[1]), int(t[2])
+                e.fpr[12] = int(t[3], 16)
+                self.heights = [int(t[4], 16), int(t[5], 16)]
+                self.call(MAYBE_MAKE_SKIDS, WHEELS + 0x200 * i,
+                          CARS + 0x1000 * car)
             elif c == "GC":
                 self.put_vec(ARGS, [int(x, 16) for x in t[1:4]])
                 self.emit("clan %s" % self.label(self.call(GET_CLAN, ARGS)))
@@ -484,6 +558,30 @@ class Script(object):
         """The car over the point, then the skid."""
         self.car(car, p[0], p[1], p[2] + 0.3)
         self.skid(m, car, p, **kw)
+
+    def wheel(self, i, wn=None, width=0.3, terr=1, slip=1, touch=1,
+              zf=3000.0, tu=0.4, v=(0.0, 6.0)):
+        self.op("WH %d %d %s %d %d %d %s %s %s %s" % (
+            i, i if wn is None else wn, h(width), terr, slip, touch, h(zf),
+            h(tu), h(v[0]), h(v[1])))
+
+    def place(self, i, p, yaw=0.0, pitch=0.0, roll=0.0):
+        """The wheel's world matrix: x the axle, y ahead, z up, then the
+        place, as rows."""
+        cy, sy = math.cos(yaw), math.sin(yaw)
+        cp, sp = math.cos(pitch), math.sin(pitch)
+        cr, sr = math.cos(roll), math.sin(roll)
+        ahead = (-sy * cp, cy * cp, sp)
+        axle = (cy * cr + sy * sp * sr, sy * cr - cy * sp * sr, -cp * sr)
+        up = (axle[1] * ahead[2] - axle[2] * ahead[1],
+              axle[2] * ahead[0] - axle[0] * ahead[2],
+              axle[0] * ahead[1] - axle[1] * ahead[0])
+        rows = (axle + (0.0,), ahead + (0.0,), up + (0.0,),
+                (p[0], p[1], p[2], 1.0))
+        self.op("WM %d %s" % (i, " ".join(h(x) for r in rows for x in r)))
+
+    def maybe(self, i, car, ha=0.0, hb=0.0, dt=1.0 / 30.0):
+        self.op("MM %d %d %s %s %s" % (i, car, h(dt), h(ha), h(hb)))
 
 
 def s_basics(sc):
@@ -653,6 +751,129 @@ def s_flush(sc):
     sc.op("D")
 
 
+def s_wheels(sc):
+    """MaybeMakeSkids: the gates, then trails."""
+    sc.op("W 30000")
+    x0, y0 = 800.0, -600.0
+    for i in range(NUM_WHEELS):
+        sc.wheel(i)
+        sc.place(i, (x0 + 30.0 * (i // 2) + 1.6 * (i % 2), y0, 0.35))
+    sc.car(0, x0 + 0.8, y0, 0.6)
+    sc.car(1, x0 + 30.8, y0, 0.6)
+    sc.op("BL 0 00")
+    sc.op("BL 1 00")
+    sc.op("D")
+    pos = [y0]
+
+    def frame(i=0, car=0, step=0.4, yaw=0.0, ha=0.0, hb=0.0, z=0.35,
+              pitch=0.0, roll=0.0, **kw):
+        pos[0] += step
+        x = x0 + 30.0 * car + 1.6 * (i % 2)
+        sc.car(car, x0 + 30.0 * car + 0.8, pos[0], z + 0.25)
+        sc.wheel(i, **kw)
+        sc.place(i, (x, pos[0], z), yaw=yaw, pitch=pitch, roll=roll)
+        sc.maybe(i, car, ha, hb)
+
+    # One gate at a time, on wheel 0 going ahead.
+    for kw in (dict(), dict(slip=0, zf=16.0, tu=0.5),
+               dict(slip=0, zf=16.0001, tu=0.5), dict(slip=0),
+               dict(slip=0, zf=-3000.0, tu=-0.4),
+               dict(slip=0, zf=3000.0, tu=-0.4), dict(),
+               dict(touch=0), dict(slip=2, touch=2), dict(v=(0.0, 1.0)),
+               dict(v=(0.6, 0.8)), dict(v=(0.0, 1.0001)),
+               dict(v=(-0.001, 1.0)), dict(v=(0.0, -6.0)),
+               dict(v=(-1.0, 0.0)), dict(v=(80.0, 3.0))):
+        frame(**kw)
+    sc.op("D")
+    # The blown tires: this wheel's bit, another's, all, and the top bit
+    # under a signed shift, which reaches a wheel number past 7.
+    for bits, wn in (("01", 0), ("02", 0), ("0e", 0), ("ff", 0), ("80", 0),
+                     ("08", 3), ("80", 3), ("f7", 3), ("80", 8),
+                     ("00", 0)):
+        sc.op("BL 0 %s" % bits)
+        frame(wn=wn)
+    sc.op("D")
+    # Rolling straight and pressing: nothing sideways, so the least
+    # width and the least intensity.
+    for k in range(12):
+        frame(slip=0, v=(0.0, 8.0), step=0.27)
+    sc.op("D")
+    # A drift from straight to broadside, then back, the ground sloping
+    # under the edges both ways.
+    for k in range(40):
+        a = math.radians(90.0 * math.sin(math.pi * k / 39.0))
+        tilt = 0.04 * math.sin(0.7 * k)
+        frame(slip=1 if k % 9 else 0, yaw=0.3 * math.sin(0.2 * k),
+              v=(-9.0 * math.sin(a), 9.0 * math.cos(a)),
+              ha=0.1 + tilt, hb=0.1 - tilt, step=0.3,
+              width=0.25 + 0.01 * (k % 5))
+    frame(touch=0)
+    sc.op("D")
+    # Every terrain, at 45 degrees: the width's multiplier, and the
+    # puddle's nothing.
+    for terr in range(NUM_TERRAIN):
+        frame(terr=terr, v=(-5.0, 5.0), step=0.35, ha=0.02, hb=-0.01)
+    frame(touch=0)
+    sc.op("D")
+    # Pitched and rolled; edges far apart in height; the wheel high over
+    # the car; no width.
+    for kw in (dict(pitch=0.3), dict(roll=0.25, pitch=-0.2, yaw=1.0),
+               dict(ha=0.5, hb=-0.5), dict(ha=-3.0, hb=2.0),
+               dict(ha=1e-6, hb=0.0), dict(z=8.0, ha=8.0, hb=8.0),
+               dict(width=0.0), dict(), dict(width=1.2, v=(-7.0, 0.5))):
+        frame(v=kw.pop("v", (-4.0, 6.0)), **kw)
+    sc.op("D")
+    # The other wheels, two to a car.
+    for k in range(10):
+        for i in range(NUM_WHEELS):
+            frame(i=i, car=i // 2, step=0.2 if i % 2 else 0.0,
+                  slip=(k + i) % 3 != 0, v=(-3.0 - i, 5.0 + k))
+    sc.op("D")
+
+
+def s_wheel_random(sc, n=300):
+    rng = random.Random(0x5eed78b)
+    cars = [[rng.uniform(-200, 200), rng.uniform(-200, 200), 0.0,
+             rng.uniform(0, 2 * math.pi), 0.0, 8.0] for _ in range(2)]
+    t = 40000
+    for k in range(n):
+        c = rng.randrange(2)
+        x, y, z, yaw, slide, speed = cars[c]
+        yaw += rng.gauss(0.0, 0.08)
+        slide = max(-1.6, min(1.6, slide + rng.gauss(0.0, 0.15)))
+        speed = max(0.0, min(60.0, speed + rng.gauss(0.0, 1.5)))
+        step = speed / 30.0
+        x -= step * math.sin(yaw + slide)
+        y += step * math.cos(yaw + slide)
+        z = 0.5 * math.sin(0.01 * x) + 0.3 * math.cos(0.013 * y)
+        cars[c] = [x, y, z, yaw, slide, speed]
+        if k % 10 == 0:
+            t += rng.randrange(1, 60)
+            sc.op("W %d" % t)
+        if rng.random() < 0.02:
+            sc.op("BL %d %02x" % (c, rng.choice((0, 0, 1, 2, 4, 8, 0x0f))))
+        sc.car(c, x, y, z + 0.3)
+        v = (-speed * math.sin(yaw + slide), speed * math.cos(yaw + slide))
+        terr = rng.choice((1, 1, 1, 2, 3, 4, 6, 7, 0, 12))
+        for side in (0, 1):
+            i = 2 * c + side
+            off = -0.8 if side == 0 else 0.8
+            px = x + off * math.cos(yaw)
+            py = y + off * math.sin(yaw)
+            sc.wheel(i, terr=terr, slip=int(abs(slide) > 0.2
+                                            or rng.random() < 0.1),
+                     touch=int(rng.random() < 0.95),
+                     zf=rng.uniform(0.0, 6000.0),
+                     tu=rng.choice((0.0, 0.001, 0.003, 0.5, 1.0)),
+                     width=rng.choice((0.2, 0.25, 0.3)), v=v)
+            sc.place(i, (px, py, z), yaw=yaw,
+                     pitch=rng.uniform(-0.05, 0.05),
+                     roll=rng.uniform(-0.05, 0.05))
+            g = 0.02 * math.sin(0.3 * px + 0.2 * py)
+            sc.maybe(i, c, z + g, z - g)
+    sc.op("D")
+
+
 def s_random(sc, n=1500):
     rng = random.Random(0x5c1d)
     cars = [[rng.uniform(-300, 300), rng.uniform(-300, 300),
@@ -707,6 +928,8 @@ def script():
     s_clans(sc)
     s_setpool(sc)
     s_flush(sc)
+    s_wheels(sc)
+    s_wheel_random(sc)
     s_random(sc)
     sc.op("CC")
     sc.op("CS")
@@ -815,7 +1038,8 @@ MUTATIONS = [
     ("as-len2", S, "len2 = (way.x * way.x + way.y * way.y) + way.z * way.z;",
      "len2 = way.x * way.x + way.y * way.y;"),
     ("as-step", S, "step = sqrtf(len2);", "step = len2;"),
-    ("as-q", S, "q = ee_div(1.0f, sqrtf(len2));", "q = 1.0f / sqrtf(len2);"),
+    ("as-q", S, "        q = ee_div(1.0f, sqrtf(len2));",
+     "        q = 1.0f / sqrtf(len2);"),
     ("as-norm", S, "        way.y *= q;" + NL, ""),
     ("as-n2", S, "    if (n >= 2) {", "    if (n >= 3) {"),
     ("as-turn", S, "float turn = 1.0f - ((way.x", "float turn = 0.5f - ((way.x"),
@@ -904,6 +1128,84 @@ MUTATIONS = [
     ("mn-off", S, "    if (m->pSkidSet != NULL)" + NL
      + "        skidset_finished_adding_skids((SkidSet *)m->pSkidSet);" + NL,
      ""),
+    # ---- MaybeMakeSkids
+    ("mk-hard-eq", S, "hard = 8.0f < w->ZForce", "hard = 8.0f <= w->ZForce"),
+    ("mk-hard-k", S, "hard = 8.0f < w->ZForce", "hard = 9.0f < w->ZForce"),
+    ("mk-hard-tu", S, "w->ZForce * w->TractionUsage;", "w->ZForce;"),
+    ("mk-blown-off", S, "|| !w->TouchingGround || blown" + NL,
+     "|| !w->TouchingGround" + NL),
+    ("mk-blown-bit", S, ">> w->WI->WheelNumber) & 1;",
+     ">> w->WI->WheelNumber) & 2;"),
+    ("mk-blown-wn", S, ">> w->WI->WheelNumber) & 1;", ">> 0) & 1;"),
+    ("mk-blown-sign", S, "((int32_t)(int8_t)car->BlownTireBits",
+     "((int32_t)car->BlownTireBits"),
+    ("mk-slip-only", S, "if (!(w->Slipping || hard)", "if (!w->Slipping"),
+    ("mk-hard-only", S, "if (!(w->Slipping || hard)", "if (!hard"),
+    ("mk-touch", S, "|| !w->TouchingGround || blown", "|| blown"),
+    ("mk-speed-eq", S, "|| !(1.0f < sqrtf(w->Velocity.x",
+     "|| !(1.0f <= sqrtf(w->Velocity.x"),
+    ("mk-speed-y", S, "+ w->Velocity.y * w->Velocity.y)))",
+     "+ w->Velocity.x * w->Velocity.x)))"),
+    ("mk-noskid", S, "        skidmaker_make_no_skid(&w->TheSkidMaker);" + NL
+     + "        return;", "        return;"),
+    ("mk-across-x", S, "across.x = -w->Velocity.y;",
+     "across.x = w->Velocity.y;"),
+    ("mk-across-y", S, "across.y = w->Velocity.x;",
+     "across.y = w->Velocity.y;"),
+    ("mk-q", S, "q = ee_div(1.0f, sqrtf(len2));" + NL + "    across.x *= q;",
+     "q = 1.0f;" + NL + "    across.x *= q;"),
+    ("mk-q-y", S, "    across.y *= q;" + NL, ""),
+    ("mk-ahead", S, "ahead = { 0.0f, 1.0f, 0.0f, 0.0f };",
+     "ahead = { 1.0f, 0.0f, 0.0f, 0.0f };"),
+    ("mk-ahead-z", S, "ahead = { 0.0f, 1.0f, 0.0f, 0.0f };",
+     "ahead = { 0.0f, 1.0f, 0.5f, 0.0f };"),
+    ("mk-abs", S, "d = fabsf((fwd.x * across.x + fwd.y * across.y) "
+     "+ fwd.z * across.z);",
+     "d = (fwd.x * across.x + fwd.y * across.y) + fwd.z * across.z;"),
+    ("mk-dot-z", S, "+ fwd.z * across.z);", "+ fwd.z * across.y);"),
+    ("mk-wide-off", S, "    if (d < 0.5f)" + NL + "        wide = 0.5f;" + NL,
+     ""),
+    ("mk-wide-k", S, "        wide = 0.5f;", "        wide = 0.4f;"),
+    ("mk-wide-d", S, "    half = half * wide;" + NL, ""),
+    ("mk-mult", S, "half = w->WI->Width * TerrainTypeInfoTable[w->Terrain]"
+     ".SkidWidthMultiplier;", "half = w->WI->Width;"),
+    ("mk-half", S, "    half = half * 0.5f;" + NL, ""),
+    ("mk-norm1", S, "    bNormalize3To(&across, &across, half);" + NL + NL
+     + "    // The two edges", NL + "    // The two edges"),
+    ("mk-edge-b", S, "b.x = place->x - across.x;",
+     "b.x = place->x + across.x;"),
+    ("mk-edge-ay", S, "a.y = place->y + across.y;", "a.y = place->y;"),
+    ("mk-edge-by", S, "b.y = place->y - across.y;", "b.y = place->y;"),
+    ("mk-ha", S, "ha = edge_height(w, &a);", "ha = edge_height(w, &b);"),
+    ("mk-topo", S, "((const CarState *)w->CS)->pTopologyCoordinate, pos,",
+     "NULL, pos,"),
+    ("mk-px", S, "point.x = place->x;", "point.x = a.x;"),
+    ("mk-pz", S, "point.z = (ha + hb) * 0.5f;", "point.z = ha;"),
+    ("mk-pz-place", S, "point.z = (ha + hb) * 0.5f;",
+     "point.z = place->z;"),
+    ("mk-tilt", S, "across.z = ha * 0.5f - hb * 0.5f;",
+     "across.z = hb * 0.5f - ha * 0.5f;"),
+    ("mk-tilt-off", S, "    across.z = ha * 0.5f - hb * 0.5f;" + NL, ""),
+    ("mk-norm2", S, "    across.z = ha * 0.5f - hb * 0.5f;" + NL
+     + "    bNormalize3To(&across, &across, half);",
+     "    across.z = ha * 0.5f - hb * 0.5f;"),
+    ("mk-press", S, "    if (!w->Slipping)" + NL
+     + "        intensity = intensity * SkidPressOnly;" + NL, ""),
+    ("mk-press-k", S, "SkidPressOnly      = 1.0f / 3.0f;",
+     "SkidPressOnly      = 0.33f;"),
+    ("mk-puddle", S, "if (w->Terrain == TERRAIN_TYPE_PUDDLE)",
+     "if (w->Terrain == 5)"),
+    ("mk-puddle-min", S, "        intensity = 0.0f;" + NL + "    else if",
+     "        intensity = 0.0f;" + NL + "    if"),
+    ("mk-min-k", S, "SkidMinIntensity   = 0.3f;",
+     "SkidMinIntensity   = 0.25f;"),
+    ("mk-min-off", S, "    else if (intensity < SkidMinIntensity)" + NL
+     + "        intensity = SkidMinIntensity;" + NL, ""),
+    ("mk-terr", S, "&point, &across, w->Terrain,", "&point, &across, 1,"),
+    ("mk-car", S, "skidmaker_make_skid(&w->TheSkidMaker, car,",
+     "skidmaker_make_skid(&w->TheSkidMaker, NULL,"),
+    ("mk-delta", S, "&point, &across, w->Terrain,",
+     "&point, &fwd, w->Terrain,"),
     # ---- InitSkids, CloseSkids, DeleteThisSkid
     ("is-once", S, "    if (SkidSetSlotPool == NULL) {", "    if (1) {"),
     ("is-slots", S, "SKIDSET_POOL_SLOTS, \"SkidSetSlotPool\",",

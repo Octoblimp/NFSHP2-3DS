@@ -361,7 +361,8 @@ shipped.
     - Slipping as `bSliding`;
     - CurrentSlip as `lng`.
 11. **Skids.** When ShouldVisualEffectsBeGenerated and the closest player
-    is under 200 m, each wheel's MaybeMakeSkids runs with `dt`.
+    is under 200 m, each wheel's MaybeMakeSkids runs with the mover's car
+    and `dt` (`docs/formats/skids.md`).
 12. Car::ComputeFakeRPM, and `dt` is returned.
 
 ### What the image leaves to the stack
@@ -370,8 +371,11 @@ shipped.
   and leave the fourth word to the stack. The cross product keeps the
   first argument's w, so that word is never read. The port stores 0.
 - **AngularVelocity's w.** The image leaves it to the stack.
-- **MaybeMakeSkids' second argument.** The skids loop passes `a1` as it
-  happens to be. The port's stand-in takes only the wheel and `dt`.
+- **MaybeMakeSkids' second argument.** It is not left to chance: the
+  skids loop loads `a1` from the mover's `pCar` (`lw a1,8(s2)` at
+  `0x00205334`) for every wheel, and retail's MaybeMakeSkids reads the
+  car's blown tires and hands it to MakeSkid. The port passes `m->pCar`
+  (TASKS 78b). The harness prints it and the model prints `a1`.
 
 ## The seams
 

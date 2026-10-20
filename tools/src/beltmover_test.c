@@ -270,9 +270,9 @@ void wheel_set_state_from_car_state(Wheel *w, void *cs, void *ti,
            bitsf(suspensionHeight));
 }
 
-void wheel_maybe_make_skids(Wheel *w, float dt)
+void wheel_maybe_make_skids(Wheel *w, Car *car, float dt)
 {
-    printf("  skids %s %08x\n", lab(w), bitsf(dt));
+    printf("  skids %s %s %08x\n", lab(w), lab(car), bitsf(dt));
 }
 
 void drivetarget_resample(DriveTarget *t, Car *c)

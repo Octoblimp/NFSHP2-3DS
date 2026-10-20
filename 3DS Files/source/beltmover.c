@@ -620,7 +620,7 @@ float beltmover_move(BeltMover *m, float dt)
                                                 &m->pCar->State.Position)
            < 200.0f)
         for (i = 0; i < 4; i++)
-            wheel_maybe_make_skids(m->pWheels[i], dt);
+            wheel_maybe_make_skids(m->pWheels[i], m->pCar, dt);
 
     car_compute_fake_rpm(m->pCar);
     return dt;

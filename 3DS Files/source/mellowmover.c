@@ -845,7 +845,7 @@ void mellowmover_update_car(MellowMover *mm, float dt)
         w->CurrentSlip = m->WheelSlip[i].x;
 
         if (car_should_visual_effects_be_generated(mm->pCar))
-            wheel_maybe_make_skids(mm->pWheels[i], dt);
+            wheel_maybe_make_skids(mm->pWheels[i], mm->pCar, dt);
     }
 
     cs->CurrentGear = mm->pMellovator->CurrentGear;
