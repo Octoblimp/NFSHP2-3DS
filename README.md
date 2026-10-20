@@ -21,14 +21,17 @@ races up to eight New 3DS consoles against each other.
   little memory and a third of the speed.
 - **Your own PS2 disc** of Need for Speed: Hot Pursuit 2. The port was
   made from the European disc (SLES-50731); other discs are untested.
-- About **2.8 GB** free on the SD card.
-- A computer with **Python 3.8 or newer** (nothing else to install).
+- About **2.9 GB** free on the SD card.
+- A computer with **Python 3.8 or newer** (nothing else to install) and
+  about 7 GB free for the steps below.
 
 ## Installing
 
-1. Copy `ZDIR.BIN` and `ZZDATA.BIN` from the root of your disc into this
-   repository's `PS2 Files/Full Game/` folder.
-2. Extract the disc's files (about 3 GB):
+1. In this repository's top folder, make a `PS2 Files/Full Game/` folder
+   and copy `ZDIR.BIN` and `ZZDATA.BIN` from the root of your disc into
+   it. Run the commands below from the top folder too.
+2. Extract the disc's files into `extracted-retail/` (3.3 GB, a minute or
+   two):
 
    ```
    python tools/zdir_extract.py --retail --decompress
@@ -40,9 +43,18 @@ races up to eight New 3DS consoles against each other.
    python tools/audio_pack.py extracted-retail/SOUND extracted-retail/SOUND
    ```
 
-4. Copy everything in `extracted-retail/` to the SD card as
-   `sdmc:/NFSHP2`, so that `sdmc:/NFSHP2/GLOBAL/GLOBALB.BUN` exists. The
-   game also finds it at `sdmc:/3ds/NFSHP2-3DS/data`.
+4. Copy the files the game reads to the SD card, here with the card in
+   your computer as `E:`:
+
+   ```
+   python tools/make_card.py E:\
+   ```
+
+   That makes `E:\NFSHP2` (2.9 GB), so that
+   `sdmc:/NFSHP2/GLOBAL/GLOBALB.BUN` exists. Give it a folder instead
+   and it makes the `NFSHP2` folder there, for you to copy to the card's
+   root. Don't copy `extracted-retail/` over as it is: it holds the
+   tracks a second time, packed, and the game would load those.
 5. Install `NFSHP2-3DS.cia` with FBI and start it from the HOME Menu. The
    `.3dsx` runs from the Homebrew Launcher as well, but the CIA is what has
    been tested on hardware.
