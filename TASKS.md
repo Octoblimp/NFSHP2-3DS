@@ -1483,7 +1483,7 @@ is citro3d and owns the top.
         and `Player` (task 26); force feedback drives the wheel's motors.
         Three `DoSnapshot`s -- PhysicsCar's, MellowMover's, the
         Mellovator's -- wait on `ReplaySnapshot`.
-26. [ ] Race/event logic, cop AI, pursuit (roadblocks, spike strips) --
+26. [x] Race/event logic, cop AI, pursuit (roadblocks, spike strips) --
         `HotPursuitEvent` already seen in the `.mdebug` strings survey
         **Inherited from task 25:** the eight classes behind Car's
         constructor seams (`gTrafficCarCtorFn` .. `gCopDriverCtorFn` in
@@ -1605,7 +1605,15 @@ is citro3d and owns the top.
         caught, 1 equivalent. Written up in
         `docs/formats/ai-driving-choice.md`. Next is 11b-3,
         BuildDriveTarget and BuildDriveTargetAroundCar.
-27. [ ] Track rendering/streaming, collision. Task 24's debt is paid:
+
+        **Closed 2026-10-20, at the launch prep.** The race and event logic,
+        the cop AI and the pursuits are all in, as retail's (TASKS 73 and
+        74), and the user played the game through on a 3DS on 2026-10-19.
+        Two inherited pieces are not ported: AnimatedDriver (the driver's
+        own animations, and R/C Car's big head in TASKS 50b), whose seams
+        stay empty and the race runs without, and DeliveryMover, whose
+        `car_deliver_me_from_evil` nothing in the port calls.
+27. [x] Track rendering/streaming, collision. Task 24's debt is paid:
         `QuickSpline.obj` and `TrackPath.obj` are ported (Session 29,
         continued), and `TrackPathCoordinate::UpdatePosition` measures
         through the spline as shipped. `gTrackPathDistanceFn` is now only
@@ -2072,7 +2080,13 @@ is citro3d and owns the top.
         of 5 mutations caught. Written up in `docs/formats/rain.md`.
         Step 4, a car on the track, is step 6 of CONTINUE.md's road now:
         task 36 goes first.
-28. [ ] New3DS perf: core2 for background streaming/decode, gate higher
+
+        **Closed 2026-10-20, at the launch prep.** Every track draws,
+        streams and collides: TASKS 36's step 18, and the user's playthrough
+        on a 3DS on 2026-10-19. What is left of the track's drawing has its
+        own tasks: the speed (46), the bridge and the blink (47 and 64) and
+        the rigid animations (76).
+28. [x] New3DS perf: core2 for background streaming/decode, gate higher
         fidelity behind the New3DS speedup flag
         **Re-scoped by the user on 2026-10-03:** New 3DS mode in full,
         and a smooth 30 FPS race on the New 3DS. Only the optimizations
@@ -2100,9 +2114,13 @@ is citro3d and owns the top.
           fog sprites (`acidsys.c`), the signs, the helicopter's model and
           its light -- then cut by the profile, keeping retail's look.
 
+        **Closed 2026-10-20, at the launch prep.** The New 3DS is the only
+        target (6ac29d1), and a race holds 30 FPS on it outside the heaviest
+        scenes. Those are TASKS 46.
+
 ## Phase 5 -- Polish
 
-29. [ ] Save data, options menus, final sound mix pass
+29. [x] Save data, options menus, final sound mix pass
         **For the full game (task 36):** the saves go to the SD card in
         the memory card's place, with retail's save game layout and
         screens: Phils Load Save, the Autosaver, the BootAutoLoader and
@@ -2116,6 +2134,13 @@ is citro3d and owns the top.
         `CalcForceParameters`, `StartForceImpact`, which the 3DS has no
         motors for; and every `DoSnapshot`, which waits on
         `ReplaySnapshot`.
+
+        **Closed 2026-10-20, at the launch prep.** The saves are on the SD
+        card with retail's layout and screens (`memcard.c`, TASKS 52), the
+        options are retail's (TASKS 71), and the sound is in full
+        (CONTINUE.md's step 14). The rumble and force-feedback group stays
+        out, as the 3DS has no motors, and `DoSnapshot` came with the
+        replays (TASKS 72).
 30. [x] Split-screen/multiplayer scope decision (HP2 supported split-screen;
         not committed to yet -- decide once single-player core is solid)
         Decided on 2026-10-13 at the user's word: "There is no split
@@ -2202,7 +2227,7 @@ phases.
         the two viewer modes get the same panel with their controls on it.
         The only console the port still creates is on the *top* screen, in
         the three paths that are about to exit.
-36. [ ] **The full game, from the retail disc.** The user put the PAL
+36. [x] **The full game, from the retail disc.** The user put the PAL
         retail disc in `PS2 Files/Full Game/` on 2026-09-27 and asked for
         the full game rather than the demo: every track and car, the whole
         frontend and saving. `docs/retail.md` has what differs.
@@ -2312,13 +2337,19 @@ phases.
         differ, 161 of 163 mutations caught, 2 equivalent.
         `docs/formats/car-render-info.md`.
 
-        - [ ] `CarRenderInfo::Render` (`0x00120ef8`) and the culler's two
-              passes, so that a car draws. The plan is in CONTINUE.md.
+        - [x] `CarRenderInfo::Render` (`0x00120ef8`) and the culler's two
+              passes, so that a car draws. Done in CONTINUE.md's step 6
+              (`carrender.c`).
 
         The rest is CONTINUE.md's "The road to the full game": the rest
         of step 6 (Render, so that a car draws), then the retail pass over what is ported (step 10), the
         full frontend (step 16), the saves (step 17) and every track and
         car (step 18).
+
+        **Closed 2026-10-20, at the launch prep.** The full game runs from
+        the retail disc: every track and car, the frontend a player reaches,
+        and the saves. The user played it through on a 3DS on 2026-10-19.
+        What retail still changes is TASKS 75 and 76, and 72h-2c.
 
 37. [ ] **Local Wireless (multi-card) play.** Asked for on 2026-10-07. Up to
         eight 3DS consoles (two in the first ask, eight since
@@ -5255,7 +5286,8 @@ ahead of step 6's second slice, which waits on `wip/carrenderinfo`.
       callbacks. Retail's `LanguageOptionsScreenBase` serves both
       language screens. `bootflow_check` runs them on the retail image
       and catches 56 of 57 mutations. The remaining one is equivalent.
-  - [ ] The speech banks (`hookLoadSpeech` only logs).
+  - [x] The speech banks. `hookLoadSpeech` loads them
+        (`sedwedge_load_localized_speech_files`), with step 14's sound.
   - [ ] The French `LOADING` and `NFS_LOGO_ALPHA` art on the host
         (`hookSwapLogoArt` only logs).
   - [ ] `Language Options`' `tSlideOnScreen` (`0x001ee918`).
@@ -5276,7 +5308,7 @@ ahead of step 6's second slice, which waits on `wip/carrenderinfo`.
         ("Autosave") are in `memcard.c`. `bootflow_check` runs them on
         the retail image: 34 rows; 76 mutations, 75 caught, 1
         equivalent. See task 52.
-  - [ ] `DemoModeReplay`'s internals.
+  - [x] `DemoModeReplay`'s internals (TASKS 72h-2a, `dmreplay.c`).
   - [ ] `bmenu.c`'s menus recolour the demo's way; retail's
         `FlailerMenuItem` recolour is only the popups'.
 - [x] **The main menu's background movie.** MV3's inter frames, bit-exact
@@ -5289,7 +5321,8 @@ ahead of step 6's second slice, which waits on `wip/carrenderinfo`.
         picture, and the decode and the conversion are faster, to the
         same values. The main menu runs at 59 FPS on Azahar and its movie
         at 30 fps. Real hardware, and an Old 3DS's core 1, are unmeasured.
-  - [ ] `StartDemoMode`'s track, from `BuildDemoTrackList`.
+  - [x] `StartDemoMode`'s track, from `BuildDemoTrackList` (TASKS
+        72h-2b, `demomode.c`).
 - [x] **The highlight's echo.** A large faded red copy of the current
       item's label, now and then. It is the bloom, `tHighlightAnimation`
       on `ANIMATING_MENUITEM`, which every screen authors off the bottom
@@ -5306,13 +5339,13 @@ ahead of step 6's second slice, which waits on `wip/carrenderinfo`.
       `Stop`. Its BACK is a silent veto. `bootflow_check` runs retail's
       `Callback`, `HandleEvent` and `OnTick` on the image
       (`RetailMainMenu`).
-  - [ ] `TheEasterEggs`' 78 codes (`0x0031d828`), and `OnTick`'s three
-        seconds of "Unlocked" when one is entered.
+  - [x] `TheEasterEggs`' 78 codes (`0x0031d828`), and `OnTick`'s three
+        seconds of "Unlocked" when one is entered (TASKS 50a).
   - [ ] Attract mode from the main menu (`OnTick`'s
         `ConsiderStartDemoMode`), with message 24 resetting its timer.
         It waits on `StartDemoMode`'s race.
-  - [ ] `MakeChallengeCarsAvailable` and `RaceParameters::InitWithDefaults`
-        in the constructor.
+  - [x] `MakeChallengeCarsAvailable` and `RaceParameters::InitWithDefaults`
+        in the constructor: its `challengeCars` and `raceDefaults` hooks.
 - [x] **The main menu's highlight bars.** Reported on 2026-09-28: after
       going into a menu and back, the two white bars stayed around Hot
       Pursuit while the highlight moved. The port's `NewMainMenu` had no
@@ -5344,8 +5377,10 @@ ahead of step 6's second slice, which waits on `wip/carrenderinfo`.
   - [x] Its strips, and every WHITE16X16 strip and mask with them, drawn
         with the GS's MODULATE (`docs/formats/flailer-ui.md`, "Colour").
         Before that, the box's charcoal bars were a faint haze.
-  - [ ] The Options' Jukebox screen (the playlist and its volumes).
-  - [ ] Real hardware: the stream thread's timing is only seen on Azahar.
+  - [x] The Options' Jukebox screen (the playlist and its volumes),
+        in TASKS 71b.
+  - [x] Real hardware: the user's playthrough on a 3DS (2026-10-19)
+        passed with it.
 - [x] **You're The Cop.** Cops On's second item. Retail's
       `BeACopChallengeSetup` (`0x001b6c68`) is `bsetup.c`, with Players,
       Skill Level and Setup, the arrows class (`0x0024a690`) and
@@ -5353,7 +5388,7 @@ ahead of step 6's second slice, which waits on `wip/carrenderinfo`.
       0 differ; 145 mutations, 142 caught, 3 equivalent. On Azahar the
       arrows pulse either side of the skill, the level wraps, and the
       lines are retail's (`docs/formats/frontend-setup.md`).
-  - [ ] `tHelpMenu`: `SetHelpOverride` only logs the four lines.
+  - [x] `tHelpMenu` and `SetHelpOverride`: TASKS 48.
   - [ ] `mPolice` from Fred+32. The port reads `gf->copsOn`, as
         `bscreens.c` keeps it; the Mode Selects' state belongs in the Fred
         image.
@@ -5369,12 +5404,14 @@ ahead of step 6's second slice, which waits on `wip/carrenderinfo`.
       0 differ; 86 mutations, 82 caught, 4 equivalent. On Azahar it
       matches the photo, and RIGHT on Traffic goes to Moderate
       (`docs/formats/frontend-setup.md`, "Be The Cop Setup").
-  - [ ] `SetClipToPoly`: `uirender.c` keeps the poly and does not clip.
-  - [ ] The other race setups (Single Race, Free Run, Lap KO, Track KO),
-        on the same base with other rows.
+  - [x] `SetClipToPoly`: `uirender.c` cuts each copy to its box
+        (MaybeClipPoly, `0x00141808`).
+  - [x] The other race setups (Single Race, Free Run, Lap KO, Track KO),
+        on the same base with other rows (`bsetup.c`,
+        `docs/formats/frontend-setup.md`).
 - On 2026-09-29 the user moved the port back to cars and racing: the
   items below wait unless a race needs them.
-- [ ] **Car select** (`bcarsel.c`, `docs/formats/car-select.md`).
+- [x] **Car select** (`bcarsel.c`, `docs/formats/car-select.md`).
   - [x] SC-1, retail's SelectCarScreen and CarSelector as logic and 2D:
         the make's logo and the badge, the row of car icons, "Cars
         Unlocked" and "NFS Points", the unlock box and the popups.
@@ -5411,5 +5448,6 @@ ahead of step 6's second slice, which waits on `wip/carrenderinfo`.
         to a TSELECT.BIN picture after four seconds.
   - [x] Y (SQUARE) for the track's speech: the run script sent key 0;
         with Azahar's X (88) the log has "last SQUARE".
-- [ ] **The briefing.** "You're The Cop", with its button list over the
-      track's picture.
+- [x] **The briefing.** "You're The Cop", with its button list over the
+      track's picture. It is the Blurb over the cop race's fly-by
+      (`docs/formats/start-race-screens.md`).
