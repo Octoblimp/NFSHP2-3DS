@@ -63,7 +63,7 @@ void capture_race(bool racing)
         // The ring goes at capture_pause_frame, once the GPU is done.
         return;
     }
-    if (ConfigDebugLog && ConfigPauseFrames && s_pfRing == NULL) {
+    if (ConfigPauseLog && s_pfRing == NULL) {
         s_pfRing = (uint8_t*)linearMemAlign(PAUSE_FRAMES * PF_SLOT, 0x1000);
         hangwatch_log("pause frames: %s %d frames of %dx%d (%d KB)",
                       s_pfRing ? "keeping" : "no linear heap to keep",

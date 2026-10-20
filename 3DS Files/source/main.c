@@ -680,9 +680,10 @@ static void logOnAbort(int sig)
 
 static void logOpen(void)
 {
-    // Only when the config file says "DebugLog 1", or "GPULog 1", whose
-    // timing frames' lines have nowhere else to go (configitems.h). The
-    // words are read again, and logged, by readConfigItems.
+    // Only when the config file says "DebugLog 1", or "GPULog 1" or
+    // "PauseLog 1", whose timing frames' and pause frames' lines have
+    // nowhere else to go (configitems.h). The words are read again, and
+    // logged, by readConfigItems.
     {
         static char text[4096];
         FILE*  f = fopen(CONFIG_ITEMS_FILE, "rb");
@@ -696,7 +697,7 @@ static void logOpen(void)
             config_items_apply_text(text, &skipFE, NULL);
         }
     }
-    if (ConfigDebugLog || ConfigGpuLog)
+    if (ConfigDebugLog || ConfigGpuLog || ConfigPauseLog)
         g_log = fopen("sdmc:/nfshp2_debug.txt", "w");
     // The lines go to the card from a thread of their own (logwriter.h):
     // written in place, a race's once-a-second lines cost the device that

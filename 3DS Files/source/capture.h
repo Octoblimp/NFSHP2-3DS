@@ -68,8 +68,8 @@ void capture_note(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
 
 // The pause's frames (TASKS 64). The road's blink on the device lasts a
 // moment, the log's lines come once a second, and Azahar never draws it;
-// but the user pauses right after seeing it. So with "DebugLog 1" (and
-// "PauseFrames", on by default) a race keeps its last PAUSE_FRAMES frames,
+// but the user pauses right after seeing it. So with "PauseLog 1"
+// (configitems.h, off by default) a race keeps its last PAUSE_FRAMES frames,
 // the top screen at half size as the transfer engine scales it, and a
 // pause writes them to sdmc:/nfshp2_pause_N.bin, N from 1 each boot, with
 // each frame's numbers in the log. tools/pause_frames.py makes PNGs of

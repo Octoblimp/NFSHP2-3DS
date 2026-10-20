@@ -216,13 +216,14 @@ extern int32_t ConfigCoreSample;            // 0
 // turned the timing frames on, at the user's word a key now.
 extern int32_t ConfigGpuLog;                // 0
 
-// The port's own: with "DebugLog 1", a race keeps the top screen of its
-// last 96 frames at half size (4.5 MB of linear heap), and a pause writes
-// them to sdmc:/nfshp2_pause_N.bin, each frame's numbers in the log
-// (capture.h, TASKS 64): the road's blink on the device is gone before
-// the log's next line, but the user pauses right after it. "PauseFrames
-// 0" keeps none. Without "DebugLog 1" it does nothing (2026-10-19).
-extern int32_t ConfigPauseFrames;           // 1
+// The port's own: "PauseLog 1" has a race keep the top screen of its last
+// 96 frames at half size (4.5 MB of linear heap), and a pause write them
+// to sdmc:/nfshp2_pause_N.bin, each frame's numbers in the log (capture.h,
+// TASKS 64): the road's blink on the device is gone before the log's next
+// line, but the user pauses right after it. It opens sdmc:/nfshp2_debug.txt
+// as "DebugLog 1" does, for those numbers. Off unless the config file says
+// so (the user, 2026-10-20); until then "PauseFrames", on with "DebugLog 1".
+extern int32_t ConfigPauseLog;              // 0
 
 typedef void (*ConfigItemsLogFn)(const char *line);
 
