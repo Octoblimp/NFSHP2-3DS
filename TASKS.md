@@ -3441,6 +3441,34 @@ phases.
         and where the table comes from, then port it. On the 3DS the
         sixteen buttons are joyhid's DualShock 2 buttons, so a code is
         entered with the 3DS keys mapped to them.
+        - [x] **50a, the reader and the 78 codes** (`eastereggs.c`):
+              retail's constructor (`0x0024f420`, the image's static
+              constructor 99), Start, Stop, the press (`0x0024f748`),
+              the clears, the lookups and the five small ones, with the
+              table at `0x0031d828` read off the disc. NewMainMenu's
+              OnTick half is in `mainMenuTick` (the reader off under the
+              help; "Unlocked" and the code's name, FrontendSound 30),
+              and `main.c` binds car select's and track select's tests,
+              the Begin of unloading's ClearTemporary and `gEggIsOnFn`.
+              So the 46 car codes, the 23 track codes and the two bonus
+              events work. On the main menu L/ZL/R/ZR are L1/L2/R1/R2,
+              X is Square and B Triangle. `eastereggs_check`: 2,084 ops,
+              1,999 lines, 0 differ; 83 mutations, 83 caught.
+              `run_azahar_cheat.ps1` entered code 46 in Azahar: the
+              menu said "Unlocked / Pursuit Corvette Z06 in You're The
+              Cop Mode", and You're The Cop's car select went from 1 car
+              unlocked of 5 to 2. Write-up:
+              `docs/formats/easter-eggs.md`, with every code's 3DS keys.
+        - [ ] **50b, the render eggs**: Motion Blur, Black & White,
+              Heavy Fog, R/C Car, Video Mode's picture and Chrome Cars.
+              Retail's Stomper (`InitStomper` `0x0024bbd0` to
+              `UpdateStomper`, `pStomper` gp-14932, the table of stomps
+              from `_GLOBAL_$I$StomperRenderEggs` `0x0024c048`) and
+              `ResetRenderEggs`, `RandomRenderEgg`,
+              `SetRenderEggFromEasterEggs` (`0x0024bf18`) and
+              `DisableRenderEggs`; then bind `gSetRenderEggFromEasterEggsFn`,
+              `gResetRenderEggsFn` and `gDisableRenderEggsFn`. Until then
+              these codes are taken and shown but change nothing.
 51. [x] **The damage system (CarDamage).** Found on 2026-10-12 with
         TASKS 39. Nothing made a CarDamage, so `pCarDamage` was NULL on
         every car: no hit dented a car, broke a light or a window, or

@@ -28655,3 +28655,30 @@ is done, and `gCubicCameraMoverFn` stays NULL (noted in `playercam.h`,
 
 Next: TASKS 50, the cheat codes and the easter eggs, then the launch
 prep.
+
+## Session 142, continued -- the cheat codes (TASKS 50a)
+
+The main menu takes the PS2 game's 78 cheat codes (`eastereggs.c`): eight
+presses, and the menu says "Unlocked" and the code's name, as retail does.
+
+- **The reader.** Retail's TheEasterEggs (`0x0031d7e8`, the port's name)
+  whole: Start and Stop (NewMainMenu's), the ring of the last eight
+  presses, the groups, ClearTemporary after each race, and the lookups.
+  The table (`0x0031d828`) is read off the disc. Its static constructor is
+  the one entry retail's `__CTOR_LIST__` has that the demo's does not, so
+  `main.c` calls it after `sinit_run`.
+- **What works now.** The 46 car codes (car select), the 23 track codes
+  (track select, both ways) and the two bonus events. Video Mode shows its
+  HUD group. Motion Blur, Black & White, Heavy Fog, R/C Car and Chrome
+  Cars are taken and shown but need the Stomper: TASKS 50b. Code 5 (the
+  pet helicopter) has no presses on the disc.
+- **Keys.** On the main menu L, ZL, R and ZR are L1, L2, R1 and R2, X is
+  Square and B Triangle (BACK goes nowhere there). Every code's keys are in
+  `docs/formats/easter-eggs.md`.
+- **Checks.** `eastereggs_check`: 2,084 ops, 1,999 lines, 0 differ; 83
+  mutations, 83 caught. `tools/run_azahar_cheat.ps1` (new): code 46 on the
+  main menu, "Unlocked / Pursuit Corvette Z06 in You're The Cop Mode", and
+  You're The Cop's car select went from 1 of 5 cars unlocked to 2. Not yet
+  on the 3DS.
+
+Next: TASKS 50b, the render eggs, then the launch prep.

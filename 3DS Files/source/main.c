@@ -138,6 +138,7 @@
 #include "emodel.h"
 #include "esolid.h"
 #include "eventmgr.h"
+#include "eastereggs.h"
 #include "eventtree.h"
 #include "eventtreeview.h"
 #include "eview.h"
@@ -3562,13 +3563,53 @@ static void hookLoadSoundRegionsInGame(void (*done)(intptr_t), intptr_t param)
             gSoundModule.region[3].name);
 }
 
-// TheEasterEggs' Start and Stop, NewMainMenu's. The 78 codes it listens for
-// are not ported, so the pad is not handed to it: the log says when retail
-// would have.
+// TheEasterEggs (eastereggs.h), NewMainMenu's: Start and Stop, the
+// reader's switch, and the code just entered.
 static void hookEasterEggs(void* user, int start)
 {
     (void)user;
     logLine("easter eggs %s", start ? "start" : "stop");
+    if (start)
+        eastereggs_start(&TheEasterEggs);
+    else
+        eastereggs_stop(&TheEasterEggs);
+}
+
+static void hookEasterEggsActive(void* user, int on)
+{
+    (void)user;
+    if (on)
+        eastereggs_enable(&TheEasterEggs);
+    else
+        eastereggs_disable(&TheEasterEggs);
+}
+
+static int hookEasterEggEntered(void* user, int32_t* languageId)
+{
+    (void)user;
+    if (!eastereggs_just_entered(&TheEasterEggs))
+        return 0;
+    *languageId = eastereggs_take_language_id(&TheEasterEggs);
+    logLine("easter egg entered: %d", (int)*languageId);
+    return 1;
+}
+
+// The car and track selects' tests (0x0024f8f8, 0x0024f930).
+static int hookCarSelEgg(void* user, int32_t carType, int copsOnly)
+{
+    (void)user;
+    return eastereggs_car_on(&TheEasterEggs, carType, copsOnly);
+}
+
+static int hookTrackSelEgg(void* user, int32_t track, int32_t direction)
+{
+    (void)user;
+    return eastereggs_track_on(&TheEasterEggs, track, direction);
+}
+
+static void clearTemporaryEasterEggs(void)
+{
+    eastereggs_clear_temporary(&TheEasterEggs);
 }
 
 // tDisplayOptionsChangeManager::Start: displayoptions.c keeps the snapshot.
@@ -6111,10 +6152,18 @@ static void guardNote(FILE* f)
 // few seconds and starts a bombing run of the kind the item names. With
 // no cop manager (SkipFEMaxCops 0) a spike belt has no list for its strip
 // (DroppedSpikes::Explode), so the belt becomes a smoke bomb. 6 only
-// follows.
+// follows. Every other egg is TheEasterEggs' (eastereggs.h): its code n's
+// On. Egg 5's code has no presses, so only ForceChopper turns it on.
+static int forceChopperOn(void)
+{
+    return g_flow.skipFE && ConfigForceChopper > 0;
+}
+
 static int32_t eggIsOn(int32_t n)
 {
-    return n == EGG_HELICOPTER && g_flow.skipFE && ConfigForceChopper > 0;
+    if (n == EGG_HELICOPTER && forceChopperOn())
+        return 1;
+    return eastereggs_egg_on(&TheEasterEggs, n);
 }
 
 static void forceChopperTick(float dt)
@@ -6125,7 +6174,7 @@ static void forceChopperTick(float dt)
     struct Chopper*              h;
     ChopperAttackType            type;
 
-    if (!eggIsOn(EGG_HELICOPTER) || pCurrentWorld == NULL) return;
+    if (!forceChopperOn() || pCurrentWorld == NULL) return;
     h = pCurrentWorld->Helicopter;
     // The replay's snapshots clear an idle helicopter, its word at 960
     // too (copsnap.c, TASKS 72e-1), so the follow is set again.
@@ -7674,6 +7723,9 @@ int main(int argc, char** argv)
     // before anything can call bNewSlotPool. Its allocator hook is left at
     // the default, malloc -- i.e. the heap heapcfg.c already sized.
     sinit_run();
+    // Retail's list has one more the demo's does not: [99], 0x0024fa60,
+    // TheEasterEggs' constructor.
+    eastereggs_construct(&TheEasterEggs);
     bSetSlotPoolPrintf(slotPoolLog);
 
     // The image's vtables are .data and need nothing done to them; the
@@ -8471,6 +8523,9 @@ int main(int argc, char** argv)
     hooks.raceDemo         = hookRaceDemo;
     hooks.raceReturn       = hookRaceReturn;
     hooks.easterEggs       = hookEasterEggs;
+    hooks.easterEggsActive = hookEasterEggsActive;
+    hooks.easterEggEntered = hookEasterEggEntered;
+    hooks.helpActive       = hookCarSelHelpActive;
     hooks.initSelectCar    = hookCarSelInit;
     hooks.closeSelectCar   = hookCarSelClose;
     hooks.fixUpTables      = hookFixUpTables;
@@ -8608,6 +8663,8 @@ int main(int argc, char** argv)
     // InitAIPlans and CloseAIPlans: the AI actions' slot pool, made as a
     // track loads and deleted as it unloads.
     gInitAIPlansFn           = ai_init_ai_plans;
+    // The Begin of unloading's: the codes not kept go off after each race.
+    gClearTemporaryEasterEggsFn = clearTemporaryEasterEggs;
     gCloseAIPlansFn          = ai_close_ai_plans;
     gNewRaceCoordinatorFn    = racecoordinator_new;
     gDeleteRaceCoordinatorFn = racecoordinator_destroy;
@@ -8766,8 +8823,8 @@ int main(int argc, char** argv)
     gCopManagerBeACopRequestChopperFn   = tcopmanager_be_a_cop_request_chopper;
     gCopManagerBeACopRequestRoadBlockFn =
         tcopmanager_be_a_cop_request_road_block;
-    // The eggs (the cheats) are not ported; only ForceChopper's helicopter
-    // egg is ever on.
+    // The eggs: the main menu's cheat codes (eastereggs.h), and
+    // ForceChopper's helicopter.
     gEggIsOnFn                          = eggIsOn;
     // The pullovers (12l): a chase or a spike strip that stops its car pulls
     // it over, a ticket or an arrest, and the cop manager's think ends each
@@ -9005,6 +9062,7 @@ int main(int argc, char** argv)
     carselHooks.loaderUnload       = hookCarSelLoaderUnload;
     carselHooks.loaderBeginLoading = hookCarSelLoaderBeginLoading;
     carselHooks.renderTextIntoRectangle = hookCarSelRenderText;
+    carselHooks.eggActive          = hookCarSelEgg;
     carselHooks.formatUnlockBlurb  = hookCarSelFormatUnlockBlurb;
     carselHooks.speakCar           = hookCarSelSpeakCar;
     carselHooks.speechFade         = hookCarSelSpeechFade;
@@ -9021,6 +9079,7 @@ int main(int argc, char** argv)
     trackselHooks.translate         = hookCarSelTranslate;
     trackselHooks.speechFade        = hookCarSelSpeechFade;
     trackselHooks.speakTrack        = hookTrackSelSpeak;
+    trackselHooks.eggActive         = hookTrackSelEgg;
     trackselHooks.isTrackUnlocked   = hookTrackSelUnlocked;
     trackselHooks.formatUnlockBlurb = hookTrackSelFormatUnlockBlurb;
     trackselHooks.renderTextIntoRectangle = hookCarSelRenderText;

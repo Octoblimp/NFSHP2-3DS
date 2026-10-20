@@ -1570,13 +1570,31 @@ static void mainMenuDtor(BGameFlow* gf)
 // animate: the blurb, the bloom, the slide-in. Last, the group comes down
 // three seconds after it went up.
 //
-// Not ported: the eggs' half, which needs the 78 codes (TheEasterEggs never
-// sets +4 without them, so nothing of it is seen).
+// Not ported: 0x0024f968, whose loop over the codes does nothing.
 static void mainMenuTick(BGameFlow* gf)
 {
     BNewMainMenu* m = &gf->mainMenu;
     BAnim*        a = flowAnim(gf);
+    int32_t       id = 0;
 
+    if (gf->hooks.helpActive && gf->hooks.helpActive(gf->hooks.user)) {
+        HOOK_VOID(gf, easterEggsActive, 0);
+        m->timer = gf->realTimer;
+    } else {
+        HOOK_VOID(gf, easterEggsActive, 1);
+        if (gf->hooks.easterEggEntered
+            && gf->hooks.easterEggEntered(gf->hooks.user, &id)) {
+            m->timer = gf->realTimer;
+            makeSound(gf, BGF_SOUND_EASTER_EGG);
+            groupVisible(gf, BGF_SCREEN_NEW_MAIN_MENU, BGF_GROUP_EASTER_EGG,
+                         1);
+            trace(gf, "easter egg %d", (int)id);
+            HOOK_VOID(gf, setLanguageId, BGF_SCREEN_NEW_MAIN_MENU,
+                      BGF_OBJ_EASTER_EGG_NAME, (int)id);
+            m->eggShown = 1;
+            m->eggTimer = gf->realTimer;
+        }
+    }
     if (gf->popups[0].active) m->timer = gf->realTimer;
     bgf_consider_start_demo_mode(gf, &m->timer);
     if (!m->tracedAnimate) trace(gf, "menu animate");

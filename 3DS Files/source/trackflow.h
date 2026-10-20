@@ -126,9 +126,9 @@ extern int (*gBCountFreeMemoryFn)(int pool);       // 0x00257988
 extern void (*gEFlashScreenFn)(int r, int g, int b, const char *why,
                                float seconds);
 // ResetRenderEggs (0x0024bdc0), and 0x0024f700 on TheEasterEggs
-// (0x0031d7e8), the port's name ClearTemporaryEasterEggs: every egg not
-// kept (+52 of its 56 bytes) is turned off (+48). Not after an AI or
-// replay demo.
+// (0x0031d7e8, eastereggs.h), the port's name ClearTemporaryEasterEggs:
+// every egg not kept (+52 of its 56 bytes) is turned off (+48). Not after
+// an AI or replay demo.
 extern void (*gResetRenderEggsFn)(void);
 extern void (*gClearTemporaryEasterEggsFn)(void);
 

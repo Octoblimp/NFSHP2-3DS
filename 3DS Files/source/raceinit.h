@@ -84,11 +84,11 @@ extern ChopperCtorFn     gChopperCtorFn;
 // Chopper's size in retail, which becomes sizeof when it is ported.
 #define CHOPPER_SIZE 976
 
-// The word at +48 + 56n of the table at *(0x0031d7f4), the word at +12 of
-// a retail object at 0x0031d7e8 that the demo does not have. Only readers
-// are found, and they look like Easter eggs: RandomRenderEgg's neighbour
-// reads n = 0 and 1, Player n = 4, InitCars and Chopper's constructor
-// n = 5, and EventInfo::GetStatus n = 6 and 7. InitCars builds the
+// The word at +48 + 56n of the table at *(0x0031d7f4): code n's On, of
+// TheEasterEggs (0x0031d7e8, eastereggs.h), the main menu's cheat codes.
+// RandomRenderEgg's neighbour reads n = 0 and 1, Player n = 4 (Video
+// Mode), InitCars and Chopper's constructor n = 5 (Pet Helicopter), and
+// EventInfo::GetStatus n = 6 and 7 (the bonus events). InitCars builds the
 // helicopter with no cops when egg 5 is on, and the Chopper's
 // constructor sets its own word 960 then. NULL reads 0, every egg off.
 typedef int32_t (*EggIsOnFn)(int32_t n);

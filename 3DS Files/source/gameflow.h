@@ -80,6 +80,9 @@ typedef enum {
 // group as it is built and as it is torn down, and shows it for three
 // seconds when a code has just been entered (OnTick, 0x00216718).
 #define BGF_GROUP_EASTER_EGG      0x74e404b4u
+#define BGF_OBJ_EASTER_EGG_NAME   0xf58c1a4bu
+// FrontendSoundEvent 30, "EasterEgg", OnTick's for a code just entered.
+#define BGF_SOUND_EASTER_EGG      30
 
 #define BGF_TEX_LEGAL             0xa7ebc389u  // both out of GLOBAL\DYNTEX.BIN
 #define BGF_TEX_ANTIPIRACY        0x38258033u
@@ -253,12 +256,20 @@ typedef struct {
     // instead of the game type's, when it is on the stack (a wireless
     // race's lobby, TASKS 37f), or NULL for retail's.
     const char* (*raceReturn)(void* user);
-    // TheEasterEggs (0x0031d7e8), the port's name: retail's ELF has no
-    // symbols, and the class is not on the demo disc. Start (0x0024f488)
-    // gives it the pad's sixteen button events, 133..148, and Stop
-    // (0x0024f610) takes them back. NewMainMenu's constructor and
+    // TheEasterEggs (0x0031d7e8, eastereggs.h), the port's name: retail's
+    // ELF has no symbols, and the class is not on the demo disc. Start
+    // (0x0024f488) gives it the pad's sixteen button events, 133..148, and
+    // Stop (0x0024f610) takes them back. NewMainMenu's constructor and
     // destructor are its only callers. `start` is 1 for Start, 0 for Stop.
     void (*easterEggs)(void* user, int start);
+    // NewMainMenu::OnTick's stores to it: its +0, the reader's on switch
+    // (`on`); and its +4 and +8, the code just entered: 1 with the code's
+    // LanguageID, +4 cleared, or 0 when no code has been entered.
+    void (*easterEggsActive)(void* user, int on);
+    int (*easterEggEntered)(void* user, int32_t* languageId);
+    // tHelpMenu::IsActive on the screen list's help menu (+452), which
+    // OnTick asks first: the reader is off while the help is up.
+    int (*helpActive)(void* user);
     // NewMainMenu::HighlightMenuItem (0x00216880), the same pair bscreens.h
     // gives the menus it has classes for. moveBrackets is its
     // FlailerGetBoundingBox on the item's MI_n_MASK and the two SetTopLeftYs:
