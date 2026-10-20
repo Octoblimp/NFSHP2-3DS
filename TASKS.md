@@ -3901,6 +3901,35 @@ phases.
         - [x] Session 133: the VRAM upload's copy, given back before
           the GPU had read it (TASKS 47's note), fixed. The likely
           cause of all three of the user's brief road artifacts.
+        - [ ] 2026-10-19: still there on build 6f090e6. The user paused
+          right after seeing it ("look where I paused specifically,
+          that's the area where I see the road briefly glitch out"):
+          log line 9367, the same corner on lap 2, car 0 from 248.9
+          219.7 at world 218.956 s to 226.4 212.4 at 219.977 s, slowed
+          to 6.6 m/s against the verge (resolve 2.83 ms, 20 rounds).
+          Again the sun only then: 4 quads, alpha 51, its rect all sky,
+          the second before 0. Nothing else odd in the once-a-second
+          lines: 29.5 fps, worst frame 49.9 ms, worst send 2.80 ms, 0
+          dropped or failed anywhere. Read again and ruled out (Session
+          138): georender's strip and model caches and the cull planes
+          they feed, geocull, c3dwrap's patching (it never touches a
+          sent part), the command buffer guard, the scenery cull (its
+          frustum is the draw's, conservative), the sun's GEQUAL core
+          and its depth read-back, the fog texture writes, the GPU
+          timing replays (off, GPULog 0).
+        - [x] Session 138: the pause's frames. With "DebugLog 1" (and
+          "PauseFrames", on by default) a race keeps its last 96
+          frames at 200 by 120 (a display transfer each frame start,
+          before the clear) with each frame's numbers, and a pause
+          writes them to `sdmc:/nfshp2_pause_N.bin` (8 a boot) and a
+          "pause frame k" log line each. `tools/pause_frames.py` makes
+          PNGs, a contact sheet and the frames least like their
+          neighbours. On Azahar every 8th picture came out in shifted
+          strips until each got a 48 KB page-aligned slot (Azahar's
+          surface cache; 62 clean pictures after). Next: the user
+          pauses as soon as it blinks and sends the .bin with the log;
+          the pictures show what blinks, the numbers whether the CPU
+          dropped it.
 
 65. [x] **The FPS dip in the same race.** Reported with TASKS 64:
         "there was a minor FPS slowdown too at one point, locate that

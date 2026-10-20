@@ -33,6 +33,7 @@
 #define CAPTURE_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #include <citro3d.h>
 
@@ -64,5 +65,39 @@ void capture_offscreen(bool on);
 // The next draw's number, from 1, and a line of the legend for it.
 int  capture_next_id(void);
 void capture_note(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+
+// The pause's frames (TASKS 64). The road's blink on the device lasts a
+// moment, the log's lines come once a second, and Azahar never draws it;
+// but the user pauses right after seeing it. So with "DebugLog 1" (and
+// "PauseFrames", on by default) a race keeps its last PAUSE_FRAMES frames,
+// the top screen at half size as the transfer engine scales it, and a
+// pause writes them to sdmc:/nfshp2_pause_N.bin, N from 1 each boot, with
+// each frame's numbers in the log. tools/pause_frames.py makes PNGs of
+// them. A race with them off allocates and sends nothing.
+#define PAUSE_FRAMES 96
+
+// What the frame drew, for the log's line beside its picture.
+typedef struct {
+    uint32_t frame;             // eFrameCounter once it was drawn
+    float    world;             // WorldTimeSeconds
+    float    pos[3];            // the camera's eye
+    float    dir[3];            // and the way it looks
+    int32_t  zone;              // CurrentZoneNumber
+    int32_t  drawn, infos, sky, tris, skipped;
+    int32_t  sunQuads, sunAlpha, sunSky;
+    int32_t  strips, sprites;
+    float    cpuMs;             // the draw's, C3D_FrameBegin to the HUD
+    float    gpuMs;             // the GPU's last frame (C3D_GetDrawingTime)
+} PauseFrameNote;
+
+// After C3D_FrameBegin, which waits for the GPU, and before anything of
+// the frame is sent, every frame: the last frame's picture into the ring,
+// if it was noted, and once the race is paused, on the pause's second
+// frame, the ring to the card. The ring is let go here once the race is.
+void capture_pause_frame(C3D_RenderTarget* top, bool paused);
+
+// After the race's view is drawn: the frame's numbers, for the picture the
+// next capture_pause_frame takes of it. Not while paused.
+void capture_pause_note(const PauseFrameNote* n);
 
 #endif

@@ -6942,6 +6942,42 @@ static struct PauseMenu* pauseMenuNew(void* mem)
     return pause_menu_construct((PauseMenu*)mem);
 }
 
+// The race view's numbers for the pause's frames (capture.h): what the
+// track drew this frame, beside its picture. `drawTick` is the draw's
+// start, after C3D_FrameBegin.
+static void notePauseFrame(uint32_t drawTick)
+{
+    const eView*   view = eGetView(EVIEW_ID_PLAYER1);
+    PauseFrameNote n;
+    int            k;
+
+    memset(&n, 0, sizeof n);
+    n.frame = eFrameCounter;
+    n.world = WorldTimeSeconds;
+    if (view->pCamera != NULL) {
+        const CameraParams* c = &view->pCamera->CurrentKey;
+
+        for (k = 0; k < 3; k++) {
+            n.pos[k] = (&c->Position.x)[k];
+            n.dir[k] = (&c->Direction.x)[k];
+        }
+    }
+    n.zone     = CurrentZoneNumber;
+    n.drawn    = g_track.drawn;
+    n.infos    = g_track.drawInfos;
+    n.sky      = g_track.skyDrawn;
+    n.tris     = g_track.drawnTris;
+    n.skipped  = g_track.cmdSkipped;
+    n.sunQuads = g_track.sunQuads;
+    n.sunAlpha = g_track.sunAlpha;
+    n.sunSky   = g_track.sunSky;
+    n.strips   = g_track.stripsDrawn;
+    n.sprites  = g_track.spritesDrawn;
+    n.cpuMs    = bGetTickerDifference(drawTick, bGetTicker());
+    n.gpuMs    = C3D_GetDrawingTime();
+    capture_pause_note(&n);
+}
+
 // RCSTATE_PAUSE's way in: the port that asked, and in a wireless race the
 // lockstep frame, so the log says whose pause it is.
 static void pauseEnter(struct PauseMenu* m, JoystickPort port)
@@ -9471,6 +9507,11 @@ int main(int argc, char** argv)
             C3D_FrameBegin(0);
             hangwatch_gpu_begin();
             hangwatch_gpu_sends_begin(g_track.attached && ConfigGpuSends);
+            // The last frame's picture for the pause's frames, ahead of
+            // anything this frame sends (capture.h).
+            capture_pause_frame(top, pRaceCoordinator != NULL
+                                && pRaceCoordinator->CurrentRCState
+                                       == RCSTATE_PAUSE);
             uint32_t drawTick = bGetTicker();
             // The GPU is done with the last frame: what the frontend's view
             // let go of since can be freed, and the slideshow's pictures.
@@ -9506,6 +9547,7 @@ int main(int argc, char** argv)
                                       __builtin_bswap32(sky), 0);
                 C3D_FrameDrawOn(top);
                 trackview_draw(&g_track);
+                notePauseFrame(drawTick);
                 C2D_Prepare();
                 C3D_DepthTest(false, GPU_GREATER, GPU_WRITE_COLOR);
             } else {
