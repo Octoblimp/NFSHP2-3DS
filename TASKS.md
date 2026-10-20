@@ -5031,9 +5031,9 @@ phases.
 80. [ ] **The zone cameras: the freeze, the preview, the rest of
         zonecameras.cpp, and the radial blur.** Found while TASKS 64
         waited on the device. `playerzone.c` refused zones 1 and 2 as
-        dead buttons because their movers were not ported, so a car
-        hitting a roadblock at over 40 mph (`pursuit.c`) never froze
-        the world as retail does.
+        dead buttons because their movers were not ported, so the
+        player's car hitting a roadblock's police car at over 40 mph
+        (`pursuit.c`) never froze the world as retail does.
         - [x] **80a, the Zone Freeze camera** (`zonecam.c`): retail's
               constructor (`0x00160298`), destructor (`0x00161000`),
               `Duration` (3 s) and `Update` (`0x001610a8`), with

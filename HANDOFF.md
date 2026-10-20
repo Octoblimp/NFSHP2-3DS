@@ -28464,3 +28464,36 @@ glitch out".
 Next: the user pauses on the blink and sends the .bin with the log.
 Meanwhile the zone cameras (TASKS 80, Zone Freeze first), then 72h-2c
 and 75.
+
+## Session 138, continued -- the Zone Freeze camera (TASKS 80a)
+
+While TASKS 64 waited on the device, 049c9e9 ported retail's
+ZoneFreezeCameraMover (`zonecam.c`), zone 1's camera, so zone 1 is no
+longer a dead button. With Zone Cams on (the default), the player's car
+hitting a roadblock's police car at over 40 mph (`pursuit.c`) now
+freezes the world for 3 s while the camera swings round it, with the
+wind swept round the listener.
+
+- **New beside it.** `Spline`'s allocating constructor,
+  `AddControlPoint` and `GetDerivative`; `tCubic3D`'s setters;
+  `Player::UpdateZoneSound` and the bSample azimuth, pitch and volume
+  seams (bound in main.c).
+- **Two things the checker found.** The model needs bmatrix's static
+  initialiser (`0x0025afa8`, the (0,0,0,1) at `0x00320a60`), or retail's
+  matrix-times-vector drops the translation. Also, retail's constructor
+  passes `CM_STILL` (12), not `CM_ZONE_FREEZE` (13), so the port does
+  too.
+- **The check.** `tools/zonecam_check.py`: 12 scenarios, 1850 ops, 45410
+  lines, 0 differ. 99 mutations: 96 caught, 3 equivalent (e-hi, pt-pad,
+  der-floor), with their reasons in the script and in
+  `docs/formats/camera.md`, "The Zone Freeze camera".
+- **Still unbound.** The radial blur (80d) and the Zone Preview (80b).
+  TASKS 80 lists them with the Jumper and Cubic movers (80c).
+- Not yet seen on a 3DS. The checklist is v22.
+
+The user is about to test the build on their 3DS and asked for work to
+halt once it was ready, so nothing changes under the test. Work stops
+here until they report.
+
+Next, after their report: TASKS 64 from the pause frames, then 80b
+(the Zone Preview), 80d (the radial blur), 72h-2c and 75.
