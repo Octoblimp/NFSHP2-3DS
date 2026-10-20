@@ -263,6 +263,14 @@ It works around the space in the path and produces
 ## About
 
 A fan project, not made, endorsed or supported by Electronic Arts.
-Need for Speed and Hot Pursuit 2 are Electronic Arts' trademarks. No
-game data is included: the port runs only with files from a disc you
-own.
+Need for Speed and Hot Pursuit 2 are Electronic Arts' trademarks. The
+repository holds no game data: the port runs only with files from a disc
+you own. The CIA's HOME Menu icon, banner and siren are made from the
+disc's files when it is built.
+
+## License
+
+The port's own code is under the GNU General Public License, version 3
+(`LICENSE`). It covers the code alone: the game, its data and its art
+stay Electronic Arts'. The vendored `makerom` and `bannertool` keep their
+own licenses.
