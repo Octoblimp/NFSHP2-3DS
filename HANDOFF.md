@@ -28424,3 +28424,43 @@ has the number-to-name table, read from GLOBALB's TrackInfo chunk
 (0x34201) and `FE_ENGLISH.BIN`.
 
 Next: the zone cameras (TASKS 80), starting with Zone Freeze.
+
+## Session 138 -- the road blink's pause frames (TASKS 64)
+
+Session 137's last stretch read retail's Zone Freeze (TASKS 80a) and
+wrote no code: its notes, zf_retail.txt and zf_helpers.txt, were in
+session 74b47348's scratchpad. Then the user sent a new log: "look where
+I paused specifically, that's the area where I see the road briefly
+glitch out".
+
+- **Where.** `3DS Files/nfshp2_debug.txt` (2026-10-19, build 6f090e6),
+  pause at line 9367: track 31 forwards, lap 2, the same curb turn as
+  the first report, car 0 from 248.9 219.7 (world 218.956 s) to 226.4
+  212.4 (219.977 s), slowed to 6.6 m/s against the verge. The sun's 4
+  quads were up at alpha 51, its rect all sky, the second before 0.
+  TASKS 45, 47 and 64 all came with the glare.
+- **What the log can't say.** 29.5 fps, worst frame 49.9 ms, worst send
+  2.80 ms, nothing dropped or failed. A blink of a frame or two falls
+  between the once-a-second lines, and 76a0e7e's VRAM fix didn't cure
+  it.
+- **Read and ruled out** (TASKS 64 has the list): georender's strip and
+  model caches and the cull planes, geocull, c3dwrap, the command
+  buffer guard, the scenery cull, the sun's core and read-back, the fog
+  texture writes, GPULog's replays.
+- **The pause's frames** (7296449). With "DebugLog 1" and "PauseFrames"
+  (on by default) a race keeps its last 96 top-screen frames at 200 by
+  120: a display transfer of the top target at each frame's start,
+  queued before the clear, into a 4.5 MB linear ring, with each frame's
+  draw numbers (`notePauseFrame` in main.c). RCSTATE_PAUSE writes
+  `sdmc:/nfshp2_pause_N.bin` (8 a boot) and a "pause frame k" log line
+  each; `tools/pause_frames.py FILE` makes frame_KK.png, sheet.png and
+  odd.png (the frames least like their neighbours). Packed 48000-byte
+  slots came out in shifted strips every 8th frame on Azahar (its
+  surface cache, slots at 0x200 mod 0x400); 0xC000-byte page-aligned
+  slots gave 62 clean frames. On the device the SD write may take a
+  second or two at the pause.
+- The checklist is v21: 64 back to Open, with what to send.
+
+Next: the user pauses on the blink and sends the .bin with the log.
+Meanwhile the zone cameras (TASKS 80, Zone Freeze first), then 72h-2c
+and 75.
