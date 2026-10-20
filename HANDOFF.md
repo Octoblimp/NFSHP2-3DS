@@ -28489,7 +28489,10 @@ wind swept round the listener.
   `docs/formats/camera.md`, "The Zone Freeze camera".
 - **Still unbound.** The radial blur (80d) and the Zone Preview (80b).
   TASKS 80 lists them with the Jumper and Cubic movers (80c).
-- Not yet seen on a 3DS. The checklist is v22.
+- **How to see it.** In a normal race with the automatic gearbox,
+  Shift Down (D-pad Down) asks for it (`playerinput.c`), as on the
+  PS2. Not yet seen on a 3DS. The checklist is v22, with it as a
+  device test.
 
 The user is about to test the build on their 3DS and asked for work to
 halt once it was ready, so nothing changes under the test. Work stops
