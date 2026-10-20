@@ -6,7 +6,9 @@
 #include <string.h>
 
 #include "bchunk.h"
+#include "bmath.h"
 #include "eefpu.h"
+#include "realtime.h"
 
 bNode WeatherRegionLists[WEATHER_NUM_TYPES] = {
     { &WeatherRegionLists[0], &WeatherRegionLists[0] },
@@ -29,6 +31,7 @@ float   WeatherFogStart;
 int32_t WeatherFogColourR;
 int32_t WeatherFogColourG;
 int32_t WeatherFogColourB;
+int32_t WeatherHeavyFog;
 
 WeatherQuery CachedWeatherQueries[EVIEW_NUM_VIEWS];
 
@@ -199,6 +202,18 @@ void WeatherManQuery(WeatherQuery *q, const bVector3 *pos)
     float x = pos->x, y = pos->y, z = pos->z;
     int   type;
 
+    // Retail 0x001a84f0's first test.
+    if (WeatherHeavyFog) {
+        float s1, s2, s3;
+
+        q->Fog = 0.957753f;
+        s1 = bSinF((float)WorldTimeFrames * 0.02f);
+        s2 = bSinF((float)WorldTimeFrames * 0.001f);
+        s3 = bSinF((float)WorldTimeFrames * 0.01f);
+        q->FogColour = 0x00887062;
+        q->FogStart  = s1 * 200.0f + -1000.0f + s2 * 150.0f + s3 * 100.0f;
+        return;
+    }
     if (WeatherUseTweakerValues) {
         q->Fog       = WeatherFog;
         q->FogStart  = WeatherFogStart;

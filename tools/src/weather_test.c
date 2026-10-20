@@ -1,6 +1,8 @@
 // Harness for tools/weather_check.py: runs the checker's scenarios on
 // weatherman.c and efog.c and prints what the model prints for the image.
-// eGetView and eFrameCounter are the harness's, and the seam eAttachFog
+// eGetView, eFrameCounter and WorldTimeFrames (which only the retail
+// Heavy Fog egg's branch reads: stomper_check.py's) are the harness's, and
+// the seam eAttachFog
 // hands each palette to logs it with its mode's ALPHA_1; after each step
 // the lists and the regions' links are dumped. See the checker's docstring.
 //
@@ -16,6 +18,7 @@
 #include "weatherman.h"
 
 uint32_t eFrameCounter;
+int32_t  WorldTimeFrames;
 
 #define MAX_REGIONS 24
 #define MAX_POS     16

@@ -283,6 +283,8 @@ typedef struct {
     int  mirrorModels;          // the models drawn into it
     int  blurBlends;            // radial blur frames blended, since the load
     int  blurFailed;            // and ones with no RADIALBLUR or no room
+    int  greyDrawn;             // black and white frames, since the load
+    int  greyFailed;            // and ones with no copy or no room
 
     // --- the sun: what StuffSun drew and asked for, the frame just drawn.
     int   sunQuads;             // quads ePoly::Render drew

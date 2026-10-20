@@ -188,6 +188,11 @@ int main(int argc, char **argv)
             radialblur_on_off_view(a, &views[b]);
             printf("OO %d %d\n", a, b);
             print_state();
+        } else if (strcmp(op, "OP") == 0) {
+            sscanf(line + 2, "%d %d", &a, &b);
+            c = radialblur_on_off(a, b);
+            printf("OP %d %d -> %d\n", a, b, c);
+            print_state();
         } else if (strcmp(op, "R") == 0) {
             sscanf(line + 1, "%d", &a);
             radialblur_replay(a);

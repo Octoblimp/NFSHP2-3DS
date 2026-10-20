@@ -28682,3 +28682,35 @@ presses, and the menu says "Unlocked" and the code's name, as retail does.
   on the 3DS.
 
 Next: TASKS 50b, the render eggs, then the launch prep.
+
+## Session 143 -- the render eggs (TASKS 50b)
+
+The five picture codes now change the picture (`stomper.c`), so TASKS 50
+is done.
+
+- **The Stomper.** Retail's whole: a render egg is a list of globals to
+  poke (or a function to call, or a nested list); Set keeps the old
+  values on a 1 KB stack and Clear puts them back. InitStomper runs last
+  in InitializeEverything; the track's load sets the egg of the first
+  code that is on, its unload clears it, and the AI demo disables it.
+  Each frame suspends the egg before the mirror and resumes it at the
+  end, so the mirror draws as it was.
+- **The eggs.** Motion Blur turns the radial blur on (RadialBlurOnOff,
+  now ported). Black & White and Video Mode set ForceBlackAndWhite:
+  `eAttachBlackAndWhite` greys the view by its green after the fog, and
+  the 3DS does it with a copy of the top screen drawn back through a
+  green-to-grey combiner. Heavy Fog sets the weather's heavy fog. R/C Car
+  halves `CarRenderMatrix` (the big head needs AnimatedDriver, not
+  ported). Chrome Cars makes the environment pass replace the paint.
+- **Checks.** `stomper_check`: 1,524 ops, 1,736 lines, 0 differ; 92
+  mutations, 92 caught. `radialblur_check` with RadialBlurOnOff: 335
+  steps, 3,757 lines, 0 differ; 43 mutations, 43 caught.
+- **Azahar** (track 42, gas held, the new `EggCodes N` config key, off
+  by default): Black & White grey with the mirror and HUD in colour,
+  Chrome Cars the reflection alone, R/C Car half-size cars. Not yet on
+  the 3DS.
+- Retail also greys a NIS (the view's `+116`); the port's NIS player has
+  no EnableOverrideRendering, so it stays in colour.
+
+Next: the launch prep: the packaging decisions (the user's), a README
+for players with the cheat codes' 3DS keys, and the final CIA.

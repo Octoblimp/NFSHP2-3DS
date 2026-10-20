@@ -69,7 +69,8 @@ WMC = "3DS Files/source/weatherman.c"
 WMH = "3DS Files/source/weatherman.h"
 EFC = "3DS Files/source/efog.c"
 EFH = "3DS Files/source/efog.h"
-SOURCES = [HARNESS, WMC, EFC]
+SOURCES = [HARNESS, WMC, EFC, "3DS Files/source/bmath.c",
+           "3DS Files/source/bmathtab.c"]
 
 HARNESS_TIMEOUT = 120
 

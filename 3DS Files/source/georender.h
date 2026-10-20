@@ -213,6 +213,12 @@ bool georender_envmap_ready(void);
 // CARSELECTENVMAP instead of target 14.
 void georender_set_env_texture(const C3D_Tex* tex);
 
+// Whether the environment passes draw their colour in place of the
+// frame's, as Chrome Cars' ALPHA_2 has the PS2's second context do
+// (eview.h's EnvPassAlpha): trackview.c's begin_frame sets it each race
+// frame, and the frontend's draw clears it. Off, they add theirs.
+void georender_set_env_replace(bool on);
+
 // The rear-view mirror's target, retail's target 7: a texture `width` by
 // `height` in VRAM, RGBA8 as target 7's PSMCT32 is, with a depth buffer
 // of its own. False when there is no room; true again for the same size.
@@ -298,6 +304,11 @@ void georender_set_fog(const GeoFog* fog, uint32_t colour);
 // rest of the heap. False when the ring is full or there is no texture.
 bool georender_draw_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
                          uint8_t blend, float depth);
+// The same over everything, with neither blend nor alpha test, and grey:
+// the texture's green in all three, and an alpha of 1.0 (0x80). The Black
+// & White egg's (trackview.c's black_and_white).
+bool georender_draw_green_quad(const GeoRenderVertex v[4],
+                               const GeoTexture* gt);
 // The same for a Flailer poly over the HUD, on a screen `width` by
 // `height`, citro2d's mapping: blended as citro2d blends, with neither
 // the alpha test nor the depth test, as the rest of the HUD draws. The

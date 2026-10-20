@@ -36,6 +36,7 @@
 #include "scenery.h"
 #include "skids.h"
 #include "sky.h"
+#include "stomper.h"
 #include "sun.h"
 #include "sundraw.h"
 #include "texpack.h"
@@ -147,6 +148,7 @@ static void render_epoly(ePoly* p, TextureInfo* info, int flags);
 static void render_epoly_3d(ePoly* p, TextureInfo* info, bMatrix4* m,
                             int flags);
 static void free_blur_previous(void);
+static void free_grey_copy(void);
 static void transfer_zbuffer_rect(uint8_t* dst, int x, int y, int w, int h);
 static float depth_of_gs_z(float g);
 static void target_to_screen(float x, float y, int targetW, int targetH,
@@ -2448,10 +2450,11 @@ void trackview_free(TrackView* v)
         }
         s_numSunRects = 0;
         // Their textures go with the track, and the radial blur's last
-        // frame with it.
+        // frame and the black and white's copy with it.
         s_numFlailer     = 0;
         s_flailerDropped = 0;
         free_blur_previous();
+        free_grey_copy();
     }
     if (v->info) {
         for (i = 0; i < v->numSolids + v->numOther; i++) {
@@ -3307,6 +3310,12 @@ static void begin_frame(TrackView* v)
     v->cacheClock++;
     eSwapFrameMallocBuffers();
     MaybeChangeViewMode();
+    // AttachDrawEnvironment's second context out of the frontend
+    // (0x0010ac50): its ALPHA_2 from EnvPassAlphaA .. D (eview.h). The two
+    // the game sets are the default, which adds the environment pass, and
+    // Chrome Cars', A = B and D = 0, which is the pass alone.
+    georender_set_env_replace(EnvPassAlphaA == EnvPassAlphaB
+                              && EnvPassAlphaD == 0);
     if (EnableEnvMapViews) {
         update_environment_map_cameras();
     }
@@ -3731,12 +3740,8 @@ void trackview_draw_mirror(TrackView* v)
 
 // DisplayBlendPrevious's last frame (radialblur.h). The PS2 reads its other
 // screen buffer; here the view's colour is copied after its blend and
-// before its mirror and the HUD, which so leave no trails. The top
-// screen's buffer is 240 by 400 in 50 rows of 30 tiles, and the texture
-// 256 by 512, so the copy leaves two tiles at the end of each row. Made in
-// the linear heap at the blur's first frame, kept to the track's end.
-#define BLUR_TILE_ROW (240 / 8 * 64 * 4)          // bytes
-#define BLUR_TILE_GAP ((256 - 240) / 8 * 64 * 4)
+// before its mirror and the HUD, which so leave no trails. Made at the
+// blur's first frame, kept to the track's end.
 
 static C3D_Tex s_blurPrev;
 static bool    s_blurPrevMade;
@@ -3754,36 +3759,50 @@ static void free_blur_previous(void)
     s_blurPrevFull   = false;
 }
 
-// The view as the GPU will have drawn it: what is drawn so far is sent
-// first, whether the frame goes in parts or not, and the copy queued after
-// waits for it.
-static void copy_blur_previous(void)
+// The top screen's colour as the GPU will have drawn it, into `tex`, made
+// the first time in the linear heap and filtered by `filter`. The screen's
+// buffer is 240 by 400 in 50 rows of 30 tiles, and the texture 256 by 512,
+// so the copy leaves two tiles at the end of each row; its columns run up
+// the screen and its rows across it (capture.c's tiled_index). What is
+// drawn so far is sent first, whether the frame goes in parts or not, and
+// the copy queued after waits for it, as what is sent after waits for the
+// copy. False when the buffer is not the top screen's, or the heap had no
+// 512 KB, which `noHeap` keeps.
+#define TOP_TILE_ROW (240 / 8 * 64 * 4)           // bytes
+#define TOP_TILE_GAP ((256 - 240) / 8 * 64 * 4)
+
+static bool copy_top_screen(C3D_Tex* tex, bool* made, bool* noHeap,
+                            GPU_TEXTURE_FILTER_PARAM filter)
 {
     C3D_FrameBuf* fb = C3D_GetFrameBuf();
 
-    s_blurPrevFull = false;
     if (fb == NULL || fb->colorBuf == NULL || fb->width != 240
         || fb->height != 400 || fb->colorFmt != GPU_RB_RGBA8) {
-        return;
+        return false;
     }
-    if (!s_blurPrevMade) {
-        if (s_blurPrevNoHeap
-            || !C3D_TexInit(&s_blurPrev, 256, 512, GPU_RGBA8)) {
-            memset(&s_blurPrev, 0, sizeof s_blurPrev);
-            s_blurPrevNoHeap = true;
-            return;
+    if (!*made) {
+        if (*noHeap || !C3D_TexInit(tex, 256, 512, GPU_RGBA8)) {
+            memset(tex, 0, sizeof *tex);
+            *noHeap = true;
+            return false;
         }
-        // The GS reads the buffer bilinear.
-        C3D_TexSetFilter(&s_blurPrev, GPU_LINEAR, GPU_LINEAR);
-        C3D_TexSetWrap(&s_blurPrev, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
-        s_blurPrevMade = true;
+        C3D_TexSetFilter(tex, filter, filter);
+        C3D_TexSetWrap(tex, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
+        *made = true;
     }
     hangwatch_gpu_send_now();
-    GX_TextureCopy((u32*)fb->colorBuf, GX_BUFFER_DIM(BLUR_TILE_ROW / 16, 0),
-                   (u32*)s_blurPrev.data,
-                   GX_BUFFER_DIM(BLUR_TILE_ROW / 16, BLUR_TILE_GAP / 16),
+    GX_TextureCopy((u32*)fb->colorBuf, GX_BUFFER_DIM(TOP_TILE_ROW / 16, 0),
+                   (u32*)tex->data,
+                   GX_BUFFER_DIM(TOP_TILE_ROW / 16, TOP_TILE_GAP / 16),
                    240u * 400u * 4u, 8);
-    s_blurPrevFull = true;
+    return true;
+}
+
+// The GS reads its other buffer bilinear.
+static void copy_blur_previous(void)
+{
+    s_blurPrevFull = copy_top_screen(&s_blurPrev, &s_blurPrevMade,
+                                     &s_blurPrevNoHeap, GPU_LINEAR);
 }
 
 // DisplayRadialBlur and DisplayBlendPrevious (0x0010f280, 0x0010f4f0) for
@@ -3856,6 +3875,78 @@ static void display_radial_blur(TrackView* v, eView* view)
         v->blurBlends++;
     }
     copy_blur_previous();
+}
+
+// ------------------------------------------------------ the black and white
+
+// The view's colour for eAttachBlackAndWhite's draw back, copied as the
+// blur's last frame is, but read texel for texel, as the GS's sprites
+// read it. Made at the egg's first frame, kept to the track's end.
+static C3D_Tex s_greyCopy;
+static bool    s_greyCopyMade;
+static bool    s_greyCopyNoHeap;        // the linear heap had no 512 KB
+
+static void free_grey_copy(void)
+{
+    if (s_greyCopyMade) {
+        C3D_TexDelete(&s_greyCopy);
+    }
+    memset(&s_greyCopy, 0, sizeof s_greyCopy);
+    s_greyCopyMade   = false;
+    s_greyCopyNoHeap = false;
+}
+
+// eAttachBlackAndWhite (retail 0x0011a9f0), the main chain's last, while a
+// track is up (InGameFlag): with ForceBlackAndWhite, the Black & White
+// egg's (stomper.h), or a player view's NisBlackAndWhite, each player view
+// with the egg, or Active with an Active target and its own flag, is drawn
+// over again as its green (eview.h). After the fog, before the blur, the
+// mirror and the HUD, which stay in colour. The top screen is view 1's,
+// and the 3DS has no view 2 to draw.
+static void black_and_white(TrackView* v, eView* view)
+{
+    static const float kX[4] = { 0.0f, 400.0f, 0.0f, 400.0f };
+    static const float kY[4] = { 0.0f, 0.0f, 240.0f, 240.0f };
+    eRenderTarget*  rt = view->pRenderTarget0;
+    GeoTexture      gt;
+    GeoRenderVertex q[4];
+    int             i;
+
+    if (!InGameFlag
+        || (!ForceBlackAndWhite
+            && !eGetView(EVIEW_ID_PLAYER1)->NisBlackAndWhite
+            && !eGetView(EVIEW_ID_PLAYER2)->NisBlackAndWhite)) {
+        return;
+    }
+    if (!ForceBlackAndWhite
+        && (!view->Active || rt == NULL || !rt->Active
+            || !view->NisBlackAndWhite)) {
+        return;
+    }
+    if (gpuCmdBufSize - gpuCmdBufOffset < CMDBUF_GUARD_WORDS
+        || !copy_top_screen(&s_greyCopy, &s_greyCopyMade, &s_greyCopyNoHeap,
+                            GPU_NEAREST)) {
+        v->greyFailed++;
+        return;
+    }
+    memset(&gt, 0, sizeof gt);
+    gt.tex              = &s_greyCopy;
+    gt.uvScale[0]       = 1.0f;
+    gt.uvScale[1]       = 1.0f;
+    gt.pass.noAlphaTest = true;
+    memset(q, 0, sizeof q);
+    for (i = 0; i < 4; i++) {
+        q[i].pos[0] = kX[i];
+        q[i].pos[1] = kY[i];
+        q[i].st[0]  = (240.0f - kY[i]) / 256.0f;
+        q[i].st[1]  = kX[i] / 512.0f;
+        memset(q[i].colour, 0x80, 4);
+    }
+    if (georender_draw_green_quad(q, &gt)) {
+        v->greyDrawn++;
+    } else {
+        v->greyFailed++;
+    }
 }
 
 // DisplayRVMs (retail 0x0010edc8), for view 0 after its scene and before
@@ -4041,9 +4132,15 @@ void trackview_draw(TrackView* v)
     // the alpha test is put back off and the blend back to its own, and
     // the fog off.
     georender_set_fog(NULL, 0);
-    // The radial blur, then the mirror, after the view's scene and before
-    // the HUD (0x00113a54 and 0x00113a64, then 0x00113af4).
+    // The main chain's black and white (0x00113900), then the radial blur,
+    // then the mirror, after the view's scene and before the HUD
+    // (0x00113a54 and 0x00113a64, then 0x00113af4). The render eggs are
+    // put back between the blur and the mirror (0x00113a90) and set again
+    // at the frame's end (0x00113d7c), after the HUD's EndFrame; here at
+    // trackview_draw's, before the HUD, which reads nothing they stomp.
+    black_and_white(v, view);
     display_radial_blur(v, view);
+    SuspendRenderEggs();
     display_rvms(v);
     C3D_AlphaTest(false, GPU_ALWAYS, 0);
     C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_SRC_ALPHA,
@@ -4057,6 +4154,7 @@ void trackview_draw(TrackView* v)
     }
     // eDisplayFrame's very end (0x00113d2c): the frame is counted.
     eFrameCounter++;
+    ResumeRenderEggs();
 }
 
 // ------------------------------------------------------------ the frontend
@@ -4188,6 +4286,8 @@ bool trackview_draw_frontend(TrackView* v, void (*render)(void*),
     v->cacheClock++;
     eSwapFrameMallocBuffers();
     MaybeChangeViewMode();
+    // The frontend's ALPHA_2 is its own, 72, whatever EnvPassAlpha says.
+    georender_set_env_replace(false);
     eview_set_max_z(view->pRenderTarget0);
     eview_calculate_view_matrices(view, 0.0f, 0.0f, 0.0f);
 

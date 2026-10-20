@@ -30,7 +30,7 @@ takes them:
 | `0x0010f1b0` RadialBlurOff | `radialblur_off` | off the same way |
 | `0x0010f1e0` | `radialblur_on_off_view` | on or off, on a view: `ReplayScreen::ChangeCameraMover`'s, on `eGetView(1)` (`radialblur_replay`) |
 | `0x0010f238` RadialBlurAlpha | `radialblur_alpha` | each of the two floats times 255, `cvt.w.s` (truncated), stored as a byte, by player |
-| `0x0010f1f8` RadialBlurOnOff(bool, int) | none | no caller in the image |
+| `0x0010f1f8` RadialBlurOnOff(bool, int) | `radialblur_on_off` | RadialBlurOn or RadialBlurOff by the bool, for the player; returns the player. No `jal` calls it: the Motion Blur egg's list does, through its pointer (`stomper.md`) |
 
 The view-on indexes the bytes by the view's ID less one unchecked, and
 RadialBlurAlpha by the player; the port checks both against 2. The game
@@ -136,8 +136,8 @@ none failed; trails at the edges and the middle sharp, the HUD and the
 mirror clean. A second test build drew the copy opaque over the view:
 the picture stayed upright and in place, so the copy's UVs are right.
 Neither is in the game. The nitro is a cop's, in Be A Cop alone
-(`realdriver.c`), so a race shows the blur in a zone and in the
-replays.
+(`realdriver.c`), so a race shows the blur in a zone, in the replays
+and with the Motion Blur egg (`stomper.md`).
 
 ## The check
 
@@ -149,8 +149,8 @@ and past them, and the draws of every view, active or not, with or
 without a blur, its target active or not, a blur on views 0, 3 and
 others, and 40 scissors at random, odd,
 off the origin and negative. Facts checked in the image: the call order
-in `eDisplayFrame`, that `RadialBlurOnOff(bool, int)` has no caller, the
+in `eDisplayFrame`, that `RadialBlurOnOff(bool, int)` has no `jal` caller, the
 byte 79 store, and the constants 160, 255 and 1/512.
 
-    python tools/radialblur_check.py           # 323 steps, 4651 lines, 0 differ; 6 facts
-    python tools/radialblur_check.py --mutate  # 41 mutations, 41 caught
+    python tools/radialblur_check.py           # 335 steps, 3757 lines, 0 differ; 6 facts
+    python tools/radialblur_check.py --mutate  # 43 mutations, 43 caught

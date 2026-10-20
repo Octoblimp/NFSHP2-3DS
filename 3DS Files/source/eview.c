@@ -17,6 +17,12 @@ int32_t CurrentViewMode;
 int32_t RenderingViewMode;
 int32_t TweakerViewMode;
 int32_t EnvironmentMappingEnable = 1;
+int32_t ForceBlackAndWhite;
+int32_t EnvPassAlphaA;
+int32_t EnvPassAlphaB = 2;
+int32_t EnvPassAlphaC = 1;
+int32_t EnvPassAlphaD = 1;
+int32_t EnvPassAlphaFix = 16;
 int32_t eViewShowOne;
 
 bNode SolidList;

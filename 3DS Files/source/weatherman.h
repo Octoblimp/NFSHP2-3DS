@@ -155,6 +155,13 @@ extern int32_t WeatherFogColourR;
 extern int32_t WeatherFogColourG;
 extern int32_t WeatherFogColourB;
 
+// WeatherHeavyFog, retail gp-19256 (0x00330db8), new in retail and the
+// port's name: the Heavy Fog egg's (stomper.h). Retail's query takes it
+// before the tweaker's: a fog of 0.957753, colour 0x00887062, starting at
+// -1000 plus three slow sines by WorldTimeFrames, of 200, 150 and 100, and
+// the rain, snow and wind left as they were.
+extern int32_t WeatherHeavyFog;
+
 // WeatherManInit (0x0019dfe8) and WeatherManClose (0x0019dff0) do nothing.
 void WeatherManInit(void);
 void WeatherManClose(void);

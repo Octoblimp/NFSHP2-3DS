@@ -200,8 +200,8 @@ What the eggs do in the port now:
 
 | egg | status |
 | --- | --- |
-| 0 Motion Blur, 1 Black & White, 2 Heavy Fog, 3 R/C Car, 8 Chrome Cars | entered and shown, but the render eggs (the Stomper) are TASKS 50b |
-| 4 Video Mode | the HUD's group `0x06d1f9fb`; its render egg is TASKS 50b |
+| 0 Motion Blur, 1 Black & White, 2 Heavy Fog, 3 R/C Car, 8 Chrome Cars | the render eggs (`stomper.md`, TASKS 50b); R/C Car's big head is AnimatedDriver's, which the port does not have |
+| 4 Video Mode | the HUD's group `0x06d1f9fb`, and Black & White's render egg |
 | 5 Pet Helicopter | no presses; `ForceChopper` |
 | 6, 7 the bonus events | in the event tree (`eventtree.c`) |
 
@@ -219,6 +219,9 @@ values that are not read, a table of its own (two codes with one sequence,
 no codes, odd types and groups), 90 random runs, Stop, and a second
 object: 2,084 ops, 1,999 lines, 0 differ. `--mutate`: 83 mutations, 83
 caught.
+
+The port's `EggCodes N` config key turns codes on at boot by N's bits
+(`stomper.md`).
 
 `tools/run_azahar_cheat.ps1` enters code 46 on the main menu in Azahar:
 the menu says "Unlocked / Pursuit Corvette Z06 in You're The Cop Mode",

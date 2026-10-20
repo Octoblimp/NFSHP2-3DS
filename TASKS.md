@@ -3427,7 +3427,7 @@ phases.
         caught, 5 equivalent (`docs/formats/joystick.md`). Not ported:
         rumble, and the code reader (TASKS 50).
 
-50. [ ] **The main menu's code reader.** Found on 2026-10-12 with
+50. [x] **The main menu's code reader.** Found on 2026-10-12 with
         TASKS 49. Retail's NewMainMenu constructor (its call at
         0x00216550) hands the reader at 0x0031d7e8 to 0x0024f488, which
         registers one handler (0x0024fa88, on to 0x0024f748) for
@@ -3459,16 +3459,37 @@ phases.
               Cop Mode", and You're The Cop's car select went from 1 car
               unlocked of 5 to 2. Write-up:
               `docs/formats/easter-eggs.md`, with every code's 3DS keys.
-        - [ ] **50b, the render eggs**: Motion Blur, Black & White,
-              Heavy Fog, R/C Car, Video Mode's picture and Chrome Cars.
-              Retail's Stomper (`InitStomper` `0x0024bbd0` to
-              `UpdateStomper`, `pStomper` gp-14932, the table of stomps
-              from `_GLOBAL_$I$StomperRenderEggs` `0x0024c048`) and
-              `ResetRenderEggs`, `RandomRenderEgg`,
-              `SetRenderEggFromEasterEggs` (`0x0024bf18`) and
-              `DisableRenderEggs`; then bind `gSetRenderEggFromEasterEggsFn`,
-              `gResetRenderEggsFn` and `gDisableRenderEggsFn`. Until then
-              these codes are taken and shown but change nothing.
+        - [x] **50b, the render eggs** (`stomper.c`): retail's Stomper
+              (`0x0024b918` to `0x0024c420`): StompEntry's Set and
+              Clear, the Stomper's Clear, Set, Suspend, Resume and
+              ClearSet, InitStomper (InitializeEverything's last) and
+              the six render-egg calls, bound in `main.c`; the lists
+              for eStomper 8 to 12 entry for entry. The demo's seven
+              (1 to 7) only RandomRenderEgg sets, and nothing calls it:
+              empty lists. Each frame suspends the egg before the mirror
+              and resumes it at the end. Motion Blur calls
+              `radialblur_on_off` (RadialBlurOnOff(bool, int), now
+              ported and checked). Black & White (and Video Mode) is
+              `eAttachBlackAndWhite` (`0x0011a9f0`): retail writes each
+              pixel's green into the alpha through FBMSK `0x7fff` and
+              draws it back through a grey ramp, so the 3DS copies the
+              top screen (`copy_top_screen`, shared with the blur) and
+              draws its green over it (`georender_draw_green_quad`),
+              after the fog and before the blur, the mirror and the HUD.
+              Heavy Fog is the weather query's `WeatherHeavyFog`, R/C
+              Car `CarRenderMatrix` at half size, and Chrome Cars the
+              environment pass's ALPHA_2, `georender_set_env_replace`.
+              R/C Car's big head is AnimatedDriver's, not ported; a
+              NIS's black and white (the view's `+116`) waits for the
+              NIS player's EnableOverrideRendering. `stomper_check`:
+              1,524 ops, 1,736 lines, 0 differ, 0 facts wrong; 92
+              mutations, 92 caught. `radialblur_check`: 335 steps, 3,757
+              lines, 0 differ; 43 mutations, 43 caught. The port's
+              `EggCodes N` config key turns codes on at boot. Azahar,
+              track 42: Black & White grey with the mirror and HUD in
+              colour (101 frames, none failed), Chrome Cars the map
+              alone, R/C Car every car half size. Write-up:
+              `docs/formats/stomper.md`.
 51. [x] **The damage system (CarDamage).** Found on 2026-10-12 with
         TASKS 39. Nothing made a CarDamage, so `pCarDamage` was NULL on
         every car: no hit dented a car, broke a light or a window, or

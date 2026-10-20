@@ -157,6 +157,9 @@ static bool              s_sphereFolded;
 // A texture the environment passes take in place of the sphere map, as
 // the car select's CARSELECTENVMAP, or NULL.
 static const C3D_Tex*    s_envOverride;
+// Whether the environment passes draw their colour in place of the
+// frame's: Chrome Cars' (georender_set_env_replace).
+static bool              s_envReplace;
 
 // The rear-view mirror's target, retail's target 7: its texture in VRAM,
 // a target over it with a depth buffer of its own, and its size.
@@ -1131,10 +1134,15 @@ void georender_draw_lit(const GeoMesh* mesh, const GeoTexture* textures,
     C3D_TexEnvSrc(env, C3D_Alpha, GPU_PRIMARY_COLOR, 0, 0);
     C3D_TexEnvFunc(env, C3D_Alpha, GPU_REPLACE);
 
-    // Added, so it fogs to black; see apply_fog_colour.
-    s_blend = GEO_BLEND_ADD;
+    // Added, so it fogs to black; see apply_fog_colour. Chrome Cars'
+    // ALPHA_2 is (0 - 0) * Ad + Cs, the pass's colour alone, gloss map or
+    // not, which fogs as an opaque strip does.
+    s_blend = s_envReplace ? GEO_BLEND_NONE : GEO_BLEND_ADD;
     apply_fog_colour();
-    if (L->gloss) {
+    if (s_envReplace) {
+        C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_ONE, GPU_ZERO,
+                       GPU_ZERO, GPU_ONE);
+    } else if (L->gloss) {
         C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_DST_ALPHA, GPU_ONE,
                        GPU_ZERO, GPU_ONE);
     } else {
@@ -1268,6 +1276,11 @@ bool georender_envmap_ready(void)
 void georender_set_env_texture(const C3D_Tex* tex)
 {
     s_envOverride = tex;
+}
+
+void georender_set_env_replace(bool on)
+{
+    s_envReplace = on;
 }
 
 void georender_envmap_fold(unsigned views)
@@ -1415,7 +1428,8 @@ void georender_quads_rewind(void)
 
 static bool draw_screen_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
                              const C3D_Mtx* screen, uint8_t blend,
-                             bool alphaTest, float depth, bool sourceAlpha)
+                             bool alphaTest, float depth, bool sourceAlpha,
+                             bool green)
 {
     GeoRenderVertex* dst;
     C3D_BufInfo*     buf;
@@ -1463,9 +1477,19 @@ static bool draw_screen_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
     C3D_TexBind(0, gt->tex);
     env = C3D_GetTexEnv(0);
     C3D_TexEnvInit(env);
-    C3D_TexEnvSrc(env, C3D_Both, GPU_TEXTURE0, GPU_PRIMARY_COLOR, 0);
-    C3D_TexEnvFunc(env, C3D_Both, GPU_MODULATE);
-    C3D_TexEnvScale(env, C3D_Both, GPU_TEVSCALE_2);
+    if (green) {
+        // eAttachBlackAndWhite's grey ramp: the texel's green in all
+        // three, and the ramp's alpha of 0x80, 1.0.
+        C3D_TexEnvSrc(env, C3D_RGB, GPU_TEXTURE0, 0, 0);
+        C3D_TexEnvOpRgb(env, GPU_TEVOP_RGB_SRC_G, 0, 0);
+        C3D_TexEnvSrc(env, C3D_Alpha, GPU_CONSTANT, 0, 0);
+        C3D_TexEnvColor(env, 0xffffffffu);
+        C3D_TexEnvFunc(env, C3D_Both, GPU_REPLACE);
+    } else {
+        C3D_TexEnvSrc(env, C3D_Both, GPU_TEXTURE0, GPU_PRIMARY_COLOR, 0);
+        C3D_TexEnvFunc(env, C3D_Both, GPU_MODULATE);
+        C3D_TexEnvScale(env, C3D_Both, GPU_TEVSCALE_2);
+    }
 
     C3D_CullFace(GPU_CULL_NONE);
     if (alphaTest) {
@@ -1486,8 +1510,13 @@ static bool draw_screen_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
         C3D_DepthMap(true, -1.0f, 0.0f);
     }
 
-    // What draws next sets its own combiner, but not always its scale.
-    C3D_TexEnvScale(env, C3D_Both, GPU_TEVSCALE_1);
+    // What draws next sets its own combiner, but not always its scale, or
+    // its operands.
+    if (green) {
+        C3D_TexEnvInit(env);
+    } else {
+        C3D_TexEnvScale(env, C3D_Both, GPU_TEVSCALE_1);
+    }
     return true;
 }
 
@@ -1495,7 +1524,14 @@ bool georender_draw_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
                          uint8_t blend, float depth)
 {
     return draw_screen_quad(v, gt, &s_screen, blend, !gt->pass.noAlphaTest,
-                            depth, false);
+                            depth, false, false);
+}
+
+bool georender_draw_green_quad(const GeoRenderVertex v[4],
+                               const GeoTexture* gt)
+{
+    return draw_screen_quad(v, gt, &s_screen, GEO_BLEND_NONE, false, -1.0f,
+                            false, true);
 }
 
 bool georender_draw_hud_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
@@ -1512,7 +1548,7 @@ bool georender_draw_hud_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
     }
     Mtx_OrthoTilt(&screen, 0.0f, width, height, 0.0f, 1.0f, -1.0f, true);
     return draw_screen_quad(v, gt, &screen, GEO_BLEND_ALPHA, false, -1.0f,
-                            false);
+                            false, false);
 }
 
 bool georender_draw_hud_quad_w(const GeoRenderVertex v[4],
@@ -1535,7 +1571,8 @@ bool georender_draw_hud_quad_w(const GeoRenderVertex v[4],
         screen.r[i].z = screen.r[i].w;
         screen.r[i].w = 0.0f;
     }
-    return draw_screen_quad(v, gt, &screen, blend, alphaTest, -1.0f, false);
+    return draw_screen_quad(v, gt, &screen, blend, alphaTest, -1.0f, false,
+                            false);
 }
 
 bool georender_draw_mirror_quad(const GeoRenderVertex v[4],
@@ -1550,7 +1587,8 @@ bool georender_draw_mirror_quad(const GeoRenderVertex v[4],
     // A texture's rows are its own, not a screen's turned on its side.
     Mtx_Ortho(&screen, 0.0f, (float)s_mirrorW, (float)s_mirrorH, 0.0f, 1.0f,
               -1.0f, false);
-    return draw_screen_quad(v, gt, &screen, blend, false, -1.0f, sourceAlpha);
+    return draw_screen_quad(v, gt, &screen, blend, false, -1.0f, sourceAlpha,
+                            false);
 }
 
 // ------------------------------------------------------------- the strips

@@ -79,6 +79,15 @@ void radialblur_on_off_view(int32_t on, eView *view)
         radialblur_view_off(view);
 }
 
+int32_t radialblur_on_off(int32_t on, int32_t player)
+{
+    if (on)
+        radialblur_on(player);
+    else
+        radialblur_off(player);
+    return player;
+}
+
 // cvt.w.s of each times 255, stored as a byte.
 void radialblur_alpha(int32_t player, float from, float to)
 {

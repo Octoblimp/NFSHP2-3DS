@@ -69,6 +69,11 @@ void radialblur_off(int32_t player);
 // RadialBlurOnOff (0x0010f1e0), on a view: the replay screen's.
 void radialblur_on_off_view(int32_t on, eView *view);
 
+// RadialBlurOnOff(bool, int) (0x0010f1f8): RadialBlurOn or RadialBlurOff
+// for the player, and the player back: the Motion Blur egg's stomp
+// (stomper.h), which keeps what it returns and gives it back to turn off.
+int32_t radialblur_on_off(int32_t on, int32_t player);
+
 // RadialBlurAlpha (0x0010f238): the player's centre and edge alphas, each
 // truncated from times 255. gRadialBlurAlphaFn's.
 void radialblur_alpha(int32_t player, float from, float to);

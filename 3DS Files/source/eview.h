@@ -130,7 +130,8 @@ typedef struct eView {
     void     *pBlendMask;               // 104
     void     *WorldLightContext;        // 108  eLightContext *
     int32_t   BlackAndWhiteMode;        // 112
-    uint8_t   pad3[12];                 // 116
+    int32_t   NisBlackAndWhite;         // 116  retail's: see below
+    uint8_t   pad3[8];                  // 120
 } eView;                                // 128
 
 #if UINTPTR_MAX == 0xFFFFFFFFu
@@ -142,6 +143,7 @@ typedef char eview_layout_check[
      && offsetof(eView, WorldScreenClipMatrix) == 80
      && offsetof(eView, WorldLightContext) == 108
      && offsetof(eView, BlackAndWhiteMode) == 112
+     && offsetof(eView, NisBlackAndWhite) == 116
      && sizeof(eRenderTarget) == 1168
      && offsetof(eRenderTarget, AspectRatioX) == 84
      && offsetof(eRenderTarget, MaxZ) == 116
@@ -184,6 +186,38 @@ int32_t eGetCurrentViewMode(void);      // 0x00107238
 // EnvironmentMappingEnable, 0x00323758 (gp-21656): whether eDisplayFrame
 // culls the six environment-map views. 1 in the image's .sdata.
 extern int32_t EnvironmentMappingEnable;
+
+// Two of the render eggs' (stomper.h), new in retail, and the port's names.
+// ForceBlackAndWhite (gp-24048, 0): the Black & White egg's. With it set,
+// or a player view's NisBlackAndWhite, eAttachBlackAndWhite (0x0011a9f0),
+// the main chain's last, greys the frame after its fog and before the
+// blur, the mirror and the HUD, which stay in colour. It reads the frame
+// as 16-bit, eight columns at a time, and writes each pixel's green byte
+// into a second buffer's alpha byte (FBMSK 0x7fff keeps bits 9 to 15 of
+// each half: the green's top seven bits, onto the alpha's); then each
+// player view with the egg, or Active with its target and its own flag,
+// draws that alpha back over itself as an 8-bit index through
+// SetupBlackAndWhite's grey ramp (0x0011a990: entry i is i, i, i and an
+// alpha of 0x80). So the grey is the green. trackview.c's black_and_white.
+// NisBlackAndWhite, the view's word at 116, is retail's:
+// NisManager::EnableOverrideRendering (0x001b1ce0) sets it to 1 with the
+// OverrideRendering byte, and DisableOverrideRendering (0x001b24a8)
+// clears both, so a NIS plays in black and white. The port's NIS player
+// does not have them yet (nismanager.h), so it stays 0.
+// EnvPassAlphaA .. EnvPassAlphaFix (gp-25060 .. gp-25044; 0, 2, 1, 1 and
+// 16): Chrome Cars' 2, 2, 1, 0 and 128. Out of the frontend,
+// AttachDrawEnvironment (0x0010ac50) builds the second context's ALPHA_2
+// from them, A | B << 2 | C << 4 | D << 6 | FIX << 32, and that context
+// draws the environment map's pass: (Cs - 0) * Ad + Cd, the map added by
+// the paint's alpha, by default, and (0 - 0) * Ad + Cs, the map in place
+// of the paint, for the egg. The frontend's is 72, Cs * As + Cd, FIX 64,
+// whatever these say. trackview.c's begin_frame reads them.
+extern int32_t ForceBlackAndWhite;
+extern int32_t EnvPassAlphaA;
+extern int32_t EnvPassAlphaB;
+extern int32_t EnvPassAlphaC;
+extern int32_t EnvPassAlphaD;
+extern int32_t EnvPassAlphaFix;
 
 // Two of the five list heads the static constructor empties first, beside
 // InactiveActiveTextureList, SolidTextureList and AlphaTextureList, which

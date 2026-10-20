@@ -245,6 +245,7 @@
 #include "smokeable.h"
 #include "spikestrip.h"
 #include "startrace.h"
+#include "stomper.h"
 #include "terraineffect.h"
 #include "terraintype.h"
 #include "tiresound.h"
@@ -5857,8 +5858,9 @@ static void logRaceState(void)
             g_track.drawnTris, g_track.note);
     logLine("race: minimap %d polys (%d failed)", g_track.flailerPolys,
             g_track.flailerFailed);
-    logLine("race: radial blur %d frames blended, %d failed",
-            g_track.blurBlends, g_track.blurFailed);
+    logLine("race: radial blur %d frames blended, %d failed; black and "
+            "white %d, %d failed", g_track.blurBlends, g_track.blurFailed,
+            g_track.greyDrawn, g_track.greyFailed);
     logLine("race: sun %d quads (%d failed), last at %.0f %.0f alpha %d; "
             "Z rect at %d %d, %d read back, %d of it sky",
             g_track.sunQuads, g_track.sunQuadsFailed,
@@ -8564,6 +8566,12 @@ int main(int argc, char** argv)
     }
     seedRandomNumber();
     readConfigItems();
+    for (int n = 0; n < 32 && n < (int)TheEasterEggs.NumCodes; n++) {
+        if ((uint32_t)ConfigEggCodes & (1u << n)) {
+            TheEasterEggs.Codes[n].On = 1;
+            logLine("config: easter egg code %d on", n);
+        }
+    }
     gCurrLanguageFn = currLanguage;
     // LoadGlobalChunks' first pack, DynTextures, and its LOADING, which is
     // waited on before the frame. Retail sets English between the table
@@ -8620,6 +8628,15 @@ int main(int argc, char** argv)
     gUnloadResourceFileFn     = resUnloadFile;
     gFindResourceFileFn       = resFindByType;
     gFindResourceFileByNameFn = resFindByName;
+    // InitializeEverything's last, InitStomper (0x0024bbd0): the render
+    // eggs' Stomper (stomper.h). The End of loading sets the first picture
+    // code's egg, the Begin of unloading clears it, and the AI demo's
+    // InitForRace turns them off; trackview_draw keeps its mirror and HUD
+    // out of it.
+    InitStomper();
+    gSetRenderEggFromEasterEggsFn = SetRenderEggFromEasterEggs;
+    gResetRenderEggsFn            = ResetRenderEggs;
+    gDisableRenderEggsFn          = DisableRenderEggs;
     // GameFlowLoadingTrackCommonPart2's copies of the solids a second car
     // of a type draws and dents, and the Begin of unloading's delete.
     gEDuplicateSolidFn             = eduplicate_solid;

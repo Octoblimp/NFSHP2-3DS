@@ -27,14 +27,18 @@ The script:
     VON i, VOFF i           0x0010f128 / 0x0010f1a8 on view i
     OO on i                 0x0010f1e0(on, view i)
     R on                    the replay screen's: 0x0010f1e0(on, view 1)
+    OP on p                 RadialBlurOnOff(bool, int) (0x0010f1f8): what
+                            it returns
     A p from to             RadialBlurAlpha(p, from, to), floats as bits
     D i                     DisplayRadialBlur(view i): each poly drawn
     P i                     DisplayBlendPrevious(view i): the poly drawn
 
 After each change both alpha pairs and every view's blend texture print.
 
-Not run on both sides: RadialBlurOnOff(bool, int) (0x0010f1f8) has no
-caller in the image; the facts below check that. DisplayBlendPrevious first
+RadialBlurOnOff(bool, int) (0x0010f1f8) has no jal caller in the image,
+which the facts below check: the Motion Blur egg's stomp list calls it
+through its pointer (stomper.c, tools/stomper_check.py), which saves what
+it returns, the player. DisplayBlendPrevious first
 marks the last frame's TextureInfo semitransparent (byte 79) so Render
 blends it; the 3DS's last frame is trackview.c's copy, and the fact checks
 the store. The view-on's alphas are indexed by the view's ID less one with
@@ -76,7 +80,7 @@ BLUR_ON = 0x0010f178            # RadialBlurOn__Fi
 VIEW_OFF = 0x0010f1a8           # RadialBlurOff(eView *)
 BLUR_OFF = 0x0010f1b0           # RadialBlurOff__Fi
 ONOFF_VIEW = 0x0010f1e0         # RadialBlurOnOff(bool, eView *)
-ONOFF_PLAYER = 0x0010f1f8       # RadialBlurOnOff__Fbi, no caller
+ONOFF_PLAYER = 0x0010f1f8       # RadialBlurOnOff__Fbi, the Motion Blur egg
 ALPHA = 0x0010f238              # RadialBlurAlpha__Fiff
 DISPLAY = 0x0010f280            # DisplayRadialBlur__FP5eViewP9eDmaChainT1
 PREVIOUS = 0x0010f4f0           # DisplayBlendPrevious__FP5eViewP9eDmaChainT1
@@ -135,7 +139,9 @@ def script():
             "VOFF 1", "VON 1", "VOFF 2", "VON 2", "VOFF 1",
             "OO 1 1", "OO 0 1", "OO 5 2", "OO 0 2", "OO -1 1",
             "R 1", "R 0", "R 1", "C 7 1 0", "R 0", "R 1", "C 3 0 0", "R 1",
-            "OO 1 2"]
+            "OO 1 2",
+            "C 3 0 0", "OP 1 0", "OP 0 0", "OP 7 1", "OP 0 1", "OP -1 0",
+            "C 4 1 1", "OP 1 1", "OP 0 1", "C 7 0 0", "OP 1 0", "OP 0 0"]
     # The alphas: the nitro's (0, 0.8), the edges, past 1 and below 0.
     for p, a, b in ((0, 0.0, 0.8), (1, 0.25, 1.0), (0, 1.0, 0.0),
                     (1, 0.5, 0.627451), (0, 0.003, 0.997), (1, 1.2, 2.0),
@@ -293,6 +299,10 @@ class Model(object):
                 e.call(ONOFF_VIEW, a[0], view_at(a[1]))
                 self.emit("OO %d %d" % (a[0], a[1]))
                 self.state()
+            elif o == "OP":
+                r = e.call(ONOFF_PLAYER, a[0], a[1])
+                self.emit("OP %d %d -> %d" % (a[0], a[1], s32(r)))
+                self.state()
             elif o == "R":
                 e.call(ONOFF_VIEW, a[0], view_at(1))
                 self.emit("R %d" % a[0])
@@ -436,6 +446,12 @@ MUTATIONS = [
     ("alpha-clamped", RBC,
      "    RadialBlurFromAlpha[player] = (uint8_t)ee_trunc_w(ee_mul(from, 255.0f));",
      "    RadialBlurFromAlpha[player] = (uint8_t)(from > 1.0f ? 255 : from < 0.0f ? 0 : ee_trunc_w(ee_mul(from, 255.0f)));"),
+    ("on-off-return", RBC,
+     "        radialblur_off(player);\n    return player;",
+     "        radialblur_off(player);\n    return on;"),
+    ("on-off-swap", RBC,
+     "    if (on)\n        radialblur_on(player);\n    else\n        radialblur_off(player);",
+     "    if (on)\n        radialblur_off(player);\n    else\n        radialblur_on(player);"),
     ("replay-view-2", RBC,
      "    radialblur_on_off_view(on, eGetView(EVIEW_ID_PLAYER1));",
      "    radialblur_on_off_view(on, eGetView(2));"),

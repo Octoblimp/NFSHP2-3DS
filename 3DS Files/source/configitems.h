@@ -225,6 +225,13 @@ extern int32_t ConfigGpuLog;                // 0
 // so (the user, 2026-10-20); until then "PauseFrames", on with "DebugLog 1".
 extern int32_t ConfigPauseLog;              // 0
 
+// The port's own: "EggCodes N" turns on, at boot, the easter egg codes
+// whose numbers are N's bits (eastereggs.h), as entering them on the main
+// menu does: 2 is Black & White, 4 Heavy Fog, 0x100 Chrome Cars. For
+// checking the render eggs (stomper.h, TASKS 50b) in an R-held race.
+// Off by default (2026-10-20).
+extern int32_t ConfigEggCodes;              // 0
+
 typedef void (*ConfigItemsLogFn)(const char *line);
 
 // Applies `text` (NUL-terminated), each word as it is read; SkipFE goes
