@@ -5299,7 +5299,9 @@ ahead of step 6's second slice, which waits on `wip/carrenderinfo`.
       attract mode and the replay. `bootflow_check` runs all of it on the
       retail image: 46 scenarios and 147 mutations, of which 144 are
       caught and 3 are equivalent.
-  - [ ] `ANY_BUTTON_PRESSED` (message 24) from `JoyHandler`.
+  - [x] `ANY_BUTTON_PRESSED` (message 24) from `JoyHandler`. `main.c`'s
+        `flowInput` sends it for every press or release no popup or
+        HELP panel takes, before BACK and the menu (2026-10-20).
   - [ ] `OverwriteFred`'s six calls into the frontend. Nothing reads the
         loaded `Fred` yet.
   - [x] `MemcardSaver`, and the Options screen's manual load (Session
@@ -5341,9 +5343,11 @@ ahead of step 6's second slice, which waits on `wip/carrenderinfo`.
       (`RetailMainMenu`).
   - [x] `TheEasterEggs`' 78 codes (`0x0031d828`), and `OnTick`'s three
         seconds of "Unlocked" when one is entered (TASKS 50a).
-  - [ ] Attract mode from the main menu (`OnTick`'s
+  - [x] Attract mode from the main menu (`OnTick`'s
         `ConsiderStartDemoMode`), with message 24 resetting its timer.
-        It waits on `StartDemoMode`'s race.
+        `tools/run_azahar_menuwait.ps1`: 50 s of presses on the main
+        menu and no demo, then the demo 32 s after the last press
+        (2026-10-20).
   - [x] `MakeChallengeCarsAvailable` and `RaceParameters::InitWithDefaults`
         in the constructor: its `challengeCars` and `raceDefaults` hooks.
 - [x] **The main menu's highlight bars.** Reported on 2026-09-28: after

@@ -1206,6 +1206,13 @@ Still owed:
 
 Attract mode from the main menu came with TASKS 72h-2b: `mainMenuTick`
 calls `bgf_consider_start_demo_mode` on the menu's timer, as `OnTick` does.
+Until 2026-10-20 nothing sent the menu message 24, which restarts that
+timer, so the demo started thirty seconds after the menu came up, however
+much it was used. `flowInput` sends it now (see `tPopupMenu` and the screen
+list's popups). `tools/run_azahar_menuwait.ps1` presses D-Pad Down and Up
+on the main menu every 6 s for 50 s, and no demo starts; then it presses
+nothing, and the demo starts 32 s after the last press, the log's lag
+included.
 
 `bootflow_check` runs retail's `Callback`, `HandleEvent` and `OnTick` on the
 image (`RetailMainMenu`). The members are said as the port traces them:
@@ -1547,7 +1554,14 @@ equivalent: the menu is hidden then, and the popup takes every button.
   whose `JoyPort` is the event's port or -1. If any popup took it, that is
   the end of the event. Otherwise:
   * the current screen gets message 24, `ANY_BUTTON_PRESSED`, whether or
-    not the button is down. **The port owes this.**
+    not the button is down, from any port, with a block that is all zero
+    but the port: no item, no param, and no sound after it. `main.c`'s
+    `flowInput` sends it once a frame when a key the list hears was
+    pressed or let go and no popup took it. Only the main menu does
+    anything with it, so once a frame is as good as once an event. The
+    lockstep record carries presses alone, so a wireless race's screens
+    get it on presses only, and the Circle Pad's menu moves have no
+    release.
   * BACK then moves to the previous screen, and anything else goes to the
     screen's own `JoyHandler`.
 
@@ -2078,8 +2092,6 @@ Not yet on the host:
   `NFS_LOGO_ALPHA_FR` are not swapped in.
 * **`Language Options`**, the Options menu's copy, gets the class without
   its `tSlideOnScreen` (`0x001ee918`).
-* **`ANY_BUTTON_PRESSED`** (message 24), which `JoyHandler` sends the
-  current screen when no popup takes a button.
 * **`OverwriteFred`'s six calls** into the frontend. The loaded `Fred` is
   copied, and nothing reads it yet.
 

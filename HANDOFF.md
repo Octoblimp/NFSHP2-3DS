@@ -28714,3 +28714,37 @@ is done.
 
 Next: the launch prep: the packaging decisions (the user's), a README
 for players with the cheat codes' 3DS keys, and the final CIA.
+
+## Session 144 -- the launch prep, and the main menu's attract wait
+
+The launch prep so far, for today's release (the user, 2026-10-20 morning).
+
+- **A README for players** (`6ab7ed3`): what the port needs, the data
+  steps, the keys and the 78 cheat codes' 3DS presses.
+- **The data steps from scratch** (`5ed6644`). Run from a fresh clone,
+  they work, but copying `extracted-retail/` over whole put the tracks on
+  the card a second time, packed, and `bfile.c` opens a `.LZC` before its
+  `.BUN`. `tools/make_card.py <drive>` now writes `<drive>/NFSHP2` with
+  what the game reads and nothing else: 299 files, 2.89 GB, byte for byte
+  the Azahar card's plus the other languages' EA logos.
+- **TASKS' stale boxes** (`09fb688`): the ones later tasks finished are
+  closed, each with where the work went. 29 stay open, all real work.
+- **The main menu's attract wait.** On the PS2 a button on the main menu
+  restarts its 30-second wait for the attract demo: retail's
+  `FlailerScreenList::JoyHandler` (`0x0016cab0`) sends the screen
+  `ANY_BUTTON_PRESSED` (message 24) for every event no popup takes, after
+  the HELP panel and the popups and before BACK and the menu, pressed or
+  let go, with nothing but the port in its block. The main menu's
+  `HandleEvent` sets its timer on it (`gameflow.c` had that), but nothing
+  sent it, so the demo started 30 s after the menu came up, even while it
+  was in use. `flowInput` (`main.c`) sends it now, once a frame, for any
+  list key pressed or released that no popup or HELP panel took; every
+  other screen's callback was checked to ignore it. The lockstep record
+  has presses only, so a wireless race's screens get it on presses.
+- **Checks.** `tools/run_azahar_menuwait.ps1` (new): D-Pad Down and Up on
+  the main menu every 6 s for 50 s, 19 message-24 lines and no demo; then
+  nothing, and the demo 32 s after the last press, the log's lag
+  included. PASS. Not yet on the 3DS.
+
+Next: the packaging decisions (the user's), a check of the release build
+for test-only changes, and the final CIA.

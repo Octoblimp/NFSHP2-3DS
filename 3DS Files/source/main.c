@@ -6294,7 +6294,7 @@ static void raceFrame(void)
     logRaceState();
 }
 
-static int flowInput(u32 kDown, int port);
+static int flowInput(u32 kDown, u32 kUp, int port);
 
 // gJoypadRead: in a lockstep frame each port reads its place's pad from
 // the frame's record (netstep.h), as the DualShock joyhid builds; else the
@@ -6546,7 +6546,7 @@ static int lockFlowInput(void)
                     (unsigned long)netstep_frame(), p,
                     (unsigned)r->pad[p].menu,
                     (unsigned long)(g_flow.screen ? g_flow.screen->hash : 0));
-        redraw |= flowInput(r->pad[p].menu, p);
+        redraw |= flowInput(r->pad[p].menu, 0, p);
     }
     return redraw;
 }
@@ -7406,12 +7406,17 @@ static void raceSoundMute(int32_t on)
 }
 
 // FlailerScreenList::JoyHandler and FlailerMenu's: this frame's presses on
-// `port` to the popups, the screen up and its menu. Nonzero when one went
-// anywhere. Port 0 is the console's; a wireless race's second player's
-// come on port 1 (netstep.h).
-static int flowInput(u32 kDown, int port)
+// `port` to the popups, the screen up and its menu, and its releases as far
+// as ANY_BUTTON_PRESSED. Nonzero when one went anywhere. Port 0 is the
+// console's; a wireless race's second player's come on port 1 (netstep.h),
+// and the lockstep record carries presses alone.
+static int flowInput(u32 kDown, u32 kUp, int port)
 {
     int redraw = 0;
+
+    // Every key the list hears: the binds, START and B.
+    u32 listKeys = KEY_START | KEY_B;
+    for (int i = 0; i < NUM_BINDS; i++) listKeys |= kBinds[i].key;
 
     // ChangeToScreen (0x0016c4c0) adds the list's JoyHandler for its
     // sixteen events when a screen comes up out of none, and removes it
@@ -7420,6 +7425,7 @@ static int flowInput(u32 kDown, int port)
     // screen and its menu hear nothing, and BACK cannot pop the frontend's
     // stack under the race.
     u32 listDown = g_flow.screen ? kDown : 0;
+    u32 listUp   = g_flow.screen ? (kUp & listKeys) : 0;
 
     // A screen given a port (hookSetScreenFilterPort) hears no other's;
     // its menu filters the same.
@@ -7441,26 +7447,48 @@ static int flowInput(u32 kDown, int port)
     if (helpmenu_is_active(&g_help)) {
         if (listDown) redraw = 1;
         listDown = 0;
+        listUp   = 0;
     }
 
     // A popup that is up has each event before the screen and its menu,
     // and takes every one -- the memory card's messages ignore SELECT and
-    // BACK, but the title underneath does not get them either.
+    // BACK, but the title underneath does not get them either. A release
+    // it takes too, and does nothing with (HandleJoy's first test).
     u32 flowDown = listDown;
-    if (listDown && bpopup_any_active(&g_flow)) {
+    u32 flowUp   = listUp;
+    if ((listDown || listUp) && bpopup_any_active(&g_flow)) {
         static const struct { u32 key; BJoyEvent ev; } kPopupBinds[] = {
             { KEY_START, BJOY_START },
             { KEY_B,     BJOY_MENU_BACK },
         };
-        for (int i = 0; i < NUM_BINDS; i++)
+        for (int i = 0; i < NUM_BINDS; i++) {
             if ((listDown & kBinds[i].key)
                 && bpopup_joy(&g_flow, port, kBinds[i].ev, 1))
                 flowDown &= ~kBinds[i].key;
-        for (int i = 0; i < 2; i++)
+            if ((listUp & kBinds[i].key)
+                && bpopup_joy(&g_flow, port, kBinds[i].ev, 0))
+                flowUp &= ~kBinds[i].key;
+        }
+        for (int i = 0; i < 2; i++) {
             if ((listDown & kPopupBinds[i].key)
                 && bpopup_joy(&g_flow, port, kPopupBinds[i].ev, 1))
                 flowDown &= ~kPopupBinds[i].key;
+            if ((listUp & kPopupBinds[i].key)
+                && bpopup_joy(&g_flow, port, kPopupBinds[i].ev, 0))
+                flowUp &= ~kPopupBinds[i].key;
+        }
         if (flowDown != listDown) redraw = 1;
+    }
+    // Then an event no popup took reaches the screen as ANY_BUTTON_PRESSED
+    // (24), down or up and from any port, before BACK and its menu hear it,
+    // with nothing but the port: no item, no param, no sound. The main menu
+    // restarts its wait for the attract demo on it; no other screen does a
+    // thing with it, so once a frame is as good as once an event.
+    if (g_flow.screen && ((flowDown & listKeys) || flowUp)) {
+        BScreenCallbackData any;
+        memset(&any, 0, sizeof(any));
+        any.port = port;
+        bgf_send(&g_flow, BMSG_ANY_BUTTON_PRESSED, &any);
     }
     // The port's debug menu (debugmenu.h): L, R and D-Pad Up held together
     // on the main menu, the last of them pressed this frame, show its item.
@@ -9288,7 +9316,9 @@ int main(int argc, char** argv)
         u32 kDown = hidKeysDown();
         // The Circle Pad moves through the menus as the D-pad does (TASKS
         // 42). Only the flow's input hears it: a race steers with it, and
-        // the viewers pan with it.
+        // the viewers pan with it. Its press is the menu's; letting it go
+        // is no key's release.
+        u32 menuUp = hidKeysUp();
         u32 menuDown;
         {
             static JoyHidMenuPad menuPad;
@@ -9422,7 +9452,7 @@ int main(int argc, char** argv)
                 if (took) redraw = 1;
                 menuDown &= ~took;
             }
-            if (!raceUp && flowInput(menuDown, 0)) redraw = 1;
+            if (!raceUp && flowInput(menuDown, menuUp, 0)) redraw = 1;
 
             // The local wireless link, on whichever screen: what came in,
             // the resends and the network's status, before the screens
@@ -9481,7 +9511,7 @@ int main(int argc, char** argv)
                 // In lockstep the presses are the record's.
                 if (lockOn) {
                     if (raceStep && lockFlowInput()) redraw = 1;
-                } else if (flowInput(menuDown, 0)) {
+                } else if (flowInput(menuDown, menuUp, 0)) {
                     redraw = 1;
                 }
                 // Not when the coordinator's own tick went on to the
@@ -9494,7 +9524,7 @@ int main(int argc, char** argv)
             } else if (raceUp) {
                 // The coordinator went in the flow's pass (Quit Race's
                 // unloading): the pad is the screen's that is up.
-                if (flowInput(menuDown, 0)) redraw = 1;
+                if (flowInput(menuDown, menuUp, 0)) redraw = 1;
             } else if (g_flow.current == BGF_IN_FRONTEND) {
                 // MainLoop's UpdateCameraMovers, which raceFrame makes in
                 // a race; in the frontend the car select's camera is the
