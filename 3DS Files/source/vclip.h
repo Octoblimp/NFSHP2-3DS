@@ -249,6 +249,13 @@ extern VCPolyhedron *pPrintingPolygon;     // 0x00324358
 // cross-checker binds its own seed. NULL draws vertex 0.
 extern int32_t (*gVClipWorldRandomFn)(int32_t range);
 
+// Not in the image. VClip's walks, counted for main.c's "world:" line with
+// DebugLog 1: calls, steps over all of them, and restarts. main.c zeroes
+// them after each line.
+extern uint32_t VClipCalls;
+extern uint32_t VClipSteps;
+extern uint32_t VClipRestarts;
+
 // ---------------------------------------------------------------- transform
 
 // 0x001c5d90. |v1 - v2|: the VU's `vsqrt` of the bracketed sum of squares.

@@ -4925,6 +4925,34 @@ phases.
         - [ ] **78c, the drawing**: SkidSet::Render, RenderSkids
               and RenderClans after StuffSun.
 
+79. [ ] **The 2026-10-19 device race: the crash on saving, the wall, and
+        the lag by the roadblock.** Asked for on 2026-10-19, ahead of
+        78b: the user's Hot Pursuit race on their 3DS lagged hard near
+        the end, the car went through a wall in the last lap, and
+        saving afterwards crashed in an ARM11 exception (Luma dump).
+        - [x] **79a, the crash and the wall.** The collision bodies'
+              IDs went past retail's 206 (the munitions' pools are
+              bigger than retail's, and smoke bombs were falling). The
+              ID table and the pair bits are indexed with no test, so
+              the heap was overwritten (the crash came when the track's
+              collision tables were freed) and the pair bits aliased: a
+              wall's witness was taken to exist and never made. The
+              table holds 256 now, an ID past it aborts with the reason
+              in `sdmc:/nfshp2_stderr.txt`, and every body maker tests
+              `collisionbody_id_available()` first
+              (`docs/formats/collision-body.md`). Needs a race on the
+              3DS to confirm.
+        - [x] **79b, the world's profile.** The log said the world took
+              65 ms a frame (10 FPS) from about 250 m before the
+              roadblock until the car got past it, and nothing more.
+              With `DebugLog 1`, a `world:` line now follows each
+              `frame:` line: the step by part, the three slowest cars,
+              the witnesses, the contact rounds and VClip's walks
+              (`docs/formats/world.md`).
+        - [ ] **79c, the roadblock's cost**, from the next device log
+              with `DebugLog 1` and `GPULog 0` (GPULog's timing frames
+              are a hitch of about 150 ms every 10 s).
+
 ### The retail frontend
 
 Asked for on 2026-09-28. The user sent seven PCSX2 photos of the retail

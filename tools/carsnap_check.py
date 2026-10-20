@@ -1371,8 +1371,13 @@ def sources(d):
     return [str(harness_source(d))] + PORT
 
 
+# The image's 206 collision body numbers: the port's 256
+# (collisionbody.h) is a capacity no checker compares.
+FLAGS206 = hostbuild.FLAGS + ["-DCOLLISIONBODY_MAX_BODIES=206"]
+
+
 def build_harness(tmp, name="carsnap_test"):
-    return hostbuild.build(tmp, sources(tmp), name=name)
+    return hostbuild.build(tmp, sources(tmp), name=name, flags=FLAGS206)
 
 
 def run_harness(exe, sc_path, out_path, timeout=120):
@@ -1782,14 +1787,15 @@ def mutate_pass(only=None, jobs=None):
         srcs = sources(gen)
         t0 = time.time()
         with tempfile.TemporaryDirectory() as bt:
-            exe = hostbuild.build(bt, srcs, name="carsnap_test")
+            exe = hostbuild.build(bt, srcs, name="carsnap_test",
+                                  flags=FLAGS206)
             t0 = time.time()
             run_harness(exe, sc, Path(bt) / "base.txt")
         limit = mutpar.timeout_for(time.time() - t0)
         tally = mutpar.run_pass(
             todo, srcs, "carsnap_test",
             lambda exe, out: mutpar.run_exe([exe, sc], out, limit),
-            base, diff, EQUIVALENT, jobs)
+            base, diff, EQUIVALENT, jobs, flags=FLAGS206)
     return mutpar.summarize(todo, only, EQUIVALENT, tally)
 
 

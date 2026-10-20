@@ -379,6 +379,20 @@ destroy and no seam. WorldObject's new and delete are `obb.c`'s seams:
 with no new, Render draws nothing, and a cube to delete with no delete
 aborts. RaceCoordinator is not ported, so nothing constructs a World yet.
 
+**The step's profile.** Not in the image. With `DebugLog 1`, main.c sets
+`WorldStepProfOn` and the step times itself by part with `bGetTicker`:
+the cops, the thinks, the drives, the helicopter, BeginMovement, the
+moves, the witnesses, the first contact tests, the contact rounds, the
+Collisions, FinishMovement, the events, the effects and the rest. Each
+car's think and drive are summed by CarIndex too (`car_think` and
+`car_drive` are macros in the step that go through `prof_car`), with the
+witnesses tested, the contact rounds, and `vclip.c`'s walks (calls, steps,
+restarts). main.c logs a `world:` line after each `frame:` line, averages
+a step, and starts again. With the flag clear no tick is read, so the
+checkers' scripted tickers are untouched. It was added for the
+2026-10-19 device log, where the world took 65 ms a frame near a
+roadblock and nothing said where.
+
 The port departs from the listing in one place. UpdateAIDebugRendering
 reads the car's pCarDriver with no NULL test, so a driver number that no
 car has reads the word at 44 in low memory. The only renderer the shipped

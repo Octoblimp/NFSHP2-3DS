@@ -202,6 +202,43 @@ void world_do_timestep_move(World *w, float dt);
 // updated and ended once it has gone quiet.
 void world_do_timestep_collisions(World *w, float dt);
 
+// Not in the image. The step's time by part, in EE ticks summed over the
+// steps since main.c last logged them, while WorldStepProfOn is set (it is
+// with DebugLog 1). The 2026-10-19 device log had a 10 FPS stretch by a
+// roadblock with nothing past "world" to say where it went. With the flag
+// clear no tick is read, so a harness's scripted ticks are untouched.
+enum {
+    WSP_COPS,           // the teleporter and the global cop think
+    WSP_THINK,          // every car's think
+    WSP_DRIVE,          // the players' wheel forces and every car's drive
+    WSP_CHOPPER,        // the helicopter's fly
+    WSP_BEGIN,          // every car's BeginMovement
+    WSP_MOVE,           // the dynamic bodies' moves
+    WSP_WITNESSES,      // witnesses expired and made
+    WSP_TESTS,          // the first contact tests
+    WSP_RESOLVE,        // the contact rounds
+    WSP_COLLISIONS,     // the Collisions' updates
+    WSP_FINISH,         // every car's FinishMovement
+    WSP_EVENTS,         // trigger events and shakes
+    WSP_EFFECTS,        // particles, world and terrain effects, engines
+    WSP_REST,           // em events to the race update
+    WSP_PARTS
+};
+
+typedef struct WorldStepProf {
+    uint32_t steps;
+    uint32_t ticks[WSP_PARTS];
+    uint32_t worst;                     // the longest step
+    uint32_t think[WORLD_MAX_CARS];     // by CarIndex
+    uint32_t drive[WORLD_MAX_CARS];
+    uint32_t witnesses;                 // tested in the first pass
+    uint32_t rounds;                    // contact rounds
+    uint32_t roundsMax;                 // in one step
+} WorldStepProf;
+
+extern int32_t       WorldStepProfOn;
+extern WorldStepProf WorldStepProfile;
+
 // 0x0014bce0. Empty.
 void world_flush_collisions(World *w);
 

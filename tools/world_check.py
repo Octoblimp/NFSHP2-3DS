@@ -2522,8 +2522,9 @@ _m("collide create or",
 _m("collide create inactive",
    "        if (b->Dynamic && b->ActiveCollisionDetection)\n            dynamiccollisionbody_maybe_create_witnesses(\n                (DynamicCollisionBody *)(void *)b);",
    "        if (b->Dynamic)\n            dynamiccollisionbody_maybe_create_witnesses(\n                (DynamicCollisionBody *)(void *)b);")
-_m("collide no first tests", "        cbwitness_test_for_contact(wit, &list);\n\n    // Earliest",
-   "        (void)wit;\n\n    // Earliest")
+_m("collide no first tests",
+   "        cbwitness_test_for_contact(wit, &list);\n    prof_mark(WSP_TESTS);",
+   "        (void)wit;\n    prof_mark(WSP_TESTS);")
 _m("collide no resolve", "        contact_resolve(c);\n", "")
 _m("collide b1 static removed", "if (b1->Dynamic)\n", "if (!b1->Dynamic)\n")
 _m("collide b2 static removed", "if (b2->Dynamic)\n", "if (!b2->Dynamic)\n")

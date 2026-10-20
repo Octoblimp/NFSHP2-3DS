@@ -1817,10 +1817,11 @@ MUTATIONS = [
     # The module.
     ("create-type", S, "    return SmokeableCreators[type](id, info, name_hash);",
      "    return SmokeableCreators[0](id, info, name_hash);"),
-    ("spawn-found", S, "    if (found == 0 || bIsSlotPoolFull(SmokeableSlotPool)) {",
-     "    if (bIsSlotPoolFull(SmokeableSlotPool)) {"),
-    ("spawn-full", S, "    if (found == 0 || bIsSlotPoolFull(SmokeableSlotPool)) {",
-     "    if (found == 0) {"),
+    ("spawn-found", S, "    if (found == 0 || bIsSlotPoolFull(SmokeableSlotPool)\n",
+     "    if (bIsSlotPoolFull(SmokeableSlotPool)\n"),
+    ("spawn-full", S, "    if (found == 0 || bIsSlotPoolFull(SmokeableSlotPool)\n"
+     "        || !collisionbody_id_available()) {",
+     "    if (found == 0\n        || !collisionbody_id_available()) {"),
     ("spawn-id16", S, "    id = (int16_t)collisionbody_get_next_id();\n"
      "    s = smokeable_create(type, id, info, name_hash);\n"
      "    z = (-s",
@@ -1839,7 +1840,8 @@ MUTATIONS = [
     ("spawn-destroy", S, "    smokeable_set_initial_position(s, &m, NULL);\n"
      "    topology_destroy(&tc);\n    return id;",
      "    smokeable_set_initial_position(s, &m, NULL);\n    return id;"),
-    ("spawnm-full", S, "    if (bIsSlotPoolFull(SmokeableSlotPool))\n        return -1;\n"
+    ("spawnm-full", S, "    if (bIsSlotPoolFull(SmokeableSlotPool) || !collisionbody_id_available())\n"
+     "        return -1;\n"
      "    id = (int16_t)collisionbody_get_next_id();\n"
      "    s = smokeable_create(type, id, info, name_hash);\n"
      "    smokeable_set_initial_position(s, m, NULL);",
@@ -1959,7 +1961,8 @@ MUTATIONS = [
     ("vdel-flags", S, "    staticcollisionbody_destroy(&v->Static, 0);", "    staticcollisionbody_destroy(&v->Static, 1);"),
     ("vdel-free", S, "    if (flags & 1)\n        bSlotFree(VirginSmokeableSlotPool, v);",
      "    if (flags & 2)\n        bSlotFree(VirginSmokeableSlotPool, v);"),
-    ("vconv-full", S, "    if (bIsSlotPoolFull(SmokeableSlotPool))\n        return NULL;", ""),
+    ("vconv-full", S, "    if (bIsSlotPoolFull(SmokeableSlotPool) || !collisionbody_id_available())\n"
+     "        return NULL;", ""),
     ("vconv-pos", S, "    m.v3.y = inst->Position[1];", "    m.v3.y = inst->Position[0];"),
     ("vconv-hash", S, "v->pSceneryInfo->NameHash[0]);", "v->pSceneryInfo->NameHash[1]);"),
     ("vconv-smoke", S, "    if (body_int(s, SMOKEABLE_VT_GET_SMOKE_TYPE) == 0) {",

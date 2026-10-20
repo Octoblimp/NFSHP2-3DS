@@ -3941,7 +3941,11 @@ def diff(model_lines, harness_lines, quiet=False):
 
 
 def build(tmp):
-    return hostbuild.build(tmp, SOURCES, name="collisionbody_test")
+    # The image's 206 numbers: the port's 256 (collisionbody.h) is a
+    # capacity the checker does not compare.
+    return hostbuild.build(tmp, SOURCES, name="collisionbody_test",
+                           flags=hostbuild.FLAGS
+                           + ["-DCOLLISIONBODY_MAX_BODIES=206"])
 
 
 # -------------------------------------------------------------- mutations
@@ -4540,8 +4544,8 @@ MUTATIONS = [
        "            if (near[i]->pPolygon < near[i + 1]->pPolygon) {"),
     _m("dyn_ctp_sort_one_pass", "    } while (swaps != 0);", "    } while (0);"),
     _m("dyn_ctp_sort_short", "        for (i = 0; i < n - 1; i++) {", "        for (i = 0; i < n - 2; i++) {"),
-    _m("dyn_ctp_full_n", "        if (bIsSlotPoolFull(TrackPolygonCollisionBodySlotPool))\n            return i;",
-       "        if (bIsSlotPoolFull(TrackPolygonCollisionBodySlotPool))\n            return n;"),
+    _m("dyn_ctp_full_n", "            || !collisionbody_id_available())\n            return i;",
+       "            || !collisionbody_id_available())\n            return n;"),
     _m("dyn_ctp_first_poly", "        p = near[i]->pPolygon;", "        p = near[0]->pPolygon;"),
     _m("dyn_ctp_id", "        id = collisionbody_get_next_id();", "        id = -1;"),
     _m("dyn_ctp_return", "    return n;\n}\n\n// The two heights", "    return 0;\n}\n\n// The two heights"),

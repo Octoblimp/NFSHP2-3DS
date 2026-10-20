@@ -170,7 +170,10 @@ int32_t smokeable_spawn(int32_t type, SmokeableInfo *info, uint32_t name_hash,
 
     topology_init(&tc);
     elev = topology_get_elevation(&tc, pos, NULL, &n, &found);
-    if (found == 0 || bIsSlotPoolFull(SmokeableSlotPool)) {
+    // A body with no number left is refused as a full pool's is
+    // (collisionbody.h).
+    if (found == 0 || bIsSlotPoolFull(SmokeableSlotPool)
+        || !collisionbody_id_available()) {
         topology_destroy(&tc);
         return -1;
     }
@@ -217,7 +220,7 @@ int32_t smokeable_spawn_matrix(int32_t type, SmokeableInfo *info,
     Smokeable *s;
     int32_t    id;
 
-    if (bIsSlotPoolFull(SmokeableSlotPool))
+    if (bIsSlotPoolFull(SmokeableSlotPool) || !collisionbody_id_available())
         return -1;
     id = (int16_t)collisionbody_get_next_id();
     s = smokeable_create(type, id, info, name_hash);
@@ -507,7 +510,7 @@ Smokeable *virginsmokeable_convert(VirginSmokeable *v)
     Smokeable             *s;
     bMatrix4               m;
 
-    if (bIsSlotPoolFull(SmokeableSlotPool))
+    if (bIsSlotPoolFull(SmokeableSlotPool) || !collisionbody_id_available())
         return NULL;
     inst = v->pSceneryInstance;
     instance_rotation(&m, inst);

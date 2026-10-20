@@ -2683,11 +2683,17 @@ def model(cti=None):
 
 # ================================================================ the build
 
+# The image's 206 collision body numbers: the port's 256
+# (collisionbody.h) is a capacity no checker compares.
+FLAGS206 = hostbuild.FLAGS + ["-DCOLLISIONBODY_MAX_BODIES=206"]
+
+
 def build_harness(tmp, cti, name="carmode_test"):
     text = generate(cti) + HARNESS.read_text(encoding="utf-8")
     src = Path(tmp) / "carmode_test.c"
     src.write_text(text, encoding="utf-8", newline=NL)
-    return hostbuild.build(tmp, [str(src)] + SOURCES_PORT, name=name)
+    return hostbuild.build(tmp, [str(src)] + SOURCES_PORT, name=name,
+                           flags=FLAGS206)
 
 
 run_harness = pcc.run_harness

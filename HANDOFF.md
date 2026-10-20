@@ -28180,3 +28180,63 @@ After 78b comes 78c, the drawing, as read from retail:
   3DS.
 
 Then the zone cameras, 72h-2c, 75 and 76.
+
+## Session 136 -- the device race's crash, wall and lag (TASKS 79)
+
+The user raced Hot Pursuit on their 3DS on 2026-10-19 with `DebugLog`,
+`GPULog` and `CoreSample` on, and sent the Luma dump and the log. Three
+things went wrong: saving afterwards crashed in an ARM11 exception, the
+car went through a wall in the last lap, and the world took 65 ms a frame
+near a roadblock. 78b waited for them.
+
+**The crash (79a).** The collision bodies' IDs went past 205. Retail's
+NumberAllocator hands out the lowest free number below `MaxNumbers`, but
+the ID table (`ID -> body`) and the witness pair bits (`ID1 * 206 + ID2`)
+are indexed with no test, and the port's munitions' pools are bigger than
+retail's. Smoke bombs and their smokeables took the IDs past the end; the
+table writes overran the heap, and the dump's crash is in the free of
+those tables when the track was unloaded. The fix:
+
+- `COLLISIONBODY_MAX_BODIES` is 256 on the 3DS (`#ifndef`; the checkers
+  build with `-DCOLLISIONBODY_MAX_BODIES=206`, `FLAGS206` in
+  carmode_check and carsnap_check);
+- `collisionbody_init` aborts with the ID, its type and the size when an
+  ID is past the table;
+- `collisionbody_id_available()` is tested before a body is made: the
+  track polygons' loop (it returns early, as for a full pool),
+  `smokeable_spawn`, `smokeable_spawn_matrix`, `virginsmokeable_convert`
+  and the helicopter's `launch()`.
+
+**The wall (79a).** The log puts it in the last lap, at the corner near
+(975, -1150), world frames 19431 to 19612, while smoke bombs were
+falling. With IDs past 205 the pair bits alias, so `DoesWitnessExist`
+said yes for the car and a wall polygon that had no witness, and none was
+made: no contact, so the car went through. The same fix covers it. Both
+need a race on the 3DS.
+
+**The lag (79b, 79c).** Log lines 8058 to 8323: world 59 to 68 ms a
+frame, draw 18 ms, 10 FPS. It starts when the player is between 294 m and
+241 m from the roadblock (traffic car 12 stopped in front of it at
+397.9 -1537.7) and ends the second the player passes it
+(`road_block_passed`, behaviours 0x20f to 0x26f, the chopper up). Not
+the cause on their own: the AI racers' action 8 (avoid the roadblock),
+which ran for minutes before at 4.5 ms; the stopped traffic car, stopped
+from line 7837 at 4.5 ms; the cop flares, which are drawn. The 250 m is
+`can_teleport`'s (coputil.c), which stops the roadblock cops' teleport
+home inside it, but nothing found in `taicop_do_road_block_logic`,
+`tpursuit_update_road_blocks` or `taicop_hold_position` costs 60 ms. So
+the step now profiles itself with `DebugLog 1` (`world.h`'s
+`WorldStepProf`, `docs/formats/world.md`), and main.c logs a `world:`
+line after each `frame:` line with the parts, the three slowest cars by
+think and drive, the witnesses, the contact rounds and VClip's walks.
+79c is to read that line from the next log. The GPULog timing frames are
+the 150 to 300 ms hitches every 10 to 13 s in the same log; they are
+GPULog's by design, so the user should race with `GPULog 0`.
+
+**Checks.** world, vclip, polyhedra, loadertable, collisionbody, carmode
+and carsnap: 0 differ. Every world_check and vclip_check mutation pattern
+still matches; world_check's "collide no first tests" is re-anchored on
+the new `prof_mark(WSP_TESTS)`. The guard's mutations: collisionbody 3
+of 3, smokeable 4 of 4. The CIA is built.
+
+Next: 79c when the user sends a log; otherwise 78b as planned above.

@@ -338,6 +338,26 @@ EndGameFlowLoadingTrackSpecific is its one caller.
 and a half. The pairs (205, 202) to (205, 205) are in a 5305th byte. The
 port asks for that byte as well.
 
+**The port's table holds 256.** `COLLISIONBODY_MAX_BODIES` is 256 on the
+3DS, behind `#ifndef`; the checkers build with 206. On 2026-10-19 a device
+race in Hot Pursuit, with smoke bombs and the munitions' pools grown past
+retail's, took IDs past 205. Nothing in the listing stops that:
+AllocateNumber hands out the lowest free number up to `MaxNumbers`, but
+the table and the bit field are indexed with no test. An ID past the end
+wrote past the table, and the pair bits aliased, so `DoesWitnessExist`
+said yes for pairs that had no witness. That is the wall the car went
+through in that race's last lap, and the heap the save then crashed on
+when the track was freed. The port now:
+
+- holds 256 numbers, so 256 pointers and 8192 bytes of pair bits;
+- aborts in `collisionbody_init` with the ID, its type and the size when
+  an ID is past the table, rather than corrupting the heap
+  (`sdmc:/nfshp2_stderr.txt` says which);
+- has `collisionbody_id_available()`, a free number below `MaxNumbers`,
+  which every body maker tests before it takes a slot: the track
+  polygons' loop (it stops early, as with a full pool), the smokeables'
+  spawns and conversions, and the helicopter's launches.
+
 **CloseCollisionBody** (0x001cb880):
 
 - deletes the three pools and leaves their pointers NULL;

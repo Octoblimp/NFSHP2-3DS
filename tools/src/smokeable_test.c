@@ -458,6 +458,13 @@ int32_t collisionbody_get_next_id(void)
     return v;
 }
 
+// The port's test before a body is made (collisionbody.h): the image has
+// none, and the stub's numbers never run out.
+int32_t collisionbody_id_available(void)
+{
+    return 1;
+}
+
 void collisionbody_set_debug_name(CollisionBody *b, const char *nm)
 {
     printf("  name %s %s\n", sym(b), nm);

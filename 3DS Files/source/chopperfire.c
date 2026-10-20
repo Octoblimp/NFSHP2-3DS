@@ -64,12 +64,16 @@ static void bomb_velocity(struct Chopper *h, bVector3 *v, float spread)
                   h->Yaw);
 }
 
-// 0x001eab70. The pools grow, so a munition is always made.
+// 0x001eab70. The pools grow, so a munition is always made -- unless no
+// collision body number is left, which the image never tests and the port
+// does (collisionbody.h): that munition is not fired.
 static void launch(struct Chopper *h, float spread, const bMatrix4 *m)
 {
     struct Car *car = h->CurrentCar;
     bVector3    v;
 
+    if (!collisionbody_id_available())
+        return;
     if (car->pPlayer != NULL && REPLAY_SPEED < car->State.VelocityMagnitude
         && gReplayRegisterInterestingEventFn != NULL)
         gReplayRegisterInterestingEventFn(pReplayManager, REPLAY_WEIGHT,

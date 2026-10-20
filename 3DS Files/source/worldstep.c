@@ -74,6 +74,79 @@ static float max_s(float fs, float ft)
     return fs < ft ? ft : fs;
 }
 
+// ------------------------------------------------- the step's profile
+
+// Not in the image; see world.h. Each mark gives the ticks since the last
+// one to its part.
+int32_t       WorldStepProfOn;
+WorldStepProf WorldStepProfile;
+
+static uint32_t ProfStart;
+static uint32_t ProfLast;
+
+static void prof_start(void)
+{
+    if (WorldStepProfOn)
+        ProfStart = ProfLast = bGetTicker();
+}
+
+static void prof_mark(int32_t part)
+{
+    uint32_t now;
+
+    if (!WorldStepProfOn)
+        return;
+    now = bGetTicker();
+    WorldStepProfile.ticks[part] += now - ProfLast;
+    ProfLast = now;
+}
+
+static void prof_end(void)
+{
+    prof_mark(WSP_REST);
+    if (WorldStepProfOn) {
+        WorldStepProfile.steps++;
+        if (ProfLast - ProfStart > WorldStepProfile.worst)
+            WorldStepProfile.worst = ProfLast - ProfStart;
+    }
+}
+
+static void prof_witnesses(void)
+{
+    CollisionBodyWitness *wit;
+
+    if (!WorldStepProfOn)
+        return;
+    for (wit = CollisionBodyWitnessList.next; wit != WITNESS_END;
+         wit = wit->Link.next)
+        WorldStepProfile.witnesses++;
+}
+
+static void prof_rounds(int32_t round)
+{
+    if (!WorldStepProfOn)
+        return;
+    WorldStepProfile.rounds += (uint32_t)round;
+    if ((uint32_t)round > WorldStepProfile.roundsMax)
+        WorldStepProfile.roundsMax = (uint32_t)round;
+}
+
+// A car's think or drive, its ticks added to its CarIndex's.
+static void prof_car(void (*fn)(Car *c, float dt), uint32_t *by_car, Car *c,
+                     float dt)
+{
+    uint32_t t0;
+
+    if (!WorldStepProfOn) {
+        fn(c, dt);
+        return;
+    }
+    t0 = bGetTicker();
+    fn(c, dt);
+    if (c->CarIndex >= 0 && c->CarIndex < WORLD_MAX_CARS)
+        by_car[c->CarIndex] += bGetTicker() - t0;
+}
+
 // ----------------------------------------------------- the clock and pause
 
 void world_set_time_scale(World *w, float scale, float timer,
@@ -367,6 +440,7 @@ void world_do_timestep_move(World *w, float dt)
 
         ((MoveFn)e->fn)(vt_this(moving[i], e), dt);
     }
+    prof_mark(WSP_MOVE);
 }
 
 #define CONTACT_END(l) ((Contact *)(void *)(l))
@@ -429,12 +503,15 @@ void world_do_timestep_collisions(World *w, float dt)
         if (b->Dynamic && b->ActiveCollisionDetection)
             dynamiccollisionbody_maybe_create_witnesses(
                 (DynamicCollisionBody *)(void *)b);
+    prof_mark(WSP_WITNESSES);
+    prof_witnesses();
 
     list.next = CONTACT_END(&list);
     list.prev = CONTACT_END(&list);
     for (wit = CollisionBodyWitnessList.next; wit != WITNESS_END;
          wit = wit->Link.next)
         cbwitness_test_for_contact(wit, &list);
+    prof_mark(WSP_TESTS);
 
     // Earliest first: resolve the head, drop every other contact either
     // body had, and look again round whatever the resolve left moving.
@@ -469,6 +546,8 @@ void world_do_timestep_collisions(World *w, float dt)
         if (round >= WORLD_MAX_CONTACT_ROUNDS)
             break;
     }
+    prof_mark(WSP_RESOLVE);
+    prof_rounds(round);
 
     // Twenty rounds and still touching: what is left is dropped unresolved.
     if (round == WORLD_MAX_CONTACT_ROUNDS) {
@@ -485,6 +564,7 @@ void world_do_timestep_collisions(World *w, float dt)
         if (!collision_update(col, dt))
             collision_end(col);
     }
+    prof_mark(WSP_COLLISIONS);
     // ~bTList<Contact>(&list, 2) follows in the image. The list is empty by
     // now either way, and ~bList with flags 2 frees nothing.
 }
@@ -499,6 +579,11 @@ static int32_t no_shakes(void)
         || s == RCSTATE_AUTO_REPLAY
         || racecoordinator_is_replay_demo_mode(pRaceCoordinator);
 }
+
+// The step's thinks and drives go through prof_car, which times them by
+// car while the profile is on; the calls below keep the image's names.
+#define car_think(c, dt) prof_car(car_think, WorldStepProfile.think, (c), (dt))
+#define car_drive(c, dt) prof_car(car_drive, WorldStepProfile.drive, (c), (dt))
 
 void world_do_timestep(World *w, float dt)
 {
@@ -523,10 +608,12 @@ void world_do_timestep(World *w, float dt)
         }
     }
 
+    prof_start();
     if (w->Teleporter != NULL && gTrafficTeleporterDoTimestepFn != NULL)
         gTrafficTeleporterDoTimestepFn(w->Teleporter, dt);
     if (gGlobalCopThinkFn != NULL)
         gGlobalCopThinkFn(dt);
+    prof_mark(WSP_COPS);
 
     // AI racers, traffic, players, cops: the counts are read again after
     // every car.
@@ -538,16 +625,20 @@ void world_do_timestep(World *w, float dt)
         car_think(w->CarTable[i], dt);
     for (i = 0; i < w->TrafficCarPos - w->CopCarPos; i++)
         car_think(w->CarTable[w->CopCarPos + i], dt);
+    prof_mark(WSP_THINK);
 
     for (i = 0; i < w->AICarPos; i++)
         if (gCarDoWheelForcesFn != NULL)
             gCarDoWheelForcesFn(w->CarTable[i]);
     for (i = 0; i < w->TotalNumCars; i++)
         car_drive(w->CarTable[i], dt);
+    prof_mark(WSP_DRIVE);
     if (w->Helicopter != NULL && gChopperFlyFn != NULL)
         gChopperFlyFn(w->Helicopter, dt);
+    prof_mark(WSP_CHOPPER);
     for (i = 0; i < w->TotalNumCars; i++)
         car_begin_movement(w->CarTable[i], dt);
+    prof_mark(WSP_BEGIN);
 
     world_do_timestep_move(w, dt);
     world_do_timestep_collisions(w, dt);
@@ -557,6 +648,7 @@ void world_do_timestep(World *w, float dt)
             world_fail("Car::FinishMovement is not ported");
         gCarFinishMovementFn(w->CarTable[i], dt);
     }
+    prof_mark(WSP_FINISH);
     for (i = 0; i < w->TotalNumCars; i++) {
         Car *car = w->CarTable[i];
 
@@ -576,6 +668,7 @@ void world_do_timestep(World *w, float dt)
                 gCarMaybeRumbleFn(car);
         }
     }
+    prof_mark(WSP_EVENTS);
 
     if (gServiceParticleGroupsFn != NULL)
         gServiceParticleGroupsFn();
@@ -594,6 +687,7 @@ void world_do_timestep(World *w, float dt)
     }
     for (i = 0; i < w->TotalNumCars; i++)
         car_fake_engine_task(w->CarTable[i]);
+    prof_mark(WSP_EFFECTS);
 
     if (gEmProcessAllEventsFn != NULL)
         gEmProcessAllEventsFn();
@@ -609,4 +703,5 @@ void world_do_timestep(World *w, float dt)
         gServiceTrackRouteEditorFn();
     if (pCurrentRace != NULL && gRaceUpdateFn != NULL)
         gRaceUpdateFn(pCurrentRace);
+    prof_end();
 }

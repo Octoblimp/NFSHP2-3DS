@@ -32,6 +32,10 @@ int32_t       PlotClosestFeatures;
 VCPolyhedron *pPrintingPolygon;
 int32_t     (*gVClipWorldRandomFn)(int32_t range);
 
+uint32_t VClipCalls;
+uint32_t VClipSteps;
+uint32_t VClipRestarts;
+
 // ---------------------------------------------------------------- helpers
 
 // A vertex's position as the listing loads it: three lwc1s packed with
@@ -962,6 +966,7 @@ int32_t vcwitness_vclip(VCWitness *w, bMatrix4 *r1, bVector3 *t1,
     int32_t restarts = 0;
     int32_t i = 0;
 
+    VClipCalls++;
     if (PrintThisTime) {
         vcpoly_print(w->P1);
         vcpoly_print(w->P2);
@@ -1019,11 +1024,13 @@ int32_t vcwitness_vclip(VCWitness *w, bMatrix4 *r1, bVector3 *t1,
         default:
             break;
         }
+        VClipSteps++;
         if (vclip_pair_seen(w, seen1, seen2, i)) {
             restarts++;
             i = 0;
             w->F1 = vclip_random_vertex(w->P1);
             w->F2 = vclip_random_vertex(w->P2);
+            VClipRestarts++;
         } else {
             i++;
         }

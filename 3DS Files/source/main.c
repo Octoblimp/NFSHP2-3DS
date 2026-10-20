@@ -701,6 +701,7 @@ static void logOpen(void)
     // written in place, a race's once-a-second lines cost the device that
     // second's frame, and more while the card was slow.
     if (g_log) {
+        WorldStepProfOn = 1;    // worldstep's timings, for logWorldStep
         logwriter_start(g_log);
         atexit(logwriter_stop);
         signal(SIGABRT, logOnAbort);
@@ -7469,6 +7470,110 @@ static int32_t vclipWorldRandom(int32_t range)
     return pCurrentWorld != NULL ? world_random_i(pCurrentWorld, range) : 0;
 }
 
+// `fmt` added at `used` in `line`, which stays terminated when it is full.
+static int appendLine(char* line, size_t size, int used, const char* fmt, ...)
+{
+    va_list ap;
+    int     n;
+
+    if (used < 0 || (size_t)used >= size)
+        return used;
+    va_start(ap, fmt);
+    n = vsnprintf(line + used, size - (size_t)used, fmt, ap);
+    va_end(ap);
+    if (n < 0)
+        return used;
+    return (size_t)(used + n) < size ? used + n : (int)size - 1;
+}
+
+// A car table slot as the race lines name it: player, AI racer, cop or
+// traffic, and the slot.
+static const char* carSlotKind(const World* w, int i)
+{
+    if (w == NULL)              return "car";
+    if (i < w->AICarPos)        return "player";
+    if (i < w->CopCarPos)       return "ai";
+    if (i < w->TrafficCarPos)   return "cop";
+    return "traffic";
+}
+
+static void clearWorldStep(void)
+{
+    memset(&WorldStepProfile, 0, sizeof WorldStepProfile);
+    VClipCalls = 0;
+    VClipSteps = 0;
+    VClipRestarts = 0;
+}
+
+// With DebugLog 1, after each "frame:" line: the world steps since the last
+// one, on average by part (world.h's WorldStepProf), the three cars whose
+// think and drive took longest, the witnesses and contact rounds, and
+// VClip's walks. Then the sums start again.
+static void logWorldStep(void)
+{
+    static const char* const parts[WSP_PARTS] = {
+        "cops", "think", "drive", "heli", "begin", "move", "witnesses",
+        "tests", "resolve", "collisions", "finish", "events", "effects",
+        "rest"
+    };
+    const WorldStepProf* p = &WorldStepProfile;
+    const World* w = pCurrentWorld;
+    char   line[1024];
+    int    used = 0;
+    int    top[3] = { -1, -1, -1 };
+    double ms;
+    double steps;
+    int    i, k;
+
+    if (p->steps != 0) {
+        uint32_t total = 0;
+
+        steps = (double)p->steps;
+        ms = 1.0 / (294912.0 * steps);
+        for (i = 0; i < WSP_PARTS; i++)
+            total += p->ticks[i];
+        used = appendLine(line, sizeof line, used,
+                          "world: %.2f ms a step over %lu, worst %.2f;",
+                          total * ms, (unsigned long)p->steps,
+                          p->worst / 294912.0);
+        for (i = 0; i < WSP_PARTS; i++)
+            used = appendLine(line, sizeof line, used, " %s %.2f%s",
+                              parts[i], p->ticks[i] * ms,
+                              i + 1 < WSP_PARTS ? "," : ";");
+        for (i = 0; i < WORLD_MAX_CARS; i++) {
+            uint32_t t = p->think[i] + p->drive[i];
+
+            for (k = 0; k < 3; k++) {
+                if (top[k] < 0
+                    || t > p->think[top[k]] + p->drive[top[k]]) {
+                    int m;
+
+                    for (m = 2; m > k; m--)
+                        top[m] = top[m - 1];
+                    top[k] = i;
+                    break;
+                }
+            }
+        }
+        used = appendLine(line, sizeof line, used,
+                          " slowest cars (think+drive)");
+        for (k = 0; k < 3 && top[k] >= 0; k++)
+            used = appendLine(line, sizeof line, used, " %s %d %.2f+%.2f",
+                              carSlotKind(w, top[k]), top[k],
+                              p->think[top[k]] * ms, p->drive[top[k]] * ms);
+        used = appendLine(line, sizeof line, used,
+                          "; %.1f witnesses, %.2f rounds (most %lu); "
+                          "vclip %.1f calls, %.2f steps each, "
+                          "%.2f restarts",
+                          p->witnesses / steps, p->rounds / steps,
+                          (unsigned long)p->roundsMax, VClipCalls / steps,
+                          VClipCalls ? (double)VClipSteps / VClipCalls : 0.0,
+                          VClipRestarts / steps);
+        logLine("%s", line);
+    }
+    clearWorldStep();
+}
+
 int main(int argc, char** argv)
 {
     (void)argc; (void)argv;
@@ -9541,6 +9646,7 @@ int main(int argc, char** argv)
                         logLine("%s", line);
                         if (coresample_line(line, sizeof line))
                             logLine("%s", line);
+                        logWorldStep();
                     }
                     jbLineTick = MainLoopTiming.LimitFrameRate;
                     jbLineDecode = decode;
@@ -9550,6 +9656,7 @@ int main(int argc, char** argv)
                                   - jbLineTick;
 
                     frameprof_reset(&prof);
+                    clearWorldStep();
                     if (span >= 5u * BTICKER_RATE_HZ) {
                         // Milliseconds a second: the ticks over the
                         // span's, times 1000.

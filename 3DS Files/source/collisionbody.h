@@ -5,7 +5,7 @@
 // A collision body is anything VClip can be asked about: a car, a
 // smokeable, or a track polygon near a car. Each carries a convex
 // polyhedron (vclip.h), a two-dimensional bounding box, and an ID below
-// 206 that indexes a table of every body and a bit field of which pairs
+// COLLISIONBODY_MAX_BODIES (the image's 206) that indexes a table of every body and a bit field of which pairs
 // have a witness. The bodies are on one list, kept sorted by BBoxMax.x as
 // the boxes move; a witness is a VCWitness for one pair, on a list of its
 // own.
@@ -64,9 +64,21 @@
 #define VIRGIN_SMOKEABLE_COLLISION_BODY 2
 #define TRACK_POLYGON_COLLISION_BODY    3
 
-// 206: the NumberAllocator's size, the table's length and the bit field's
-// stride. Init hard-codes it three times over (206, 824, 5304).
-#define COLLISIONBODY_MAX_BODIES 206
+// The NumberAllocator's size, the table's length and the bit field's
+// stride. The image's is 206, hard-coded three times over in Init (206,
+// 824, 5304), which retail's pools fill exactly: 160 track polygons, 14
+// cars and 32 smokeables. The chopper's munitions take numbers on top,
+// from pools that grow, and GetNextID hands out the lowest free number
+// unchecked, so a smoke-bomb run could go past 205. A number past the end
+// wrote past the table and both bit fields, and pair bits aliased other
+// pairs: a car missed its witness with a wall, and the heap was corrupted
+// until freeing the table at the track's unload crashed (the user's
+// 2026-10-19 crash dump). The port allows 256, and refuses a body when no
+// number is left (collisionbody_id_available). The checkers that hold
+// this module to the image build it at 206.
+#ifndef COLLISIONBODY_MAX_BODIES
+#define COLLISIONBODY_MAX_BODIES 256
+#endif
 
 typedef struct CollisionBodyNode {
     struct CollisionBody *next;   // 0
@@ -382,7 +394,7 @@ extern float MaxCollisionBodyWidthX;
 
 // 0x00324464, `_20CollisionBodyWitness$pWitnessExistanceBitField`: bit
 // ID1 * 206 + ID2 is set while bodies ID1 and ID2 have a witness, and so
-// is ID2 * 206 + ID1.
+// is ID2 * 206 + ID1 (the port's stride is COLLISIONBODY_MAX_BODIES).
 extern uint8_t *pWitnessExistanceBitField;
 
 // 0x00324468, 0x0032446c, 0x00324470. Made by Init.
@@ -395,8 +407,10 @@ extern BSlotPool *CollisionBodyWitnessSlotPool;
 // takes, so the pairs (205, 202) to (205, 205) are in a 5305th byte; and
 // SetMaxNumbers takes n >> 3 bytes, which for 206 numbers leaves 200 to
 // 205 in a twenty-sixth. On the console both land in bMalloc's round-up
-// to sixteen. The port asks for the byte more and zeroes it.
-#define COLLISIONBODY_BITFIELD_BYTES 5304
+// to sixteen. The port asks for the byte more and zeroes it. At 256 both
+// are whole.
+#define COLLISIONBODY_BITFIELD_BYTES \
+    ((COLLISIONBODY_MAX_BODIES * COLLISIONBODY_MAX_BODIES) >> 3)
 #define COLLISIONBODY_SHORT_SLACK    1
 
 // Collision.obj's destructor (0x0020b358), which EndCollision calls: a
@@ -441,8 +455,9 @@ void numberallocator_destroy(NumberAllocator *na, int32_t flags);
 // ----------------------------------------------------------- Init / Close
 
 // 0x001cb760. The three pools (cars 14, track polygons 160, witnesses
-// 256), the allocator for 206, the table, the two matrices and the bit
-// field. EndGameFlowLoadingTrackSpecific is the one caller.
+// 256), the allocator for COLLISIONBODY_MAX_BODIES, the table, the two
+// matrices and the bit field. EndGameFlowLoadingTrackSpecific is the one
+// caller.
 void init_collision_body(void);
 
 // 0x001cb880. Deletes the pools, the allocator, the table and the bit
@@ -486,6 +501,11 @@ void collisionbody_plot_to_caffeine(CollisionBody *b, const bMatrix4 *m,
 
 // 0x001cc758. The allocator's lowest free number, read as a halfword.
 int32_t collisionbody_get_next_id(void);
+
+// The port's: whether GetNextID has a number to give. Every caller that
+// makes a body tests it first and makes none when it is 0, as it does
+// when the body's pool is full.
+int32_t collisionbody_id_available(void);
 
 // 0x001cc768. bStrNCpy's forty bytes, the last forced to NUL.
 void collisionbody_set_debug_name(CollisionBody *b, const char *name);

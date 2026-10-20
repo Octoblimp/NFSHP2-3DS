@@ -272,6 +272,15 @@ CollisionBody *collisionbody_init(CollisionBody *b, int32_t id, int32_t type)
     b->Type = (int8_t)type;
     b->ID = (int16_t)id;
     if (id >= 0) {
+        // The port's: a number past the table would write past it and
+        // both bit fields (collisionbody.h). Every maker tests
+        // collisionbody_id_available first, so this is a missed test.
+        if (b->ID >= pCollisionBodyNumberAllocator->MaxNumbers) {
+            fprintf(stderr, "collisionbody_init: ID %d of type %d is past "
+                            "the table's %d\n", (int)b->ID, (int)type,
+                    (int)pCollisionBodyNumberAllocator->MaxNumbers);
+            abort();
+        }
         // `sll 16 ; sra 16`: the number is the halfword, as stored.
         numberallocator_allocate_number(pCollisionBodyNumberAllocator,
                                         (int16_t)id);
@@ -426,6 +435,13 @@ void collisionbody_plot_to_caffeine(CollisionBody *b, const bMatrix4 *m,
 int32_t collisionbody_get_next_id(void)
 {
     return (uint16_t)pCollisionBodyNumberAllocator->LowestFreeNumber;
+}
+
+int32_t collisionbody_id_available(void)
+{
+    const NumberAllocator *na = pCollisionBodyNumberAllocator;
+
+    return na != NULL && na->LowestFreeNumber < na->MaxNumbers;
 }
 
 void collisionbody_set_debug_name(CollisionBody *b, const char *name)
@@ -1296,7 +1312,8 @@ int32_t dynamiccollisionbody_create_track_polygon_collision_bodies(
         TrackPolygonCollisionBody *t;
         int32_t id;
 
-        if (bIsSlotPoolFull(TrackPolygonCollisionBodySlotPool))
+        if (bIsSlotPoolFull(TrackPolygonCollisionBodySlotPool)
+            || !collisionbody_id_available())
             return i;
         p = near[i]->pPolygon;
         id = collisionbody_get_next_id();
