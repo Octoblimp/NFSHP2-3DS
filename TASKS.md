@@ -3930,6 +3930,44 @@ phases.
           pauses as soon as it blinks and sends the .bin with the log;
           the pictures show what blinks, the numbers whether the CPU
           dropped it.
+        - [x] Session 139: found in the pause frames. The user's three
+          pauses at the corner (2026-10-19, `nfshp2_pause_1.bin` to
+          `_3.bin`, build 049c9e9): the blink is pause 1's frames 77 to
+          80 and 83 to 86, and pause 3's 85, 86, 88 and 89. In those
+          frames one batch alone changes: the asphalt, ST_NEWROAD4 in
+          RD_SECTION20_CHOP3 (texture 3), on the screen's right, shows
+          the sea's teal in its exact outline. Its edges, the sand, the
+          baked shadows (SHD_S20_CHOP3) and the curb mark stay. The sea
+          (WATER, order 1, depth written, alpha blended) is under the
+          road everywhere and drawn after it, so the asphalt's colour
+          was drawn and its depth lost. Ruled out on the way: the
+          cluster cull, a stale cull matrix, the run cache's pass and
+          depth state, the alpha test (the asphalt is a gloss texture,
+          so it has none), the shadow layer's depth, the texture
+          cache, the lean draws' words, the command buffer guard.
+        - The cause: citro3d's `C3D_RenderTargetClear(top,
+          C3D_CLEAR_ALL, ...)` is one GX_MemoryFill, the colour on the
+          PSC's first fill unit and the depth on the second. For a
+          fill with both buffers GSP signals the first unit's end alone
+          (3dbrew, "GSP Shared Memory"), and libctru's queue
+          (gxqueue.c) hands GSP up to three commands at once and
+          ignores PSC1's interrupt. So the view's command list can
+          start while the depth fill is still going: a draw early in
+          the list keeps its colour and loses its depth to the fill's
+          end, which is the buffer's end and the screen's right. It
+          needs the list queued right behind the clear. The GPU sends
+          made that possible (on by default since b3b9bab, 2026-10-13,
+          the day before the first report): with few models to build,
+          as when the view swings to the open sea and the sun, the CPU
+          queues the list while the GPU is still on the mirror. Azahar's
+          fills end at once.
+        - [x] The fix (4803cfc): c3dwrap.c wraps C3D_FrameBufClear, so
+          a clear of both is two fills, each on the first unit, and the
+          list queued after waits for both. Every target's clear goes
+          through it: the view, the mirror, the envmap faces, the
+          frontend's, and citro2d's C2D_TargetClear. A frame's GX queue
+          gains up to 8 entries (14 of 32 used before).
+        - [ ] The user's run past the corner on 4803cfc's CIA.
 
 65. [x] **The FPS dip in the same race.** Reported with TASKS 64:
         "there was a minor FPS slowdown too at one point, locate that
@@ -5045,9 +5083,10 @@ phases.
               the wind round the listener (`playerzone.c`). The
               constructor passes `CM_STILL`, as retail does.
               `zonecam_check`: 12 scenarios, 1850 ops, 45410 lines, 0
-              differ; 99 mutations, 96 caught, 3 equivalent. Not yet
-              seen on a 3DS. Write-up: `docs/formats/camera.md`, "The
-              Zone Freeze camera".
+              differ; 99 mutations, 96 caught, 3 equivalent. Passed on
+              the user's 3DS on 2026-10-19: "zone freeze works 100%!".
+              Write-up: `docs/formats/camera.md`, "The Zone Freeze
+              camera".
         - [ ] **80b, the Zone Preview camera** (type 14) and its three
               calls (`gZonePreview*Fn`). Zone 2 stays refused until then.
         - [ ] **80c, the Jumper and Cubic movers**, the rest of

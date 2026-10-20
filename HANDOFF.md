@@ -28500,3 +28500,42 @@ here until they report.
 
 Next, after their report: TASKS 64 from the pause frames, then 80b
 (the Zone Preview), 80d (the radial blur), 72h-2c and 75.
+
+## Session 139 -- the road blink found (TASKS 64)
+
+The user's report on the 049c9e9 build (2026-10-19): "zone freeze works
+100%!", so TASKS 80a passed on the 3DS, and three pause .bins with the
+log from the curb turn on Ancient Ruins (track 31).
+
+- **What blinks.** Pause 1's frames 77 to 80 and 83 to 86, pause 3's 85,
+  86, 88 and 89. One batch alone: the asphalt (ST_NEWROAD4 in
+  RD_SECTION20_CHOP3, texture 3), on the screen's right, shows the sea's
+  teal in its exact outline. Its edges, the sand, the baked shadows and
+  the curb mark stay. The sea (WATER, order 1, depth written) is under
+  the road everywhere and drawn after it, so the asphalt was drawn and
+  then lost its depth.
+- **Why.** citro3d clears the top target's colour and depth with one
+  GX_MemoryFill: the colour on the PSC's first fill unit, the depth on
+  the second. GSP signals only the first unit's end for such a fill
+  (3dbrew, "GSP Shared Memory"), and libctru's gxqueue.c hands GSP three
+  commands at once and ignores PSC1. So the view's command list can
+  start before the depth fill reaches the buffer's end, the screen's
+  right. It takes the list queued right behind the clear: the GPU sends
+  (default since b3b9bab, 2026-10-13, the day before the first report)
+  with few models to build, as when the view turns to the open sea and
+  the sun. Azahar's fills end at once.
+- **The fix** (4803cfc). `__wrap_C3D_FrameBufClear` in c3dwrap.c (linked
+  with --wrap) makes a clear of both two fills, each on the first unit,
+  so the list queued after waits for both. It covers every target: the
+  view, the mirror, the envmap faces, the frontend, citro2d's
+  C2D_TargetClear (its base.o tail-calls the wrapper). Up to 8 more GX
+  queue entries a frame (the device's peak was 14 of 32).
+- **Ruled out on the way** (TASKS 64 lists them): the cluster cull, a
+  stale cull matrix, the run cache's state, the alpha test, the shadow
+  layer, the texture cache, the lean draws, the command buffer guard.
+- The checklist is v23: 64 fix in build, 80a passed (device tests 4 to
+  3).
+
+The fix needs the user's run past that corner on the 3DS; work halts
+until they report. Next, after: 80b (the Zone Preview), 80d (the radial
+blur), 72h-2c and 75.
