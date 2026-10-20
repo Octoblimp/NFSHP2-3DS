@@ -2153,6 +2153,13 @@ is citro3d and owns the top.
         at boot with a message (6ac29d1), and the pass checks only that.)
         The HOME Menu banner, sound and icon are TASKS 66's.
         - The Old 3DS message passed on the user's 3DS (2026-10-19).
+        - The release candidate (2026-10-20, built from 926d1e1):
+          the disc-made icon, banner and siren, version 1.0.0, and
+          GPL-3.0 for the port's code (`LICENSE`), all the user's
+          picks. The release build was checked for test-only
+          changes: none. Open until the user says it is good to go
+          and names the GitHub repo; then the v1.0.0 tag and the
+          push.
 
 ## Asked for during the port
 

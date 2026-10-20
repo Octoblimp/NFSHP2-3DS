@@ -28746,5 +28746,25 @@ The launch prep so far, for today's release (the user, 2026-10-20 morning).
   nothing, and the demo 32 s after the last press, the log's lag
   included. PASS. Not yet on the 3DS.
 
-Next: the packaging decisions (the user's), a check of the release build
-for test-only changes, and the final CIA.
+- **The release build checked** for test-only changes. Every test switch
+  in `nfshp2_config.txt` is off unless its line is added; GpuSends,
+  KernelFlush and ClusterCull, the normal paths, are on. `SHOW_FRAME_RATES`
+  is 0. The debug menu opens only with L + R + D-Pad Up on the main menu
+  (TASKS 53, the user's ask) or `DebugMenu 1`. Nothing real is
+  uncommitted: the sources git lists as changed differ only in line
+  endings.
+- **The packaging decisions**, the user's: the disc-made icon, banner and
+  siren (`meta/hp2`); version 1.0.0; GPL-3.0 for the port's code. The tag
+  waits: "only after I've confirmed we're good to go and I give you the
+  github repo to commit to". The repo's own placeholder banner reads
+  "NFSU2 3DS" (the earlier port's), so it must not ship.
+- **`LICENSE`** (`926d1e1`): the FSF's GPL-3.0 text, copied from
+  devkitPro's copy (md5 `1ebbd3e34237af26da5dc08a4e440464`). The README
+  says what it covers.
+- **The release candidate**, built from `926d1e1`:
+  `3DS Files/NFSHP2-3DS.cia` (1,833,920 bytes, sha256 `423fffe5...0804`)
+  and `.3dsx` (1,994,408 bytes, sha256 `36360aed...ba46`). The
+  `NFSHP2-3DS.cia` at the repo root is an older copy, from 2026-10-19.
+
+Next: the user's go on the release candidate and the GitHub repo's name;
+then the v1.0.0 tag, the push, and TASKS 31 closed.
