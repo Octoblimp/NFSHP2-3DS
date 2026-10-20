@@ -104,7 +104,7 @@
 #define TRACKVIEW_STOPS        24       // how many stops round it
 #define TRACKVIEW_MAX_DEFERRED 1024     // batches held back for the alpha pass
 #define TRACKVIEW_MAX_STRIPS   256      // eBeginStrip's strips in a view
-#define TRACKVIEW_MAX_STRIP_VERTS 2048  // and their vertices
+#define TRACKVIEW_MAX_STRIP_VERTS 4096  // and their vertices: the skids'
 #define TRACKVIEW_FOG_SAMPLES  5        // depths the fog's fraction is logged at
 
 // One TextureInfo a solid's table points at. `tex` is what the solids'
@@ -266,6 +266,7 @@ typedef struct {
     int  numStrips;
     int  numStripVerts;
     int  stripsDropped;         // that found the store or the lists full
+    int  stripsJoined;          // that went on the end of the one before
     int  stripsDrawn;           // in the frame just drawn
     int  spritesDrawn;          // RenderEffects' sprites, the frame just drawn
     int  spritesDropped;        // that found the store, the lists or the ring full

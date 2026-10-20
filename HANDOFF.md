@@ -28295,3 +28295,79 @@ every car whose visual effects are on (BeltMover cars only within
 
 Next: 78c, the drawing (the plan is in Session 135's entry), or 79c when
 the user's next log comes.
+
+## Session 137, continued -- the skid drawing (TASKS 78c)
+
+78b is committed (217e597). Then 78c, which finishes TASKS 78.
+
+**The port.** In skids.c, from retail's code instruction by instruction:
+
+- `skidset_render(set, fade)` (`0x001aacc0`): no texture, no draw. One
+  ePoly from `epoly_init`. For each pair of segments, V0/V3 are segment
+  i's ends and V1/V2 segment i + 1's, each 0.05 higher. The alphas are
+  `(intensity < fade ? 0 : intensity - fade) >> 1`. Then
+  `gEPolyRender3DFn(poly, tex, &eMathIdentityMatrix, 0)`.
+- `render_skids(clan, clip, view)` (`0x001ab248`): nothing when the
+  view's byte 6 is set. eview.h now names it OverrideRendering: a NIS
+  sets it, and the NIS player isn't ported. Each set must pass
+  IsBoundingBoxVisible and, with a car, the car's VisibleViewBits bit
+  `ID & 31`. Then `px = GetPixelSize(1.0, distance to the camera)`. A
+  set at `4 < px` is drawn, with a fade of 0 past 10 pixels and
+  `256 - (px - 4) * 42.666668` otherwise. It then moves to
+  SkidSetList's head.
+- `render_clans(clip, view)` (`0x001ab810`): a clan needs a box pixel
+  size of at least 11 and a visible box. One drawn more than 300 ticks
+  after its stamp is stamped again and moved to ClanList's head.
+
+trackview.c calls `render_clans(view->WorldScreenClipMatrix, view)`
+after StuffSun in the player's view, where eDisplayFrame has it
+(`0x001132c4`). The call is unconditional in retail's per-view chain, so
+the mirror's view makes it too, after its scenery. The mirror is drawn
+first here and second on the PS2, so the lists' order differs by that.
+
+**The draws.** Every skid quad is an ePoly, as on the PS2: a four-vertex
+strip through render_epoly_3d. `strip_end` now joins a strip onto the
+previous deferred strip when all of these hold:
+
+- the texture is the same and is not sorted;
+- the matrix (memcmp of the C3D_Mtx) is the same;
+- the previous strip is the last deferred entry and the last in
+  stripVerts;
+- the result fits 1024 vertices and the store.
+
+The joins are degenerate: the last vertex and the new first after an
+even count, plus the new first again after an odd one, so the winding
+holds. TRACKVIEW_MAX_STRIP_VERTS is now 4096 (was 2048) and
+GEO_STRIP_RING 8192 (was 4096). The race log's strips line counts the
+joins. georender.h's comment that 0x42 was the skid marks' blend was
+wrong: they are 0x44, plain alpha (GEO_BLEND_ALPHA), in INGAMEB.
+
+**Checks.**
+
+- skids_check now runs retail's three, with the ePoly constructor as
+  shipped. Stubbed on both sides:
+  - IsBoundingBoxVisible (`0x0010ce80`; scenerycull.h's 0x0010bb10 is
+    the demo's);
+  - both GetPixelSizes;
+  - Render3D, which prints the corners, the alphas and a hash of the
+    poly's bytes 16 .. 152. On the 64-bit host the trailing pointer sits
+    at 160, so it is printed by field.
+- The script's draw section covers fades either side of the
+  intensities, every pixel size, IDs past 31 and below 0, the NIS byte,
+  the clans' 11-pixel and 300-tick edges, and a close view of the
+  untextured terrains. The random drive draws every 50 ops.
+- Results: 9079 ops, 79162 lines, 0 differ, 1708 quads drawn. All 39
+  new mutations are caught; the whole pass is 204 of 208 caught and 4
+  equivalent.
+- cn-head, ms-dy and gc-stamp were re-anchored, since the new code
+  repeats their lines.
+- The CIA is built.
+
+**Needs the 3DS.** The marks have not been seen on a screen. Look for:
+
+- dark trails where the car slides, fading out with distance;
+- no flicker on them (they are 0.05 above the road, as on the PS2);
+- no FPS cost in a long drift.
+
+Next: 79c when the user's log comes. Otherwise the order in the
+checklist's footer.

@@ -5818,7 +5818,7 @@ static void logRaceState(void)
     logLine("race: other solids %d (%d failed, %d dropped), %d bakes "
             "failed, textures %d "
             "(%d missing, %d reduced, %d unchained, %d evicted), deferred "
-            "%d dropped; strips %d (%d dropped); %lu KB linear free",
+            "%d dropped; strips %d (%d dropped, %d joined); %lu KB linear free",
             g_track.numOther, g_track.otherFailed, g_track.otherDropped,
             g_track.bakesFailed,
             g_track.numTextures, g_track.missingTextures,
@@ -5826,6 +5826,7 @@ static void logRaceState(void)
             g_track.evictedTextures,
             g_track.deferredDropped,
             g_track.stripsDrawn, g_track.stripsDropped,
+            g_track.stripsJoined,
             (unsigned long)linearSpaceFree() / 1024);
     {
         const bNode*        n;

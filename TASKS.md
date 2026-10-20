@@ -4888,11 +4888,12 @@ phases.
         kReplayHint). The HUD is down in a replay, so the panel loses
         nothing. Not yet seen on a screen.
 
-78. [ ] **Skid marks.** Found in TASKS 73's last slice: the port draws
+78. [x] **Skid marks.** Found in TASKS 73's last slice: the port draws
         none. On the PS2 a wheel sliding on the ground lays a trail
         textured by its terrain's SkidTextureName, darkening the road
-        (the texture's blend is 0x42, Cd - Cs * As, which georender has
-        as GEO_BLEND_SUBTRACT). What retail has, all in its own code:
+        (the skid textures, in INGAMEB, are AlphaBits 0x44, plain alpha
+        blending, not 0x42 as this entry first said). What retail has,
+        all in its own code:
         - Wheel::MaybeMakeSkids (`0x001a5520`), which takes the Car too,
           called from PhysicsCar::Move, BeltMover::Move and
           MellowMover::UpdateCar; the port's wheel_maybe_make_skids is a
@@ -4925,10 +4926,20 @@ phases.
               fills, so sliding wheels lay skid sets in the race now.
               Nothing draws them until 78c. `skids_check` runs
               retail's MaybeMakeSkids too: 8654 ops, 0 differ, all 47
-              new mutations caught (165 of 169 caught and 4 equivalent in all).
-              Write-up: `docs/formats/skids.md`.
-        - [ ] **78c, the drawing**: SkidSet::Render, RenderSkids
-              and RenderClans after StuffSun.
+              new mutations caught (165 of 169 caught and 4 equivalent
+              in all). Write-up: `docs/formats/skids.md`.
+        - [x] **78c, the drawing** (`skids.c`): SkidSet::Render
+              (`0x001aacc0`), RenderSkids (`0x001ab248`) and
+              RenderClans (`0x001ab810`). trackview.c calls them after
+              StuffSun in the player's view, and after the scenery in
+              the mirror's. Each quad is an ePoly through Render3D, as
+              on the PS2. trackview.c's strip_end joins a strip onto
+              the one before it when the texture and matrix match, so
+              each run of one texture's quads is one draw. The strip
+              store and ring are doubled. `skids_check` runs retail's
+              three: 9079 ops, 0 differ, all 39 new mutations caught
+              (204 of 208 caught and 4 equivalent in all). Not yet seen
+              on a 3DS. Write-up: `docs/formats/skids.md`.
 
 79. [ ] **The 2026-10-19 device race: the crash on saving, the wall, and
         the lag by the roadblock.** Asked for on 2026-10-19, ahead of

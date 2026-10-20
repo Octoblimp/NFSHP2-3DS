@@ -32,6 +32,7 @@
 #include "coresample.h"
 #include "hangwatch.h"
 #include "scenery.h"
+#include "skids.h"
 #include "sky.h"
 #include "sun.h"
 #include "sundraw.h"
@@ -1080,10 +1081,58 @@ static void strip_add_uv(float s, float t)
     }
 }
 
+// The most vertices strips joined into one draw take: see strip_join.
+#define STRIP_JOIN_MAX 1024
+
+// A texture's own list draws its strips in the order they came, so a strip
+// with the texture and the matrix of the one just before it can go on the
+// end of that one, for one draw instead of two. The join repeats that
+// strip's last corner and this one's first, and the first once more after
+// an odd count, which keeps this one's winding. Every triangle across the
+// join has a corner twice and so no area. The skid marks' quads, an ePoly
+// each as on the PS2, come this way by the hundred.
+static bool strip_join(TrackView* v, const TrackTex* t, const C3D_Mtx* mv)
+{
+    const int        n = s_strip.n;
+    TrackDeferred*   last;
+    TrackStrip*      ls;
+    GeoRenderVertex* o;
+    int              pad;
+
+    if (t->sorted || v->numDeferred == 0 || n < 3) {
+        return false;
+    }
+    last = &v->deferred[v->numDeferred - 1];
+    if (last->strip < 0 || last->strip != v->numStrips - 1) {
+        return false;
+    }
+    ls  = &v->strips[last->strip];
+    pad = (ls->count & 1) ? 3 : 2;
+    if (ls->tex != t || ls->count < 3
+        || ls->first + ls->count != v->numStripVerts
+        || ls->count + pad + n > STRIP_JOIN_MAX
+        || v->numStripVerts + pad + n > TRACKVIEW_MAX_STRIP_VERTS
+        || memcmp(&last->modelView, mv, sizeof *mv) != 0) {
+        return false;
+    }
+    o    = &v->stripVerts[v->numStripVerts];
+    o[0] = o[-1];
+    o[1] = s_strip.v[0];
+    if (pad == 3) {
+        o[2] = s_strip.v[0];
+    }
+    memcpy(o + pad, s_strip.v, (size_t)n * sizeof s_strip.v[0]);
+    v->numStripVerts += pad + n;
+    ls->count = (uint16_t)(ls->count + pad + n);
+    v->stripsJoined++;
+    return true;
+}
+
 // eEndStrip (0x00110608) puts the packet on its texture's list, with the
 // strip's matrix, or on the alpha list when the texture has
 // ApplyAlphaSorting, keyed by the first vertex's z through the view's
 // WorldViewMatrix -- the vertex as it is, not through the strip's matrix.
+// Here a strip may join the one before it instead (strip_join).
 static void strip_end(void)
 {
     TrackView*     v = s_draw;
@@ -1091,6 +1140,7 @@ static void strip_end(void)
     TrackStrip*    s;
     TrackDeferred* d;
     bMatrix4       localView;
+    C3D_Mtx        mv;
     const float*   p;
 
     s_strip.tex = NULL;
@@ -1098,6 +1148,11 @@ static void strip_end(void)
         return;
     }
     note_use(v, t);
+    eMulMatrix(&localView, &s_strip.m, s_worldView);
+    to_c3d(&localView, &mv);
+    if (strip_join(v, t, &mv)) {
+        return;
+    }
     s        = &v->strips[v->numStrips];
     s->tex   = t;
     s->first = (uint16_t)v->numStripVerts;
@@ -1108,8 +1163,7 @@ static void strip_end(void)
 
     d = &v->deferred[v->numDeferred++];
     memset(d, 0, sizeof *d);
-    eMulMatrix(&localView, &s_strip.m, s_worldView);
-    to_c3d(&localView, &d->modelView);
+    d->modelView = mv;
     p        = s_strip.v[0].pos;
     d->depth = p[0] * s_worldView->v0.z + p[1] * s_worldView->v1.z
              + p[2] * s_worldView->v2.z + s_worldView->v3.z;
@@ -3609,6 +3663,12 @@ void trackview_draw_mirror(TrackView* v)
     georender_run_begin();
     scenery_stuff_scenery(&v->cull, view);
     georender_run_end();
+    // RenderClans (0x001132c4) for the mirror too: retail's chain makes
+    // the call for every view. The PS2 draws the mirror after the player's
+    // view and the port before it, so the sets the mirror sees go to the
+    // head of SkidSetList first.
+    hangwatch_mark("the mirror's skids");
+    render_clans(view->WorldScreenClipMatrix, view);
     // RenderWorldObjects (0x001cdb20) for the mirror too: the spike
     // strips' belts. The mirror has no sun, so they follow the scenery.
     // Then the tunnels' light flares (0x00116778), which wait on the
@@ -3715,6 +3775,7 @@ void trackview_draw(TrackView* v)
     v->cmdSkipped   = 0;
     v->stripsDrawn  = 0;
     v->stripsDropped = 0;
+    v->stripsJoined  = 0;
     v->spritesDrawn   = 0;
     v->spritesDropped = 0;
     v->spritesRefused = 0;
@@ -3757,6 +3818,9 @@ void trackview_draw(TrackView* v)
 
     // Then StuffSun (0x00112ecc), after DrawNisObjects, which has nothing
     // to draw here. Its quads draw at once; see render_epoly. Then
+    // RenderClans (0x001132c4), the skid marks, with the view's
+    // WorldScreenClipMatrix: their quads go on their textures' lists, as
+    // strips, and draw with the scenery's list below. Then
     // RenderWorldObjects (0x001cdb20, after RenderPlayers): the spike
     // strips' belts. Then the tunnels' light flares
     // (eRenderWorldLightFlares, 0x00116778) and the effects
@@ -3771,6 +3835,8 @@ void trackview_draw(TrackView* v)
     StuffSun(view);
     s_quadTarget = NULL;
     georender_set_fog(s_fogOn ? &s_fog : NULL, s_fogColour);
+    hangwatch_mark("the skids begun");
+    render_clans(view->WorldScreenClipMatrix, view);
     hangwatch_mark("the world objects begun");
     georender_run_begin();
     render_world_objects(view);
@@ -3983,6 +4049,7 @@ bool trackview_draw_frontend(TrackView* v, void (*render)(void*),
     v->cmdSkipped   = 0;
     v->stripsDrawn  = 0;
     v->stripsDropped = 0;
+    v->stripsJoined  = 0;
     v->spritesDrawn   = 0;
     v->spritesDropped = 0;
     v->spritesRefused = 0;

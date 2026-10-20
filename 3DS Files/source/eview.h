@@ -96,11 +96,16 @@ typedef struct eRenderTarget {
     uint32_t    pad;                    // 1164
 } eRenderTarget;
 
+// OverrideRendering is retail's byte 6: NisManager::EnableOverrideRendering
+// (0x001b1ce0) sets it and the word at 116 to 1 for the view a NIS takes
+// over, and DisableOverrideRendering (0x001b24a8) clears both. RenderSkids
+// draws nothing in such a view. The NIS player isn't ported, so it stays
+// 0.
 typedef struct eView {
     int32_t   ID;                       //   0
     uint8_t   Active;                   //   4
     uint8_t   LetterBox;                //   5
-    uint8_t   pad0;                     //   6
+    uint8_t   OverrideRendering;        //   6  a NIS's; see below
     uint8_t   pad1;                     //   7
     float     H;                        //   8  focal length in pixels
     float     NearZ;                    //  12

@@ -36,7 +36,7 @@ typedef enum {
     GEO_BLEND_NONE,             // not semitransparent, or AlphaBits 0x0a: Cs
     GEO_BLEND_ALPHA,            // 0x44, (Cs - Cd) * As + Cd
     GEO_BLEND_ADD,              // 0x48, Cs * As + Cd: bulbs, the sun
-    GEO_BLEND_SUBTRACT,         // 0x42, Cd - Cs * As: the skid marks
+    GEO_BLEND_SUBTRACT,         // 0x42, Cd - Cs * As
 } GeoBlend;
 
 // A texture's fragment state, for georender_draw_mask. Zero is an opaque
@@ -313,7 +313,7 @@ void georender_quads_rewind(void);
 
 // How many strip vertices a frame can draw, in a ring of their own that
 // georender_quads_rewind starts again with the quads'.
-#define GEO_STRIP_RING 4096
+#define GEO_STRIP_RING 8192
 
 // A strip eBeginStrip (retail 0x00110488) built: `n` vertices in a
 // model's space, drawn as a triangle strip with the camera

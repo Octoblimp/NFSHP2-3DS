@@ -144,7 +144,8 @@ The seams were there before this slice, empty; `main.c` fills them:
 | `gSkidSetFinishedAddingFn` | `~Wheel`'s SkidMaker (`physcomp.c`) | `skidset_finished_adding_seam` |
 | `gWheelMaybeMakeSkidsFn` (78b) | `wheel_maybe_make_skids` (`wheel.c`), from each mover | `skids_maybe_make_skids` |
 
-Nothing is drawn until 78c.
+The drawing (78c) is called from `trackview.c`'s view; see "The drawing"
+below.
 
 ## MaybeMakeSkids
 
@@ -201,6 +202,76 @@ car's BlownTireBits is at 2124 in retail's Car (the port's field).
 MakeSkid then drops the point when it is over 4 m from the car's
 GeometryPosition, as above.
 
+## The drawing
+
+Retail's `eDisplayFrame` calls `RenderClans(view->WorldScreenClipMatrix,
+view)` (`0x001ab810`) for each view, after `StuffSun` and before
+`RenderHudIntercepts`. The port's `trackview.c` calls `render_clans` from
+the same place in the player's view. The rear-view mirror's view calls it
+after its scenery, since the port draws no sun there. The PS2 draws the
+mirror after the player's view and the port draws it before, so the sets
+the mirror sees reach the head of `SkidSetList` first.
+
+**RenderClans** walks `ClanList`, keeping each clan's next before it
+draws. It skips a clan when `eView::GetPixelSize(&BBoxMin, &BBoxMax)`
+(`0x001076f8`) is under 11, or when `IsBoundingBoxVisible(&BBoxMin,
+&BBoxMax, clip)` is 0. That function is at `0x0010ce80`, and it is
+ClassifyAABB not 0. A clan drawn more than 300 ticks after its stamp
+(`(int)(WorldTime - LastUpdateTime) > 300`) is stamped again and moved
+to the list's head. Then it calls RenderSkids on the clan.
+
+**RenderSkids(clan, clip, view)** (`0x001ab248`) draws nothing in a view
+whose byte 6 is set. The byte is read with `lb`, so any nonzero value
+counts. `NisManager::EnableOverrideRendering` sets it for the view a NIS
+takes over; the port's eView calls it `OverrideRendering`. The NIS player
+isn't ported, so the byte stays 0. For each set on the clan's list:
+
+1. **Visible**: `IsBoundingBoxVisible` of the set's box. With a car, the
+   result is ANDed with bit `ID & 31` (an `srlv`) of the car's
+   `VisibleViewBits`.
+2. **Size**: `d` is the distance from the set's Centre to the camera's
+   `CurrentKey.Position`, `sqrt((dx*dx + dy*dy) + dz*dz)`. Then
+   `eView::GetPixelSize(1.0, d)` (`0x001075b8`), an int, becomes the float
+   `px`. The set is skipped unless `4 < px`.
+3. **Fade**: 0 past 10 pixels. Otherwise
+   `(u8)(int)(256 - (px - 4) * 42.666668)`, from gp-29148, `0x422aaaab`.
+   For 5 to 10 pixels the fade is 213, 170, 128, 85, 42 and 0.
+4. `SkidSet::Render(set, fade)` draws the set, which then moves to
+   `SkidSetList`'s head.
+
+**SkidSet::Render(set, fade)** (`0x001aacc0`) draws nothing when the set's
+terrain has no skid texture. It builds one ePoly on the stack with
+`__5ePoly`. Then, for each pair of segments i and i + 1:
+
+- V0 and V3 are segment i's two ends, from GetEndPoints (`pos + delta`
+  and `pos - delta`), and V1 and V2 are segment i + 1's. Each corner is
+  0.05 higher (gp-29156, `0x3d4ccccd`).
+- V0 and V3 take segment i's alpha, and V1 and V2 take segment i + 1's.
+  The alpha is `(intensity < fade ? 0 : intensity - fade) >> 1`, so a
+  full mark's 255 is 127, close to the GS's 1.0.
+- The colours stay the constructor's 0x80 grey.
+- `ePoly::Render3D(texture, eMathIdentityMatrix, 0)` draws the quad: a
+  strip of V0, V1, V3, V2 in world space, on the texture's list.
+
+The four skid textures are in INGAMEB. They are semitransparent with
+AlphaBits 0x44, `(Cs - Cd) * As + Cd`: plain alpha blending, which
+darkens the road by the mark's alpha.
+
+**On the 3DS**, each quad reaches `trackview.c`'s `render_epoly_3d` as a
+strip of four on the texture's list. With up to 128 sets of 7 quads,
+that would be hundreds of draws. Instead, `strip_end` joins a strip onto
+the one before it when all of these hold:
+
+- the strip has the same texture and matrix as the one before it;
+- the one before it is the last thing on that list;
+- the texture is not alpha-sorted.
+
+Degenerate triangles fill the joins, and they keep each strip's winding.
+Each run of one texture's quads is then one draw. The view's strip store
+now holds 4096 vertices (it was 2048), and georender's strip ring holds
+8192 a frame (it was 4096). The race log's "strips" line counts the
+joins.
+
 ## The check
 
 `tools/skids_check.py` runs retail's functions in mipsemu
@@ -208,9 +279,21 @@ GeometryPosition, as above.
 and the port's in the host harness. Both sides stub the slot pools (lowest
 free slot first, `0xcd` or cleared by the pool's flags), bPNode's nodes
 and `GetTextureInfo`, and for MaybeMakeSkids `GetElevation`, which
-answers the two heights the op gives in turn. Each stub prints what it is
-given. `bStringHash`, the bounding box functions, the list destructors,
-`bRotateVector` and `bNormalize` run as shipped. The harness has its own
+answers the two heights the op gives in turn. For the drawing they also
+stub these:
+
+- `IsBoundingBoxVisible`, which answers 1, 0, or a value from a hash of
+  the box.
+- The two `GetPixelSize`s: the distance one answers the view's H over
+  the distance, truncated; the box one answers a set number or a value
+  from a hash.
+- `ePoly::Render3D`, which prints the texture, the matrix, the four
+  corners, their alphas and a hash of the poly's other bytes.
+- The ePoly destructor, which the port doesn't call.
+
+Each stub prints what it is given. `bStringHash`, the bounding box
+functions, the list destructors, `bRotateVector`, `bNormalize` and the
+ePoly constructor run as shipped. The harness has its own
 copy of wheel.c's `bRotateVector`, because it does not link wheel.c;
 wheel_check holds wheel.c's copy to the image. The four wheels sit at
 retail's offsets on the model side, with their WheelInfos and CarStates,
@@ -232,6 +315,12 @@ The script:
   rejoining each player's view, points at and past 4 m from the car on
   each axis, no car, intensities and half-widths past a byte, and
   `DeleteThisSkid`.
+- **draw** (78c): on the sets so far, each set at fades either side of
+  the intensities; views whose focal lengths put the sets at every pixel
+  size; the views' IDs past 31 and below 0, against cars only some views
+  see; a NIS's view, with the byte 1, 0x80 and 0xff; the clans' pixel
+  test either side of 11 and boxes out of view; and the clans drawn 300
+  and 301 ticks after their stamps.
 - **clans**: the squares' edges on both sides of 0, saturation, 48
   squares against the 40 clans with makers still holding sets in the
   evicted ones, and a found clan's stamp.
@@ -246,18 +335,24 @@ The script:
   height, no width, and four wheels on two cars.
 - **wheel random**: 300 steps of two cars sliding about, each step both
   of a car's wheels, with odd grip, a few blown tires and the ground's
-  height under each edge.
+  height under each edge. Then one view draws it all.
 - **random**: 1500 ops of four cars driving with eight makers, odd
   steps, turns, terrains, views and the occasional flush and delete.
+  Every 50 ops a view near one of the cars draws, with a random focal
+  length, ID and tests.
 
-On retail's image: 8654 ops, 56726 lines, 0 differ. 761 of the ops are
-MaybeMakeSkids calls, and 593 of those lay a skid. Before 78b the same
-run without the wheels was 5839 ops, 2653 skids, 1329 sets and 74 clans
-made. Every instruction of the 78a functions runs but GetEndPoints
-(78c's) and the destructors' paths with bit 0 of the flags clear, which
-no caller takes. The mutation pass (`--mutate`) makes 169 changes to
-`skids.c`, 47 of them in MaybeMakeSkids: 165 caught (all 47 of those),
-and 4 equivalent:
+On retail's image: 9079 ops, 79162 lines, 0 differ. 761 of the ops are
+MaybeMakeSkids calls, and 593 of those lay a skid. The drawing runs
+RenderClans 104 times, RenderSkids alone 15 times and SkidSet::Render
+alone 168 times. Of the 5036 sets measured, 866 are over 4 pixels, and
+1708 quads are drawn. Before 78b the same run without the wheels was
+5839 ops, 2653 skids, 1329 sets and 74 clans made. Every instruction of
+the 78a functions runs but the destructors' paths with bit 0 of the
+flags clear, which no caller takes.
+
+The mutation pass (`--mutate`) makes 208 changes to `skids.c`: 47 in
+MaybeMakeSkids and 39 in the drawing. 204 are caught, all 86 of those
+among them, and 4 are equivalent:
 
 - `ct-centre`: the constructor ends in AddSegment, which sets the centre
   from the box whatever it was;

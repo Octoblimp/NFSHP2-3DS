@@ -8,7 +8,12 @@
 #include "bchunk.h"
 #include "car.h"
 #include "eefpu.h"
+#include "emath.h"
+#include "epoly.h"
+#include "eview.h"
+#include "eviewmatrix.h"
 #include "realtime.h"
+#include "scenerycull.h"
 #include "wheel.h"
 
 bNode        SkidSetList = { &SkidSetList, &SkidSetList };
@@ -30,6 +35,11 @@ static const float SkidIntensityScale = 1.0f / 255.0f;
 // a pressing wheel's share of the intensity, and the least intensity.
 static const float SkidPressOnly      = 1.0f / 3.0f;
 static const float SkidMinIntensity   = 0.3f;
+
+// The drawing's, gp-29156 and gp-29148 (0x3d4ccccd and 0x422aaaab): how
+// far above the ground a mark is drawn, and the fade a pixel past 4.
+static const float SkidRaise          = 0.05f;
+static const float SkidFadeScale      = 42.666668f;
 
 static void add_head(bNode *list, bNode *n)
 {
@@ -503,4 +513,114 @@ Clan *get_clan(const bVector3 *pos)
     c = clan_construct((Clan *)bSlotOMalloc(ClanSlotPool), pos, hash);
     add_head(&ClanList, &c->Node);
     return c;
+}
+
+// ------------------------------------------------------------- the drawing
+
+static void raised_corner(bVector4 *v, const bVector3 *p)
+{
+    v->x = p->x;
+    v->y = p->y;
+    v->z = p->z + SkidRaise;
+}
+
+// A corner's alpha, from its point's intensity: `sltu`, then the
+// difference's byte, then `srl 1`.
+static uint8_t faded_alpha(uint32_t intensity, uint32_t fade)
+{
+    uint32_t a = intensity < fade ? 0u : (intensity - fade) & 0xffu;
+
+    return (uint8_t)(a >> 1);
+}
+
+void skidset_render(SkidSet *s, uint8_t fade)
+{
+    ePoly   poly;
+    int32_t i;
+
+    if (SkidTextureInfo[s->TheTerrainType] == NULL)
+        return;
+    epoly_init(&poly);
+    for (i = 0; i < s->NumSkidSegments - 1; i++) {
+        const SkidSegment *a = &s->SkidSegments[i];
+        const SkidSegment *b = &s->SkidSegments[i + 1];
+        bVector3           e0, e1, e2, e3;
+        uint8_t            aa, ab;
+
+        skid_segment_get_end_points(a, &e0, &e3);
+        skid_segment_get_end_points(b, &e1, &e2);
+        raised_corner(&poly.Vertices[0], &e0);
+        raised_corner(&poly.Vertices[1], &e1);
+        raised_corner(&poly.Vertices[2], &e2);
+        raised_corner(&poly.Vertices[3], &e3);
+        aa = faded_alpha(a->Intensity, fade);
+        ab = faded_alpha(b->Intensity, fade);
+        poly.Colours[0][3] = aa;
+        poly.Colours[1][3] = ab;
+        poly.Colours[2][3] = ab;
+        poly.Colours[3][3] = aa;
+        if (gEPolyRender3DFn != NULL)
+            gEPolyRender3DFn(&poly, SkidTextureInfo[s->TheTerrainType],
+                             &eMathIdentityMatrix, 0);
+    }
+}
+
+void render_skids(Clan *c, bMatrix4 *clip, eView *view)
+{
+    bNode *n;
+
+    if ((int8_t)view->OverrideRendering != 0)
+        return;
+    for (n = c->SkidSetList.next; n != &c->SkidSetList; n = n->next) {
+        SkidSet        *s = (SkidSet *)((bPNode *)(void *)n)->Object;
+        const bVector3 *eye;
+        int32_t         vis;
+        float           dx, dy, dz, px;
+        uint8_t         fade;
+
+        vis = scenery_is_bounding_box_visible(&s->BBoxMin, &s->BBoxMax, clip);
+        if (s->pCar != NULL)
+            vis &= (int32_t)((s->pCar->TheOverrideRenderingPosition
+                                  .VisibleViewBits
+                              >> ((uint32_t)view->ID & 31u)) & 1u);
+        if (vis == 0)
+            continue;
+        eye = &view->pCamera->CurrentKey.Position;
+        dx = s->Centre.x - eye->x;
+        dy = s->Centre.y - eye->y;
+        dz = s->Centre.z - eye->z;
+        px = (float)eview_get_pixel_size(view, 1.0f,
+                                         sqrtf((dx * dx + dy * dy) + dz * dz));
+        if (!(4.0f < px))
+            continue;
+        fade = 0;
+        if (!(10.0f < px))
+            fade = (uint8_t)ee_trunc_w(256.0f - (px - 4.0f) * SkidFadeScale);
+        skidset_render(s, fade);
+        unlink_node(&s->Node);
+        add_head(&SkidSetList, &s->Node);
+    }
+}
+
+void render_clans(bMatrix4 *clip, eView *view)
+{
+    bNode *n, *next;
+
+    for (n = ClanList.next; n != &ClanList; n = next) {
+        Clan *c = (Clan *)(void *)n;
+
+        next = n->next;
+        if (eview_get_pixel_size_box(view, &c->BBoxMin, &c->BBoxMax) < 11)
+            continue;
+        if (scenery_is_bounding_box_visible(&c->BBoxMin, &c->BBoxMax, clip)
+            == 0)
+            continue;
+        if (300 < (int32_t)((uint32_t)WorldTime
+                            - (uint32_t)c->LastUpdateTime)) {
+            c->LastUpdateTime = WorldTime;
+            unlink_node(n);
+            add_head(&ClanList, n);
+        }
+        render_skids(c, clip, view);
+    }
 }

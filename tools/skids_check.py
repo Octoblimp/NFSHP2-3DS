@@ -11,8 +11,11 @@ FlushClans, CloseClans and GetClan (0x001aa788 .. 0x001abaa0) -- run as
 shipped, with bStringHash, the bounding box functions, ~bPNode and the
 list destructors under them -- and Wheel::MaybeMakeSkids (0x001a5520,
 TASKS 78b), with bRotateVector and bNormalize under it, on four wheels at
-retail's offsets. The harness (tools/src/skids_test.c) runs the port over
-the same script, and the two transcripts are diffed.
+retail's offsets -- and the drawing, TASKS 78c: SkidSet::Render
+(0x001aacc0), with the ePoly constructor under it, RenderSkids
+(0x001ab248) and RenderClans (0x001ab810). The harness
+(tools/src/skids_test.c) runs the port over the same script, and the two
+transcripts are diffed.
 
 Stubbed on both sides, each printing what it is given:
   - the slot pools (bNewSlotPool, bDeleteSlotPool, bMalloc(SlotPool *),
@@ -25,7 +28,17 @@ Stubbed on both sides, each printing what it is given:
   - GetTextureInfo, which answers one of four textures, or none, by the
     hash;
   - TopologyCoordinate::GetElevation (0x00152070), which answers the two
-    heights the MaybeMakeSkids op gives, in turn, and 0 past them.
+    heights the MaybeMakeSkids op gives, in turn, and 0 past them;
+  - IsBoundingBoxVisible (0x0010ce80), which answers 1, 0, or by a hash of
+    the box, as the VW op says;
+  - eView::GetPixelSize(float, float) (0x001075b8), which answers the
+    view's H over the distance, truncated, and eView::GetPixelSize(bVector3
+    *, bVector3 *) (0x001076f8), which answers the VW op's number or one by
+    a hash of the box;
+  - ePoly::Render3D (0x0010ff88), which prints the texture, the matrix,
+    the flags, the four corners, their alphas, a hash of the poly's bytes
+    16 .. 152 and its pDynamicFrameMemory; and the ePoly
+    destructor (0x00114db8), which the port has no call for.
   The harness has its own copy of bRotateVector, wheel.c's, which it does
   not link; wheel_check holds wheel.c's to the image.
 
@@ -38,7 +51,11 @@ their edges and far off; a clan pool and a set pool run full; flushes,
 closes and reopens; then MaybeMakeSkids' gates one at a time, wheels
 rolling, pressing, drifting and broadside, every terrain, the ground
 tilted under the edges, and a random drive of four wheels on two cars;
-and then a long random drive of MakeSkid alone. After each op both
+and then a long random drive of MakeSkid alone. Between them it draws:
+each set at fades either side of every intensity, the views' IDs past 31
+and the cars seen by some views only, a NIS's view, the clans' pixel test
+and their 300 ticks either side, and views from the random drive with
+focal lengths that put the sets at every pixel size. After each op both
 sides print a hash of the whole state: each maker's set, the pools'
 flags, SkidSetList in order with every set's fields and segments, ClanList
 in order with every clan's and its list, the textures and the two debug
@@ -73,7 +90,7 @@ HARNESS = "tools/src/skids_test.c"
 SKC = "3DS Files/source/skids.c"
 SOURCES = [HARNESS, SKC, "3DS Files/source/bvector.c",
            "3DS Files/source/bmath.c", "3DS Files/source/bmathtab.c",
-           "3DS Files/source/terraintypetab.c"]
+           "3DS Files/source/terraintypetab.c", "3DS Files/source/epoly.c"]
 HARNESS_TIMEOUT = 120
 LIMIT = 5000000
 
@@ -103,6 +120,15 @@ PNODE_FREE = 0x002506b0             # Free__6bPNodePv
 GET_TEXTURE_INFO = 0x001abf48       # GetTextureInfo__FUii
 MAYBE_MAKE_SKIDS = 0x001a5520       # Wheel::MaybeMakeSkids(Car *, float)
 GET_ELEVATION = 0x00152070          # TopologyCoordinate::GetElevation
+SKIDSET_RENDER = 0x001aacc0         # Render__7SkidSetUc
+RENDER_SKIDS = 0x001ab248           # RenderSkids__FP4ClanP8bMatrix4P5eView
+RENDER_CLANS = 0x001ab810           # RenderClans__FP8bMatrix4P5eView
+IS_VISIBLE = 0x0010ce80             # IsBoundingBoxVisible__FP8bVector3T0P8bMatrix4
+PIXEL_SIZE = 0x001075b8             # GetPixelSize__5eViewff
+PIXEL_SIZE_BOX = 0x001076f8         # GetPixelSize__5eViewP8bVector3T1
+RENDER3D = 0x0010ff88               # Render3D__5ePolyP11TextureInfoP8bMatrix4i
+EPOLY_DTOR = 0x00114db8             # _$_5ePoly
+IDENTITY = 0x002dc380               # eMathIdentityMatrix
 
 G_WORLDTIME = GP - 19568
 G_SKIDLIST = GP - 19208
@@ -172,6 +198,13 @@ NUM_WHEELS = 4
 WIS = 0x01360000                    # 0x40 a WheelInfo
 CSS = 0x01370000                    # 0x40 a CarState
 TOPO = 0x01380000                   # 16 bytes a topology, never read
+VIEW = 0x01390000                   # the eView: ID 0, byte 6, pCamera 56
+CAMERA = 0x013a0000                 # its Camera: CurrentKey.Position 64
+CLIP = 0x013b0000                   # the clip matrix, never read
+VIEW_ID = 0
+VIEW_OVERRIDE = 6
+VIEW_CAMERA = 56
+CAMERA_POSITION = 64
 
 SIZE_LABELS = {272: "skidset", 80: "clan"}
 POOL_PREFIX = {"SkidSetSlotPool": "s", "ClanSlotPool": "c"}
@@ -201,6 +234,35 @@ def fnv(lines):
     return h
 
 
+def poly_hash(byte_at):
+    """FNV-1a over an ePoly's bytes 16 .. 152: the pad at 153 .. 155 is
+    never set, and on the host the pointer at 156 is 8 bytes at 160."""
+    h = 0x811c9dc5
+    for i in range(16, 153):
+        h = ((h ^ byte_at(i)) * 0x01000193) & M32
+    return h
+
+
+def pixel_size(hbits, dbits):
+    """The stubbed GetPixelSize: H / d in float, truncated."""
+    d = bf(dbits)
+    if d == 0.0:
+        return 1000
+    return int(bf(fb(bf(hbits) / d)))
+
+
+def visible_for(mn, mx, mode):
+    if mode != 2:
+        return mode
+    return 1 if ((mn[0] ^ mx[1] ^ mn[2]) >> 4) & 3 else 0
+
+
+def pixel_box_for(mn, mx, mode):
+    if mode >= 0:
+        return mode
+    return ((mn[0] ^ mx[1]) >> 3) % 20
+
+
 def tex_for(h):
     """GetTextureInfo's stubbed answer: texture 1..4, or 0 for none."""
     return (h >> 3) % (NUM_TEX + 1)
@@ -223,7 +285,15 @@ class Model(object):
         e.stub(PNODE_FREE, self.st_node_free)
         e.stub(GET_TEXTURE_INFO, self.st_tex)
         e.stub(GET_ELEVATION, self.st_elev)
+        e.stub(IS_VISIBLE, self.st_visible)
+        e.stub(PIXEL_SIZE, self.st_pixel)
+        e.stub(PIXEL_SIZE_BOX, self.st_pixel_box)
+        e.stub(RENDER3D, self.st_render3d)
+        e.stub(EPOLY_DTOR, lambda em: None)
         self.heights = []
+        self.focal = fb(60.0)
+        self.vis_mode = 1
+        self.box_mode = 20
         self.out = []
         self.pools = []
         self.nodes = [False] * NUM_NODES
@@ -234,6 +304,10 @@ class Model(object):
             e.put32(g, 0xa5a5a5a5 if g in (G_PLOT, G_PLOTPOINTS) else 0)
         e.write(SKID_TEX, bytes(4 * NUM_TERRAIN))
         e.put32(G_WORLDTIME, 1)
+        e.write(VIEW, bytes(128))
+        e.put32(VIEW + VIEW_CAMERA, CAMERA)
+        e.write(CAMERA, bytes(0x100))
+        e.write(CLIP, bytes(64))
 
     def emit(self, s):
         self.out.append(s)
@@ -282,6 +356,9 @@ class Model(object):
             return "topo%d" % ((a - TOPO) // 16)
         if TEX <= a < TEX + 0x100 * (NUM_TEX + 1) and a % 0x100 == 0:
             return "t%d" % ((a - TEX) // 0x100)
+        names = {VIEW: "view", CAMERA: "cam", CLIP: "clip", IDENTITY: "ident"}
+        if a in names:
+            return names[a]
         return "?%08x" % a
 
     # ---- the stubs -------------------------------------------------------
@@ -360,6 +437,39 @@ class Model(object):
             self.label(self.arg(0)), self.vec(self.arg(1)),
             self.label(self.arg(2)), self.label(self.arg(3)), h))
         self.e.fpr[0] = h
+
+    def words(self, a):
+        return [self.w(a), self.w(a + 4), self.w(a + 8)]
+
+    def st_visible(self, em):
+        mn, mx, m = self.arg(0), self.arg(1), self.arg(2)
+        v = visible_for(self.words(mn), self.words(mx), self.vis_mode)
+        self.emit("vis %s %s %s -> %d" % (self.vec(mn), self.vec(mx),
+                                          self.label(m), v))
+        return v
+
+    def st_pixel(self, em):
+        r, d = self.e.fpr[12] & M32, self.e.fpr[13] & M32
+        n = pixel_size(self.focal, d)
+        self.emit("px %s r=%08x d=%08x -> %d" % (self.label(self.arg(0)), r,
+                                                 d, n))
+        return n & M32
+
+    def st_pixel_box(self, em):
+        mn, mx = self.arg(1), self.arg(2)
+        n = pixel_box_for(self.words(mn), self.words(mx), self.box_mode)
+        self.emit("pxbox %s %s %s -> %d" % (self.label(self.arg(0)),
+                                            self.vec(mn), self.vec(mx), n))
+        return n & M32
+
+    def st_render3d(self, em):
+        p, t, m, f = (self.arg(i) for i in range(4))
+        e = self.e
+        self.emit("r3d %s %s f=%d v=%s a=%02x%02x%02x%02x h=%08x mem=%s" % (
+            self.label(t), self.label(m), s32(f),
+            ";".join(self.vec(p + 16 + 16 * i) for i in range(4)),
+            e.u8(p + 131), e.u8(p + 135), e.u8(p + 139), e.u8(p + 143),
+            poly_hash(lambda i: e.u8(p + i)), self.label(self.w(p + 156))))
 
     # ---- the state -------------------------------------------------------
 
@@ -517,6 +627,28 @@ class Model(object):
                 if head != G_SKIDLIST:
                     self.emit("delete %s" % self.label(head))
                     self.call(DELETE_THIS_SKID, head)
+            elif c == "VW":
+                e.put32(VIEW + VIEW_ID, int(t[1]))
+                e.write(VIEW + VIEW_OVERRIDE, bytes([int(t[2], 16)]))
+                self.focal = int(t[3], 16)
+                self.vis_mode, self.box_mode = int(t[4]), int(t[5])
+                self.put_vec(CAMERA + CAMERA_POSITION,
+                             [int(x, 16) for x in t[6:9]])
+            elif c == "RC":
+                self.call(RENDER_CLANS, CLIP, VIEW)
+            elif c == "RK":
+                clans = self.walk(G_CLANLIST)
+                j = int(t[1])
+                if j < len(clans) and clans[j] is not None:
+                    self.emit("render clan %s" % self.label(clans[j]))
+                    self.call(RENDER_SKIDS, clans[j], CLIP, VIEW)
+            elif c == "RR":
+                sets = self.walk(G_SKIDLIST)
+                j = int(t[1])
+                if j < len(sets) and sets[j] is not None:
+                    self.emit("render set %s fade=%d" % (self.label(sets[j]),
+                                                         int(t[2])))
+                    self.call(SKIDSET_RENDER, sets[j], int(t[2]))
             elif c != "D":
                 raise SystemExit("bad op %r" % op)
             st = self.state()
@@ -582,6 +714,11 @@ class Script(object):
 
     def maybe(self, i, car, ha=0.0, hb=0.0, dt=1.0 / 30.0):
         self.op("MM %d %d %s %s %s" % (i, car, h(dt), h(ha), h(hb)))
+
+    def view(self, cam, vid=0, override=0, focal=60.0, vis=1, box=20):
+        self.op("VW %d %02x %s %d %d %s %s %s" % (
+            vid, override, h(focal), vis, box, h(cam[0]), h(cam[1]),
+            h(cam[2])))
 
 
 def s_basics(sc):
@@ -685,6 +822,67 @@ def s_breaks(sc):
     sc.op("D")
     sc.op("DH")
     sc.op("DH")
+    sc.op("D")
+
+
+def s_draw(sc):
+    """The drawing, on the sets s_basics .. s_breaks left."""
+    sc.op("W 500")
+    # Each of the first sets at fades either side of the intensities,
+    # which run 0x33 .. 0xff.
+    for k in range(12):
+        for fade in (0, 1, 2, 50, 51, 52, 101, 127, 128, 129, 191, 192,
+                     254, 255):
+            sc.op("RR %d %d" % (k, fade))
+    sc.op("D")
+    # Views at every pixel size: H over the distance runs 0 .. 30 and
+    # past, the fade's 4 .. 10 among them.
+    cam = (-18.0, -18.0, 2.0)
+    for focal in (4.0, 20.0, 41.0, 60.0, 77.0, 95.0, 120.0, 160.0, 230.0,
+                  400.0, 1000.0, 5000.0):
+        sc.view(cam, focal=focal)
+        sc.op("RC")
+    sc.op("D")
+    for cam in ((10.0, 3.0, 1.5), (120.0, -50.0, 3.0), (-200.0, -70.0, 1.0),
+                (62.0, 61.0, 0.5)):
+        for focal in (30.0, 75.0, 200.0):
+            sc.view(cam, focal=focal)
+            sc.op("RC")
+    sc.op("D")
+    # The views' IDs, past 31 and below 0, against cars some views do not
+    # see.
+    cam = (-18.0, -18.0, 2.0)
+    for bits in (0xffffffff, 0x00000002, 0x00020001, 0x80000000, 0x0):
+        for k in range(NUM_CARS):
+            sc.car(k, *sc.cars.get(k, (0.0, 0.0, 0.0)), bits=bits)
+        for vid in (0, 1, 2, 17, 31, 33, -1):
+            sc.view(cam, vid=vid, focal=300.0)
+            sc.op("RC")
+    for k in range(NUM_CARS):
+        sc.car(k, *sc.cars.get(k, (0.0, 0.0, 0.0)))
+    sc.op("D")
+    # A NIS's view draws no set, but the clans' tests and order go on.
+    for override in (1, 0x80, 0xff, 0):
+        sc.op("W %d" % (900 + override))
+        sc.view(cam, override=override, focal=300.0)
+        sc.op("RC")
+        sc.op("RK 0")
+        sc.op("RK 2")
+    sc.op("D")
+    # The clans' pixel test either side of 11, by a hash, and the box's
+    # visibility by a hash and not at all.
+    for vis, box in ((1, 10), (1, 11), (1, 0), (1, -1), (2, 30), (0, 30),
+                     (2, -1)):
+        sc.view(cam, focal=300.0, vis=vis, box=box)
+        sc.op("RC")
+        sc.op("RK 1")
+    sc.op("D")
+    # The clans' 300 ticks: drawn at 300 past their stamp they stay where
+    # they are, at 301 they go to the head.
+    sc.view(cam, focal=300.0)
+    for t in (2000, 2300, 2301, 2302, 2601, 2602, 2901):
+        sc.op("W %d" % t)
+        sc.op("RC")
     sc.op("D")
 
 
@@ -815,6 +1013,11 @@ def s_wheels(sc):
         frame(terr=terr, v=(-5.0, 5.0), step=0.35, ha=0.02, hb=-0.01)
     frame(touch=0)
     sc.op("D")
+    # Drawn from close by: the terrains without a skid texture draw
+    # nothing.
+    sc.view((x0 + 2.0, pos[0] - 5.0, 1.5), focal=2000.0)
+    sc.op("RC")
+    sc.op("D")
     # Pitched and rolled; edges far apart in height; the wheel high over
     # the car; no width.
     for kw in (dict(pitch=0.3), dict(roll=0.25, pitch=-0.2, yaw=1.0),
@@ -915,6 +1118,15 @@ def s_random(sc, n=1500):
             sc.op("FC")
         if rng.random() < 0.002:
             sc.op("DH")
+        if k % 50 == 49:
+            vc = rng.randrange(NUM_CARS)
+            vx, vy, vz, va = cars[vc]
+            sc.view((vx + rng.uniform(-30, 30), vy + rng.uniform(-30, 30),
+                     vz + rng.uniform(1.0, 6.0)),
+                    vid=rng.randrange(2),
+                    focal=rng.choice((25.0, 60.0, 90.0, 150.0, 400.0)),
+                    vis=rng.choice((1, 1, 2)), box=rng.choice((20, 20, -1)))
+            sc.op("RC")
     sc.op("D")
 
 
@@ -925,11 +1137,15 @@ def script():
     s_basics(sc)
     s_curves(sc)
     s_breaks(sc)
+    s_draw(sc)
     s_clans(sc)
     s_setpool(sc)
     s_flush(sc)
     s_wheels(sc)
     s_wheel_random(sc)
+    sc.view((850.0, -560.0, 2.0), focal=5000.0)
+    sc.op("RC")
+    sc.op("D")
     s_random(sc)
     sc.op("CC")
     sc.op("CS")
@@ -1094,8 +1310,8 @@ MUTATIONS = [
     ("cn-unlink", S, "        unlink_node(&tail->Node);" + NL
      + "        skidset_destroy(tail, 3);", "        skidset_destroy(tail, 3);"),
     ("cn-flags", S, "skidset_destroy(tail, 3);", "skidset_destroy(tail, 2);"),
-    ("cn-head", S, "    add_head(&SkidSetList, &s->Node);",
-     "    add_tail(&SkidSetList, &s->Node);"),
+    ("cn-head", S, "    add_head(&SkidSetList, &s->Node);" + NL + "    return s;",
+     "    add_tail(&SkidSetList, &s->Node);" + NL + "    return s;"),
     ("cn-omalloc", S, "skidset_construct((SkidSet *)bSlotMalloc(SkidSetSlotPool)",
      "skidset_construct((SkidSet *)bSlotOMalloc(SkidSetSlotPool)"),
     # ---- MakeSkid, MakeNoSkid
@@ -1104,8 +1320,8 @@ MUTATIONS = [
     ("ms-4", S, "if (4.0f < sqrtf(", "if (4.5f < sqrtf("),
     ("ms-4eq", S, "if (4.0f < sqrtf(", "if (4.0f <= sqrtf("),
     ("ms-dz", S, "float dz = g->z - pos->z;", "float dz = 0.0f;"),
-    ("ms-dy", S, "sqrtf((dx * dx + dy * dy) + dz * dz)",
-     "sqrtf(dx * dx + dz * dz)"),
+    ("ms-dy", S, "if (4.0f < sqrtf((dx * dx + dy * dy) + dz * dz))",
+     "if (4.0f < sqrtf(dx * dx + dz * dz))"),
     ("ms-new", S, "        m->pSkidSet = create_new_skid_set(m, car, pos, delta, "
      "terrain,", "        (void)create_new_skid_set(m, car, pos, delta, terrain,"),
     ("ms-vis", S, "    if (visible_to_both_players(car) == s->bVisibleToBothPlayers"
@@ -1262,7 +1478,9 @@ MUTATIONS = [
     ("gc-sign", S, "((uint32_t)(y >> 22) << 16)", "(((uint32_t)y >> 22) << 16)"),
     ("gc-mask", S, "((uint32_t)(x >> 22) & 0xffffu)",
      "((uint32_t)(x >> 22) & 0x3ffu)"),
-    ("gc-stamp", S, "            c->LastUpdateTime = WorldTime;" + NL, ""),
+    ("gc-stamp", S, "            c->LastUpdateTime = WorldTime;" + NL
+     + "            add_head(&ClanList, n);" + NL + "            return c;",
+     "            add_head(&ClanList, n);" + NL + "            return c;"),
     ("gc-mru", S, "            unlink_node(n);" + NL
      + "            c->LastUpdateTime = WorldTime;" + NL
      + "            add_head(&ClanList, n);",
@@ -1275,6 +1493,81 @@ MUTATIONS = [
      "clan_construct((Clan *)bSlotMalloc(ClanSlotPool)"),
     ("gc-head", S, "    add_head(&ClanList, &c->Node);" + NL + "    return c;",
      "    add_tail(&ClanList, &c->Node);" + NL + "    return c;"),
+    # ---- SkidSet::Render
+    ("r-texnull", S, "    if (SkidTextureInfo[s->TheTerrainType] == NULL)" + NL
+     + "        return;" + NL + "    epoly_init(&poly);",
+     "    epoly_init(&poly);"),
+    ("r-loop", S, "for (i = 0; i < s->NumSkidSegments - 1; i++)",
+     "for (i = 0; i < s->NumSkidSegments - 2; i++)"),
+    ("r-loop0", S, "for (i = 0; i < s->NumSkidSegments - 1; i++)",
+     "for (i = 1; i < s->NumSkidSegments - 1; i++)"),
+    ("r-ends-a", S, "skid_segment_get_end_points(a, &e0, &e3);",
+     "skid_segment_get_end_points(a, &e3, &e0);"),
+    ("r-ends-b", S, "skid_segment_get_end_points(b, &e1, &e2);",
+     "skid_segment_get_end_points(b, &e2, &e1);"),
+    ("r-v1", S, "raised_corner(&poly.Vertices[1], &e1);",
+     "raised_corner(&poly.Vertices[1], &e2);"),
+    ("r-raise", S, "SkidRaise          = 0.05f;", "SkidRaise          = 0.04f;"),
+    ("r-rz", S, "v->z = p->z + SkidRaise;", "v->z = p->z;"),
+    ("r-ry", S, "    v->y = p->y;" + NL + "    v->z", "    v->y = p->x;" + NL
+     + "    v->z"),
+    ("r-clamp", S, "intensity < fade ? 0u : (intensity - fade) & 0xffu;",
+     "(intensity - fade) & 0xffu;"),
+    ("r-shift", S, "return (uint8_t)(a >> 1);", "return (uint8_t)(a >> 2);"),
+    ("r-shift-off", S, "return (uint8_t)(a >> 1);", "return (uint8_t)a;"),
+    ("r-ab", S, "ab = faded_alpha(b->Intensity, fade);",
+     "ab = faded_alpha(a->Intensity, fade);"),
+    ("r-c2", S, "poly.Colours[2][3] = ab;", "poly.Colours[2][3] = aa;"),
+    ("r-c3", S, "poly.Colours[3][3] = aa;", "poly.Colours[3][3] = ab;"),
+    ("r-tex", S, "gEPolyRender3DFn(&poly, SkidTextureInfo[s->TheTerrainType],",
+     "gEPolyRender3DFn(&poly, SkidTextureInfo[1],"),
+    ("r-mat", S, "&eMathIdentityMatrix, 0);", "NULL, 0);"),
+    # ---- RenderSkids
+    ("rk-ovr", S, "if ((int8_t)view->OverrideRendering != 0)",
+     "if ((int8_t)view->OverrideRendering > 0)"),
+    ("rk-ovr-off", S, "    if ((int8_t)view->OverrideRendering != 0)" + NL
+     + "        return;" + NL, ""),
+    ("rk-car", S, "        if (s->pCar != NULL)" + NL + "            vis &=",
+     "        if (0)" + NL + "            vis &="),
+    ("rk-id", S, ">> ((uint32_t)view->ID & 31u)) & 1u);",
+     ">> ((uint32_t)view->ID & 15u)) & 1u);"),
+    ("rk-vis", S, "        if (vis == 0)" + NL + "            continue;" + NL,
+     ""),
+    ("rk-dz", S, "dz = s->Centre.z - eye->z;", "dz = 0.0f;"),
+    ("rk-d", S, "                                         sqrtf((dx * dx + dy * dy) "
+     "+ dz * dz));", "                                         sqrtf(dx * dx + "
+     "(dy * dy + dz * dz)));"),
+    ("rk-r", S, "eview_get_pixel_size(view, 1.0f,",
+     "eview_get_pixel_size(view, 2.0f,"),
+    ("rk-4", S, "if (!(4.0f < px))", "if (!(4.0f <= px))"),
+    ("rk-10", S, "if (!(10.0f < px))", "if (!(8.0f < px))"),
+    ("rk-fade", S, "256.0f - (px - 4.0f) * SkidFadeScale",
+     "255.0f - (px - 4.0f) * SkidFadeScale"),
+    ("rk-fade-k", S, "SkidFadeScale      = 42.666668f;",
+     "SkidFadeScale      = 42.0f;"),
+    ("rk-mru", S, "        unlink_node(&s->Node);" + NL
+     + "        add_head(&SkidSetList, &s->Node);" + NL, ""),
+    ("rk-mru-tail", S, "        add_head(&SkidSetList, &s->Node);" + NL
+     + "    }" + NL + "}", "        add_tail(&SkidSetList, &s->Node);" + NL
+     + "    }" + NL + "}"),
+    # ---- RenderClans
+    ("rc-pb", S, "&c->BBoxMax) < 11)", "&c->BBoxMax) < 10)"),
+    ("rc-pb-off", S, "        if (eview_get_pixel_size_box(view, &c->BBoxMin, "
+     "&c->BBoxMax) < 11)" + NL + "            continue;" + NL, ""),
+    ("rc-vis", S, "        if (scenery_is_bounding_box_visible(&c->BBoxMin, "
+     "&c->BBoxMax, clip)" + NL + "            == 0)" + NL + "            continue;"
+     + NL, ""),
+    ("rc-time", S, "if (300 < (int32_t)((uint32_t)WorldTime",
+     "if (299 < (int32_t)((uint32_t)WorldTime"),
+    ("rc-stamp", S, "            c->LastUpdateTime = WorldTime;" + NL
+     + "            unlink_node(n);" + NL, "            unlink_node(n);" + NL),
+    ("rc-mru", S, "            unlink_node(n);" + NL
+     + "            add_head(&ClanList, n);" + NL + "        }" + NL
+     + "        render_skids", "        }" + NL + "        render_skids"),
+    ("rc-next", S, "    for (n = ClanList.next; n != &ClanList; n = next) {",
+     "    for (n = ClanList.next; n != &ClanList; n = n->next) {"),
+    ("rc-clip", S, "        render_skids(c, clip, view);",
+     "        render_skids(c, NULL, view);"),
 ]
 
 EQUIVALENT = {

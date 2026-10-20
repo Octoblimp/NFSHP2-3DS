@@ -39,6 +39,7 @@ These layouts come from `.mdebug`.
 | 0 | `ID` | |
 | 4 | `Active` | a byte |
 | 5 | `LetterBox` | a byte |
+| 6 | `OverrideRendering` | *retail's*, a byte: set, with the word at 116, by `NisManager::EnableOverrideRendering` (0x001b1ce0) for the view a NIS takes over, and cleared by `DisableOverrideRendering` (0x001b24a8). `RenderSkids` draws nothing in such a view. The NIS player is not ported, so it stays 0 |
 | 8 | `H` | the focal length in the PS2's pixels |
 | 12, 16 | `NearZ`, `FarZ` | this frame's planes |
 | 20 | `FovBias` | 1 from the constructor; nothing here writes it again |

@@ -24,7 +24,9 @@
 // centre, which RenderSkids measures the camera's distance to. MakeSkid
 // also lays nothing more than 4 m from the car.
 //
-// The drawing -- SkidSet::Render, RenderSkids, RenderClans -- is 78c's.
+// The drawing, 78c: eDisplayFrame's RenderClans draws, for each view, the
+// sets of each clan big and near enough to see, an ePoly between each two
+// points through Render3D, fading them out with distance.
 //
 // Cross-check: tools/skids_check.py, against the retail image in mipsemu.
 // Write-up: docs/formats/skids.md.
@@ -36,6 +38,7 @@
 #include <stdint.h>
 
 #include "blist.h"
+#include "bmatrix.h"
 #include "bplist.h"
 #include "bslotpool.h"
 #include "bvector.h"
@@ -43,6 +46,7 @@
 #include "texturepack.h"
 
 struct Car;
+struct eView;
 struct SkidMaker;
 struct Wheel;
 
@@ -271,5 +275,34 @@ void close_clans(void);
 // with WorldTime. Else a new one on the head, from the pool's full path,
 // the tail's clan destroyed with 3 first when the pool is full.
 Clan *get_clan(const bVector3 *pos);
+
+// ------------------------------------------------------------- the drawing
+
+// SkidSet::Render(unsigned char), 0x001aacc0. Nothing without the
+// terrain's texture. Else one ePoly for each two points in turn, drawn
+// through gEPolyRender3DFn with the texture and eMathIdentityMatrix: V0
+// and V3 are the first point's edges (GetEndPoints' plus and minus), V1
+// and V2 the second's, each raised 0.05 m (gp-29156). A corner's alpha is
+// its point's intensity less `fade`, 0 at least, halved, so that 255 is
+// the GS's opaque 0x80. The rest is the constructor's: the whole texture,
+// colour 0x80.
+void skidset_render(SkidSet *s, uint8_t fade);
+
+// RenderSkids(Clan *, bMatrix4 *, eView *), 0x001ab248. Nothing in a view
+// a NIS has taken over (eview.h's OverrideRendering). Else each set on the
+// clan's list, when its box is visible through `clip` and, with a car,
+// the car's VisibleViewBits has the view's ID: the size of 1 m at the
+// distance from the camera's eye to the set's centre, by GetPixelSize. Over
+// 4 pixels the set is drawn, faded by 256 - (pixels - 4) * 42.6667
+// (gp-29148), truncated, up to 10, and not faded past it, and it goes to
+// SkidSetList's head, where a full pool frees it last.
+void render_skids(Clan *c, bMatrix4 *clip, struct eView *view);
+
+// RenderClans(bMatrix4 *, eView *), 0x001ab810: eDisplayFrame calls it for
+// each view after StuffSun, with the view's WorldScreenClipMatrix. Each
+// clan on ClanList whose box is 11 pixels or more and visible: one whose
+// stamp is over 300 sixtieths old is stamped with WorldTime again and goes
+// to the head, and RenderSkids draws its sets.
+void render_clans(bMatrix4 *clip, struct eView *view);
 
 #endif

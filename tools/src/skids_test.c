@@ -3,9 +3,10 @@
 // prints the transcript it diffs against the retail image, run in mipsemu
 // over the same script.
 //
-// The slot pools, bPNode's nodes, GetTextureInfo and the elevation seam
-// are stand-ins that print what they are given, as the model's are. After
-// each op the state is hashed, and every so often printed.
+// The slot pools, bPNode's nodes, GetTextureInfo, the elevation seam, the
+// box and pixel tests and the ePoly seam are stand-ins that print what
+// they are given, as the model's are. After each op the state is hashed,
+// and every so often printed.
 //
 // A float prints as its bits.
 #include <stddef.h>
@@ -16,9 +17,15 @@
 
 #include "bplist.h"
 #include "bslotpool.h"
+#include "camera.h"
 #include "car.h"
+#include "emath.h"
+#include "epoly.h"
+#include "eview.h"
 #include "realtime.h"
 #include "skids.h"
+#include "eviewmatrix.h"
+#include "scenerycull.h"
 #include "texturepack.h"
 #include "wheel.h"
 
@@ -36,7 +43,11 @@
 #define LINE_BYTES  2048
 
 // The globals of files the harness does not link.
-int32_t WorldTime = 1;
+int32_t  WorldTime = 1;
+bMatrix4 eMathIdentityMatrix = {
+    { 1.0f, 0.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f, 0.0f },
+    { 0.0f, 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f, 0.0f, 1.0f },
+};
 
 typedef struct HPool {
     int      size, n, mem;
@@ -61,6 +72,12 @@ static CarState  s_cs[NUM_WHEELS];
 static uint8_t   s_topo[NUM_WHEELS][16];
 static uint32_t  s_height[2];
 static int       s_nheight;
+static eView     s_view;
+static Camera    s_cam;
+static bMatrix4  s_clip;
+static uint32_t  s_focal;
+static int       s_vis_mode = 1;
+static int       s_box_mode = 20;
 
 static uint32_t bits(float f)
 {
@@ -173,6 +190,14 @@ static const char *label(const void *p)
             return o;
         }
     }
+    if (p == &s_view)
+        return "view";
+    if (p == &s_cam)
+        return "cam";
+    if (p == &s_clip)
+        return "clip";
+    if (p == &eMathIdentityMatrix)
+        return "ident";
     snprintf(o, 24, "?%p", p);
     return o;
 }
@@ -353,6 +378,64 @@ static float elevation(void *topology, const bVector3 *pos,
 
 TopologyGetElevationFn gTopologyGetElevationFn = elevation;
 
+// ---------------------------------------------------------- the drawing
+
+int32_t scenery_is_bounding_box_visible(const bVector3 *min,
+                                        const bVector3 *max,
+                                        const bMatrix4 *clip)
+{
+    int32_t v = s_vis_mode;
+
+    if (v == 2)
+        v = ((bits(min->x) ^ bits(max->y) ^ bits(min->z)) >> 4) & 3 ? 1 : 0;
+    printf("vis %s %s %s -> %d\n", vec(min), vec(max), label(clip), (int)v);
+    return v;
+}
+
+int32_t eview_get_pixel_size(eView *view, float r, float d)
+{
+    int32_t n = d == 0.0f ? 1000 : (int32_t)(fl(s_focal) / d);
+
+    printf("px %s r=%08x d=%08x -> %d\n", label(view), (unsigned)bits(r),
+           (unsigned)bits(d), (int)n);
+    return n;
+}
+
+int32_t eview_get_pixel_size_box(eView *view, const bVector3 *mn,
+                                 const bVector3 *mx)
+{
+    int32_t n = s_box_mode;
+
+    if (n < 0)
+        n = (int32_t)(((bits(mn->x) ^ bits(mx->y)) >> 3) % 20u);
+    printf("pxbox %s %s %s -> %d\n", label(view), vec(mn), vec(mx), (int)n);
+    return n;
+}
+
+// Render3D: the corners, their alphas, a hash of the poly's bytes 16 ..
+// 152 and its pDynamicFrameMemory, which here is 8 bytes at 160.
+static void render3d(ePoly *p, TextureInfo *tex, bMatrix4 *m, int flags)
+{
+    const uint8_t *q = (const uint8_t *)p;
+    uint32_t       h = 0x811c9dc5u;
+    bVector3       c[4];
+    int            i;
+
+    for (i = 16; i < 153; i++)
+        h = (h ^ q[i]) * 0x01000193u;
+    for (i = 0; i < 4; i++) {
+        c[i].x = p->Vertices[i].x;
+        c[i].y = p->Vertices[i].y;
+        c[i].z = p->Vertices[i].z;
+    }
+    printf("r3d %s %s f=%d v=%s;%s;%s;%s a=%02x%02x%02x%02x h=%08x mem=%s\n",
+           label(tex), label(m), flags, vec(&c[0]), vec(&c[1]), vec(&c[2]),
+           vec(&c[3]), (unsigned)p->Colours[0][3],
+           (unsigned)p->Colours[1][3], (unsigned)p->Colours[2][3],
+           (unsigned)p->Colours[3][3], (unsigned)h,
+           label(p->pDynamicFrameMemory));
+}
+
 // wheel.c's, which the harness does not link (wheel_check holds it to the
 // image); the model runs the image's.
 void bRotateVector(bVector3 *o, const bMatrix4 *m, const bVector3 *v)
@@ -517,6 +600,9 @@ int main(int argc, char **argv)
         return 2;
     }
     setvbuf(stdout, NULL, _IOFBF, 1 << 16);
+    gEPolyRender3DFn = render3d;
+    s_view.pCamera = &s_cam;
+    s_focal = bits(60.0f);
     // As the model starts them, so that InitSkids' clearing shows.
     PlotSkidsInCaffeine = (int32_t)0xa5a5a5a5u;
     PlotSkidPointsInCaffeine = (int32_t)0xa5a5a5a5u;
@@ -609,6 +695,31 @@ int main(int argc, char **argv)
 
                 printf("delete %s\n", label(s));
                 delete_this_skid(s);
+            }
+        } else if (strcmp(t[0], "VW") == 0) {
+            s_view.ID = atoi(t[1]);
+            s_view.OverrideRendering = (uint8_t)hex(t[2]);
+            s_focal = hex(t[3]);
+            s_vis_mode = atoi(t[4]);
+            s_box_mode = atoi(t[5]);
+            put_vec(&s_cam.CurrentKey.Position, &t[6]);
+        } else if (strcmp(t[0], "RC") == 0) {
+            render_clans(&s_clip, &s_view);
+        } else if (strcmp(t[0], "RK") == 0) {
+            int j = atoi(t[1]), m = walk(&ClanList, s_walk);
+
+            if (j < m && s_walk[j] != NULL) {
+                printf("render clan %s\n", label(s_walk[j]));
+                render_skids((Clan *)(void *)s_walk[j], &s_clip, &s_view);
+            }
+        } else if (strcmp(t[0], "RR") == 0) {
+            int j = atoi(t[1]), m = walk(&SkidSetList, s_walk);
+
+            if (j < m && s_walk[j] != NULL) {
+                printf("render set %s fade=%d\n", label(s_walk[j]),
+                       atoi(t[2]));
+                skidset_render((SkidSet *)(void *)s_walk[j],
+                               (uint8_t)atoi(t[2]));
             }
         } else if (strcmp(t[0], "D") != 0) {
             fprintf(stderr, "bad op %s\n", t[0]);
