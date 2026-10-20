@@ -28612,3 +28612,31 @@ today." So TASKS 64 stays open as a known issue, and the order is 80d,
 
 Next: 80b (the Zone Preview), 80c (the Jumper and Cubic movers), then
 TASKS 50 and the easter eggs, then the launch prep.
+
+## Session 142 -- the Zone Preview (TASKS 80b)
+
+Zone 2's camera is in (`zonepreview.c`), so the preview zone is no longer
+a dead button: the world stops, the camera runs out along the road ahead
+with a glowing comet before it, holds at the road's stops, turns, runs
+back and drops in behind the car.
+
+- **The parts.** The mover (`zonepreview.c`), the route's splines
+  (`previewspline.c`), the stops (`previewstops.c`) and the comet
+  (`previewcomet.c`), each with a checker on retail's image (numbers in
+  TASKS 80b). The stops checker's last 13 survivors were killed with a
+  cop in two roadblocks, stops either side of the 60 cut, looped splines'
+  stops, a hairpin eye spline and float-edge cases; 2 equivalents left.
+- **main.c and trackview.c.** The four `gZonePreview*Fn` are bound, and
+  `RenderCameraMovers` runs for the main view and the mirror.
+- **The 3DS build** failed the mover's layout check, which the 64-bit
+  host never compiles: the EE's 16-byte bVector3 alignment leaves 4
+  bytes at 1068, now `_pad1068`.
+- **Azahar** (track 42, gas held, ZR pressed after the countdown): two
+  previews, each about 5 s at 30 fps, the comet and the radial blur on,
+  the camera back on the car after. Not yet on the 3DS.
+- **How to see it.** In a race with the automatic gearbox, Shift Up (ZR
+  by default) asks for it. It refuses (the menu's wrong sound) when the
+  car is the wrong way round or the road ahead has no route.
+
+Next: 80c (the Jumper and Cubic movers), then TASKS 50 and the easter
+eggs, then the launch prep.

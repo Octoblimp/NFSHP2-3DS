@@ -272,6 +272,7 @@
 #include "world.h"
 #include "worldobject.h"
 #include "zonecam.h"
+#include "zonepreview.h"
 
 // The race's frame rates on the HUD (step 13b-2): Player::DisplayDebugInfo's
 // "C: %dfps" and "G: %dfps", with the car's position and odometer, which
@@ -8043,8 +8044,7 @@ int main(int argc, char** argv)
     // jump cam is playerzone.c's: IsJumpCamAvailable's PreviewRoute ahead
     // of the car, RequestZone's zones 6 and 7 with their slow motion and
     // TrackCarCameraMovers, and ClearZone as the car lands. The freeze and
-    // preview zones (1 and 2) stay a dead button until their movers are
-    // ported, and the zones' sounds wait for the sample seams.
+    // preview zones (1 and 2) have their movers below (TASKS 80a, 80b).
     gCarFinishMovementFn = car_finish_movement;
     // TASKS 73: Car::TriggerEvents for every car near a player, which
     // shakes the bushes it drives into (fernshaker.h), and the event queue
@@ -8068,6 +8068,13 @@ int main(int argc, char** argv)
     // The freeze zone's camera (zonecam.c, TASKS 80a).
     gZoneFreezeCameraMoverFn = zone_freeze_camera_mover_new;
     gZoneFreezeDurationFn = zone_freeze_camera_mover_duration;
+    // The preview zone's (zonepreview.c, TASKS 80b): the route ahead, the
+    // camera that runs out along it and back, its topology check and its
+    // length. Its comet draws from render_camera_movers.
+    gZonePreviewCameraMoverFn = zone_preview_camera_mover_new;
+    gZonePreviewFindRouteFn = zone_preview_find_route;
+    gZonePreviewViolatesTopologyFn = zone_preview_violates_topology_fn;
+    gZonePreviewDurationFn = zone_preview_duration_fn;
 
     // Player::CleanupAfterRace takes the player's handlers off through
     // SetInputMode(NONE); playerinput.c has it.

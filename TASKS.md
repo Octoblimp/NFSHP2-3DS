@@ -5128,8 +5128,33 @@ phases.
               the user's 3DS on 2026-10-19: "zone freeze works 100%!".
               Write-up: `docs/formats/camera.md`, "The Zone Freeze
               camera".
-        - [ ] **80b, the Zone Preview camera** (type 14) and its three
-              calls (`gZonePreview*Fn`). Zone 2 stays refused until then.
+        - [x] **80b, the Zone Preview camera** (`zonepreview.c`, type
+              14): retail's constructor (`0x00161f98`), destructor,
+              `Duration`, `Update`, `Render`, `Enable`, `Disable`,
+              `FindRoute`, `ViolatesTopology`, `EnsureTopology` and
+              `Spline::LinearEstimateLength`, with the route's splines
+              (`previewspline.c`), its stops (`previewstops.c`,
+              `0x00165a70`) and the comet (`previewcomet.c`). main.c
+              binds the four `gZonePreview*Fn`, so zone 2 is no longer
+              refused, and `trackview.c` runs `RenderCameraMovers` for
+              the main view and the mirror. In a race with the automatic
+              gearbox, Shift Up (ZR by default) asks for it. The checks:
+              `zonepreview_check` 13 scenarios, 2727 ops, 54646 lines, 0
+              differ, 131 mutations, 130 caught, 1 equivalent;
+              `previewspline_check` 52 scenarios, 3248 ops, 48851 lines,
+              0 differ, 8 facts, 114 mutations, 113 caught, 1
+              equivalent; `previewcomet_check` 534 steps, 12442 lines, 0
+              differ, 14 facts, 97 mutations, 95 caught, 2 equivalent;
+              `previewstops_check` 58 scenarios, 2051 ops, 7846 lines, 0
+              differ, 136 mutations, 134 caught, 2 equivalent. The first
+              3DS build failed the mover's layout check, which the
+              64-bit host skips: the EE's 16-byte bVector3 leaves 4
+              bytes at 1068, now named. Seen in Azahar (track 42): the
+              camera runs down the road with the comet and the radial
+              blur at 30 fps, then drops back behind the car. Not yet on
+              the 3DS. Write-ups: `docs/formats/camera.md`, "The Zone
+              Preview camera", and `preview-splines.md`,
+              `preview-stops.md` and `preview-comet.md`.
         - [ ] **80c, the Jumper and Cubic movers**, the rest of
               zonecameras.cpp.
         - [x] **80d, the radial blur** (`radialblur.c`), which the

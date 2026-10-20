@@ -1642,9 +1642,9 @@ clears 6 and 7 when a wheel touches down.
 
 - **The freeze** is bound since TASKS 80a: `gZoneFreezeCameraMoverFn`
   and `gZoneFreezeDurationFn` are `zonecam.c`'s, below.
-- **The preview.** Its mover and calls (`gZonePreviewCameraMoverFn` and
-  the three `gZonePreview*Fn`) are NULL. While they are, `RequestZone`
-  refuses zone 2 before anything changes, as a dead button.
+- **The preview** is bound since TASKS 80b: `gZonePreviewCameraMoverFn`
+  and the three `gZonePreview*Fn` are `zonepreview.c`'s, below. Before
+  that, `RequestZone` refused zone 2 as a dead button.
 - **The radial blur** is bound since TASKS 80d: `gRadialBlurOn/Off/
   AlphaFn` are `radialblur.c`'s (`docs/formats/radial-blur.md`). The
   zone's sample plays, and the freeze's `Update` sweeps it.
@@ -1966,6 +1966,121 @@ The equivalent ones:
   it holds. Retail leaves a stack word there.
 - `der-floor`: at a whole t, the end of one segment and the start of
   the next weight the same two points by the same halves.
+
+## The Zone Preview camera
+
+`ZonePreviewCameraMover` (1104 bytes, vtable `0x002b2050`) is zone 2's
+camera, type 14 to `ChangeCameraMover`. The world stops while the camera
+leaves the car, runs out along the road ahead (`PreviewRoute`, 40 on and
+320 long), stops where the road needs a look, turns, comes back faster,
+and drops in behind the car again. A glowing comet runs along the road
+ahead of it. The port is `zonepreview.c`; the route's splines are
+`previewspline.c` (`docs/formats/preview-splines.md`), its stops
+`previewstops.c` (`docs/formats/preview-stops.md`) and the comet
+`previewcomet.c` (`docs/formats/preview-comet.md`).
+
+| Offset | Field |
+| --- | --- |
+| +44 .. +64 | the eye's and the look point's blends in (0.25 s), through the turn (0.4 s) and out (0.6 s), `tCubic3D` |
+| +68 | `pFocusPull` (`tCubic1D`) |
+| +72 | `fTime` |
+| +76 | `fTanFov` |
+| +80, +84 | `fOutTime` (the route's length times 0.01), `fBackTime` (times 1/300) |
+| +88 | `fHoldTime`, what is left of a stop |
+| +92 | `fStops[4]`, look parameters, 0 for none |
+| +108, +156 | `LookSpline`, `LookAheadSpline` |
+| +204, +252 | `EyeForwardSpline`, `EyeBackwardSpline` |
+| +300, +308 | `EyeParameter`, `LookParameter` (`Linear`) |
+| +316 | `PreviewComet` (48 bytes) |
+| +364 | `Topology` |
+| +1072, +1088 | `vAnchorEye`, `vAnchorLook`, the camera when it was built |
+
+- **`FindRoute`** (`0x00163708`) builds the route from the car, 40 out
+  and 320 long. With no points, or fewer than 4, the route is deleted and
+  there is no preview.
+- **`ViolatesTopology`** (`0x00164180`) walks the look spline in steps of
+  about 10 of its length (`Spline::LinearEstimateLength`, `0x0018a030`,
+  the sum of the straight runs) to its last parameter, the end included.
+  Each step's interest box is half the step plus 0.5 about its middle, and
+  a `ConstrainToTopology` from the last point to this one, 0.5 off a
+  polygon with a lift of 1, that says it hit refuses the zone.
+- **The constructor** (`0x00161f98`) runs the base's with `CM_STILL`, as
+  the freeze's does. Four splines of up to 100 points, extrapolating;
+  `PreviewRoute::MakeSplines` (`0x00166570`) fills the look and both eye
+  splines and `EyeParameter`, and the stops (`0x00165a70`) fill the look-
+  ahead spline, `LookParameter` and up to 4 stops. Then:
+  - **The parameters.** The run out takes the first 0.25 s's share
+    (0.25 / (`fOutTime` + 0.25)) at 0; the eye ends 20 short of the
+    route's end and the look starts 20 on.
+  - **The blends.** In: from the camera's eye and target a frame on, at
+    their speeds, onto the run out's starts. The turn: from the run out's
+    ends onto the run back's, which goes the other way. Out: from the run
+    back's ends onto the camera's course as it was. Each tangent is the
+    spline's derivative times its last parameter, times the parameter's
+    span over the run's time, times the blend's time. The look's turn
+    reads the look-ahead spline at the look spline's parameter, as the
+    image does.
+  - **The focus pull** starts at 1 going to 1 over 0.25 s, and the turn
+    aims it at 1 again, so the eye's distance and the field of view stay
+    as the splines have them.
+  - The comet is built on the look spline with `ZonePreviewCometParams`
+    (`0x002fa9f0`). Unless `Camera::StopUpdating` is set, every car is
+    drawn and no dash.
+- **`Duration`** (`0x001637c8`): 0.25 + `fOutTime` + 0.4 + `fBackTime` +
+  0.6, and 0.8 for each stop strictly inside the look's run.
+- **`Update`** (`0x001639d0`) does nothing while the game flow is paused.
+  During a stop's hold the hold runs down by `RealTimeElapsed` and `fTime`
+  stays; otherwise `fTime` goes on. Then by `fTime`:
+  - before 0.25 s, the blends in, kept off the walls by `EnsureTopology`,
+    and the radial blur's far alpha up from 0 to 0.8 over the 0.25 s
+  - the run out: the forward eye spline and the look-ahead spline at the
+    run's share. A stop the look crosses this frame (after where it was,
+    up to and on where it is) holds 0.8 s, with the blur off and the
+    sample silent; otherwise the blur is on, from 0 to 0.7 near and 0.8
+    to 0.9 far, and the sample rises from 0.6 to 1
+  - the turn: the focus pull aimed at 1 on its first frame, the blends,
+    and the blur and the sample down at 2.5 a second
+  - the run back: the backward eye spline and the look spline from the
+    end, the blur off on its first frame, the sample silent
+  - after, the blends out, kept off the walls, silent
+  - then the focus pull draws the eye in along the line of sight, the
+    field of view is set from it, the camera takes the look-at matrix,
+    and with `SoundEnabled` the zone sample takes the volume (and its
+    muffle 1 less, its pitch half of it less 0.5)
+- **`EnsureTopology`** (`0x0015fea0`) does the look, then the eye: an
+  interest box about the middle of the anchor and the point, then the
+  point pulled back towards the anchor out of the walls. A box bigger
+  than 15 is 15, and its half-way vector is multiplied by 15, not
+  scaled to 15. The box goes far off the line, as on the disc.
+- **`Render`** (`0x00163790`) draws the comet until the run out ends, at
+  `fTime` over the run out's end. `RenderCameraMovers` (`0x0011333c`)
+  calls it for every view after the track routes; `trackview.c` does so
+  after the skids, for the player's view and the mirror.
+- **`Enable` and `Disable`** (`0x00163978`, `0x001639a0`) put the comet's
+  emitters on and off the effects' list with the mover.
+- **The destructor** (`0x00163620`) turns the radial blur off when it
+  has a player, frees the six blends and the focus pull, and destroys the
+  topology, the comet and the four splines, the eye's backward first.
+
+### The check
+
+`tools/zonepreview_check.py` runs retail's constructor, the destructor,
+`Duration`, `Render`, `Enable`, `Disable`, `FindRoute`,
+`ViolatesTopology`, `Update`, `EnsureTopology` and
+`LinearEstimateLength` against the port. The route, its splines and
+stops, the comet, the topology, `bMalloc`, the radial blur and the zone
+sound are stubs on both sides that print their arguments; the stubs
+hand both sides the same splines and stops. Stops sit exactly on a
+frame's look parameter, at the run's ends and past them; the frames
+land exactly on the stages' ends; and straight look splines with points
+exactly 10 apart make the topology walk end exactly on the last point.
+
+    python tools/zonepreview_check.py           # 13 scenarios, 2727 ops, 54646 lines, 0 differ
+    python tools/zonepreview_check.py --mutate  # 131 mutations, 130 caught, 1 equivalent
+
+The equivalent one, `scale-add-pad`, changes the fourth lane of
+`scale_add`'s results, which are locals nothing reads that lane of: the
+blends and `eCreateLookAtMatrix` take x, y and z.
 
 ## Divergences from the disc
 

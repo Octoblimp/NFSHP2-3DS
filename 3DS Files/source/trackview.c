@@ -11,6 +11,7 @@
 #include "acidsys.h"
 #include "bchunk.h"
 #include "bchunkload.h"
+#include "cammover.h"
 #include "cardamage.h"
 #include "carrenderinfo.h"
 #include "eefpu.h"
@@ -3689,6 +3690,9 @@ void trackview_draw_mirror(TrackView* v)
     // head of SkidSetList first.
     hangwatch_mark("the mirror's skids");
     render_clans(view->WorldScreenClipMatrix, view);
+    // RenderCameraMovers (0x0011333c) for the mirror too: its mover's,
+    // which draws nothing.
+    render_camera_movers(view);
     // RenderWorldObjects (0x001cdb20) for the mirror too: the spike
     // strips' belts. The mirror has no sun, so they follow the scenery.
     // Then the tunnels' light flares (0x00116778), which wait on the
@@ -3988,6 +3992,11 @@ void trackview_draw(TrackView* v)
     georender_set_fog(s_fogOn ? &s_fog : NULL, s_fogColour);
     hangwatch_mark("the skids begun");
     render_clans(view->WorldScreenClipMatrix, view);
+    // RenderCameraMovers (0x0011333c), every view's, after the track
+    // routes: the Zone Preview's comet, whose quads go through
+    // gEPolyRender3DFn as the skids' do.
+    hangwatch_mark("the camera movers begun");
+    render_camera_movers(view);
     hangwatch_mark("the world objects begun");
     georender_run_begin();
     render_world_objects(view);
