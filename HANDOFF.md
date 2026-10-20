@@ -28371,3 +28371,39 @@ wrong: they are 0x44, plain alpha (GEO_BLEND_ALPHA), in INGAMEB.
 
 Next: 79c when the user's log comes. Otherwise the order in the
 checklist's footer.
+
+## Session 137, continued -- the second device race (TASKS 79c)
+
+The user raced f1e1f9d on their 3DS and sent the log: "It went great!"
+Track 21 (the desert), Hot Pursuit, 2 laps, 3 AI, 4 cops, smoke bombs in
+lap 2, a roadblock at about (1622, -334), then the autosave.
+
+- **79a holds.** The save went through ("Game settings saved
+  successfully!", `memcard: saved` for settings.db and controls.bin), and
+  nothing aborted. The user reported no wall trouble.
+- **The skid marks draw.** The race lines' `strips N (0 dropped, M
+  joined)` show joins in most seconds: runs of skid quads going out as
+  one draw. The user hasn't said how they look.
+- **79c, the roadblock.** The world took 8 to 16 ms a step (worst 24)
+  from about 300 m before the roadblock until it was passed (log lines
+  4053 to 4463), where the first race had 65. The `world:` lines put it
+  in the contact rounds: 6 to 16 a step, most 20, about 0.5 ms each, and
+  in them VClip (up to 347 calls a step, 10 steps each, a restart in
+  nearly every call, which is retail's restart rule). It is the
+  roadblock's own cars and barrels settling, then the player's car
+  pushing against them for 6 s (lines 4292 to 4463, at 1622 -334), all by
+  retail's rules. The 65 ms hasn't come back; 79a's aliased pair bits are
+  the likely cause, since they could make the same pair's witness again
+  and again. With the draw's 22 to 28 ms the frames there are 20 FPS.
+  TASKS 79 is closed.
+- **The desert, for TASKS 46** (written there): a CPU-bound stretch at x
+  1010 to 1080, y -780 to -180 (draw 28 to 32 ms, models 13 to 15), and a
+  GPU-bound one at x 1210 to 1470, y 320 to 120 (167 to 315 dust
+  particles, citro3d GPU 35 to 47 ms, 14 to 18 FPS). Both laps alike.
+  TASKS 46 stays set aside at the user's word (2026-10-18).
+- The race's first frame took 4.5 s behind the Loading screen (the
+  track's attach, "prep" in the frame line), and hangwatch noted it. The
+  Loading screen holds for that by design.
+
+Next: the zone cameras (Zone Freeze, Zone Preview and the zones' blur),
+then 72h-2c and 75, as the checklist's footer has it.

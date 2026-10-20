@@ -3269,6 +3269,20 @@ phases.
         - [ ] A device log with "CoreSample 1" and "DebugLog 1", through
           the slow stretch: the `samples, models:` lines say which parts
           of a model to cut next.
+        - The desert on the device (2026-10-19, TASKS 79c's log: track
+          21, build f1e1f9d, `GPULog 0`). Two stretches under 30, both
+          laps alike:
+          - x 1010 to 1080, y -780 to -180: 20 FPS, bound by the CPU.
+            The draw takes 28 to 32 ms (models 13 to 15, mirror 4 to 6,
+            cull 3, 1,000 to 1,100 models in view), the world 5 to 10;
+            C 19 to 20 FPS, G 50 to 60.
+          - x 1210 to 1470, y 320 to 120: 14 to 18 FPS, bound by the GPU.
+            167 to 315 dust particles are on screen, and citro3d's GPU
+            time is 35 to 47 ms where it is 12 elsewhere (the sprites
+            are fill-bound, as above).
+          - By the roadblock (x 1470 to 1620, y -40 to -340): 20 FPS from
+            the world's contact rounds (8 to 16 ms, TASKS 79c) with a
+            draw of 22 to 28.
         - [ ] The user's word on the envmap a face a frame.
 
 47. [ ] **A brief artifact on the bridge before the finish line.**
@@ -4941,7 +4955,7 @@ phases.
               (204 of 208 caught and 4 equivalent in all). Not yet seen
               on a 3DS. Write-up: `docs/formats/skids.md`.
 
-79. [ ] **The 2026-10-19 device race: the crash on saving, the wall, and
+79. [x] **The 2026-10-19 device race: the crash on saving, the wall, and
         the lag by the roadblock.** Asked for on 2026-10-19, ahead of
         78b: the user's Hot Pursuit race on their 3DS lagged hard near
         the end, the car went through a wall in the last lap, and
@@ -4965,9 +4979,24 @@ phases.
               `frame:` line: the step by part, the three slowest cars,
               the witnesses, the contact rounds and VClip's walks
               (`docs/formats/world.md`).
-        - [ ] **79c, the roadblock's cost**, from the next device log
-              with `DebugLog 1` and `GPULog 0` (GPULog's timing frames
-              are a hitch of about 150 ms every 10 s).
+        - [x] **79c, the roadblock's cost.** The user's second race
+              (2026-10-19, build f1e1f9d: track 21, Hot Pursuit, 2 laps,
+              smoke bombs, a roadblock at about (1622, -334)) "went
+              great". The save went through ("Game settings saved
+              successfully!") and nothing aborted, so 79a holds on the
+              3DS. From about 300 m before the roadblock until it was
+              passed, the world took 8 to 16 ms a step (worst 24), where
+              the first race had 65. That is the contact rounds: 6 to 16
+              a step (most 20), about 0.5 ms each, nearly all VClip's
+              walks (up to 347 calls a step, 10 steps each, and a
+              restart in nearly every call, as retail has it). They are
+              the roadblock's own cars and barrels settling, then the
+              player's car against them for 6 s, by retail's rules. The
+              65 ms has not come back; 79a's aliased pair bits, which
+              could make a pair's witness again and again, are the
+              likely cause. With the draw's 22 to 28 ms the frames there
+              run at 20 FPS, and the draw is TASKS 46's (this log's
+              desert numbers are there).
 
 ### The retail frontend
 
