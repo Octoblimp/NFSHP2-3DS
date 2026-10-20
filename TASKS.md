@@ -5132,9 +5132,27 @@ phases.
               calls (`gZonePreview*Fn`). Zone 2 stays refused until then.
         - [ ] **80c, the Jumper and Cubic movers**, the rest of
               zonecameras.cpp.
-        - [ ] **80d, the radial blur** (`RadialBlurOn`, `RadialBlurOff`
-              `0x0010f1b0`, `RadialBlurAlpha` `0x0010f238`), which the
-              nitro shares. Until then the zones are not blurred.
+        - [x] **80d, the radial blur** (`radialblur.c`), which the
+              nitro, the zones and the replays share: retail's
+              `GetPlayerView`, the view's on and off, `RadialBlurOn`,
+              `Off`, `Alpha` and the replay screen's on-off
+              (`0x0010f0d0` to `0x0010f238`), and the ePolys of
+              `DisplayRadialBlur` and `DisplayBlendPrevious`
+              (`0x0010f280`, `0x0010f4f0`). `trackview.c` draws them
+              after the cars and the alpha lists and before the mirror:
+              four quads write a mask into the target's alpha
+              (`GEO_BLEND_KEEP`), then the last frame blends in by it
+              (`GEO_BLEND_DEST_ALPHA`). The last frame is a
+              `GX_TextureCopy` of the top screen into a 256 by 512
+              texture, after a send (`hangwatch_gpu_send_now`).
+              `radialblur_check`: 323 steps, 4651 lines, 0 differ, 6
+              image facts; 41 mutations, 41 caught. Seen in Azahar with
+              a test build that forced it on in a SkipFE race (148 of
+              150 frames blended, trails at the edges, the HUD and the
+              mirror clean); not yet on the 3DS. The nitro is a cop's in
+              Be A Cop alone, so in a race it comes with a zone (D-pad
+              Down) and in the replays. Write-up:
+              `docs/formats/radial-blur.md`.
 
 ### The retail frontend
 

@@ -219,6 +219,7 @@
 #include "quickrace.h"
 #include "race.h"
 #include "racecoord.h"
+#include "radialblur.h"
 #include "raceevent.h"
 #include "eventrace.h"
 #include "raceinit.h"
@@ -5814,6 +5815,8 @@ static void logRaceState(void)
             g_track.drawnTris, g_track.note);
     logLine("race: minimap %d polys (%d failed)", g_track.flailerPolys,
             g_track.flailerFailed);
+    logLine("race: radial blur %d frames blended, %d failed",
+            g_track.blurBlends, g_track.blurFailed);
     logLine("race: sun %d quads (%d failed), last at %.0f %.0f alpha %d; "
             "Z rect at %d %d, %d read back, %d of it sky",
             g_track.sunQuads, g_track.sunQuadsFailed,
@@ -7954,8 +7957,9 @@ int main(int argc, char** argv)
     gChangeGameFlowFn = raceChangeGameFlow;
     gSoundMuteFn = raceSoundMute;
     gSoundMuteReplayFn = sndMuteReplay;
-    // ReplayScreen (72g-2). Its radial blur stays unbound, as the race's
-    // is (gRadialBlurOnFn); the disc test answers 1.
+    // ReplayScreen (72g-2): its radial blur is radialblur.c's, on view 1;
+    // the disc test answers 1.
+    gReplayScreenRadialBlurFn = radialblur_replay;
     gReplayScreenPlaySampleFn = replayPlaySample;
     gReplayScreenFrontendSoundFn = replayFrontendSound;
     gReplayScreenHelpActiveFn = replayHelpActive;
@@ -8056,8 +8060,12 @@ int main(int argc, char** argv)
     gPlayerClearZoneFn = player_clear_zone;
     gPlayerJumpCamMoverFn = player_jump_cam_mover;
     gPreviewRouteDeleteFn = preview_route_delete;
-    // The freeze zone's camera (zonecam.c, TASKS 80a). Its radial blur
-    // stays unbound, as the nitro's is (gRadialBlurOnFn).
+    // The radial blur (radialblur.c, TASKS 80d): the nitro's, the zones'
+    // and the NIS's off. trackview.c draws it.
+    gRadialBlurOnFn    = radialblur_on;
+    gRadialBlurOffFn   = radialblur_off;
+    gRadialBlurAlphaFn = radialblur_alpha;
+    // The freeze zone's camera (zonecam.c, TASKS 80a).
     gZoneFreezeCameraMoverFn = zone_freeze_camera_mover_new;
     gZoneFreezeDurationFn = zone_freeze_camera_mover_duration;
 

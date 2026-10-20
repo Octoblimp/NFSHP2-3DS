@@ -88,6 +88,13 @@ enum {
     EPOLY_ALPHA_ZERO = 2
 };
 
+// ALPHA_1's C.
+enum {
+    EPOLY_ALPHA_AS  = 0,
+    EPOLY_ALPHA_AD  = 1,
+    EPOLY_ALPHA_FIX = 2
+};
+
 // The z every vertex starts at. Retail's constructor stores 0; the demo's
 // loaded 65535 from gp-32684. The sun and its glare set every z they draw.
 #define EPOLY_DEFAULT_Z 0.0f

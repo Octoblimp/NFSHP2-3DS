@@ -126,6 +126,10 @@ void hangwatch_gpu_sends_begin(bool on);
 // "KernelFlush"), and the send is timed for frameprof's sends line.
 void hangwatch_gpu_send(void);
 
+// The same whether the frame goes in parts or not: for a transfer queued
+// next that has to wait for what is drawn (trackview.c's radial blur copy).
+void hangwatch_gpu_send_now(void);
+
 // Right before C3D_FrameEnd: the rest sent, and no more sends until the
 // next hangwatch_gpu_sends_begin.
 void hangwatch_gpu_sends_end(void);

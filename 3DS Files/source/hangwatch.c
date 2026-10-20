@@ -803,10 +803,15 @@ void hangwatch_gpu_sends_begin(bool on)
 
 void hangwatch_gpu_send(void)
 {
+    if (s_sendsOn) hangwatch_gpu_send_now();
+}
+
+void hangwatch_gpu_send_now(void)
+{
     u32     *list, words;
     uint32_t t0, t1, t2;
 
-    if (!s_sendsOn || !C3Di_SplitFrame(&list, &words)) return;
+    if (!C3Di_SplitFrame(&list, &words)) return;
     CoreSamplePart = CS_PART_SEND;
     // The flush after the split, as time_stage has it: the split writes
     // the list's FINALIZE. All the heap, for the vertices written since.

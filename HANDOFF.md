@@ -28579,3 +28579,36 @@ Then: "You're done working for tonight".
 Work stopped for the night at the user's word. Next: TASKS 64 as
 above, then 80b (the Zone Preview), 80d (the radial blur), 72h-2c and
 75.
+
+## Session 141 -- the radial blur (TASKS 80d)
+
+The user (2026-10-20): "I'm going to call it fine and just launch with
+that issue possibly. You're going to finish the zone thing up, then work
+on the cheat codes/easter eggs and just get the game prepped to launch
+today." So TASKS 64 stays open as a known issue, and the order is 80d,
+80b, 80c, then TASKS 50 and the easter eggs, then the launch prep.
+
+- **80d, the radial blur** (`radialblur.c`, new). Retail's
+  `GetPlayerView`, the view's on and off, `RadialBlurOn`, `Off`,
+  `Alpha` and the replay screen's on-off, bound in main.c, so the
+  nitro, the zones and the replays now blur. `DisplayRadialBlur` and
+  `DisplayBlendPrevious` become ePolys that `trackview.c` draws after
+  the cars and the alpha lists and before the mirror: four quads put a
+  mask in the target's alpha (`GEO_BLEND_KEEP`), then the last frame
+  blends in by it (`GEO_BLEND_DEST_ALPHA`). The last frame is a
+  `GX_TextureCopy` of the top screen into a 256 by 512 texture in the
+  linear heap, queued after a send (`hangwatch_gpu_send_now`, new).
+- **The check.** `tools/radialblur_check.py`: 323 steps, 4651 lines,
+  0 differ, 6 image facts; 41 mutations, 41 caught. Write-up:
+  `docs/formats/radial-blur.md`.
+- **Azahar.** The nitro is a cop's in Be A Cop alone, so a SkipFE race
+  never turns it on. Two test builds, both reverted and rebuilt: one
+  forced the blur on (148 of 150 frames blended, trails at the edges,
+  the HUD and the mirror clean), one drew the copy opaque (upright and
+  in place). The vertical seam in an earlier shot was Azahar's capture
+  catching two frames: the top screen's rows run across it.
+- Not yet on the 3DS. To see it: a zone (D-pad Down in a race with the
+  automatic gearbox), the nitro in Be A Cop (ZL), or a replay.
+
+Next: 80b (the Zone Preview), 80c (the Jumper and Cubic movers), then
+TASKS 50 and the easter eggs, then the launch prep.

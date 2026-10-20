@@ -1645,9 +1645,9 @@ clears 6 and 7 when a wheel touches down.
 - **The preview.** Its mover and calls (`gZonePreviewCameraMoverFn` and
   the three `gZonePreview*Fn`) are NULL. While they are, `RequestZone`
   refuses zone 2 before anything changes, as a dead button.
-- **The radial blur.** `gRadialBlurOn/Off/AlphaFn` are NULL, so the
-  zones are not blurred. The zone's sample plays, and the freeze's
-  `Update` sweeps it.
+- **The radial blur** is bound since TASKS 80d: `gRadialBlurOn/Off/
+  AlphaFn` are `radialblur.c`'s (`docs/formats/radial-blur.md`). The
+  zone's sample plays, and the freeze's `Update` sweeps it.
 - **The HUD.** It goes while a zone is up, as `DetermineHudFeatures`
   says (`playerhud.c`).
 

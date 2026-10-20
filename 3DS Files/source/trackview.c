@@ -31,6 +31,7 @@
 #include "capture.h"
 #include "coresample.h"
 #include "hangwatch.h"
+#include "radialblur.h"
 #include "scenery.h"
 #include "skids.h"
 #include "sky.h"
@@ -144,6 +145,7 @@ static float      s_depthFar  = TRACK_FAR;
 static void render_epoly(ePoly* p, TextureInfo* info, int flags);
 static void render_epoly_3d(ePoly* p, TextureInfo* info, bMatrix4* m,
                             int flags);
+static void free_blur_previous(void);
 static void transfer_zbuffer_rect(uint8_t* dst, int x, int y, int w, int h);
 static float depth_of_gs_z(float g);
 static void target_to_screen(float x, float y, int targetW, int targetH,
@@ -2444,9 +2446,11 @@ void trackview_free(TrackView* v)
             gETransferZBufferRectFn = NULL;
         }
         s_numSunRects = 0;
-        // Their textures go with the track.
+        // Their textures go with the track, and the radial blur's last
+        // frame with it.
         s_numFlailer     = 0;
         s_flailerDropped = 0;
+        free_blur_previous();
     }
     if (v->info) {
         for (i = 0; i < v->numSolids + v->numOther; i++) {
@@ -2702,12 +2706,17 @@ static void queue_flailer(const ePoly* p, TextureInfo* info)
 }
 
 // A SunPoly's own ALPHA_1, where any other poly takes its texture's. C is
-// As in every one StuffSun makes.
+// As in every one StuffSun makes; the radial blur's are A - A, which
+// leaves the colour, and C Ad (radialblur.h).
 static uint8_t poly_blend(const ePoly* p)
 {
     if (p->AlphaA == EPOLY_ALPHA_CS && p->AlphaD == EPOLY_ALPHA_CD) {
+        if (p->AlphaB == EPOLY_ALPHA_CS) {
+            return GEO_BLEND_KEEP;
+        }
         if (p->AlphaB == EPOLY_ALPHA_CD) {
-            return GEO_BLEND_ALPHA;
+            return p->AlphaC == EPOLY_ALPHA_AD ? GEO_BLEND_DEST_ALPHA
+                                               : GEO_BLEND_ALPHA;
         }
         if (p->AlphaB == EPOLY_ALPHA_ZERO) {
             return GEO_BLEND_ADD;
@@ -2718,6 +2727,47 @@ static uint8_t poly_blend(const ePoly* p)
         return GEO_BLEND_SUBTRACT;
     }
     return GEO_BLEND_NONE;
+}
+
+// ePoly::Render's strip on the top screen, V0, V1, V3, V2, for a poly in
+// `rt`'s pixels: each vertex where the GS puts it, with its UVs and colour.
+// `mid` gets their mean.
+static void epoly_screen(ePoly* p, const eRenderTarget* rt,
+                         GeoRenderVertex q[4], float mid[2])
+{
+    static const uint8_t kStrip[4] = { 0, 1, 3, 2 };
+    float                halfW = (float)(rt->ScissorW >> 1);
+    float                off   = GS_CENTRE - halfW;
+    int                  i;
+
+    mid[0] = 0.0f;
+    mid[1] = 0.0f;
+    memset(q, 0, 4u * sizeof *q);
+    for (i = 0; i < 4; i++) {
+        const int n = kStrip[i];
+        float     x = p->Vertices[n].x;
+        float     y = p->Vertices[n].y;
+        float     w = p->UVs[n][2] != 0.0f ? p->UVs[n][2] : 1.0f;
+
+        if (p->ApplyAspectRatio) {
+            x *= rt->AspectRatio2DX;
+            y *= rt->AspectRatio2DY;
+        } else if (halfW < x) {
+            x += -0.5f;
+        }
+        // XYZ2 is 12.4 fixed point on the GS's screen, and Render drops
+        // the fraction.
+        x = floorf(x + off) - off;
+        y = floorf(y + (GS_CENTRE - (float)(rt->ScissorH >> 1)))
+          - (GS_CENTRE - (float)(rt->ScissorH >> 1));
+        mid[0] += x * 0.25f;
+        mid[1] += y * 0.25f;
+        target_to_screen(x, y, rt->ScissorW, rt->ScissorH, rt->AspectRatioX,
+                         rt->AspectRatioY, &q[i].pos[0], &q[i].pos[1]);
+        q[i].st[0] = p->UVs[n][0] / w;
+        q[i].st[1] = p->UVs[n][1] / w;
+        memcpy(q[i].colour, p->Colours[n], 4);
+    }
 }
 
 // ePoly::Render (retail 0x0010fa68), for the quads StuffSun and
@@ -2731,16 +2781,14 @@ static uint8_t poly_blend(const ePoly* p)
 // clear's 0, and so only over the sky.
 static void render_epoly(ePoly* p, TextureInfo* info, int flags)
 {
-    static const uint8_t kStrip[4] = { 0, 1, 3, 2 };
-    eRenderTarget*       rt = s_quadTarget;
-    TrackView*           v  = s_draw;
-    TrackTex*            t;
-    GeoTexture           gt;
-    GeoRenderVertex      q[4];
-    float                halfW, off, depth, mx = 0.0f, my = 0.0f;
-    uint8_t              blend;
-    bool                 drawn;
-    int                  i;
+    eRenderTarget*  rt = s_quadTarget;
+    TrackView*      v  = s_draw;
+    TrackTex*       t;
+    GeoTexture      gt;
+    GeoRenderVertex q[4];
+    float           depth, mid[2];
+    uint8_t         blend;
+    bool            drawn;
 
     // `flags` keeps the packet in the poly's frame memory, for a poly
     // drawn again unchanged; nothing here needs it.
@@ -2772,35 +2820,7 @@ static void render_epoly(ePoly* p, TextureInfo* info, int flags)
     gt.uvScale[0] = t->uvScale[0];
     gt.uvScale[1] = t->uvScale[1];
     gt.pass       = t->pass;
-
-    halfW = (float)(rt->ScissorW >> 1);
-    off   = GS_CENTRE - halfW;
-    memset(q, 0, sizeof q);
-    for (i = 0; i < 4; i++) {
-        const int n = kStrip[i];
-        float     x = p->Vertices[n].x;
-        float     y = p->Vertices[n].y;
-        float     w = p->UVs[n][2] != 0.0f ? p->UVs[n][2] : 1.0f;
-
-        if (p->ApplyAspectRatio) {
-            x *= rt->AspectRatio2DX;
-            y *= rt->AspectRatio2DY;
-        } else if (halfW < x) {
-            x += -0.5f;
-        }
-        // XYZ2 is 12.4 fixed point on the GS's screen, and Render drops
-        // the fraction.
-        x = floorf(x + off) - off;
-        y = floorf(y + (GS_CENTRE - (float)(rt->ScissorH >> 1)))
-          - (GS_CENTRE - (float)(rt->ScissorH >> 1));
-        mx += x * 0.25f;
-        my += y * 0.25f;
-        target_to_screen(x, y, rt->ScissorW, rt->ScissorH, rt->AspectRatioX,
-                         rt->AspectRatioY, &q[i].pos[0], &q[i].pos[1]);
-        q[i].st[0] = p->UVs[n][0] / w;
-        q[i].st[1] = p->UVs[n][1] / w;
-        memcpy(q[i].colour, p->Colours[n], 4);
-    }
+    epoly_screen(p, rt, q, mid);
 
     // Render turns the blend on for a semitransparent texture alone.
     if (!info->IsAnySemitransparencyFlag) {
@@ -2818,8 +2838,8 @@ static void render_epoly(ePoly* p, TextureInfo* info, int flags)
         return;
     }
     v->sunQuads++;
-    v->sunAt[0] = mx;
-    v->sunAt[1] = my;
+    v->sunAt[0] = mid[0];
+    v->sunAt[1] = mid[1];
     v->sunAlpha = p->Colours[0][3];
 }
 
@@ -3703,6 +3723,137 @@ void trackview_draw_mirror(TrackView* v)
     hangwatch_gpu_stage("the mirror");
 }
 
+// ---------------------------------------------------------- the radial blur
+
+// DisplayBlendPrevious's last frame (radialblur.h). The PS2 reads its other
+// screen buffer; here the view's colour is copied after its blend and
+// before its mirror and the HUD, which so leave no trails. The top
+// screen's buffer is 240 by 400 in 50 rows of 30 tiles, and the texture
+// 256 by 512, so the copy leaves two tiles at the end of each row. Made in
+// the linear heap at the blur's first frame, kept to the track's end.
+#define BLUR_TILE_ROW (240 / 8 * 64 * 4)          // bytes
+#define BLUR_TILE_GAP ((256 - 240) / 8 * 64 * 4)
+
+static C3D_Tex s_blurPrev;
+static bool    s_blurPrevMade;
+static bool    s_blurPrevNoHeap;        // the linear heap had no 512 KB
+static bool    s_blurPrevFull;          // the last frame's view is in it
+
+static void free_blur_previous(void)
+{
+    if (s_blurPrevMade) {
+        C3D_TexDelete(&s_blurPrev);
+    }
+    memset(&s_blurPrev, 0, sizeof s_blurPrev);
+    s_blurPrevMade   = false;
+    s_blurPrevNoHeap = false;
+    s_blurPrevFull   = false;
+}
+
+// The view as the GPU will have drawn it: what is drawn so far is sent
+// first, whether the frame goes in parts or not, and the copy queued after
+// waits for it.
+static void copy_blur_previous(void)
+{
+    C3D_FrameBuf* fb = C3D_GetFrameBuf();
+
+    s_blurPrevFull = false;
+    if (fb == NULL || fb->colorBuf == NULL || fb->width != 240
+        || fb->height != 400 || fb->colorFmt != GPU_RB_RGBA8) {
+        return;
+    }
+    if (!s_blurPrevMade) {
+        if (s_blurPrevNoHeap
+            || !C3D_TexInit(&s_blurPrev, 256, 512, GPU_RGBA8)) {
+            memset(&s_blurPrev, 0, sizeof s_blurPrev);
+            s_blurPrevNoHeap = true;
+            return;
+        }
+        // The GS reads the buffer bilinear.
+        C3D_TexSetFilter(&s_blurPrev, GPU_LINEAR, GPU_LINEAR);
+        C3D_TexSetWrap(&s_blurPrev, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
+        s_blurPrevMade = true;
+    }
+    hangwatch_gpu_send_now();
+    GX_TextureCopy((u32*)fb->colorBuf, GX_BUFFER_DIM(BLUR_TILE_ROW / 16, 0),
+                   (u32*)s_blurPrev.data,
+                   GX_BUFFER_DIM(BLUR_TILE_ROW / 16, BLUR_TILE_GAP / 16),
+                   240u * 400u * 4u, 8);
+    s_blurPrevFull = true;
+}
+
+// DisplayRadialBlur and DisplayBlendPrevious (0x0010f280, 0x0010f4f0) for
+// the view, after its scene, the cars and the alpha lists, and before its
+// mirror: the four quads' mask into the target's alpha, then the last
+// frame by it, each drawn as ePoly::Render draws it; then the view kept
+// for the next frame. The last frame's UVs are the PS2's buffer's pixels
+// over 512; here they are put on the top screen as the vertices are, and
+// from there into the copy, whose columns run up the screen and rows
+// across it (capture.c's tiled_index).
+static void display_radial_blur(TrackView* v, eView* view)
+{
+    eRenderTarget*  rt = view->pRenderTarget0;
+    TextureInfo*    info;
+    TrackTex*       t;
+    GeoTexture      gt;
+    GeoRenderVertex q[4];
+    ePoly           polys[4];
+    ePoly           prev;
+    float           mid[2];
+    uint8_t         blend;
+    int             n, i;
+
+    n = radialblur_mask_polys(view, polys);
+    if (n == 0) {
+        s_blurPrevFull = false;
+        return;
+    }
+    info = (TextureInfo*)view->pBlendMask;
+    t    = load_texture(v, info);
+    if (t == NULL || !t->valid
+        || gpuCmdBufSize - gpuCmdBufOffset < CMDBUF_GUARD_WORDS) {
+        v->blurFailed++;
+        s_blurPrevFull = false;
+        return;
+    }
+    gt.tex        = &t->tex;
+    gt.uvScale[0] = t->uvScale[0];
+    gt.uvScale[1] = t->uvScale[1];
+    gt.pass       = t->pass;
+    // Render blends a semitransparent texture alone; RADIALBLUR is one.
+    blend = info->IsAnySemitransparencyFlag ? poly_blend(&polys[0])
+                                            : GEO_BLEND_NONE;
+    for (i = 0; i < n; i++) {
+        epoly_screen(&polys[i], rt, q, mid);
+        georender_draw_quad(q, &gt, blend,
+                            depth_of_gs_z((float)ee_trunc_w(
+                                polys[i].Vertices[0].z)));
+    }
+
+    if (s_blurPrevFull && radialblur_previous_poly(view, &prev)) {
+        epoly_screen(&prev, rt, q, mid);
+        for (i = 0; i < 4; i++) {
+            float sx, sy;
+
+            target_to_screen(q[i].st[0] * 512.0f, q[i].st[1] * 512.0f,
+                             rt->ScissorW, rt->ScissorH, rt->AspectRatioX,
+                             rt->AspectRatioY, &sx, &sy);
+            q[i].st[0] = (240.0f - sy) / 256.0f;
+            q[i].st[1] = sx / 512.0f;
+        }
+        memset(&gt, 0, sizeof gt);
+        gt.tex              = &s_blurPrev;
+        gt.uvScale[0]       = 1.0f;
+        gt.uvScale[1]       = 1.0f;
+        gt.pass.noAlphaTest = true;
+        georender_draw_quad(q, &gt, poly_blend(&prev),
+                            depth_of_gs_z((float)ee_trunc_w(
+                                prev.Vertices[0].z)));
+        v->blurBlends++;
+    }
+    copy_blur_previous();
+}
+
 // DisplayRVMs (retail 0x0010edc8), for view 0 after its scene and before
 // the HUD: target 7 at GS (160, 20) to (352, 84) of the 512 by 448, its
 // UVs mirrored left to right, blended by the alpha DisplayRVMImages left.
@@ -3881,7 +4032,9 @@ void trackview_draw(TrackView* v)
     // the alpha test is put back off and the blend back to its own, and
     // the fog off.
     georender_set_fog(NULL, 0);
-    // The mirror, after the view's scene and before the HUD (0x00113af4).
+    // The radial blur, then the mirror, after the view's scene and before
+    // the HUD (0x00113a54 and 0x00113a64, then 0x00113af4).
+    display_radial_blur(v, view);
     display_rvms(v);
     C3D_AlphaTest(false, GPU_ALWAYS, 0);
     C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_SRC_ALPHA,

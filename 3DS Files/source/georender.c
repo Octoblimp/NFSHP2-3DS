@@ -893,6 +893,15 @@ static void set_blend(uint8_t blend)
         C3D_AlphaBlend(GPU_BLEND_REVERSE_SUBTRACT, GPU_BLEND_REVERSE_SUBTRACT,
                        GPU_SRC_ALPHA, GPU_ONE, GPU_SRC_ALPHA, GPU_ONE);
         break;
+    // These two leave the fragment's alpha in the target, as the GS does.
+    case GEO_BLEND_KEEP:
+        C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_ZERO, GPU_ONE,
+                       GPU_ONE, GPU_ZERO);
+        break;
+    case GEO_BLEND_DEST_ALPHA:
+        C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_DST_ALPHA,
+                       GPU_ONE_MINUS_DST_ALPHA, GPU_ONE, GPU_ZERO);
+        break;
     default:
         C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_ONE, GPU_ZERO,
                        GPU_ONE, GPU_ZERO);

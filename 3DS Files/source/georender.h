@@ -37,6 +37,11 @@ typedef enum {
     GEO_BLEND_ALPHA,            // 0x44, (Cs - Cd) * As + Cd
     GEO_BLEND_ADD,              // 0x48, Cs * As + Cd: bulbs, the sun
     GEO_BLEND_SUBTRACT,         // 0x42, Cd - Cs * As
+    // And two the radial blur's polys carry themselves (radialblur.h). The
+    // GS writes the fragment's alpha into the target whatever the equation,
+    // and these two are how the blur uses that.
+    GEO_BLEND_KEEP,             // 0x40, (Cs - Cs) * As + Cd: As alone
+    GEO_BLEND_DEST_ALPHA,       // 0x54, (Cs - Cd) * Ad + Cd
 } GeoBlend;
 
 // A texture's fragment state, for georender_draw_mask. Zero is an opaque
