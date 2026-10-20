@@ -28407,3 +28407,20 @@ lap 2, a roadblock at about (1622, -334), then the autosave.
 
 Next: the zone cameras (Zone Freeze, Zone Preview and the zones' blur),
 then 72h-2c and 75, as the checklist's footer has it.
+
+## Session 137, continued -- five checks passed on the 3DS
+
+The user, 2026-10-19, marked five of the checklist's "On a real 3DS" items
+passed: the skid marks (TASKS 78), a full playthrough, local wireless
+with two or more consoles (TASKS 37 and 62, the wireless-off message
+among them), Audio Mode (71b) and the Old 3DS boot message (31). The
+checklist (v20) keeps three device items: the staticky road on Desert
+Heat (track 21) and Ancient Ruins (track 31), the bridge on Fall Winds at
+sunset (track 44), and TASKS 46's timing on Coastal Parklands (track 11)
+and Desert Heat.
+
+They asked which tracks 21 and 31 are. `docs/formats/track-select.md` now
+has the number-to-name table, read from GLOBALB's TrackInfo chunk
+(0x34201) and `FE_ENGLISH.BIN`.
+
+Next: the zone cameras (TASKS 80), starting with Zone Freeze.

@@ -176,6 +176,35 @@ alternate.
 
 13, 23, 33, 43, 63 and their variants are point to point.
 
+The names the player sees, from each entry's `TrackLanguageID` and
+`ReverseTrackLanguageID` in retail's `FE_ENGLISH.BIN` (GLOBALB's chunk
+0x34201). Backwards adds " II". Logs and TASKS give the number, so this
+is the key to what the user picked:
+
+| Track | Name | Its variant |
+| --- | --- | --- |
+| 11 | Coastal Parklands | 14, overcast |
+| 12 | National Forest | 15, overcast |
+| 13 | Scenic Drive | 16, overcast |
+| 21 | Desert Heat | 24, overcast |
+| 22 | Outback | 25, overcast |
+| 23 | Rocky Canyons | 26, overcast |
+| 31 | Ancient Ruins | 34, sunset |
+| 32 | Calypso Coast | 35, sunrise |
+| 33 | Mediterranean Paradise | 36, dawn |
+| 41 | Fall Winds | 44, sunset |
+| 42 | Alpine Trail | 45, sunset |
+| 43 | Autumn Crossing | 46, sunset |
+| 61 | Island Outskirts | 64, sunset |
+| 62 | Palm City Island | 65, sunset |
+| 63 | Tropical Circuit | 66, sunset |
+
+The entries' own `Name`s are the authoring ones ("Wild Water T21",
+"Wine Country T31"), which the game never shows. The variants' time words
+above are from theirs ("Calypso Sunrise T35"). Two variants' reverse
+IDs point elsewhere: 15's is plain "National Forest" and 16's is
+"Coastal Parklands".
+
 ## Constants, strings and tables
 
 | Where | Value | Use |

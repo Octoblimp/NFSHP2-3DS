@@ -2127,6 +2127,7 @@ is citro3d and owns the top.
         2026-10-05 it is the only one, the user's call: an Old 3DS stops
         at boot with a message (6ac29d1), and the pass checks only that.)
         The HOME Menu banner, sound and icon are TASKS 66's.
+        - The Old 3DS message passed on the user's 3DS (2026-10-19).
 
 ## Asked for during the port
 
