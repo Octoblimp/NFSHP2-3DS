@@ -315,7 +315,7 @@ overload of `FlailerSetTopLeftY`, no underscore offset at all, and the same
 |------|-------|-------|---------|-----|
 | 1 | Audio | 100020 | `Audio Options` | slides out first |
 | 2 | Controller | 100021 | `Joystick PreConfig` | slides out first |
-| 3 | Display | 100022 | `Display Options` | slides out first, after `tDisplayOptionsChangeManager::Start` (`0x001e0508`) |
+| 3 | Display | 100022 | `Display Options` | slides out first, after `tDisplayOptionsChangeManager::Start` (`0x001ee6c0`) |
 | 4 | Save/Load | 100023 | `Phils Load Save` | immediately |
 | 5 | Player Names | 100024 | `NameEntry` | slides out first |
 | 6 | Credits | 100025 | `Credits` | immediately |

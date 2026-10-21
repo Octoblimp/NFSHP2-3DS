@@ -29014,6 +29014,23 @@ task". TASKS 75 is the checklist's last retail item.
   (`0x00330348`) is "" on both discs. `joystick_check.py`: 65,880 ops,
   79,028 lines, 0 differ.
 - **Checks.** The CIA builds.
-- **Next:** EnterEditTextMode's help (`0x0016db68`),
-  EnableOverrideRendering (`0x001b1ce0`), DroppedSpikes, then the fog
-  chain.
+- **The rest of the named list**: nothing to change.
+  - SetupSceneryCullInfo (retail `0x0010f858`) and bMatrixToQuaternion
+    (`0x00259fc8`) are the same on both discs. `retail_consts.py`'s
+    differences were a lui of a moved global and two `lwc1 0(v0)` loads
+    it took for literals.
+  - tDisplayOptionsChangeManager::Start (`0x001ee6c0`) copies Fred+324
+    and +332 (8 bytes each) and both FrontendPlayers' 48-byte
+    cPlayerSettings; Different (`0x001ee878`) compares the same four.
+    `displayoptions.c` does that.
+  - EnterEditTextMode, EnableOverrideRendering and the DroppedSpikes
+    constructor: the port cites `0x00168ea0` (BeginGameFlowUnloadingTrackCommon),
+    `0x001a8000` (epositionmarker's range end) and `0x001b5d70`
+    (MaybeChangeOpponentSkillLevel) by retail's address, and those are
+    the demo's for the three. The port has no cEditText and no NIS
+    player, and Munition.obj came from retail (TASKS 39).
+  - Retail's addresses added to the scenerycull, bquat and
+    display-options citations.
+- **Next:** the fog chain (eAttachDepthIntoAlpha `0x00118a60`, eAttachFog
+  `0x00119768`, CreateFogPalette `0x00119308`), then the 37 functions
+  cited by neither address.

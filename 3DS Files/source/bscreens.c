@@ -599,7 +599,7 @@ static bool optionsOnSelect(BScreens* s, BScreenInstance* inst,
         immediate = item->immediate;
         trace(s, "select MENUITEM_%d", n);
         if (item->displayStart) {
-            // tDisplayOptionsChangeManager::Start (0x001e0508) takes a
+            // tDisplayOptionsChangeManager::Start (0x001ee6c0) takes a
             // snapshot so the Display page can offer to revert.
             HOOK0(s, displayOptionsStart);
             trace(s, "display options start");

@@ -15,7 +15,8 @@ the data half:
 The cull is the next slice, and `scenerycull.md` covers it: `IsVisible`,
 the brute-force and tree culls, `WhatSectionsShouldWeDraw`, `CullView`,
 `BatchCullViews`, `DoCulling`, `DrawAScenery`, `StuffScenery` and
-eDisplayFrame's `SetupSceneryCullInfo` at 0x0010e370. The debug views,
+eDisplayFrame's `SetupSceneryCullInfo` at 0x0010e370 (retail's
+0x0010f858). The debug views,
 `UpdateCaffeine`, `RenderBoundary`, `ScrollText` and
 `HandleTweakingVisibleZones`, are left out: nothing on a retail disc
 reaches them. `RenderVisibleZones` is `jr ra` in the image.

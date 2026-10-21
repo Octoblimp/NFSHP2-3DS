@@ -251,7 +251,7 @@ void bQuaternionFromMatrix(bQuaternion *q, const bMatrix4 *m)
     shepperd(q, m);
 }
 
-// 0x002418c0.
+// 0x002418c0, retail's 0x00259fc8, instruction for instruction.
 void bMatrixToQuaternion(bQuaternion *q, const bMatrix4 *m)
 {
     shepperd(q, m);

@@ -2,7 +2,8 @@
 // the cull: which of the loaded scenery each view draws this frame, and in
 // what matrix. With it come the two functions beside eModel's methods that
 // it calls, ClassifyAABB (0x0010b940) and IsBoundingBoxVisible
-// (0x0010bb10), and eDisplayFrame's SetupSceneryCullInfo (0x0010e370).
+// (0x0010bb10), and eDisplayFrame's SetupSceneryCullInfo (0x0010e370,
+// retail's 0x0010f858, the same but for one global's address).
 //
 // A frame's cull runs in three steps, all from eDisplayFrame:
 //
@@ -157,7 +158,8 @@ void scenery_do_culling(GrandSceneryCullInfo *g);
 // Render.
 void scenery_stuff_scenery(GrandSceneryCullInfo *g, eView *view);
 
-// SetupSceneryCullInfo(eView *, SceneryCullInfo &), 0x0010e370.
+// SetupSceneryCullInfo(eView *, SceneryCullInfo &), 0x0010e370 (retail's
+// 0x0010f858).
 void scenery_setup_cull_info(eView *view, SceneryCullInfo *ci);
 
 // eDisplayFrame's loop over the views, inline at 0x00112d3c: NumCullInfos

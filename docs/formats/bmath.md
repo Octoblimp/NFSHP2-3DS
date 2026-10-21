@@ -545,7 +545,8 @@ built in a different order: `m00 = (1 - yy2) - zz2` here against
 `m00 = 1 - (yy2 + zz2)` there. The two disagree in the last bit and both ship
 with callers, so the port keeps both.
 
-**`bMatrixToQuaternion`** `0x002418c0` (732 B, the largest in the object) --
+**`bMatrixToQuaternion`** `0x002418c0` (retail's `0x00259fc8`, the same
+732 B, the largest in the object) --
 the constructor's Shepperd branch again, instruction for instruction, with the
 matrix staged at `sp+16` (row-major, `m[i][i]` at `20i`), `next[]` copied to
 `sp+80` and `q4[]` at `sp+0`. One difference: the `s != 0` test is a plain

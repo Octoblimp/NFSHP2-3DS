@@ -5123,6 +5123,18 @@ phases.
           demo's 24, 24 and 34). GetJoystickButtonName falls back to ""
           on both discs. `joystick_check` runs retail's image: 65,880
           ops, 79,028 lines, 0 differ.
+        - The rest of the named list, nothing to change.
+          SetupSceneryCullInfo and bMatrixToQuaternion are the same on
+          both discs: the differences found were a moved global's
+          address and two register loads read as literals.
+          tDisplayOptionsChangeManager's Start and Different copy and
+          compare what the port's do, at retail's Fred offsets.
+          EnterEditTextMode, EnableOverrideRendering and the DroppedSpikes
+          constructor were listed because an address the port cites for
+          something else (`0x00168ea0`, `0x001a8000`, `0x001b5d70`) is the
+          demo's for them. The port has no cEditText (TASKS 54's keyboard
+          is the 3DS's) and no NIS player, and its Munition.obj is
+          retail's. The citations name retail's addresses now.
 
 76. [x] **Rigid animations: the shaken bush, and the rest.** Found in
         TASKS 73's sixth slice. An eModel's rigid animation is its

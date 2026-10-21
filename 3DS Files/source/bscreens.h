@@ -133,7 +133,7 @@ typedef struct {
     void (*stopMovie)(void* user);
 
     void (*jukebox)(void* user, int start);          // sound::jukebox::Start
-    void (*displayOptionsStart)(void* user);         // 0x001e0508
+    void (*displayOptionsStart)(void* user);         // 0x001ee6c0
 
     // StartQuickRace (0x00216c18, quickrace.h), with the transmission
     // button's state the screen keeps. It stops the panel movie, fills

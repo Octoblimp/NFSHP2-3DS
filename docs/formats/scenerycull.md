@@ -7,7 +7,8 @@ also takes in the functions the cull calls and the loop that calls it:
 
 - `ClassifyAABB` (0x0010b940) and `IsBoundingBoxVisible` (0x0010bb10),
   which sit beside eModel's methods;
-- `SetupSceneryCullInfo` (0x0010e370), and eDisplayFrame's loop over the
+- `SetupSceneryCullInfo` (0x0010e370, retail's 0x0010f858, the same but
+  for one global's address), and eDisplayFrame's loop over the
   views (0x00112d18 .. 0x00112df0), which the image has inline;
 - Ecstasy.obj's frame malloc (0x0019d9e0 .. 0x0019db2c);
 - the table of views, with `eGetView` and `eGetCurrentViewMode`.
