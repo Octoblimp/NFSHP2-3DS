@@ -43,6 +43,7 @@
 #include "bticker.h"
 #include "car.h"
 #include "carcontroller.h"
+#include "chopper.h"
 #include "collision.h"
 #include "collisionbody.h"
 #include "drivetargetrenderer.h"
@@ -71,6 +72,7 @@ enum {
     OP_OBBDTOR, OP_SETOBBS, OP_SETDTS, OP_RECPOT, OP_RECITER, OP_PREDDUMP,
     OP_CTL, OP_SETTABLE, OP_DDSET, OP_DEBUGDISP, OP_AITWEAK, OP_AIDEBUG,
     OP_CUBES, OP_CUBE, OP_DSEED, OP_CLOCK, OP_VOTSET, OP_RMODE,
+    OP_HELIX,
 };
 
 #define NCAR 14
@@ -107,7 +109,9 @@ static int32_t rc_obj[4];
 static int32_t shake_flip = -1;     // the state MaybeCameraShake moves to
 static int32_t race_obj[4];
 static int32_t tele_obj[4];
-static int32_t heli_obj[4];
+// A whole Chopper, for the checksum's x: the host's layout is not the
+// image's, so OP_HELIX writes it by name.
+static struct Chopper heli_obj[1];
 static int fx_obj;
 static int joylog_repeat;
 
@@ -513,7 +517,10 @@ static void seam_race(struct Race *r)
 
 static void seam_post(struct RaceCoordinator *rc, int32_t msg, int32_t param)
 {
-    printf("  post %s %d %d\n", label(rc), msg, param);
+    // and retail's out-of-step word, cleared for the next
+    printf("  post %s %d %d out-of-step %d\n", label(rc), msg, param,
+           rm.OutOfStepFlag);
+    rm.OutOfStepFlag = 0;
 }
 
 static int32_t seam_jget(int32_t bits, int32_t channel)
@@ -1247,6 +1254,11 @@ static void step(uint32_t op)
         break;
     case OP_RGET:
         push(&rgetq, next());
+        break;
+    case OP_HELIX:
+        a = next();
+        memcpy(&heli_obj->Matrix.v3.x, &a, 4);
+        printf("helix %08x\n", a);
         break;
     case OP_JGET:
         push(&jgetq, next());

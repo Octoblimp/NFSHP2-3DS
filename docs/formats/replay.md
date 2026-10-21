@@ -514,7 +514,7 @@ its retail layout, 20664 bytes. main.c has run it in the race since
 
 | offset | field |
 |--------|-------|
-| 0 .. 24 | ReplayingFlag, CapturingFlag, RemoveDataError, MuteHighlightSoundFlag, PausedFlag, SlowMotionFlag, ReplayPausedThisFrame |
+| 0 .. 24 | ReplayingFlag, CapturingFlag, RemoveDataError, OutOfStepFlag, PausedFlag, SlowMotionFlag, ReplayPausedThisFrame |
 | 28 | NextFancyDebugTime |
 | 32, 36, 40 | FancyReplayInProgress, FancyJoyEventNumber, NumFancyJoyEvents |
 | 44 | FancyJoyEventTable, 32 bytes |
@@ -620,8 +620,9 @@ FancyReplayInProgress is a state:
 BeginRaceHighlights starts at the first. Each next one restores the
 highlight and plays it to the loop it ended on; after the last it wraps
 to the first. With no highlight, the first lap snapshot plays to the
-capture's end; with neither, the end is 0. With MuteHighlightSoundFlag
-set it pauses instead, the highlight ending on the next loop.
+capture's end; with neither, the end is 0. With OutOfStepFlag set (a
+replayed frame's checksum missed, 72h-2c) it pauses instead, the
+highlight ending on the next loop.
 
 ### The special events, `0x0013e3f8` and `0x0013e4b0`
 
@@ -785,7 +786,7 @@ race's last frame. main.c now binds them to the manager:
   (`0x0013e318`), on its TICK once WorldLoopCounter reaches the current
   highlight's end. The state then makes the demo camera again.
 - `gReplayEndCurrentHighlightTimeFn` and `gReplayMuteHighlightsFn`:
-  EndCurrentHighlightTime and MuteHighlightSoundFlag, words 160 and 12
+  EndCurrentHighlightTime and OutOfStepFlag, words 160 and 12
   of the manager. Retail reads them inline, as do the End Game Menu and
   the pause menu. Two accessors in main.c return them.
 
@@ -976,14 +977,14 @@ the camera again on MOVE_REPLAY with no screen test, and the port tests.
 
 - **The pause menu.** main.c binds `gReplayNumInstantReplaySnapshotsFn`
   to the manager's word 140. The item is enabled while the manager holds
-  an instant replay and MuteHighlightSoundFlag is clear. The first
+  an instant replay and OutOfStepFlag is clear. The first
   instant replay is taken when the capture begins, after the countdown.
   Then one comes every 300 WorldTimeFrames, and two are kept ("The
   snapshots" above). The replay begins at the older one, so it goes back
   5 to 10 seconds, and Tick pauses it at the capture's end, the moment
   of the pause.
 - **The End Game Menu.** main.c's own test, `gEndGameReplayViewableFn`,
-  is gone. Retail's test decides: MuteHighlightSoundFlag clear.
+  is gone. Retail's test decides: OutOfStepFlag clear.
 
 With "DebugLog 1", main.c's race lines now add the manager's state every
 60 world frames: "race: replay log L, capturing C, replaying R, paused
@@ -1501,22 +1502,65 @@ before. `carsnap_check` runs retail's AnimatedDriver::DoSnapshot beside it
 (car.md, "The check").
 
 **The drift.** With the sections in step, the replay restores and plays,
-but it does not stay on the PS2's path. Measured on Azahar with a
-diagnostic build that logged each miss and did not post it, on file 2
-(track 12, snapshot loops 515 to 3349, some 94 s):
+but it does not stay on the PS2's path. 72h-2b measured it first, on file
+2 (track 12, loops 515 to 3349), with a diagnostic build that logged each
+miss and did not post it:
 
 | Build | First miss | Misses | The player's car |
 |---|---|---|---|
 | libctru's FPSCR (round to nearest) | loop 515, the first replayed | every loop to the end | off the road some 40 s in, stopped against a tree |
 | FPSCR `0x03c00000` (round toward zero, as the EE) | loop 515 | every loop to the end | off the road some 43 s in, stopped against a tunnel wall |
 
-Rounding alone does not explain it. The port's car physics is the demo
-image's, and TASKS 73 brings retail's. The EE's other float behaviour
-(no denormals, no infinities, its own square root and reciprocal) is
-72h-2c's to measure, after that. Until both are done, a disc replay would
-end at its first frame, or would wander off the road if the misses were
-ignored. That is why "DemoReplays" is off. With "DemoReplays 1", the
-replay restores, plays its first frame, and goes to the main menu.
+**72h-2c: the first frame.** The miss at the restored frame itself was
+the checksum, not the race. Retail's CalculateDebugChecksum (`0x0014e240`)
+adds the helicopter's x, as a word, after the cars (world.md, "The
+checksums"); the demo's, which the port had, does not. Every disc race has
+a helicopter, so the port's checksum was off before anything moved. With
+retail's term, the restored frame matches the PS2's byte on both files
+measured. Retail's VerifyDebugChecksums (`0x0014e300`) also sets the
+manager's +12, now named OutOfStepFlag, at a miss (the table above).
+
+**72h-2c: the first step.** The frame after it misses, on every file and
+build measured. "DemoReplayDrift" (configitems.h) has the replay play on
+past its misses and the log count them. On file 5 (track 11, loops 1053
+to 4033, about 100 s), on Azahar:
+
+| "DemoReplayDrift" | First miss | Frames missed | The player's car |
+|---|---|---|---|
+| 1, libctru's FPSCR (round to nearest) | loop 1054, the first step | 2838 of 2850 | on the grass by a tree 15 s in, then against a stone wall, then among trees |
+| 2, FPSCR `0x03c00000` (round toward zero, no denormals) | loop 1054 | 2842 of 2850 | in among the AI cars and spinning 15 s in, then against the same wall |
+
+The dozen matches are chance: one byte in 256. Neither is the seed alone.
+With the port's checksum, no seed from 27 draws back to 63 on gives the
+PS2's byte, so the cars have already moved apart. The rounding even
+changes how many numbers the step draws: the second step drew 42 at round
+to nearest and 472 at round toward zero. Played on, the replay is the
+disc's pads driving a car that is somewhere else, so it is not worth
+watching either way.
+
+**Why it cannot be matched.** Car::CalculateDebugChecksum is
+`(x + y) * 65536` truncated, so a single ulp of any car's position changes
+it. A step on the 3DS matches the PS2's only if every float operation in
+it gives the EE's bits, and the EE's FPU is not IEEE:
+
+- it rounds toward zero, has no denormals, infinities or NaNs (eefpu.h has
+  the sites the game reaches);
+- its adder keeps one guard bit, so a sum of operands whose exponents
+  differ loses the smaller one's low bits first. PCSX2's double-precision
+  FPU masks them off before each add to match it;
+- its multiplier's mantissa is sometimes one below IEEE's round toward
+  zero. PCSX2's own notes call their multiply "incorrect" for that;
+- the matrix code is VU0 macro mode (bmath.md), which rounds its own way.
+
+The 3DS's VFP can round toward zero and flush denormals, which is
+"DemoReplayDrift 2", and the step still misses. The rest would mean every
+add and multiply of the world's step done in software, as the EE does
+it, and part of that is not known. So the disc's replays stay off:
+"DemoReplays" is 0 by default, and attract mode is retail's other demo,
+the AI race. With "DemoReplays 1", a replay restores, plays its first
+frame, and goes to the main menu at the next, as retail would at a miss.
+The port's own replays are made and played on the 3DS, so they stay in
+step (72f-2).
 
 ### On Azahar
 
@@ -1531,6 +1575,9 @@ replay restores, plays its first frame, and goes to the main menu.
 - `-Replays`: PASS. File 2 loaded and launched, track 12 restored and
   reached RACING, and the first checksum miss ended the demo to the main
   menu.
+- `-Replays -Drift 1` and `-Drift 2` (72h-2c): PASS. File 5 on track 11
+  played on past its misses to loop 4033, a shot every 15 s, and the demo
+  went back to the title. The counts are in the table above.
 
 Each race's first frame waits up to 10 s while the track attaches, behind
 the Loading screen. That is the same as any race.

@@ -204,7 +204,7 @@ ReplayManager *replaymgr_construct(void *mem)
     rm->ReplayingFlag = 0;
     rm->CapturingFlag = 0;
     rm->RemoveDataError = 0;
-    rm->MuteHighlightSoundFlag = 0;
+    rm->OutOfStepFlag = 0;
     rm->PausedFlag = 0;
     rm->SlowMotionFlag = 0;
     rm->ReplayPausedThisFrame = 0;
@@ -638,7 +638,7 @@ void replaymgr_begin_next_race_highlight(ReplayManager *rm)
 {
     ReplaySnapshot *s;
 
-    if (rm->MuteHighlightSoundFlag) {
+    if (rm->OutOfStepFlag) {
         rm->PausedFlag = 1;
         rm->EndCurrentHighlightTime = WorldLoopCounter + 1;
         return;

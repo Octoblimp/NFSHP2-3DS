@@ -28862,3 +28862,65 @@ checklist was republished as v36.
   - Not yet on the 3DS.
 - **Next:** 72h-2c, then TASKS 75, then the release candidate again. The
   Azahar card is back to track 42, without FallLog or the warp.
+
+## Session 147 -- the disc's replays against the PS2 (72h-2c)
+
+The user, 2026-10-20: "Start on 72h-2c, the disc's demo replays
+drifting." 9e19324 (TASKS 81) was in first.
+
+- **The first frame.** A disc replay missed at its restored frame because
+  the port's checksum was the demo's.
+  - Retail's CalculateDebugChecksum (`0x0014e240`) adds the helicopter's
+    x after the cars: the word at Helicopter+896, its Matrix's fourth
+    row. `worldstep.c` has it.
+  - Retail's VerifyDebugChecksums (`0x0014e300`) sets the manager's +12
+    at a miss. The field was MuteHighlightSoundFlag and is OutOfStepFlag
+    now, in replay.h, replaymgr.c, main.c, replaymgr_check and the docs.
+  - `world_check`'s `retail_checksums` adds both as hooks on the demo
+    image. OP_HELIX sets the helicopter's x, and the post prints the
+    flag. 32 scenarios, 0 differ. The four new mutations and the verify
+    ones are caught. `--mutate --only A,B` runs a few by name.
+  - The restored frame now matches the PS2's byte: loop 515 of file 2 and
+    loop 1053 of file 5.
+- **The first step.** The frame after the restored one misses, whatever
+  the build.
+  - "DemoReplayDrift" (configitems.h, off by default) has the replay play
+    on past its misses. The log gets the first loops' seeds and
+    checksums, the first 8 misses with the PS2's byte, and a count every
+    150 frames. At 2, the world's steps run with the FPSCR at
+    `0x03c00000` (round toward zero, flush to zero, default NaN), as the
+    EE does.
+  - `worldstep.c` keeps a miss's checksum, seed and logged byte in
+    `WorldVerifyMiss` (world.h) for that log.
+  - `run_azahar_attract.ps1 -Replays -Drift N` sets it for a run.
+  - File 5 (track 11, loops 1053 to 4033) both ways:
+    - at 1, 2838 of 2850 frames missed, from loop 1054;
+    - at 2, 2842 of 2850, from loop 1054.
+    The dozen matches are chance. The car was off the road within 15 s
+    both ways: by a tree, against a stone wall, among trees.
+  - No seed from 27 draws back to 63 on explains the first miss, so the
+    positions have moved apart. The rounding also changes how many
+    numbers the second step draws: 42 at round to nearest, 472 at round
+    toward zero.
+- **Why it stops there.**
+  - The EE's adder keeps one guard bit: PCSX2's double-precision FPU
+    masks the smaller operand before each add to match it.
+  - Its multiplier sometimes gives a mantissa one under IEEE's round
+    toward zero. PCSX2's notes call their own multiply "incorrect" there.
+  - The matrix code is VU0.
+  - Matching the PS2 bit for bit would mean every float operation of the
+    world's step in software, part of it unknown.
+  - So "DemoReplays" stays 0, and attract mode is the AI race. replay.md's
+    "The disc's replays on the 3DS" has the tables. TASKS 72h-2c, 72h-2,
+    72h and 72 are closed.
+- **Found on the way.** The user watched both runs and saw "a minor
+  graphical artifact" on a stone wall the car hit briefly. That is TASKS
+  82, still to ask about. They also asked why it raced "so stupidly": it
+  is the PS2 player's recorded pads driving a car that is no longer where
+  the PS2's was. That only shows with "DemoReplayDrift", a diagnostic.
+- **Checks.**
+  - `world_check`: 0 differ, and the 7 changed mutations are caught.
+  - `replaymgr_check`: 0 differ after the rename.
+  - The CIA is built with the diagnostic off.
+  - The Azahar card's config was put back after each run.
+- **Next:** TASKS 75, then the release candidate again.

@@ -187,11 +187,11 @@ extern int32_t ConfigReplayCheck;           // 0
 
 // The port's own: "DemoReplays 1" lets attract mode play the disc's six
 // replays (sdmc:/NFSHP2/REPLAY) as retail does. Off by default
-// (2026-10-17): the port's car physics is the demo's (TASKS 73), so a PS2
-// replay drifts from its first frame -- every frame's checksum misses,
-// which ends the demo at once, and the car leaves the road some 40
-// seconds in. Off, ConsiderLaunching answers "none" and attract mode is
-// retail's other demo, the AI race (demomode.c).
+// (2026-10-17): the 3DS's floats are not the EE's, so a PS2 replay leaves
+// the PS2's path at its first step (72h-2c, replay.md). That frame's
+// checksum misses, which ends the demo; played on, the car is off the
+// road within 15 seconds. Off, ConsiderLaunching answers "none" and
+// attract mode is retail's other demo, the AI race (demomode.c).
 extern int32_t ConfigDemoReplays;           // 0
 
 // The port's own: "ThreadGuard 1" turns on the tripwire over the audio
@@ -238,6 +238,14 @@ extern int32_t ConfigEggCodes;              // 0
 // the road on track 62 (2026-10-20). tools/fall_trace.py puts the road's
 // height beside each. Needs "DebugLog 1". Off by default.
 extern int32_t ConfigFallLog;               // 0
+
+// The port's own: "DemoReplayDrift 1" has a disc replay (with "DemoReplays
+// 1") play on past its checksum misses instead of ending, and the log
+// count them: the first few with the checksum, the seed and the byte the
+// PS2 logged, then a line every 150 frames (72h-2c). At 2, the world's
+// steps also run with the VFP rounding toward zero and flushing denormals,
+// as the EE does. Needs "DebugLog 1". Off by default.
+extern int32_t ConfigDemoReplayDrift;       // 0
 
 typedef void (*ConfigItemsLogFn)(const char *line);
 

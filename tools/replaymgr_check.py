@@ -956,7 +956,7 @@ MUTATIONS = [
       ""),
 ] + [M("ctor-" + f, "\n    rm->%s = 0;\n" % f, "\n") for f in (
     "ReplayingFlag", "CapturingFlag",
-    "MuteHighlightSoundFlag", "PausedFlag", "SlowMotionFlag",
+    "OutOfStepFlag", "PausedFlag", "SlowMotionFlag",
     "ReplayPausedThisFrame", "BeginningOfTime", "EndOfTime",
     "NextInstantReplaySnapshotTime", "NumSnapshotsTaken",
     "SnapshotTimeCursor", "FancyReplayInProgress", "FancyJoyEventNumber",
@@ -1291,7 +1291,7 @@ MUTATIONS = [
     M("brh-zero",
       "    rm->NextHighlightNumber = 0;\n    replaymgr_begin_next_race_highlight",
       "    replaymgr_begin_next_race_highlight"),
-    M("bnrh-mute", "    if (rm->MuteHighlightSoundFlag) {", "    if (0) {"),
+    M("bnrh-mute", "    if (rm->OutOfStepFlag) {", "    if (0) {"),
     M("bnrh-mute-pause",
       "        rm->PausedFlag = 1;\n        rm->EndCurrentHighlightTime",
       "        rm->EndCurrentHighlightTime"),

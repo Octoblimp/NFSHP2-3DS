@@ -271,6 +271,17 @@ typedef struct WorldFallStep {
 extern int32_t       WorldFallTraceOn;
 extern WorldFallStep WorldFallTrace;
 
+// Not in the image either: a replayed frame's miss, for main.c's
+// "DemoReplayDrift" log (72h-2c). The checksum, the seed it was folded
+// with, and the byte the replay held.
+typedef struct WorldVerifyMissed {
+    uint32_t checksum;
+    uint32_t seed;
+    uint32_t expected;
+} WorldVerifyMissed;
+
+extern WorldVerifyMissed WorldVerifyMiss;
+
 // 0x0014bce0. Empty.
 void world_flush_collisions(World *w);
 
@@ -340,15 +351,18 @@ int32_t world_car_list_check_flip(const struct Car *a, const struct Car *b);
 // not ported, and a NULL seam aborts: there is no car without it.
 void world_add_traffic_car(World *w, struct DriverInfo *info);
 
-// 0x0014b9e0. Each car's checksum folded into WorldTimer, times 33 plus
-// the next, and each car's position copied into CarPositionTable on the
-// way. Then the high half added to the low, and 16 bits kept.
+// Retail's 0x0014e240 (the demo's 0x0014b9e0). Each car's checksum folded
+// into WorldTimer, times 33 plus the next, and each car's position copied
+// into CarPositionTable on the way. Retail then adds the helicopter's x,
+// as a word. Then the high half added to the low, and 16 bits kept.
 uint16_t world_calculate_debug_checksum(World *w);
 
-// 0x0014ba88. The checksum goes through the Joylog, and a byte of it
-// (with the seed's low byte) through the replay: recorded while it
-// captures, compared while it plays back. A mismatch posts RC_SKIP_REPLAY
-// to the race coordinator. pReplayManager is read with no NULL test.
+// Retail's 0x0014e300 (the demo's 0x0014ba88). The checksum goes through
+// the Joylog, and a byte of it (with the seed's low byte) through the
+// replay: recorded while it captures, compared while it plays back. A
+// mismatch sets the manager's OutOfStepFlag, retail's own, and posts
+// RC_SKIP_REPLAY to the race coordinator. pReplayManager is read with no
+// NULL test.
 void world_verify_debug_checksums(World *w);
 
 // DoTimestepMove's stack array holds 176 bodies (704 bytes), and

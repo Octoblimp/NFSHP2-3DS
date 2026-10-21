@@ -147,20 +147,33 @@ port aborts past them.
 
 ## The checksums
 
-**CalculateDebugChecksum** (0x0014b9e0) starts from WorldTimer. For each
-car in the table it takes the car's own checksum (0x00130ee0), copies the
-car's position into CarPositionTable, and makes the sum `sum * 33 +
-checksum`. It returns `((sum >> 16) + sum) & 0xffff`.
+**CalculateDebugChecksum** (retail's 0x0014e240, the demo's 0x0014b9e0)
+starts from WorldTimer. For each car in the table it takes the car's own
+checksum (0x00130ee0), copies the car's position into CarPositionTable,
+and makes the sum `sum * 33 + checksum`. Retail then adds the
+helicopter's x when there is a helicopter (World+24): the word at
+Helicopter+896, its Matrix's fourth row, read as an integer. The image
+tests `&Matrix` for NULL, which it never is. It returns
+`((sum >> 16) + sum) & 0xffff`. The demo has no helicopter term, and
+without it a disc replay missed at its first frame (72h-2c).
 
-**VerifyDebugChecksums** (0x0014ba88) runs it, and then:
+**VerifyDebugChecksums** (retail's 0x0014e300, the demo's 0x0014ba88)
+runs it, and then:
 
 1. While the Joylog replays, reads 16 bits on channel 3 and ignores them.
    Otherwise it records the checksum there.
 2. The byte is `((c >> 8) + c + (seed & 0xff)) & 0xff`.
 3. While the replay captures, it records the byte (8 bits, channel 2).
    Otherwise, while it plays back, it reads the recorded byte. On a
-   mismatch it posts RC_SKIP_REPLAY (11) to the race coordinator, and the
-   replay is abandoned.
+   mismatch retail reads pReplayManager again and sets its word at +12
+   (OutOfStepFlag, replay.md), then posts RC_SKIP_REPLAY (11) to the race
+   coordinator, and the replay is abandoned.
+
+The port keeps a miss's checksum, seed and logged byte in
+`WorldVerifyMiss` (world.h), its own, for main.c's "DemoReplayDrift" log.
+`world_check` runs retail's two terms on the demo image as hooks:
+`retail_checksums` adds the helicopter's word at the fold and sets +12 at
+the miss.
 
 ## The step
 

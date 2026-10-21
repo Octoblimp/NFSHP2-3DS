@@ -182,7 +182,7 @@ FN = dict(
  OP_OBBDTOR, OP_SETOBBS, OP_SETDTS, OP_RECPOT, OP_RECITER, OP_PREDDUMP,
  OP_CTL, OP_SETTABLE, OP_DDSET, OP_DEBUGDISP, OP_AITWEAK, OP_AIDEBUG,
  OP_CUBES, OP_CUBE, OP_DSEED, OP_CLOCK, OP_VOTSET,
- OP_RMODE) = range(1, 85)
+ OP_RMODE, OP_HELIX) = range(1, 86)
 
 # Retail's GetTimestep (0x0014d718) is the demo's (0x0014aee8) with one
 # test more. After the second ReplayingFlag test it reads the replay's
@@ -204,6 +204,26 @@ def retail_timestep(e):
             em.fpr[0] = em.u32(GP - 20244)
             em.reg[31] = DEMO_TS_WAIT + 4
     e.stub(DEMO_TS_WAIT, wait)
+
+
+# Retail's checksums (0x0014e240, 0x0014e300) are the demo's (0x0014b9e0,
+# 0x0014ba88) with two things more. After the cars, CalculateDebugChecksum
+# adds the word at Helicopter+848+48, the Matrix's fourth row's x, when
+# there is a helicopter. On a miss, VerifyDebugChecksums reads
+# pReplayManager again and stores 1 at its +12 before the post.
+DEMO_CS_FOLD = 0x0014ba58               # srl v0, s2, 16: s3 the World
+DEMO_VERIFY_MISS = 0x0014bb30           # lw a0, pRaceCoordinator
+
+def retail_checksums(e):
+    def fold(em):
+        h = em.u32((em.reg[19] & M32) + 24)
+        if h:
+            # addu: the low words, the sum sign-extended
+            em.reg[18] = s32(em.reg[18] + em.u32(h + 896)) & me.M64
+    def miss(em):
+        em.put32(em.u32(G_RM) + 12, 1)
+    e.hook(DEMO_CS_FOLD, fold)
+    e.hook(DEMO_VERIFY_MISS, miss)
 
 
 bits = me.f_to_bits
@@ -550,6 +570,26 @@ def checksum_script(sc):
         sc.op(OP_RGET, v)
         sc.op(OP_VERIFY)
     sc.op(OP_REPLAY, 0, 0)
+
+    # Retail's helicopter: its x as a word after the cars, with and without
+    # them, and a miss marking the replay out of step.
+    sc.op(OP_PTRS, 0, 1, 0)
+    for x in (0, bits(1.0), bits(-1250.5), 0x7F7FFFFF, 0x80000000,
+              0xFFFFFFFF):
+        sc.op(OP_HELIX, x)
+        sc.op(OP_CHECKSUM)
+    sc.carlist([])
+    sc.op(OP_BUILD)
+    sc.op(OP_CHECKSUM)
+    sc.carlist([0, 1, 2, 3, 4])
+    sc.op(OP_BUILD)
+    sc.op(OP_HELIX, bits(-1104.25))
+    sc.op(OP_REPLAY, 1, 0)
+    for v in (0, 0x5A, 0xA5):
+        sc.op(OP_RGET, v)
+        sc.op(OP_VERIFY)
+    sc.op(OP_REPLAY, 0, 0)
+    sc.op(OP_PTRS, 0, 0, 0)
 
 
 def debug_byte(timer, csums, seed):
@@ -1177,7 +1217,7 @@ class Model(object):
         self.rc = a(16, 16)
         self.race = a(16, 16)
         self.tele = a(96, 16)
-        self.heli = a(64, 16)
+        self.heli = a(960, 16)        # the checksum reads +896
         self.carhead = self.world
         self.colhead = self.world + 16
         self.aihead = self.world + 8
@@ -1340,8 +1380,10 @@ class Model(object):
             return p
 
         def post(em):
-            self.emit("  post %s %d %d" % (L(arg(0)), s32(arg(1)),
-                                           s32(arg(2))))
+            self.emit("  post %s %d %d out-of-step %d"
+                      % (L(arg(0)), s32(arg(1)), s32(arg(2)),
+                         s32(e.u32(self.rm + 12))))
+            e.put32(self.rm + 12, 0)
 
         def jget(em):
             v = self.jgetq.pop(0) if self.jgetq else 0
@@ -1499,6 +1541,7 @@ class Model(object):
         e.stub(0x0020b668, update)
         e.stub(0x0020b6a8, end)
         retail_timestep(e)
+        retail_checksums(e)
         self.placeq = []
         self.shakeflip = -1
         self.stubs_init(arg, unlink)
@@ -1893,6 +1936,10 @@ class Model(object):
                 e.put32(self.rm + 16, p)
                 e.put32(self.rm + 20, s)
                 emit("rmode %d %d" % (s32(p), s32(s)))
+            elif op == OP_HELIX:
+                v = arg()
+                e.put32(self.heli + 896, v)
+                emit("helix %08x" % v)
             elif op == OP_RGET:
                 self.rgetq.append(arg())
             elif op == OP_JGET:
@@ -2486,12 +2533,16 @@ _m("verify reads when idle", "    if (!rm->ReplayingFlag)\n        return;\n", "
 _m("verify rget channel", "ReplayManager_GetData(rm, 8, 2) & 0xffu",
    "ReplayManager_GetData(rm, 8, 1) & 0xffu")
 _m("verify rget unmasked",
-   "if (((uint32_t)ReplayManager_GetData(rm, 8, 2) & 0xffu) == b)",
-   "if ((uint32_t)ReplayManager_GetData(rm, 8, 2) == b)")
-_m("verify match inverted", "& 0xffu) == b)", "& 0xffu) != b)")
+   "e = (uint32_t)ReplayManager_GetData(rm, 8, 2) & 0xffu;",
+   "e = (uint32_t)ReplayManager_GetData(rm, 8, 2);")
+_m("verify match inverted", "    if (e == b)\n", "    if (e != b)\n")
 _m("verify post param", "RC_SKIP_REPLAY, 0);", "RC_SKIP_REPLAY, 1);")
 _m("verify posts 12", "gRaceCoordinatorPostMessageFn(pRaceCoordinator, RC_SKIP_REPLAY",
    "gRaceCoordinatorPostMessageFn(pRaceCoordinator, RC_SKIP_REPLAY + 1")
+_m("verify no out of step", "    pReplayManager->OutOfStepFlag = 1;\n", "")
+_m("verify out of step 2", "OutOfStepFlag = 1;", "OutOfStepFlag = 2;")
+_m("checksum no heli", "        s = s + x;\n", "")
+_m("checksum heli y", "&w->Helicopter->Matrix.v3.x, 4", "&w->Helicopter->Matrix.v3.y, 4")
 
 # the move
 _m("move schedule 78", "+ 77u) & 127u) == 0", "+ 78u) & 127u) == 0")
@@ -3029,7 +3080,7 @@ for _name in EQUIVALENT:
 write_source = hostbuild.write_source
 
 
-def mutate_pass(sc):
+def mutate_pass(sc, only=None):
     base_model = model(sc)
     survived, missing, equivalent, caught = [], [], [], 0
 
@@ -3043,7 +3094,8 @@ def mutate_pass(sc):
             print("base already differs -- fix that before mutating")
             return 1
 
-    for name, rel, before, after in MUTATIONS:
+    chosen = [m for m in MUTATIONS if only is None or m[0] in only]
+    for name, rel, before, after in chosen:
         path = ROOT / rel
         text = path.read_text(encoding="utf-8", newline="")
         crlf = (chr(13) + NL) in text
@@ -3094,13 +3146,13 @@ def mutate_pass(sc):
                          "mutation %s. Put the original line back before "
                          "trusting anything printed above." % (rel, name))
 
-    real = [m for m in MUTATIONS if m[0] not in missing]
+    real = [m for m in chosen if m[0] not in missing]
     holes = [s for s in survived if s not in EQUIVALENT]
-    stale = [n for n in EQUIVALENT
-             if n not in equivalent and n not in missing]
+    stale = [n for n in EQUIVALENT if any(m[0] == n for m in chosen)
+             and n not in equivalent and n not in missing]
     if missing:
         print("%d PATTERN NOT FOUND -- the tally below is over %d of %d"
-              % (len(missing), len(real), len(MUTATIONS)))
+              % (len(missing), len(real), len(chosen)))
     print("%d mutations, %d caught, %d equivalent, %d unexplained"
           % (len(real), caught, len(equivalent), len(holes)))
     for name in holes:
@@ -3115,12 +3167,15 @@ def mutate_pass(sc):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mutate", action="store_true")
+    ap.add_argument("--only", metavar="NAME,...",
+                    help="with --mutate, only these mutations")
     ap.add_argument("--dump", metavar="DIR")
     args = ap.parse_args()
 
     sc = script()
     if args.mutate:
-        sys.exit(mutate_pass(sc))
+        sys.exit(mutate_pass(sc, args.only.split(",") if args.only
+                             else None))
 
     lines = model(sc)
     with tempfile.TemporaryDirectory() as tmp:

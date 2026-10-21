@@ -2357,6 +2357,7 @@ phases.
         the retail disc: every track and car, the frontend a player reaches,
         and the saves. The user played it through on a 3DS on 2026-10-19.
         What retail still changes is TASKS 75 and 76, and 72h-2c.
+        76 and 72h-2c are done since (Sessions 145 and 147).
 
 37. [ ] **Local Wireless (multi-card) play.** Asked for on 2026-10-07. Up to
         eight 3DS consoles (two in the first ask, eight since
@@ -4476,7 +4477,7 @@ phases.
                 disc, but the name is in the ELF's strings; its
                 FlailerScreenConfig is one the tool does not parse.
 
-72. [ ] **Replays: the instant replay, the replay after a race, and
+72. [x] **Replays: the instant replay, the replay after a race, and
         attract mode's.** The user asked on 2026-10-16 whether replays
         work: they do not. main.c's `replayStandIn` is an empty
         ReplayManager that records nothing, and `bRepeat` is not
@@ -4716,7 +4717,7 @@ phases.
             differ; 49 of 50 mutations caught, 1 equivalent) and the
             checkers that link the changed files pass. On Azahar the bar
             and the help showed the 3DS keys; the career run passed.
-        - [ ] 72h. The pause pages' special events (`AddSpecialEvent`),
+        - [x] 72h. The pause pages' special events (`AddSpecialEvent`),
           and `DemoModeReplay` with the disc's replays for attract mode.
           - [x] 72h-1. The pause pages' special events.
             Done in Session 125, continued (`docs/formats/replay.md`,
@@ -4729,7 +4730,7 @@ phases.
             caught) passes, and so do the six checkers that read the
             changed headers. On Azahar, Damage turned on in the pause
             menu at loop 191 and View Replay made it again at loop 191.
-          - [ ] 72h-2. `DemoModeReplay` with the disc's replays for
+          - [x] 72h-2. `DemoModeReplay` with the disc's replays for
             attract mode. The PS2's float rounding is not the 3DS's, so
             these may drift. Measure it then.
             - [x] 72h-2a. TheDemoModeReplay.
@@ -4767,11 +4768,29 @@ phases.
               title. A skipped the next to the main menu, where a third
               started. With -Replays, file 2 restored, reached RACING and
               went to the main menu at its first checksum miss.
-            - [ ] 72h-2c. The PS2-to-3DS drift: each demo snapshot's
+            - [x] 72h-2c. The PS2-to-3DS drift: each demo snapshot's
               end against the next start, or checksums. 72h-2b found
               every loop missing from the first, so this waits for TASKS
               73's car physics; then "DemoReplays 1" and
               `tools/run_azahar_attract.ps1 -Replays` measure it again.
+              Closed in Session 147 (`docs/formats/replay.md`, "The disc's
+              replays on the 3DS"), as far as the 3DS can go. The first
+              frame's miss was the checksum: retail's (`0x0014e240`)
+              adds the helicopter's x after the cars, and retail's verify
+              (`0x0014e300`) sets the manager's +12, now OutOfStepFlag.
+              Both are in `worldstep.c`, and `world_check` runs them as
+              hooks on the demo image (0 differ; the new mutations
+              caught). The restored frame now matches the PS2's byte.
+              The step after it misses on every build: "DemoReplayDrift"
+              (the port's own, off) plays on and counts, and on file 5
+              2838 of 2850 frames missed at round to nearest and 2842 at
+              the EE's round toward zero with no denormals, the car off
+              the road within 15 s both ways. Matching it would mean the
+              EE's adder (one guard bit) and multiplier (sometimes an ulp
+              under IEEE's) in software for every float operation of the
+              world's step, and PCSX2 does not model the multiplier
+              fully either. So "DemoReplays" stays 0, and attract mode is
+              the AI race.
 
 73. [x] **The car's retail pass: where 72b found retail and the port
         apart.** The port's car physics is the demo's code. Porting
@@ -5335,6 +5354,14 @@ phases.
               moved 0.001, and no step was below the road. Not yet on the
               3DS. Write-up: `docs/formats/collision-body.md`, "The
               port's departure (CrowbarSparesCars)".
+
+82. [ ] **A stone wall's brief artifact on track 11.** Reported by the user
+        on 2026-10-20, watching the 72h-2c runs on Azahar: "a minor
+        graphical artifact on one of the stone walls it collided with
+        briefly on the demo". File 5's replay (track 11) played on past
+        its misses, and the Elise hit the low stone wall by the yellow
+        chevrons some 30 s in, in both runs. The shots, every 15 s, did
+        not catch it. What it looked like is still to ask.
 
 ### The retail frontend
 

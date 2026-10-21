@@ -292,7 +292,7 @@ Three of retail's reads are tested first in the port:
 Until TASKS 72g-3 the port hid View Replay with a test of its own,
 `gEndGameReplayViewableFn`, because `RCSTATE_INSTANT_REPLAY` had no
 handler. `rcreplay.c` is that handler now, so the test is gone. View
-Replay shows whenever the manager's MuteHighlightSoundFlag is clear, as
+Replay shows whenever the manager's OutOfStepFlag is clear, as
 retail's does. It replays the race from its first lap snapshot, and
 START goes back to the End Game Menu (`replay.md`, "72g-3").
 

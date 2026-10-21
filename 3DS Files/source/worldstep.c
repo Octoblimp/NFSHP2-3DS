@@ -7,11 +7,13 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "blist.h"
 #include "bmath.h"
 #include "bticker.h"
 #include "car.h"
+#include "chopper.h"
 #include "collision.h"
 #include "collisionbody.h"
 #include "joylog.h"
@@ -136,6 +138,7 @@ static void prof_rounds(int32_t round)
 // Not in the image; see world.h.
 int32_t       WorldFallTraceOn;
 WorldFallStep WorldFallTrace;
+WorldVerifyMissed WorldVerifyMiss;
 
 typedef bVector3 *(*FallVectorFn)(void *self);
 
@@ -472,13 +475,22 @@ uint16_t world_calculate_debug_checksum(World *w)
         w->CarPositionTable[i] = c->State.Position;
         s = s * 33u + v;
     }
+    // Retail's (0x0014e240) adds the helicopter's x, its Matrix's fourth
+    // row read as a word. The image tests &Matrix for NULL, which it never
+    // is.
+    if (w->Helicopter != NULL) {
+        uint32_t x;
+
+        memcpy(&x, &w->Helicopter->Matrix.v3.x, 4);
+        s = s + x;
+    }
     return (uint16_t)((s >> 16) + s);
 }
 
 void world_verify_debug_checksums(World *w)
 {
     uint32_t c = world_calculate_debug_checksum(w);
-    uint32_t b;
+    uint32_t b, e;
     ReplayManager *rm;
 
     if (Joylog_ReplayingFlag)
@@ -494,8 +506,16 @@ void world_verify_debug_checksums(World *w)
     }
     if (!rm->ReplayingFlag)
         return;
-    if (((uint32_t)ReplayManager_GetData(rm, 8, 2) & 0xffu) == b)
+    e = (uint32_t)ReplayManager_GetData(rm, 8, 2) & 0xffu;
+    if (e == b)
         return;
+    WorldVerifyMiss.checksum = c;
+    WorldVerifyMiss.seed = w->WorldRandomSeed;
+    WorldVerifyMiss.expected = e;
+    // Retail's (0x0014e300) marks the replay out of step first, through
+    // pReplayManager again: the pause menu and the post-race then leave it
+    // alone.
+    pReplayManager->OutOfStepFlag = 1;
     if (gRaceCoordinatorPostMessageFn != NULL)
         gRaceCoordinatorPostMessageFn(pRaceCoordinator, RC_SKIP_REPLAY, 0);
 }

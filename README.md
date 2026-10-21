@@ -225,7 +225,8 @@ want:
 | `DebugLog 1` | writes `sdmc:/nfshp2_debug.txt`, for a bug report |
 | `PauseLog 1` | keeps the last 3 seconds of a race and writes `sdmc:/nfshp2_pause_N.bin` when you pause, for a graphics bug |
 | `FallLog 1` | with `DebugLog 1`, logs your car's collisions every frame, for a car that falls through the road |
-| `DemoReplays 1` | plays the disc's demo replays in attract mode (they drift off course on the 3DS, so they are off by default) |
+| `DemoReplays 1` | lets attract mode start the disc's demo replays (on the 3DS they leave the PS2's path after one frame and end, so they are off by default) |
+| `DemoReplayDrift 1` | with `DemoReplays 1` and `DebugLog 1`, a demo replay plays on past that point, and the log counts the frames that left the path |
 | `EggCodes N` | turns cheat codes on at boot by N's bits, as entering them does: 1 Motion Blur, 2 Black & White, 4 Heavy Fog, 8 R/C Car, 16 Video Mode, 256 Chrome Cars |
 
 ## Known issues

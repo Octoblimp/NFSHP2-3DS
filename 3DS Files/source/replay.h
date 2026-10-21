@@ -40,7 +40,9 @@ typedef struct ReplayManager {
     int32_t ReplayingFlag;           // 0
     int32_t CapturingFlag;           // 4
     int32_t RemoveDataError;         // 8
-    int32_t MuteHighlightSoundFlag;  // 12, new in retail; the name is ours
+    int32_t OutOfStepFlag;           // 12, new in retail; the name is ours:
+                                     // VerifyDebugChecksums sets it at a
+                                     // replayed frame's miss
     int32_t PausedFlag;              // 16
     int32_t SlowMotionFlag;          // 20
     int32_t ReplayPausedThisFrame;   // 24

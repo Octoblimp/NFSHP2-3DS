@@ -17,6 +17,10 @@
 # checksum misses end it at once and the game goes to the main menu, which
 # the run takes as the demo's end. -Replays is run without -Skip.
 #
+# -Drift N (with -Replays) sets "DemoReplayDrift N": the replay plays on
+# past its misses, and the log counts them (configitems.h, 72h-2c). At 2,
+# the world's steps round toward zero, as the EE's do.
+#
 # sdmc:/nfshp2_config.txt must not set SkipFE: the run needs the frontend.
 # The run presses nothing in a race but -Skip's A.
 #
@@ -24,6 +28,7 @@
 #   powershell -File tools/run_azahar_attract.ps1
 #   powershell -File tools/run_azahar_attract.ps1 -Skip
 #   powershell -File tools/run_azahar_attract.ps1 -Replays
+#   powershell -File tools/run_azahar_attract.ps1 -Replays -Drift 2
 
 param(
     [int]$DemoSeconds = 240,      # the longest a demo may take to run out
@@ -33,7 +38,8 @@ param(
     [string]$Target3dsx = "",
     [string]$OutDir = "",
     [switch]$Skip,                # the second demo skipped with A
-    [switch]$Replays              # "DemoReplays 1": the disc's replays
+    [switch]$Replays,             # "DemoReplays 1": the disc's replays
+    [int]$Drift = 0               # "DemoReplayDrift": play on past misses
 )
 
 $ErrorActionPreference = "Stop"
@@ -128,7 +134,8 @@ $debugLog  = Join-Path $env:APPDATA "Azahar\sdmc\nfshp2_debug.txt"
 # DemoReplays for this run; a later line wins, and the file goes back as
 # it was once the run is over.
 $configBefore = [System.IO.File]::ReadAllBytes($hp2Config)
-Add-Content -Path $hp2Config -Value @("", ("DemoReplays {0}" -f [int][bool]$Replays)) -Encoding ASCII
+Add-Content -Path $hp2Config -Value @("", ("DemoReplays {0}" -f [int][bool]$Replays),
+    ("DemoReplayDrift {0}" -f $Drift)) -Encoding ASCII
 $azaharLog = Join-Path $env:APPDATA "Azahar\log\azahar_log.txt"
 Remove-Item $debugLog  -ErrorAction SilentlyContinue
 Remove-Item $azaharLog -ErrorAction SilentlyContinue

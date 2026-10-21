@@ -5197,7 +5197,7 @@ static int32_t replayGetBeginningOfTime(const ReplayManager* rm)
 // retail inlines (lw 12 and lw 160 of the manager).
 static int32_t replayMuteHighlights(const ReplayManager* rm)
 {
-    return rm->MuteHighlightSoundFlag;
+    return rm->OutOfStepFlag;
 }
 
 static int32_t replayEndCurrentHighlightTime(const ReplayManager* rm)
@@ -5225,6 +5225,85 @@ static void replayHandleSpecialEvent(const ReplaySpecialEventInfo* e)
               pReplayManager != NULL && pReplayManager->ReplayingFlag
                   ? ", replayed" : "",
               known ? "" : ", unknown");
+}
+
+// "DemoReplayDrift" (configitems.h): a disc replay's frames and misses,
+// counted from each snapshot's first: a new snapshot, or a loop that is
+// not the one after the last, starts the count again.
+static struct {
+    int32_t snapshot;           // the one counted, or -1
+    int32_t loop;               // the last frame's
+    int32_t frames, misses;
+    int32_t firstMiss;          // its loop, or -1
+} gDrift = { -1, 0, 0, 0, -1 };
+
+#define DRIFT_SHOWN 8           // the misses logged one by one
+
+// Before the world's step of a disc replay's frame: the frame counted, the
+// first few with the seed and the checksum the step starts from, and a
+// line every 150. At "DemoReplayDrift 2" the VFP rounds toward zero and
+// flushes denormals for the step, as the EE does (RunFast's DN and FZ, and
+// RZ). Answers the FPSCR to put back after it, or 0 for none.
+static uint32_t demoReplayDriftStep(World* w)
+{
+    uint32_t fpscr = 0;
+
+    if (!ConfigDemoReplayDrift || !DemoModeReplayActiveFlag
+        || !pReplayManager->ReplayingFlag)
+        return 0;
+    // First, so that the checksum below is the one the step's verify makes.
+    if (ConfigDemoReplayDrift >= 2) {
+        __asm__ volatile("vmrs %0, fpscr" : "=r"(fpscr));
+        __asm__ volatile("vmsr fpscr, %0" : : "r"(0x03c00000u) : "memory");
+    }
+    if (gDrift.snapshot != TheDemoModeReplay.PlayingSnapshotNumber
+        || WorldLoopCounter != gDrift.loop + 1) {
+        gDrift.snapshot = TheDemoModeReplay.PlayingSnapshotNumber;
+        gDrift.frames = gDrift.misses = 0;
+        gDrift.firstMiss = -1;
+        logPrintf("drift: snapshot %d from loop %ld\n", (int)gDrift.snapshot,
+                  (long)WorldLoopCounter);
+    }
+    if (gDrift.frames < 4)
+        logPrintf("drift: loop %ld seed %08lx checksum %04x\n",
+                  (long)WorldLoopCounter, (unsigned long)w->WorldRandomSeed,
+                  (unsigned)world_calculate_debug_checksum(w));
+    if (gDrift.frames > 0 && gDrift.frames % 150 == 0)
+        logPrintf("drift: loop %ld, %ld of %ld frames missed, the first at "
+                  "%ld\n", (long)WorldLoopCounter, (long)gDrift.misses,
+                  (long)gDrift.frames, (long)gDrift.firstMiss);
+    gDrift.frames++;
+    gDrift.loop = WorldLoopCounter;
+    return fpscr;
+}
+
+// The port's: a disc replay's checksum miss goes in the log, with its loop
+// and the demo snapshot playing, for 72h-2c's drift. The post goes on as
+// retail's: the demo ends as skipped. With "DemoReplayDrift", the miss is
+// counted and the replay plays on.
+static void demoReplayPostMessage(struct RaceCoordinator* rc, int32_t msg,
+                                  int32_t param)
+{
+    if (msg == RC_SKIP_REPLAY && DemoModeReplayActiveFlag
+        && ConfigDemoReplayDrift) {
+        const WorldVerifyMissed* m = &WorldVerifyMiss;
+
+        if (gDrift.misses++ == 0)
+            gDrift.firstMiss = WorldLoopCounter;
+        if (gDrift.misses <= DRIFT_SHOWN)
+            logPrintf("drift: missed at loop %ld: checksum %04lx seed %08lx, "
+                      "byte %02lx, the PS2's %02lx\n", (long)WorldLoopCounter,
+                      (unsigned long)m->checksum, (unsigned long)m->seed,
+                      (unsigned long)(((m->checksum >> 8) + m->checksum
+                                       + (m->seed & 0xffu)) & 0xffu),
+                      (unsigned long)m->expected);
+        return;
+    }
+    if (msg == RC_SKIP_REPLAY && DemoModeReplayActiveFlag)
+        logPrintf("demo replay: checksum missed at loop %ld, snapshot %d\n",
+                  (long)WorldLoopCounter,
+                  (int)TheDemoModeReplay.PlayingSnapshotNumber);
+    racecoordinator_post_message(rc, msg, param);
 }
 
 // FrontendDatabase::StartRace's (0x0018549c): with a demo replay active,
@@ -6309,6 +6388,7 @@ static void raceFrame(void)
                 // capture logged; frameprof times that wait apart.
                 uint32_t spin = bGetTicker();
                 float step = world_get_timestep(w);
+                uint32_t fpscr;
 
                 if (pReplayManager->ReplayingFlag)
                     FrameProfReplayWait = bGetTicker() - spin;
@@ -6317,7 +6397,10 @@ static void raceFrame(void)
                 MainLoopTiming.GenerateJoyEvents = bGetTicker();
                 frameMark("race: the world's step");
                 forceChopperTick(step);
+                fpscr = demoReplayDriftStep(w);
                 world_do_timestep(w, step);
+                if (fpscr != 0)
+                    __asm__ volatile("vmsr fpscr, %0" : : "r"(fpscr) : "memory");
                 logFallStep(w);
             }
             replaymgr_end_frame(pReplayManager);
@@ -8782,7 +8865,7 @@ int main(int argc, char** argv)
     gCarSnapshotRetailDrivers         = &DemoModeReplayActiveFlag;
     gRaceCoordinatorPostMessageFn = ConfigReplayCheck
                                         ? replayCheckPostMessage
-                                        : racecoordinator_post_message;
+                                        : demoReplayPostMessage;
     if (ConfigReplayCheck) gReplayChecksumBreakFn = replayCheckBreak;
     // The race's sound: the regions hook loads the race's banks and turns
     // the jukebox to the racing list as the track loads, the TICK starts
