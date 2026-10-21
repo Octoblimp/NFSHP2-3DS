@@ -247,6 +247,13 @@ extern int32_t ConfigFallLog;               // 0
 // as the EE does. Needs "DebugLog 1". Off by default.
 extern int32_t ConfigDemoReplayDrift;       // 0
 
+// The port's own: "DemoReplayFile N" (with "DemoReplays 1") has attract
+// mode play the disc's replay file N each time, through retail's tweaker
+// word, TweakerSnapshotFileNumber (dmreplay.h), where the first pick is
+// otherwise bRandomI(5) + 1. For running one replay again on Azahar
+// (TASKS 82). 0, the default, leaves the pick to chance.
+extern int32_t ConfigDemoReplayFile;        // 0
+
 typedef void (*ConfigItemsLogFn)(const char *line);
 
 // Applies `text` (NUL-terminated), each word as it is read; SkipFE goes

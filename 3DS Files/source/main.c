@@ -5329,6 +5329,8 @@ static int hookReplayConsiderLaunching(void* user)
 {
     (void)user;
     if (!ConfigDemoReplays) return 0;
+    if (ConfigDemoReplayFile > 0)
+        TheDemoModeReplay.TweakerSnapshotFileNumber = ConfigDemoReplayFile;
     return dmreplay_consider_launching();
 }
 

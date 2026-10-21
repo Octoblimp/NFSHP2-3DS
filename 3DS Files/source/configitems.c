@@ -65,6 +65,7 @@ int32_t ConfigPauseLog;                     // the port's own
 int32_t ConfigEggCodes;                     // the port's own
 int32_t ConfigFallLog;                      // the port's own
 int32_t ConfigDemoReplayDrift;              // the port's own
+int32_t ConfigDemoReplayFile;               // the port's own
 
 int32_t config_skip_fe(void)
 {
@@ -136,6 +137,7 @@ static const ConfigItem kConfigItems[] = {
     { "EggCodes",                   &ConfigEggCodes,             0 },
     { "FallLog",                    &ConfigFallLog,              0 },
     { "DemoReplayDrift",            &ConfigDemoReplayDrift,      0 },
+    { "DemoReplayFile",             &ConfigDemoReplayFile,       0 },
 };
 
 static void config_log(ConfigItemsLogFn log, const char *fmt,

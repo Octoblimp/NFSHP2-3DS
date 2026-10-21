@@ -227,6 +227,7 @@ want:
 | `FallLog 1` | with `DebugLog 1`, logs your car's collisions every frame, for a car that falls through the road |
 | `DemoReplays 1` | lets attract mode start the disc's demo replays (on the 3DS they leave the PS2's path after one frame and end, so they are off by default) |
 | `DemoReplayDrift 1` | with `DemoReplays 1` and `DebugLog 1`, a demo replay plays on past that point, and the log counts the frames that left the path |
+| `DemoReplayFile N` | with `DemoReplays 1`, attract mode plays the disc's replay file N (1 to 6) each time, where the game would pick one by chance |
 | `EggCodes N` | turns cheat codes on at boot by N's bits, as entering them does: 1 Motion Blur, 2 Black & White, 4 Heavy Fog, 8 R/C Car, 16 Video Mode, 256 Chrome Cars |
 
 ## Known issues

@@ -21,6 +21,9 @@
 # past its misses, and the log counts them (configitems.h, 72h-2c). At 2,
 # the world's steps round toward zero, as the EE's do.
 #
+# -File N (with -Replays) sets "DemoReplayFile N": the replay is file N
+# of the six, where the game would pick one by chance (TASKS 82).
+#
 # sdmc:/nfshp2_config.txt must not set SkipFE: the run needs the frontend.
 # The run presses nothing in a race but -Skip's A.
 #
@@ -39,7 +42,8 @@ param(
     [string]$OutDir = "",
     [switch]$Skip,                # the second demo skipped with A
     [switch]$Replays,             # "DemoReplays 1": the disc's replays
-    [int]$Drift = 0               # "DemoReplayDrift": play on past misses
+    [int]$Drift = 0,              # "DemoReplayDrift": play on past misses
+    [int]$File = 0                # "DemoReplayFile": this replay, not chance's
 )
 
 $ErrorActionPreference = "Stop"
@@ -135,7 +139,7 @@ $debugLog  = Join-Path $env:APPDATA "Azahar\sdmc\nfshp2_debug.txt"
 # it was once the run is over.
 $configBefore = [System.IO.File]::ReadAllBytes($hp2Config)
 Add-Content -Path $hp2Config -Value @("", ("DemoReplays {0}" -f [int][bool]$Replays),
-    ("DemoReplayDrift {0}" -f $Drift)) -Encoding ASCII
+    ("DemoReplayDrift {0}" -f $Drift), ("DemoReplayFile {0}" -f $File)) -Encoding ASCII
 $azaharLog = Join-Path $env:APPDATA "Azahar\log\azahar_log.txt"
 Remove-Item $debugLog  -ErrorAction SilentlyContinue
 Remove-Item $azaharLog -ErrorAction SilentlyContinue
@@ -193,7 +197,9 @@ function Shot([string]$tag) {
     if (-not (Alive)) { return }
     $script:step++
     $path = Join-Path $OutDir ("{0:d2}_{1}.png" -f $script:step, $tag)
-    [Hp2Cap]::CaptureToFile($hwnd, $path)
+    # The user may close Azahar between Alive and the capture; the run
+    # must still reach the end, where the card's config goes back.
+    try { [Hp2Cap]::CaptureToFile($hwnd, $path) } catch { return }
     Write-Host ("  [{0,5:N1}s] {1}" -f (Elapsed), $path)
 }
 
