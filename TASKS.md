@@ -2148,7 +2148,7 @@ is citro3d and owns the top.
         screen or anything on here, so no player two is possible". No
         split screen; Player Names hides Player 2 (TASKS 54).
         Multiplayer is TASKS 37's, one console each.
-31. [ ] Final CIA packaging + Old3DS/New3DS compatibility pass
+31. [x] Final CIA packaging + Old3DS/New3DS compatibility pass
         (Since 2026-10-03 the New 3DS is the target, task 28. Since
         2026-10-05 it is the only one, the user's call: an Old 3DS stops
         at boot with a message (6ac29d1), and the pass checks only that.)
@@ -2161,6 +2161,17 @@ is citro3d and owns the top.
           changes: none. Open until the user says it is good to go
           and names the GitHub repo; then the v1.0.0 tag and the
           push.
+        - Released on 2026-10-21. The user: "As long as all
+          bugs/issues are listed in README.MD its good to go", repo
+          https://github.com/Octoblimp/NFSHP2-3DS. README's known
+          issues gained TASKS 82's wall, the demo replays, 37f's split
+          and the French art; `3DS Files/meta/hp2` is in git at the
+          user's word (d8dfd37). A fresh clone built the same .3dsx and
+          the same CIA content (makerom's ticket and content IDs are
+          random). Tag v1.0.0 on f0770e9, pushed with master; the
+          GitHub release has the CIA and the .3dsx as two files (no
+          ZIP), the ones the user tested: CIA f197d13a...6096, .3dsx
+          927b65b7...5d1f.
 
 ## Asked for during the port
 

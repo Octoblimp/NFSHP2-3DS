@@ -29286,5 +29286,43 @@ you see. Only fix anything you notice that's an actual problem."
 - **TASKS 47** is [x], from the user's report. TASKS 64 gets the
   report as a note and stays open as the user's known issue.
 - **The launch checklist** (v44): the ten device tests Passed, 47 Done.
-- **Next:** the user's go and the GitHub repo's name, then the v1.0.0
-  tag and the push.
+- **The go.** The user: "As long as all bugs/issues are listed in
+  README.MD its good to go", with their own README edits (the disc's
+  name, the trademarks, the split-screen line removed: "its not an
+  issue") and the repo, https://github.com/Octoblimp/NFSHP2-3DS. Then:
+  include the meta folder and all of `3DS Files`' source so it
+  compiles; player-driven cops in wireless "was never a game feature",
+  so it is not an issue; the CIA and .3dsx as separate files on the
+  release, no ZIP.
+- **README** (d8dfd37): the known issues it lacked, from every open
+  TASKS box: track 11's stone wall (82), the demo replays left off
+  (72h-2c), the wireless split just after a finish (37f's frame 1809),
+  the French LOADING and logo art, and the language screen's slide-in.
+  Left out: OverwriteFred's open box (memcard.c has it now; the box is
+  stale) and bmenu's recolour note (not visible). Install step 5 names
+  the Releases page.
+- **meta/hp2 in git** (d8dfd37): `.gitignore` no longer skips it, and the
+  README's About, the Makefile and make_banner.py say so. Every source
+  file was already tracked. build_cia.ps1's warning names the committed
+  banner (f0770e9).
+- **A fresh clone** (`git clone` into the scratchpad, its own
+  build_cia.ps1): built, with make_banner.py failing for want of the
+  disc before it writes anything. The .3dsx is byte-identical to the
+  release candidate's (927b65b7...). The CIA is the same size and
+  differs in 602 bytes, all makerom's random ticket ID, title key and
+  content ID and the two signatures over them; the content from 0x3900
+  on is the same.
+- **Master's history** has no game data: 5,904 blobs, the biggest the
+  vendored tools; the one data file, `3DS Files/data/buttons3ds.bin`,
+  is tools/buttons3ds_make.py's.
+- **Released.** Tag v1.0.0 (annotated) on f0770e9, pushed with master
+  to origin (the repo was empty; its default branch is master). The
+  release, "Need for Speed: Hot Pursuit 2 for the New 3DS 1.0.0", was
+  made with WSL's gh (2.46.0, signed in as Octoblimp; Windows has no
+  gh): https://github.com/Octoblimp/NFSHP2-3DS/releases/tag/v1.0.0,
+  with `NFSHP2-3DS.cia` (f197d13a...6096) and `NFSHP2-3DS.3dsx`
+  (927b65b7...5d1f), the files the user tested. The repo is private;
+  making it public is the user's.
+- TASKS 31 is [x]. The launch checklist (v45) says released.
+- **Next:** whatever the user asks. The open TASKS boxes are the README's
+  known issues, 46's timing run and 61 (a wish, not an issue).
