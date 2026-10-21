@@ -29034,3 +29034,45 @@ task". TASKS 75 is the checklist's last retail item.
 - **Next:** the fog chain (eAttachDepthIntoAlpha `0x00118a60`, eAttachFog
   `0x00119768`, CreateFogPalette `0x00119308`), then the 37 functions
   cited by neither address.
+
+## Session 150 -- the fog chain as retail's (TASKS 75)
+
+The user, 2026-10-20: "Continue where you left off". Session 149 ran out
+of its limit in the middle of the fog chain, with the checker and the
+model GS done and a mutation pass running.
+
+- **eAttachDepthIntoAlpha** (retail `0x00118a60`, the demo's
+  `0x00119330`). Retail's draws, in four passes, the PSMZ24 buffer's
+  bits 8 to 15 into the frame's alpha, and 255 where the Z is past
+  0xffff. The demo's read a PSMZ16S buffer through two palettes.
+  `efog_depth_alpha` is `z > 0xffff ? 0xff : z >> 8`, and the two depth
+  palettes are gone.
+- **CreateFogPalette** (`0x00119308`). fpow is inlined, FogPower is 4.0
+  (the demo's 4.6), and the copy of entry 255 over 252 to 254 is gone.
+  Nothing in retail writes FogPower: its one gp access is the load.
+- **eAttachFog** (`0x00119768`) builds its packet in the frame's memory
+  now; GetFogPalette moved. Neither changes what the port's do.
+- **trackview.c**: the fog's Z comes from the view's target's range
+  (`s_zRange`, PSMZ24's for player 1), 24 bits, as the sun's read-back
+  already did.
+- **weather_check** runs retail's, with a model GS (PCSX2's swizzles,
+  sprites, nearest texels, the FRAME mask, the alpha and Z tests) that
+  draws the depth packet over 32 Zs. The two fpow mutations left
+  unexplained: the add order is now caught by a palette, 1.25 from 95
+  at power 4, where the other order moves 33 alphas; the saturating
+  convert is equivalent, since the sum stays within an int for any
+  power from -19 to 57. 76 scenarios, 4,180 lines, 0 differ; 88
+  mutations, 83 caught, 5 equivalent.
+- **TRACKB12's fog**, by the port's code on the host: keep at 250..4000
+  1.000 1.000 1.000 0.992 0.906, sky 0.906 (the demo's chain gave 0.977
+  at 2,000). `docs/formats/weather-fog.md` and `eview.md` updated.
+- **Checks.** The CIA builds. loadertable, radialblur, stomper and
+  trackview_cuts pass with 0 differ.
+- **Next:** TASKS 75's last part, the 37 changed functions the port cites
+  by neither address. A first look: RainSplash::Respawn is dead on both
+  discs; TrackLockedDisplayer's 0.5, the engine ducker's 5, the
+  collision volume's 0.65 and PauseDisplayOpts are retail's already;
+  RenderHud's 1 to 255 is an alignment artefact. The port has no
+  tGlobalBackgroundAnimation (the frontend's grid and cross-faded
+  backgrounds) and no depth of field; both need a look before they are
+  called gaps.

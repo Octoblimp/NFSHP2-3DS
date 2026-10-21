@@ -5111,11 +5111,24 @@ phases.
           equivalent. On the 3DS only the sun's depth read-back changes,
           player 1's quads taking PSMZ24's pair
           (`docs/formats/sun-draw.md`).
-        - Still to do: the fog chain, which retail rewrote for the Z
-          table: eAttachDepthIntoAlpha (`0x00118a60`), eAttachFog
-          (`0x00119768`), CreateFogPalette (`0x00119308`),
-          CreateFocusPalette and GetFogPalette. The port's still models
-          the demo's PSMZ16S buffer with entry 0.
+        - The fog chain, done in Session 150: retail's
+          eAttachDepthIntoAlpha (`0x00118a60`) draws the PSMZ24 buffer's
+          bits 8 to 15 into the alpha, 255 past 0xffff, where the demo's
+          read a PSMZ16S buffer through two palettes; FogPower is 4.0,
+          the demo's 4.6, and CreateFogPalette (`0x00119308`, fpow
+          inlined) no longer copies entry 255 over 252 to 254. eAttachFog
+          (`0x00119768`) builds its packet in the frame's memory now,
+          and GetFogPalette moved; neither changes what the port's do.
+          `efog.c` has
+          retail's, and `trackview.c` takes the fog's Z from the view's
+          target's range, PSMZ24's for player 1. `weather_check` runs
+          retail's, with a model GS that draws the depth packet: 76
+          scenarios, 4,180 lines, 0 differ; 88 mutations, 83 caught, 5
+          equivalent. TRACKB12's fog now leaves 99.2% at 2,000 units
+          (the demo's 97.7%) and 90.6% at 4,000 and in the sky
+          (`docs/formats/weather-fog.md`). CreateFocusPalette and
+          eAttachDepthOfField are the depth of field's, which the port
+          does not draw.
         - joyevent, nothing to change: `scannertab.c` was read out of
           retail's disc (TASKS 49), so it has the four value changes:
           130 event names, 230 scanner rows (the demo's 231), and no

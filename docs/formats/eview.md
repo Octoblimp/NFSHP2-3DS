@@ -329,11 +329,11 @@ cut, the LOD distances) were tuned in them. The 3DS renderer takes the
 camera and `H` from the view and builds its own projection for the
 400-by-240 screen. It does not use a or `WorldScreen`.
 
-The Z table reaches the 3DS in one place. The sun's quads and Z rects
-read the depth buffer back as the GS's Z through the view's target's
-entry (`trackview.c`'s `s_zRange`, `docs/formats/sun-draw.md`). The fog's
-depth-to-alpha still models the demo's PSMZ16S buffer with entry 0, until
-the fog's retail rewrite (TASKS 75).
+The Z table reaches the 3DS in two places, both through the view's
+target's entry (`trackview.c`'s `s_zRange`). The sun's quads and Z rects
+read the depth buffer back as the GS's Z (`docs/formats/sun-draw.md`),
+and the fog takes its depth alpha from that Z, retail's `Z >> 8`
+(`docs/formats/weather-fog.md`).
 
 ## Divergences
 

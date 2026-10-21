@@ -277,8 +277,6 @@ static void reset(void)
     WeatherRegionInactiveList.prev = &WeatherRegionInactiveList;
     memset(CachedWeatherQueries, 0, sizeof CachedWeatherQueries);
     memset(FogPalette, 0, sizeof FogPalette);
-    memset(DepthUpperPalette, 0, sizeof DepthUpperPalette);
-    memset(DepthLowerPalette, 0, sizeof DepthLowerPalette);
     WeatherUseTweakerValues = tw_use;
     WeatherFog = fbits(tw_fog);
     WeatherFogStart = fbits(tw_start);
@@ -314,9 +312,21 @@ static void reset(void)
 // ------------------------------------------------------------- the ops
 
 static const uint32_t kZs[] = {
-    0, 1, 16, 63, 64, 100, 575, 576, 640, 1000, 4095, 4096, 8000, 12345,
-    16320, 16383, 16384, 30000, 65535,
+    0, 1, 16, 63, 64, 100, 255, 256, 575, 576, 640, 1000, 4095, 4096, 8000,
+    12345, 16320, 16383, 16384, 30000, 61440, 65279, 65280, 65535, 65536,
+    65537, 0x10100, 0x12345, 0x7fffff, 0x800000, 0xfffeff, 0xffffff,
 };
+
+// What eAttachDepthIntoAlpha's packet leaves in the alpha, by Z.
+static void depth_alphas(void)
+{
+    size_t i;
+
+    printf("  alpha");
+    for (i = 0; i < sizeof kZs / sizeof kZs[0]; i++)
+        printf(" %x:%x", kZs[i], efog_depth_alpha(kZs[i]));
+    printf("\n");
+}
 
 static void pica(int m)
 {
@@ -330,22 +340,6 @@ static void pica(int m)
     for (i = 0; i < sizeof kZs / sizeof kZs[0]; i++)
         printf(" %u:%u:%08x", kZs[i], efog_depth_alpha(kZs[i]),
                bitsf(efog_keep(scratch_pal, mode, kZs[i])));
-    printf("\n");
-}
-
-static void fpow_tests(void)
-{
-    static const float xy[][2] = {
-        { 0.0f, 4.6f }, { 0.5f, 4.6f }, { 1.0f, 4.6f }, { 0.01f, 2.0f },
-        { 2.0f, 0.5f }, { -1.0f, 3.0f }, { 1e-3f, 1.0f }, { 100.0f, 2.0f },
-        { 0.25f, 0.0f }, { 1e30f, 10.0f }, { 0.75f, 4.5999999f },
-        { 0.9f, -2.0f }, { 0.3f, 3.1f }, { 0.35f, 1.7f }, { 0.42f, 1.1f },
-    };
-    size_t i;
-
-    printf("  fpow");
-    for (i = 0; i < sizeof xy / sizeof xy[0]; i++)
-        printf(" %08x", bitsf(fpow(xy[i][0], xy[i][1])));
     printf("\n");
 }
 
@@ -478,11 +472,14 @@ static void run_op(const char *op)
     case 'G':
         get_palettes();
         break;
-    case 'Z':
-        printf("  -> %d\n", eattach_depth_into_alpha());
-        dump_palette("upper", DepthUpperPalette);
-        dump_palette("lower", DepthLowerPalette);
+    case 'Z': {
+        int r = eattach_depth_into_alpha();
+
+        printf("  -> %d\n", r);
+        if (r)
+            depth_alphas();
         break;
+    }
     case 'F':
         printf("  -> %d\n", eattach_fog());
         dump_palette("fog0", FogPalette[0]);
@@ -490,9 +487,6 @@ static void run_op(const char *op)
         break;
     case 'K':
         pica(atoi(op + 1));
-        break;
-    case 'p':
-        fpow_tests();
         break;
     case 'm':
         remap_test();

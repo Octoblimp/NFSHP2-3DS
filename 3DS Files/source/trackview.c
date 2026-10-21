@@ -3047,32 +3047,24 @@ static float gs_z_of_depth(const eZRange* r, float t)
     return zmin + (zmax - zmin) * t;
 }
 
-// And for the fog's u, the view's depth as (far - d) / (far - near), whose
-// Z-buffer depth is near u / d. The fog is still the demo's (efog.c),
-// which reads a PSMZ16S Z, so it keeps the demo's range, ZRanges[0],
-// whatever the view's target is. Retail rewrote the fog's chain for its
-// PSMZ24 buffer; that is TASKS 75's.
-static float gs_z_of(float u)
-{
-    float d = s_depthFar - u * (s_depthFar - s_depthNear);
-
-    return gs_z_of_depth(&ZRanges[0],
-                         d > 0.0f ? s_depthNear * u / d : 1.0f);
-}
-
-// The fog's palette is looked up by the Z as a PSMZ16S read gives it,
-// where past 0xffff is taken as 0xffff.
-static uint16_t gs_z16(float z)
-{
-    return z >= 65535.0f ? 0xffffu : (uint16_t)z;
-}
-
-// And the sun's rects by the Z as retail's transfer gives it, 32 bits a
-// pixel of which StuffSun takes the low 24; all it asks is whether they
-// are under 2. What the clear left, and the sky did not write, is 0.
+// The Z as retail's 24-bit buffer holds it, which the fog reads (efog.c)
+// and the sun's rects too, 32 bits a pixel of which StuffSun takes the low
+// 24; all it asks is whether they are under 2. What the clear left, and
+// the sky did not write, is 0.
 static uint32_t gs_z24(float z)
 {
     return z >= 16777215.0f ? 0xffffffu : (uint32_t)z;
+}
+
+// And for the fog's u, the view's depth as (far - d) / (far - near), whose
+// Z-buffer depth is near u / d, in the view's target's range: player 1's
+// is PSMZ24's, 16 to 0x800000.
+static uint32_t gs_z_of(float u)
+{
+    float d = s_depthFar - u * (s_depthFar - s_depthNear);
+
+    return gs_z24(gs_z_of_depth(s_zRange,
+                                d > 0.0f ? s_depthNear * u / d : 1.0f));
 }
 
 static uint32_t gs_z(uint32_t d24)
@@ -3114,7 +3106,7 @@ static bool fog_fill(GeoFog* fog, const uint32_t* palette,
 
     for (j = 0; j <= GEO_FOG_STEPS; j++) {
         float    u = (float)j / (float)GEO_FOG_STEPS;
-        uint16_t z = sky ? 0 : gs_z16(gs_z_of(u));
+        uint32_t z = sky ? 0 : gs_z_of(u);
 
         keep[j] = efog_keep(palette, mode, z);
     }
@@ -3153,12 +3145,12 @@ static void fog_attach(eView* view, const uint32_t* palette,
     for (k = 0; k < TRACKVIEW_FOG_SAMPLES; k++) {
         float u = (s_depthFar - at[k]) / (s_depthFar - s_depthNear);
 
-        v->fogKeep[k] = efog_keep(palette, mode, gs_z16(gs_z_of(u)));
+        v->fogKeep[k] = efog_keep(palette, mode, gs_z_of(u));
     }
     v->fogSkyKeep = efog_keep(palette, mode, 0);
 }
 
-// eDisplayFrame's fog (0x00113420), which the PS2 lays over the frame once
+// eDisplayFrame's fog (0x001138ac), which the PS2 lays over the frame once
 // it is drawn; see efog.h. Its palette depends on nothing drawn, so here
 // it is made first, and georender lays it on as each thing is drawn.
 static void fog_frame(TrackView* v, eView* view)

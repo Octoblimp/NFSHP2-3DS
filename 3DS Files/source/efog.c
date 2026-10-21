@@ -21,12 +21,10 @@ FogModeInfo FogModeInfos[4] = {
 int32_t DrawFog = 1;
 int32_t FogMode1;
 int32_t FogMode2;
-float   FogPower = 4.5999999046325684f;     // 0x40933333
+float   FogPower = 4.0f;
 int32_t EnableDepthIntoAlpha = 1;
 
 uint32_t FogPalette[4][256];
-uint32_t DepthUpperPalette[256];
-uint32_t DepthLowerPalette[256];
 
 void (*gEFogAttachFn)(eView *view, const uint32_t *palette,
                       const FogModeInfo *mode);
@@ -159,11 +157,6 @@ void CreateFogPalette(eView *view, uint32_t *palette)
                 (uint32_t)ee_trunc_w(fpow(x, FogPower) * amount) << 24 | rgb;
         }
     }
-
-    // What the nearest Z's give, 252 to 255, all the one at 255.
-    linear[252] = linear[255];
-    linear[254] = linear[255];
-    linear[253] = linear[255];
     RemapLinearIntoClut8(palette, linear);
 }
 
@@ -171,23 +164,7 @@ void CreateFogPalette(eView *view, uint32_t *palette)
 
 int eattach_depth_into_alpha(void)
 {
-    uint32_t upper[256], lower[256];
-    int      i;
-
-    if (!EnableDepthIntoAlpha) {
-        return 0;
-    }
-    // The Z's high byte into the alpha's top six bits, 0xfc past 63; its
-    // low byte's top two into the alpha's bottom two.
-    for (i = 0; i < 256; i++) {
-        upper[i] = (i & 0xc0) ? 0xff000000u : (uint32_t)i << 26;
-    }
-    for (i = 0; i < 256; i++) {
-        lower[i] = (uint32_t)(i >> 6 & 3) << 24;
-    }
-    RemapLinearIntoClut8(DepthUpperPalette, upper);
-    RemapLinearIntoClut8(DepthLowerPalette, lower);
-    return 1;
+    return EnableDepthIntoAlpha != 0;
 }
 
 int eattach_fog(void)
@@ -221,12 +198,7 @@ int eattach_fog(void)
 
 uint32_t efog_depth_alpha(uint32_t z)
 {
-    uint32_t hi = DepthUpperPalette[efog_clut_index(z >> 8 & 0xffu)];
-    uint32_t lo = DepthLowerPalette[efog_clut_index(z & 0xffu)];
-
-    // The FRAME's masks: the first pass writes the alpha's bits 2 to 7,
-    // the second its bits 0 and 1.
-    return ((hi & 0xfc000000u) | (lo & 0x03000000u)) >> 24;
+    return z > 0xffffu ? 0xffu : z >> 8;
 }
 
 // ALPHA_1's two blends: mode 0's, the source over the frame by the

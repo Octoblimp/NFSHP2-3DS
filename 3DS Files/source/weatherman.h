@@ -1,7 +1,10 @@
-// weatherman -- WeatherMan.obj (0x0019dfe8 .. 0x0019ec18): the track's
-// weather regions, slot 29 of the LoaderTable, and the query that blends
-// them for a point. With it, eView::GetWeatherQuery (0x001123f8) and its
-// cache, which EcstasyE.obj keeps beside eDisplayFrame.
+// weatherman -- WeatherMan.obj (retail's 0x001a8248 .. 0x001a8f28, the
+// demo's 0x0019dfe8 .. 0x0019ec18): the track's weather regions, slot 29 of
+// the LoaderTable, and the query that blends them for a point. With it,
+// eView::GetWeatherQuery (0x00112680, the demo's 0x001123f8) and its cache,
+// which EcstasyE.obj keeps beside eDisplayFrame. Retail's is the demo's but
+// for the query's first test, WeatherHeavyFog. The addresses below are
+// retail's, with the demo's after them.
 //
 // A track has one 0x34250 chunk: a WeatherRegionPack at the next 16 in the
 // chunk, then NumRegions WeatherRegions of 128 bytes each. The loader links
@@ -131,23 +134,24 @@ typedef char weatherman_layout_check[
 #define WEATHER_CHUNK_ID      0x00034250u
 #define WEATHER_PACK_VERSION  2
 
-// WeatherRegionLists, 0x00308fe0: by WeatherType. WeatherRegionInactiveList,
-// 0x00323df8, is where WeatherSetRegionState puts a region it turns off.
-// The static constructor (0x0019ebd8) links each to itself, which is where
-// these start.
+// WeatherRegionLists, 0x003110e0 (0x00308fe0): by WeatherType.
+// WeatherRegionInactiveList, 0x00330d88 (0x00323df8), is where
+// WeatherSetRegionState puts a region it turns off. The static constructor
+// (0x001a8ee8, 0x0019ebd8) links each to itself, which is where these
+// start.
 extern bNode WeatherRegionLists[WEATHER_NUM_TYPES];
 extern bNode WeatherRegionInactiveList;
 
-// WeatherRainList .. WeatherWindList, 0x00323e00 .. 0x00323e0c: each list
-// by name. Nothing in the image reads them.
+// WeatherRainList .. WeatherWindList, 0x00330d90 .. 0x00330d9c (0x00323e00
+// .. 0x00323e0c): each list by name. Nothing in the image reads them.
 extern bNode *WeatherRainList;
 extern bNode *WeatherFogList;
 extern bNode *WeatherSnowList;
 extern bNode *WeatherWindList;
 
-// The tweaker's, 0x00323e10 .. 0x00323e24, all 0 in the image. With
-// WeatherUseTweakerValues set, the query gives these for the fog, and 0 for
-// the rest.
+// The tweaker's, 0x00330da0 .. 0x00330db4 (0x00323e10 .. 0x00323e24), all
+// 0 in the image. With WeatherUseTweakerValues set, the query gives these
+// for the fog, and 0 for the rest.
 extern int32_t WeatherUseTweakerValues;
 extern float   WeatherFog;
 extern float   WeatherFogStart;
@@ -162,43 +166,48 @@ extern int32_t WeatherFogColourB;
 // the rain, snow and wind left as they were.
 extern int32_t WeatherHeavyFog;
 
-// WeatherManInit (0x0019dfe8) and WeatherManClose (0x0019dff0) do nothing.
+// WeatherManInit (0x001a8248, 0x0019dfe8) and WeatherManClose (0x001a8250,
+// 0x0019dff0) do nothing.
 void WeatherManInit(void);
 void WeatherManClose(void);
 
-// LoaderWeatherMan(bChunk *), 0x0019dff8, and UnloaderWeatherMan,
-// 0x0019e078. They return 0 for a chunk of any other type, and 1 for a
-// chunk of this one. A pack that is not version 2 is taken and nothing is
-// linked.
+// LoaderWeatherMan(bChunk *), 0x001a8258 (0x0019dff8), and
+// UnloaderWeatherMan, 0x001a82d8 (0x0019e078). They return 0 for a chunk of
+// any other type, and 1 for a chunk of this one. A pack that is not version
+// 2 is taken and nothing is linked.
 int loader_weather_man(uint8_t *chunk);
 int unloader_weather_man(uint8_t *chunk);
 
-// 0x0019e0f8: onto the tail of its type's list.
+// 0x001a8358 (0x0019e0f8): onto the tail of its type's list.
 void WeatherAddRegion(WeatherRegion *r);
-// 0x0019e138: off whatever list it is on.
+// 0x001a8398 (0x0019e138): off whatever list it is on.
 void WeatherRemoveRegion(WeatherRegion *r);
-// 0x0019e150: off its list, then onto the tail of its type's list if state
-// is nonzero, else the inactive list's. The type is not checked. Only
-// WeatherSetGroupState calls it, on regions that are on a list, and those
-// are all of types 0 to 3.
+// 0x001a83b0 (0x0019e150): off its list, then onto the tail of its type's
+// list if state is nonzero, else the inactive list's. The type is not
+// checked. Only WeatherSetGroupState calls it, on regions that are on a
+// list, and those are all of types 0 to 3.
 void WeatherSetRegionState(WeatherRegion *r, int32_t state);
-// 0x0019e198: each region in the group, or every region for a hash of 0.
+// 0x001a83f8 (0x0019e198): each region in the group, or every region for a
+// hash of 0.
 // A state of 0 takes them off the four lists, and any other puts the
 // inactive ones back. Nothing in the image calls it.
 void WeatherSetGroupState(uint32_t group_hash, int32_t state);
 
-// 0x0019e290.
+// 0x001a84f0 (0x0019e290).
 void WeatherManQuery(WeatherQuery *q, const bVector3 *pos);
 
-// CachedWeatherQueries, 0x002d47b8: one per view, by the view's ID.
+// CachedWeatherQueries, 0x002d55b8 (0x002d47b8): one per view, by the
+// view's ID.
 extern WeatherQuery CachedWeatherQueries[EVIEW_NUM_VIEWS];
 
-// eView::GetWeatherQuery, 0x001123f8: the view's cached query, queried
-// again from the camera's position when the view's WeatherQueryCounter is
-// not eFrameCounter. The ID is not checked.
+// eView::GetWeatherQuery, 0x00112680 (0x001123f8): the view's cached query,
+// queried again from the camera's position when the view's
+// WeatherQueryCounter is not eFrameCounter. The ID is not checked. Retail's
+// eView has the counter at +104, the demo's and the port's at +100.
 WeatherQuery *eview_get_weather_query(eView *view);
 
-// WeatherTest, 0x00112460, which eDisplayFrame calls: it does nothing.
+// WeatherTest, 0x001126e8 (0x00112460), which eDisplayFrame calls: it does
+// nothing.
 void WeatherTest(void);
 
 #endif

@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Cross-check 3DS Files/source/weatherman.c (WeatherMan.obj, and
-eView::GetWeatherQuery) and efog.c (EcstasyE.obj's fog) against the image
-itself, run in mipsemu.
+eView::GetWeatherQuery) and efog.c (EcstasyE.obj's fog) against retail's
+image, SLES_507.31, run in mipsemu (retail_model.RetailEmu).
 
 The model is the image: LoaderWeatherMan, UnloaderWeatherMan,
 WeatherAddRegion, WeatherRemoveRegion, WeatherSetRegionState,
-WeatherSetGroupState, WeatherManQuery, eView::GetWeatherQuery, fpow,
-RemapLinearIntoClut8, GetFogPalette, CreateFogPalette,
-eAttachDepthIntoAlpha and eAttachFog run as shipped. Stubbed:
+WeatherSetGroupState, WeatherManQuery, eView::GetWeatherQuery,
+RemapLinearIntoClut8, GetFogPalette, CreateFogPalette (with fpow inlined,
+where the demo called it), eAttachDepthIntoAlpha and eAttachFog run as
+shipped. Stubbed:
 
     eGetView                the scenario's views, 128 apart
     eGetRenderTarget        a render target of the model's
@@ -15,19 +16,27 @@ eAttachDepthIntoAlpha and eAttachFog run as shipped. Stubbed:
     AttachImageDataPacket   silent; eAttachFog's names the palette
     eDmaChain::Add          for eAttachFog's packet, the line the port's
                             seam prints: the view, the palette and the
-                            ALPHA_1 the packet holds
+                            ALPHA_1 the packet holds; eAttachDepthIntoAlpha's
+                            packet the model's GS draws (below)
+
+The frame's memory, where both build their packets, is the model's, and
+never runs out: the port's cannot. Retail's eView keeps its weather
+counter at +104 (VUClipScreenMatrix2 took +100); the port's at +100.
 
 The harness links weatherman.c and efog.c, gives them eGetView and
 eFrameCounter, and prints the same lines; gEFogAttachFn prints the view,
 the palette and the ALPHA_1 of the FogModeInfo it is handed. After each
 step both dump the five lists walked both ways and every region's links.
-The palettes, the queries and the depth palettes are dumped where a step
-makes them.
+The palettes and the queries are dumped where a step makes them, and the
+alpha eAttachDepthIntoAlpha's packet leaves for each Z of ZS.
 
-The PICA's side, efog_depth_alpha, efog_colour and efog_keep, has nothing
-in the image to run. For it the model is the spec written out here, over
-the image's own depth palettes and fog palette: the depth alpha through the
-CLUT, and the fraction the GS's ALPHA_1 leaves.
+The packet is drawn: the model's GS (below) lays it over a 24-bit Z buffer
+that holds each Z of ZS at a pixel of its own and reads the shown frame's
+alpha back at each. The harness prints efog_depth_alpha for the same Zs.
+The rest of the PICA's side, efog_colour and efog_keep, has nothing in the
+image to run. For it the model is the spec written out here, over the
+image's fog palette and the drawn depth alpha: the alpha through the CLUT,
+and the fraction the GS's ALPHA_1 leaves.
 
 The model's chunk gives each region its own address in its first eight
 bytes, where the disc has a PS2 pointer. The image leaves a region of a
@@ -40,15 +49,17 @@ fade start past the radius and at 0; each type; types past 3 and below 0;
 colours with the top bit of each byte; the chunk at each misalignment,
 each version and the wrong type; the region and group states; the tweaker;
 the query's cache by frame; each palette mode with the amounts, starts and
-powers at their edges; the palettes by view ID; the depth palettes on and
-off; eAttachFog for each view state, DrawFog and mode; and the PICA's
-colour and fraction for each mode's palette under each blend.
+powers at their edges; the palettes by view ID; the depth into alpha on
+and off, over Zs either side of each byte and past 16 bits; eAttachFog for
+each view state, DrawFog and mode; and the PICA's colour and fraction for
+each mode's palette under each blend.
 
     python tools/weather_check.py
     python tools/weather_check.py --mutate [--only a,b]
     python tools/weather_check.py --dump out/weather
 """
 import argparse
+import array
 import os
 import struct
 import subprocess
@@ -59,7 +70,8 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hostbuild
 import physicscar_check as pcc
-from mipsemu import Emu, M32, s32
+import retail_model
+from mipsemu import M32, s32
 
 ROOT = Path(__file__).resolve().parent.parent
 NL = chr(10)
@@ -76,55 +88,55 @@ HARNESS_TIMEOUT = 120
 
 # ================================================================ the image
 
-GP = 0x00328bf0
-LISTS = 0x00308fe0
-INACTIVE = 0x00323df8
-LIST_NAMES = 0x00323e00             # WeatherRainList .. WeatherWindList
-CACHE = 0x002d47b8
-FRAME = 0x00322740
-TW_USE = 0x00323e10                 # then Fog, FogStart, R, G, B
-DRAW_FOG = 0x00322bd8
-MODE1 = 0x00322bd0
-MODE2 = 0x00322bd4
-POWER = 0x00322bdc
-ENABLE = 0x00322bb8
-DIA_BUFFER = 0x00322b8c
-FOG_PAL = 0x002da980                # three, then FocusPalettes[0]
-UPPER = 0x002d9e20
-LOWER = 0x002da220
-MODE_INFOS = 0x002d9d30
-MAIN_DISP = GP - 25496
-DIA_TARGET = GP - 25488
-DIA_PACKETS = [GP - k for k in (24672, 24668, 24664, 24660, 24656, 24652,
-                                24648)]
-DMA_PTR = GP - 20044
-DMA_END = GP - 20040
-DMA_FAIL = GP - 20028
-DMA_WANT = GP - 20024
+GP = retail_model.RETAIL_GP         # 0x003358f0
+LISTS = 0x003110e0
+INACTIVE = GP - 19304               # 0x00330d88
+LIST_NAMES = GP - 19296             # WeatherRainList .. WeatherWindList
+CACHE = 0x002d55b8
+FRAME = GP - 25260                  # eFrameCounter
+TW_USE = GP - 19280                 # then Fog, FogStart, R, G, B
+DRAW_FOG = GP - 24144
+MODE1 = GP - 24152
+MODE2 = GP - 24148
+POWER = GP - 24140
+ENABLE = GP - 24180
+FOG_PAL = 0x002da780                # three, then FocusPalettes[0]
+MODE_INFOS = 0x002da6d0
+MAIN_DISP = GP - 24920              # the shown frame's draw context
+MAIN_DRAW = GP - 24912              # and the drawn one's
+FMEM_PTR = GP - 19388               # the frame's memory
+FMEM_END = GP - 19384
+FMEM_FAIL = GP - 19372
+FMEM_WANT = GP - 19368
 
-LOADER = 0x0019dff8
-UNLOADER = 0x0019e078
-ADD_REGION = 0x0019e0f8
-REMOVE_REGION = 0x0019e138
-SET_STATE = 0x0019e150
-SET_GROUP = 0x0019e198
-QUERY = 0x0019e290
-GET_QUERY = 0x001123f8
-REMAP = 0x00118878
-GET_PALETTE = 0x001195f8
-FPOW = 0x00119628
-CREATE = 0x00119678
-DEPTH_INTO_ALPHA = 0x00119330
-ATTACH_FOG = 0x00119af8
-STATIC_CTOR = 0x0019ebd8
+LOADER = 0x001a8258
+UNLOADER = 0x001a82d8
+ADD_REGION = 0x001a8358
+REMOVE_REGION = 0x001a8398
+SET_STATE = 0x001a83b0
+SET_GROUP = 0x001a83f8
+QUERY = 0x001a84f0
+GET_QUERY = 0x00112680
+REMAP = 0x001189f8
+GET_PALETTE = 0x001192d8
+CREATE = 0x00119308
+DEPTH_INTO_ALPHA = 0x00118a60
+ATTACH_FOG = 0x00119768
+STATIC_CTOR = 0x001a8ee8
 
-E_GET_VIEW = 0x001071f0
-E_GET_TARGET = 0x00104d00
-ATTACH_IMAGE = 0x001087e0
-DMA_ADD = 0x00103e08
-BMEMSET = 0x00238140
-FOG_ATTACH_IMAGE_RA = 0x00119bd4
-FOG_ADD_RA = 0x00119e08
+E_GET_VIEW = 0x00107c90
+E_GET_TARGET = 0x00105848
+ATTACH_IMAGE = 0x00108a50
+DMA_ADD1 = 0x00104808               # eDmaChain::Add(void *)
+DMA_ADD = 0x00104820                # eDmaChain::Add(void *, void *)
+BMEMSET = 0x00250340
+FOG_ATTACH_IMAGE_RA = 0x00119854
+FOG_ADD_RA = 0x00119ad8
+DIA_ADD_RA = 0x001192a4
+
+VIEW_COUNTER = 104                  # eView's WeatherQueryCounter
+DIA_ARG = 0x342800                  # eDisplayFrame's arguments
+FOG_ARG = 0x342c00
 
 WEATHER_CHUNK = 0x00034250
 
@@ -140,19 +152,16 @@ POSV = 0x01014700
 REMAP_SRC = 0x01015000
 REMAP_DST = 0x01015400
 CHAIN = 0x01016000
-DMA = 0x01020000
-DIA_PKT = 0x01130000
+FMEM = 0x01020000
+FMEM_SIZE = 0x10000
 RT15 = 0x01131000
-MAIN_RT = 0x01132000
 NUM_VIEWS = 5
 
-ZS = (0, 1, 16, 63, 64, 100, 575, 576, 640, 1000, 4095, 4096, 8000, 12345,
-      16320, 16383, 16384, 30000, 65535)
-
-FPOW_XY = ((0.0, 4.6), (0.5, 4.6), (1.0, 4.6), (0.01, 2.0), (2.0, 0.5),
-           (-1.0, 3.0), (1e-3, 1.0), (100.0, 2.0), (0.25, 0.0),
-           (1e30, 10.0), (0.75, 4.5999999), (0.9, -2.0), (0.3, 3.1),
-           (0.35, 1.7), (0.42, 1.1))
+# GS Zs, 24 bits: either side of each byte, 16 bits and past them.
+ZS = (0, 1, 16, 63, 64, 100, 255, 256, 575, 576, 640, 1000, 4095, 4096,
+      8000, 12345, 16320, 16383, 16384, 30000, 61440, 65279, 65280, 65535,
+      65536, 65537, 0x10100, 0x12345, 0x7fffff, 0x800000, 0xfffeff,
+      0xffffff)
 
 GET_PALETTE_IDS = (-1, 0, 1, 2, 3, 4, 5, 9, 0x7fffffff, -0x80000000)
 
@@ -189,7 +198,7 @@ class Region(object):
 class Scenario(object):
     def __init__(self, ops, regions=(), version=2, cid=WEATHER_CHUNK, mis=0,
                  tweak=(0, 0.0, 0.0, 0, 0, 0), draw=1, modes=(0, 0),
-                 enable=1, power=4.6, views=None, frame=1, pos=()):
+                 enable=1, power=4.0, views=None, frame=1, pos=()):
         self.ops = ops
         self.regions = list(regions)
         self.version = version
@@ -299,7 +308,7 @@ def script():
 
     sc = [
         # The globals as the image starts them are printed before these.
-        S("I p m G"),
+        S("I m G"),
         # TRACKB12's kinds, loaded, queried, unloaded.
         S("L q0 q1 q2 q3 q4 q5 q6 q7 U q0 q3", regions=track, pos=track_pos),
         S("L U L q0 U q0", regions=track[:3], pos=track_pos),
@@ -353,6 +362,9 @@ def script():
         S("P1", tweak=fog(0.6, 256.0, 10, 20, 30)),
         S("P1", tweak=fog(0.6, -10.0, 10, 20, 30)),
         S("P1", tweak=fog(-0.5, 100.0, 10, 20, 30)),
+        # fpow's sum in the image's order: from 95 at 1.25, the other order
+        # moves 33 of the alphas by one.
+        S("P1", tweak=fog(1.25, 95.0, 9, 8, 7)),
         S("P1", tweak=fog(0.9, 128.0, 300, -5, 511), power=1.0),
         S("P1", tweak=fog(0.9, 128.0, 9, 8, 7), power=0.0),
         S("P1", tweak=fog(0.9, 128.0, 9, 8, 7), power=10.0),
@@ -413,19 +425,271 @@ def script():
     return sc
 
 
+# ================================================================== the GS
+
+# eAttachDepthIntoAlpha leaves the depth in the alpha by drawing: its
+# packet reads the Z buffer through other formats' views of it. This is
+# enough of a GS to draw that packet: the formats' swizzles, sprites,
+# nearest texels, the FRAME mask, and the alpha and Z tests. Anything else
+# the packet asks for stops the model.
+#
+# The tables are PCSX2's (GSTables.cpp). A 32-bit page is 64 by 32 pixels
+# in blocks of 8 by 8; a 16-bit one 64 by 64 in blocks of 16 by 8, each
+# pair of pixels 8 apart sharing a word. The Z formats' blocks are the
+# colour ones' XOR 24.
+BT32 = ((0, 1, 4, 5, 16, 17, 20, 21), (2, 3, 6, 7, 18, 19, 22, 23),
+        (8, 9, 12, 13, 24, 25, 28, 29), (10, 11, 14, 15, 26, 27, 30, 31))
+CT32 = ((0, 1, 4, 5, 8, 9, 12, 13), (2, 3, 6, 7, 10, 11, 14, 15),
+        (16, 17, 20, 21, 24, 25, 28, 29), (18, 19, 22, 23, 26, 27, 30, 31),
+        (32, 33, 36, 37, 40, 41, 44, 45), (34, 35, 38, 39, 42, 43, 46, 47),
+        (48, 49, 52, 53, 56, 57, 60, 61), (50, 51, 54, 55, 58, 59, 62, 63))
+BT16 = ((0, 2, 8, 10), (1, 3, 9, 11), (4, 6, 12, 14), (5, 7, 13, 15),
+        (16, 18, 24, 26), (17, 19, 25, 27), (20, 22, 28, 30),
+        (21, 23, 29, 31))
+CT16 = tuple(tuple(b + (c & 7) // 2 * 8 + (c & 1) * 2 + (c >= 8)
+                   for c in range(16))
+             for b in (0, 4, 32, 36, 64, 68, 96, 100))
+
+# PSM: 16 bits a pixel, a Z format.
+PSMS = {0x00: (0, 0), 0x02: (1, 0), 0x0a: (1, 0), 0x30: (0, 1),
+        0x31: (0, 1), 0x32: (1, 1), 0x3a: (1, 1)}
+
+# Where the model's frames are: a draw frame, the shown one and the Z
+# buffer, 512 by 512 each, in pages of 2048 words.
+DRAW_FBP = 0x20
+DISP_FBP = 0xa0
+ZBP = 0x120
+GS_FILL_DRAW = 0x5a5a5a5a
+GS_FILL_DISP = 0xa5a5a5a5
+
+
+def u64(e, a):
+    return e.u32(a) | e.u32(a + 4) << 32
+
+
+class GS(object):
+    def __init__(self):
+        self.mem = array.array("I", bytes(4 << 20))
+        self.r = {}
+        self.queue = []
+
+    @staticmethod
+    def at(psm, bp, bw, x, y):
+        """Pixel (x, y)'s word, and which half of it for 16 bits."""
+        half, z = PSMS[psm]
+        if half:
+            page = (y >> 6) * bw + (x >> 6)
+            block = BT16[y >> 3 & 7][x >> 4 & 3]
+            h = CT16[y & 7][x & 15]
+            w, part = h >> 1, h & 1
+        else:
+            page = (y >> 5) * bw + (x >> 6)
+            block = BT32[y >> 3 & 3][x >> 3 & 7]
+            w, part = CT32[y & 7][x & 7], None
+        if z:
+            block ^= 24
+        return ((bp + 32 * page + block) * 64 + w) & 0xfffff, part
+
+    def read(self, psm, bp, bw, x, y):
+        a, part = self.at(psm, bp, bw, x, y)
+        v = self.mem[a]
+        if part is not None:
+            return v >> 16 * part & 0xffff
+        return v & 0xffffff if psm == 0x31 else v
+
+    def write(self, psm, bp, bw, x, y, v, keep):
+        a, part = self.at(psm, bp, bw, x, y)
+        if part is not None:
+            s = 16 * part
+            keep = keep << s | (0xffff << (16 - s)) & 0xffffffff
+            v <<= s
+        self.mem[a] = (self.mem[a] & keep) | (v & ~keep & 0xffffffff)
+
+    # ---- the packet ---------------------------------------------------
+
+    def packet(self, e, a):
+        """A DMA tag, a VIF DIRECT and the GIF packet it carries."""
+        qwc = e.u32(a) & 0xffff
+        end = a + 16 + 16 * qwc
+        a += 16
+        while a < end:
+            a = self.giftag(e, a)
+        return end
+
+    def giftag(self, e, a):
+        tag, regs = u64(e, a), u64(e, a + 8)
+        nloop, flg = tag & 0x7fff, tag >> 58 & 3
+        nreg = tag >> 60 & 15 or 16
+        rl = [regs >> 4 * i & 15 for i in range(nreg)]
+        if tag >> 46 & 1:
+            self.set(0x00, tag >> 47 & 0x7ff)
+        a += 16
+        if flg == 0:
+            for _ in range(nloop):
+                for r in rl:
+                    assert r == 0xe, "PACKED register %x" % r
+                    self.set(u64(e, a + 8) & 0xff, u64(e, a))
+                    a += 16
+        elif flg == 1:
+            for _ in range(nloop):
+                for r in rl:
+                    self.set(r, u64(e, a))
+                    a += 8
+            if nloop * nreg & 1:
+                a += 8
+        else:
+            raise AssertionError("GIF IMAGE mode")
+        return a
+
+    def set(self, reg, v):
+        self.r[reg] = v
+        if reg == 0x00:
+            self.queue = []
+        elif reg in (0x04, 0x05):
+            self.queue.append((v, self.r.get(0x03, 0), self.r.get(0x01, 0)))
+            assert self.r.get(0x00, 0) & 7 == 6, "not a sprite"
+            if len(self.queue) == 2:
+                self.sprite(*self.queue)
+                self.queue = []
+
+    # ---- a sprite -----------------------------------------------------
+
+    def sprite(self, v0, v1):
+        r = self.r.get
+        prim = r(0x00, 0)
+        assert not prim & 0x2e0, "PRIM %x" % prim     # FGE ABE AA1 CTXT
+        assert prim & 0x100 or not prim & 0x10, "STQ"
+        ofs = r(0x18, 0)
+        x0, x1 = (v0[0] & 0xffff) - (ofs & 0xffff), (v1[0] & 0xffff) - (
+            ofs & 0xffff)
+        y0, y1 = (v0[0] >> 16 & 0xffff) - (ofs >> 32 & 0xffff), (
+            v1[0] >> 16 & 0xffff) - (ofs >> 32 & 0xffff)
+        u0, u1 = v0[1] & 0x3fff, v1[1] & 0x3fff
+        t0, t1 = v0[1] >> 16 & 0x3fff, v1[1] >> 16 & 0x3fff
+        if x1 < x0:
+            x0, x1, u0, u1 = x1, x0, u1, u0
+        if y1 < y0:
+            y0, y1, t0, t1 = y1, y0, t1, t0
+        z = v1[0] >> 32
+        rgba = v1[2] & 0xffffffff
+        sc = r(0x40, 0)
+        xs = range(max(-(-x0 // 16), sc & 0x7ff),
+                   min(-(-x1 // 16) - 1, sc >> 16 & 0x7ff) + 1)
+        ys = range(max(-(-y0 // 16), sc >> 32 & 0x7ff),
+                   min(-(-y1 // 16) - 1, sc >> 48 & 0x7ff) + 1)
+
+        frame = r(0x4c, 0)
+        fbp, fbw = (frame & 0x1ff) * 32, frame >> 16 & 0x3f
+        fpsm, fbmsk = frame >> 24 & 0x3f, frame >> 32
+        assert fpsm in (0x00, 0x02), "FRAME PSM %x" % fpsm
+        if fpsm == 0x02:
+            keep = (fbmsk >> 3 & 0x1f | (fbmsk >> 11 & 0x1f) << 5
+                    | (fbmsk >> 19 & 0x1f) << 10 | (fbmsk >> 31) << 15)
+        else:
+            keep = fbmsk
+        zbuf = r(0x4e, 0)
+        zbp, zpsm, zmsk = (zbuf & 0x1ff) * 32, 0x30 | (zbuf >> 24 & 15), (
+            zbuf >> 32 & 1)
+        test = r(0x47, 0)
+        ate, atst, aref = test & 1, test >> 1 & 7, test >> 4 & 0xff
+        afail, date = test >> 12 & 3, test >> 14 & 1
+        zte, ztst = test >> 16 & 1, test >> 17 & 3
+        assert not date and afail != 3, "TEST %x" % test
+
+        tme = prim >> 4 & 1
+        if tme:
+            tex0 = r(0x06, 0)
+            tbp, tbw = tex0 & 0x3fff, tex0 >> 14 & 0x3f
+            tpsm = tex0 >> 20 & 0x3f
+            tw, th = 1 << (tex0 >> 26 & 15), 1 << (tex0 >> 30 & 15)
+            tcc, tfx = tex0 >> 34 & 1, tex0 >> 35 & 3
+            assert tfx == 1, "TFX %d" % tfx          # DECAL
+            clamp = r(0x08, 0)
+            assert clamp & 15 in (0, 5), "CLAMP %x" % clamp
+            wrap = clamp & 3 == 0
+            texa = r(0x3b, 0)
+            ta0, aem, ta1 = texa & 0xff, texa >> 15 & 1, texa >> 32 & 0xff
+            half = PSMS[tpsm][0]
+
+        for y in ys:
+            if tme:
+                ty = (t0 * (y1 - y0) + (16 * y - y0) * (t1 - t0)) // (
+                    16 * (y1 - y0))
+                ty = ty & th - 1 if wrap else min(max(ty, 0), th - 1)
+            for x in xs:
+                if tme:
+                    tx = (u0 * (x1 - x0) + (16 * x - x0) * (u1 - u0)) // (
+                        16 * (x1 - x0))
+                    tx = tx & tw - 1 if wrap else min(max(tx, 0), tw - 1)
+                    t = self.read(tpsm, tbp, tbw, tx, ty)
+                    if half:
+                        a = ta1 if t & 0x8000 else (
+                            0 if aem and not t & 0x7fff else ta0)
+                        t = ((t & 0x1f) << 3 | (t >> 5 & 0x1f) << 11
+                             | (t >> 10 & 0x1f) << 19 | a << 24)
+                    c = t if tcc else (t & 0xffffff) | (rgba & 0xff000000)
+                else:
+                    c = rgba
+                fb, zb = 1, not zmsk
+                if ate:
+                    a = c >> 24
+                    ok = (False, True, a < aref, a <= aref, a == aref,
+                          a >= aref, a > aref, a != aref)[atst]
+                    if not ok:
+                        if afail == 0:
+                            continue
+                        if afail == 1:
+                            zb = 0
+                        else:
+                            fb = 0
+                if zte:
+                    if ztst == 0:
+                        continue
+                    if ztst > 1:
+                        old = self.read(zpsm, zbp, fbw, x, y)
+                        if z < old or (ztst == 3 and z == old):
+                            continue
+                if fb:
+                    if fpsm == 0x02:
+                        c = (c >> 3 & 0x1f | (c >> 11 & 0x1f) << 5
+                             | (c >> 19 & 0x1f) << 10 | (c >> 31) << 15)
+                    self.write(fpsm, fbp, fbw, x, y, c, keep)
+                if zb and zte:
+                    self.write(zpsm, zbp, fbw, x, y, z, 0)
+
+
+def gs_depth_alphas(e, packet):
+    """The packet drawn over a Z buffer that holds each of ZS at a pixel of
+    its own: the alpha it leaves at each, in the shown frame."""
+    gs = GS()
+    at = [((37 * k + 5) & 511, (113 * k + 11) & 511) for k in range(len(ZS))]
+    for x in range(512):
+        for y in range(512):
+            gs.write(0x00, DRAW_FBP * 32, 8, x, y, GS_FILL_DRAW, 0)
+            gs.write(0x00, DISP_FBP * 32, 8, x, y, GS_FILL_DISP, 0)
+    for z, (x, y) in zip(ZS, at):
+        gs.write(0x31, ZBP * 32, 8, x, y, z, 0)
+    gs.packet(e, packet)
+    return [gs.read(0x00, DISP_FBP * 32, 8, x, y) >> 24 for x, y in at]
+
+
 class Model(object):
     def __init__(self):
         self.out = []
-        self.e = Emu(ieee=True)
+        self.e = retail_model.RetailEmu(ieee=True)
         self.sc = None
         self.last_palette = 0
         self.last_view = 0
+        self.dia_packet = 0
+        self.drawn = {}
+        self.alphas = None
         e = self.e
         e.stub(E_GET_VIEW, self.get_view)
         e.stub(E_GET_TARGET, lambda em: RT15)
         e.stub(BMEMSET, self.memset)
         e.stub(ATTACH_IMAGE, self.attach_image)
         e.stub(DMA_ADD, self.dma_add)
+        e.stub(DMA_ADD1, self.dma_add1)
 
     def emit(self, s):
         self.out.append(s)
@@ -486,6 +750,10 @@ class Model(object):
     def attach_image(self, em):
         if em.reg[31] & M32 == FOG_ATTACH_IMAGE_RA:
             self.last_palette = self.arg(1)
+
+    def dma_add1(self, em):
+        if em.reg[31] & M32 == DIA_ADD_RA:
+            self.dia_packet = self.arg(1)
 
     def dma_add(self, em):
         if em.reg[31] & M32 != FOG_ADD_RA:
@@ -548,11 +816,17 @@ class Model(object):
     def clut_index(k):
         return (k & ~0x18) | ((k & 8) << 1) | ((k & 0x10) >> 1)
 
-    def depth_alpha(self, z):
+    def draw_depth_alpha(self):
+        """eAttachDepthIntoAlpha's last packet, drawn: the alphas of ZS.
+        The packet depends only on the globals and the draw contexts, so
+        each one is drawn once."""
         e = self.e
-        hi = e.u32(UPPER + 4 * self.clut_index(z >> 8 & 0xff))
-        lo = e.u32(LOWER + 4 * self.clut_index(z & 0xff))
-        return ((hi & 0xfc000000) | (lo & 0x03000000)) >> 24
+        p = self.dia_packet
+        key = bytes(e.read(p, 16 * ((e.u32(p) & 0xffff) + 1)))
+        if key not in self.drawn:
+            self.drawn[key] = gs_depth_alphas(e, p)
+        self.alphas = self.drawn[key]
+        return self.alphas
 
     def pica(self, m):
         e = self.e
@@ -572,8 +846,7 @@ class Model(object):
                 ok, colour = 1, rgb
         self.emit("  colour %d %06x" % (ok, colour))
         parts = []
-        for z in ZS:
-            da = self.depth_alpha(z)
+        for z, da in zip(ZS, self.alphas):
             a = pal[self.clut_index(da)] >> 24
             if over:
                 k = fb(1.0 - a / 128.0)
@@ -595,8 +868,6 @@ class Model(object):
         e.put32(INACTIVE + 4, INACTIVE)
         e.write(CACHE, bytes(960))
         e.write(FOG_PAL, bytes(4096))
-        e.write(UPPER, bytes(1024))
-        e.write(LOWER, bytes(1024))
         use, fog, start, r, g, b = sc.tweak
         for k, v in enumerate((use, fog, start, r, g, b)):
             e.put32(TW_USE + 4 * k, v & M32)
@@ -606,16 +877,18 @@ class Model(object):
         e.put32(ENABLE, sc.enable & M32)
         e.put32(POWER, sc.power)
         e.put32(FRAME, sc.frame & M32)
-        e.put32(DIA_BUFFER, DIA_PKT)
-        e.put32(MAIN_DISP, MAIN_RT)
-        e.put32(DIA_TARGET, MAIN_RT)
-        for k, a in enumerate(DIA_PACKETS):
-            e.put32(a, DIA_PKT + 0x100 + 0x100 * k)
-        e.write(DMA, bytes(0x10000))
-        e.put32(DMA_PTR, DMA)
-        e.put32(DMA_END, DMA + 0x100000)
-        e.put32(DMA_FAIL, 0)
-        e.put32(DMA_WANT, 0)
+        e.write(FMEM, bytes(FMEM_SIZE))
+        e.put32(FMEM_PTR, FMEM)
+        e.put32(FMEM_END, FMEM + FMEM_SIZE)
+        e.put32(FMEM_FAIL, 0)
+        e.put32(FMEM_WANT, 0)
+        # The draw contexts, which the image keeps in place: the frames'
+        # pages, the draw frame's as a texture's block, and the Z buffer's.
+        draw, disp = e.u32(MAIN_DRAW), e.u32(MAIN_DISP)
+        e.put32(draw + 40, DRAW_FBP)
+        e.put32(draw + 56, DRAW_FBP * 32)
+        e.put32(draw + 60, ZBP)
+        e.put32(disp + 40, DISP_FBP)
         e.write(VIEWS, bytes(128 * 10))
         e.write(RTS, bytes(256 * 10))
         e.write(CAMS, bytes(512 * 10))
@@ -625,7 +898,7 @@ class Model(object):
             e.mem[v + 4] = a & 0xff
             e.put32(v + 48, RTS + 256 * i)
             e.put32(v + 56, CAMS + 512 * i)
-            e.put32(v + 100, c & M32)
+            e.put32(v + VIEW_COUNTER, c & M32)
             e.put32(RTS + 256 * i + 8, rt & M32)
             for k in range(3):
                 e.put32(CAMS + 512 * i + 64 + 4 * k, xyz[k])
@@ -688,7 +961,8 @@ class Model(object):
         elif k == "Q":
             v = VIEWS + 128 * int(o[1:])
             q = e.call(GET_QUERY, v, limit=100000) & M32
-            self.emit("  -> %s counter %u" % (self.label(q), e.u32(v + 100)))
+            self.emit("  -> %s counter %u" % (self.label(q),
+                                              e.u32(v + VIEW_COUNTER)))
             self.dump_query(q)
         elif k == "+":
             e.put32(FRAME, (e.u32(FRAME) + 1) & M32)
@@ -708,25 +982,19 @@ class Model(object):
                                                limit=100)))
             self.emit("  palettes " + " ".join(parts))
         elif k == "Z":
-            self.emit("  -> %d" % e.call(DEPTH_INTO_ALPHA, CHAIN, 0x2c0400,
-                                         limit=1000000))
-            self.dump_palette("upper", UPPER)
-            self.dump_palette("lower", LOWER)
+            self.dia_packet = 0
+            r = e.call(DEPTH_INTO_ALPHA, CHAIN, DIA_ARG, limit=1000000)
+            self.emit("  -> %d" % r)
+            if r:
+                self.emit("  alpha" + "".join(
+                    " %x:%x" % za for za in zip(ZS, self.draw_depth_alpha())))
         elif k == "F":
-            self.emit("  -> %d" % e.call(ATTACH_FOG, CHAIN, 0x2c0800,
+            self.emit("  -> %d" % e.call(ATTACH_FOG, CHAIN, FOG_ARG,
                                          limit=3000000))
             self.dump_palette("fog0", FOG_PAL)
             self.dump_palette("fog1", FOG_PAL + 1024)
         elif k == "K":
             self.pica(int(o[1:]))
-        elif k == "p":
-            parts = []
-            for x, y in FPOW_XY:
-                e.fpr[12] = fb(x)
-                e.fpr[13] = fb(y)
-                e.call(FPOW, limit=100)
-                parts.append("%08x" % (e.fpr[0] & M32))
-            self.emit("  fpow " + " ".join(parts))
         elif k == "m":
             for i in range(256):
                 e.put32(REMAP_SRC + 4 * i, i | (255 - i) << 8 | 0xab000000)
@@ -944,8 +1212,8 @@ MUTATIONS = [
     ("ef-mode-info", EFC, "{ 1, 0, 0, 2, 128,", "{ 1, 0, 0, 2, 127,"),
     ("ef-mode-info-start", EFC, "244.0f, 255.0f,", "240.0f, 255.0f,"),
     ("ef-draw-fog", EFC, "int32_t DrawFog = 1;", "int32_t DrawFog = 2;"),
-    ("ef-power", EFC, "float   FogPower = 4.5999999046325684f;",
-     "float   FogPower = 4.5f;"),
+    ("ef-power", EFC, "float   FogPower = 4.0f;",
+     "float   FogPower = 4.6f;"),
     ("ef-enable", EFC, "int32_t EnableDepthIntoAlpha = 1;",
      "int32_t EnableDepthIntoAlpha = 0;"),
     # ---- the helpers
@@ -1001,16 +1269,15 @@ MUTATIONS = [
      "(uint32_t)ee_trunc_w(fpow(x, FogPower) * amount * 0.5f) << 24 | rgb;"),
     ("ef-amount", EFC, "amount = q->Fog * 128.0f;",
      "amount = q->Fog * 127.0f;"),
-    ("ef-near", EFC, "    linear[252] = linear[255];\n", ""),
+    # The demo's: the nearest Zs' entries all the one at 255.
+    ("ef-near", EFC, "    }\n    RemapLinearIntoClut8(palette, linear);",
+     "    }\n    linear[252] = linear[255];\n"
+     "    RemapLinearIntoClut8(palette, linear);"),
     # ---- the attaches
-    ("ef-dia-enable", EFC, "if (!EnableDepthIntoAlpha) {",
-     "if (EnableDepthIntoAlpha <= 0) {"),
-    ("ef-dia-upper", EFC, "(i & 0xc0) ? 0xff000000u",
-     "(i & 0x80) ? 0xff000000u"),
-    ("ef-dia-lower", EFC, "(uint32_t)(i >> 6 & 3) << 24",
-     "(uint32_t)(i >> 5 & 3) << 24"),
-    ("ef-dia-ret", EFC, "    return 1;\n}\n\nint eattach_fog",
-     "    return 2;\n}\n\nint eattach_fog"),
+    ("ef-dia-enable", EFC, "return EnableDepthIntoAlpha != 0;",
+     "return EnableDepthIntoAlpha > 0;"),
+    ("ef-dia-ret", EFC, "return EnableDepthIntoAlpha != 0;",
+     "return EnableDepthIntoAlpha != 0 ? 2 : 0;"),
     ("ef-fog-draw", EFC, "if (!DrawFog) {", "if (DrawFog <= 0) {"),
     ("ef-fog-views", EFC, "for (id = 1; id < 3; id++) {",
      "for (id = 1; id < 2; id++) {"),
@@ -1021,10 +1288,12 @@ MUTATIONS = [
     ("ef-fog-mode", EFC, "? &FogModeInfos[mode] : NULL);",
      "? &FogModeInfos[0] : NULL);"),
     # ---- the PICA's side
-    ("ef-depth-mask", EFC, "(hi & 0xfc000000u)", "(hi & 0xff000000u)"),
-    ("ef-depth-swizzle", EFC,
-     "DepthUpperPalette[efog_clut_index(z >> 8 & 0xffu)]",
-     "DepthUpperPalette[z >> 8 & 0xffu]"),
+    ("ef-depth-limit", EFC, "return z > 0xffffu ? 0xffu",
+     "return z > 0x7fffu ? 0xffu"),
+    ("ef-depth-far", EFC, "return z > 0xffffu ? 0xffu",
+     "return z > 0xffffu ? 0u"),
+    # The demo's precision, six bits.
+    ("ef-depth-shift", EFC, ": z >> 8;", ": z >> 8 & 0xfcu;"),
     ("ef-over-test", EFC,
      "return m->AlphaA == 0 && m->AlphaB == 1 && m->AlphaC == 0\n"
      "        && m->AlphaD == 1;",
@@ -1059,6 +1328,10 @@ EQUIVALENT = {
     "wm-fog-mask",
     # No FogModeInfo has A, B and C of 0, 1 and 0 with a D other than 1.
     "ef-over-test",
+    # fpow's sum passes an int only for a FogPower past 57 or under -19.
+    # The image's is 4.0, which nothing writes, and the scenarios' powers,
+    # -1.5 to 10, keep it within one; there the two conversions agree.
+    "ef-fpow-trunc",
 }
 
 
