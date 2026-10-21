@@ -35,6 +35,7 @@ float ContactThreshold            = 0.05f;  // 0x003243d8  3d4ccccd
 // and never written) is 0; the demo's (0x003243e0) is 0.5, which the port
 // had until TASKS 73.
 float WaferBias                   = 0.0f;   // 0x003243e0  3f000000
+int32_t CrowbarSparesCars         = 1;      // the port's; see crowbar_moves
 float MinimumContactImpulseFactor = 0.3f;   // 0x003243ec  3e99999a
 float MinimumContactImpulseSpeed  = 0.1f;   // 0x003243f0  3dcccccd
 float MaxFrictionScrapeSpeed      = 1.0f;   // 0x003243f8  3f800000
@@ -280,6 +281,19 @@ static int32_t is_moveable(CollisionBody *b)
     return ((VtBoolFn)e->fn)(vt_this(b, e));
 }
 
+// Whether Crowbar and Resolve push b out of `other`: in retail, whenever
+// b is moveable. The port's CrowbarSparesCars (collisionbody.h) leaves a
+// car where it is against a smokeable, which then takes the whole push.
+// IsMoveable is called as before, once a body, so the order of the calls
+// is the image's.
+static int32_t crowbar_moves(CollisionBody *b, CollisionBody *other)
+{
+    if (!is_moveable(b))
+        return 0;
+    return !(CrowbarSparesCars && b->Type == CAR_COLLISION_BODY
+             && other->Type == SMOKEABLE_COLLISION_BODY);
+}
+
 static int32_t is_blinking(CollisionBody *b)
 {
     const VtEntry *e = vt_slot(b->_vtable, COLLISIONBODY_VT_IS_BLINKING);
@@ -479,9 +493,9 @@ void contact_crowbar(Contact *c, float t)
         lanes_scale(&cv, &n, s);
         p1 = pos1;
         p2 = pos2;
-        if (is_moveable(c->pBody1))
+        if (crowbar_moves(c->pBody1, c->pBody2))
             lanes_sub(&p1, &p1, &cv);
-        if (is_moveable(c->pBody2))
+        if (crowbar_moves(c->pBody2, c->pBody1))
             lanes_add(&p2, &p2, &cv);
         if (vcwitness_vclip(&c->pWitness->Witness, &rot1, &p1, &rot2, &p2)
             != VCLIP_PENETRATION) {
@@ -501,9 +515,9 @@ void contact_resolve(Contact *c)
     body_backup(c->pBody2, c->BackupTime);
     p1 = *get_position(c->pBody1);
     p2 = *get_position(c->pBody2);
-    if (is_moveable(c->pBody1))
+    if (crowbar_moves(c->pBody1, c->pBody2))
         lanes_sub(&p1, &p1, &c->CrowbarVector);
-    if (is_moveable(c->pBody2))
+    if (crowbar_moves(c->pBody2, c->pBody1))
         lanes_add(&p2, &p2, &c->CrowbarVector);
     set_position(c->pBody1, &p1);
     set_position(c->pBody2, &p2);

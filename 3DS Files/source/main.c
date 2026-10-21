@@ -708,6 +708,7 @@ static void logOpen(void)
     // second's frame, and more while the card was slow.
     if (g_log) {
         WorldStepProfOn = 1;    // worldstep's timings, for logWorldStep
+        WorldFallTraceOn = ConfigFallLog != 0;  // for logFallStep
         logwriter_start(g_log);
         atexit(logwriter_stop);
         signal(SIGABRT, logOnAbort);
@@ -5685,6 +5686,53 @@ static void logMunitions(const struct Chopper* h)
             (int)DroppedSpikesSlotPool->mostNumAllocatedSlots, effects);
 }
 
+// "FallLog 1": a line for each step of the world, from worldstep's trace
+// of CarTable[0] (world.h), and its state after FinishMovement. The road's
+// height under it is left to tools/fall_trace.py, from the track bundle,
+// so the trace asks the topology nothing.
+static void logFallStep(const World* w)
+{
+    const WorldFallStep* s = &WorldFallTrace;
+    const Car*           c;
+    char                 line[1024];
+    int                  n, i, k;
+
+    if (!g_log || !WorldFallTraceOn || w == NULL || w->TotalNumCars < 1)
+        return;
+    c = w->CarTable[0];
+    n = snprintf(line, sizeof line,
+                 "fall: %ld dt %.4f at %.2f %.2f %.3f vel %.2f %.2f %.2f "
+                 "ang %.2f %.2f %.2f up %.2f %.2f %.2f wheels %d; moved %.3f "
+                 "vz %.2f; tested %d, rounds %d, dropped %d, resolved %d",
+                 (long)s->frame, (double)s->dt, (double)c->State.Position.x,
+                 (double)c->State.Position.y, (double)c->State.Position.z,
+                 (double)c->State.Velocity.x, (double)c->State.Velocity.y,
+                 (double)c->State.Velocity.z,
+                 (double)c->State.AngularVelocity.x,
+                 (double)c->State.AngularVelocity.y,
+                 (double)c->State.AngularVelocity.z,
+                 (double)c->State.BodyMatrix.v2.x,
+                 (double)c->State.BodyMatrix.v2.y,
+                 (double)c->State.BodyMatrix.v2.z,
+                 (int)c->State.nWheelsTouchingGround, (double)s->zMoved,
+                 (double)s->vzMoved, (int)s->tested, (int)s->rounds,
+                 (int)s->dropped, (int)s->resolved);
+    k = s->resolved < WORLD_FALL_CONTACTS ? s->resolved : WORLD_FALL_CONTACTS;
+    for (i = 0; i < k && n > 0 && n < (int)sizeof line; i++) {
+        const WorldFallContact* e = &s->contact[i];
+
+        n += snprintf(line + n, sizeof line - (size_t)n,
+                      "; r%d t%d nz %.2f side %.3f back %.4f crow %.2f "
+                      "z %.3f>%.3f vz %.2f>%.2f",
+                      (int)e->round, (int)e->other, (double)e->normalZ,
+                      (double)e->side, (double)e->backup,
+                      (double)e->crowbarZ, (double)e->zBefore,
+                      (double)e->zAfter, (double)e->vzBefore,
+                      (double)e->vzAfter);
+    }
+    logLine("%s", line);
+}
+
 static void logRaceState(void)
 {
     static int32_t next;
@@ -6270,6 +6318,7 @@ static void raceFrame(void)
                 frameMark("race: the world's step");
                 forceChopperTick(step);
                 world_do_timestep(w, step);
+                logFallStep(w);
             }
             replaymgr_end_frame(pReplayManager);
         }

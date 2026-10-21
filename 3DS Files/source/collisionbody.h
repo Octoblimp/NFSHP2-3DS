@@ -1034,6 +1034,17 @@ extern float MinimumContactImpulseFactor;   // 0.3
 extern float MinimumContactImpulseSpeed;    // 0.1
 extern float MaxFrictionScrapeSpeed;        // 1.0
 
+// Not in the image: 1 (the port's default) has Crowbar and Resolve leave a
+// car where it is against a smokeable, and push the smokeable alone; 0 is
+// retail, where both are pushed apart along the line of their centres. A
+// sign stands taller than a car's centre, so retail's push on the car is
+// down: on track 62 (2026-10-20, "FallLog 1") a chevron sign the car had
+// landed on pushed it 0.43 down in one step, to 0.09 above the road's plane.
+// Past that plane WaferBias's 0 turns the road's normal round, and the
+// road pushes the car on through: the user drove through the ground there.
+// The retail checkers set it to 0.
+extern int32_t CrowbarSparesCars;
+
 // Collision.obj's `new Collision(w, pt)` -- bOMalloc on CollisionSlotPool,
 // then the constructor (0x0020b290) -- which BeginCollision makes, and
 // Collision::AddImpulse (0x0020b450), which CollisionImpulse calls with the

@@ -1858,6 +1858,12 @@ def contact_time_section(sc, es):
     sc.op(OP_CT_CROWBAR, NEWEST, 0.5)   # back at t they are apart: at once
     sc.op(OP_CT_CROWBAR, NEWEST, 0.0)
     es[1].put(sc, vel=(0.0, 0.0, 0.0, 0.0))
+    # a smokeable either side: retail moves the car too, the port's
+    # CrowbarSparesCars (off here) would not
+    for k in (1, 0):
+        sc.op(OP_DYN_POKE, E(k), 12, 1)     # SMOKEABLE_COLLISION_BODY
+        sc.op(OP_CT_CROWBAR, NEWEST, 0.0)
+        sc.op(OP_DYN_POKE, E(k), 12, 0)
     sc.op(OP_CT_DEL, NEWEST, 1)
 
     sc.tag("FindContactTime and Crowbar against a track polygon")
@@ -3442,7 +3448,10 @@ class Model(object):
             e.put32(self.body(r) + 80, self.dyn_tables[k])
         elif code == OP_DYN_POKE:
             r, off, v = args(3)
-            e.put32(self.body(r) + off, v)
+            if off == 12:               # Type, a byte
+                e.mem[self.body(r) + 12] = v & 0xff
+            else:
+                e.put32(self.body(r) + off, v)
         elif code == OP_DYN_PTRS:
             r, sy, rb = args(3)
             b = self.body(r)
@@ -5109,13 +5118,21 @@ MUTATIONS = [
     _m("ct_crowbar_nineteen", "    for (i = 0; i < CROWBAR_STEPS; i++) {",
        "    for (i = 0; i < CROWBAR_STEPS - 1; i++) {", CTC),
     _m("ct_crowbar_m1",
-       "        if (is_moveable(c->pBody1))\n            lanes_sub(&p1, &p1, &cv);",
-       "        if (is_moveable(c->pBody1))\n            lanes_add(&p1, &p1, &cv);",
+       "        if (crowbar_moves(c->pBody1, c->pBody2))\n"
+       "            lanes_sub(&p1, &p1, &cv);",
+       "        if (crowbar_moves(c->pBody1, c->pBody2))\n"
+       "            lanes_add(&p1, &p1, &cv);",
        CTC),
     _m("ct_crowbar_m2",
-       "        if (is_moveable(c->pBody2))\n            lanes_add(&p2, &p2, &cv);",
-       "        if (is_moveable(c->pBody2))\n            lanes_sub(&p2, &p2, &cv);",
+       "        if (crowbar_moves(c->pBody2, c->pBody1))\n"
+       "            lanes_add(&p2, &p2, &cv);",
+       "        if (crowbar_moves(c->pBody2, c->pBody1))\n"
+       "            lanes_sub(&p2, &p2, &cv);",
        CTC),
+    # The port's CrowbarSparesCars is 0 here, as retail: on, it differs.
+    _m("ct_crowbar_spares_always",
+       "    return !(CrowbarSparesCars && b->Type",
+       "    return !(b->Type", CTC),
     _m("ct_crowbar_no_store", "            c->CrowbarVector = cv;\n", "", CTC),
 
     # Resolve

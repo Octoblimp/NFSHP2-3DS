@@ -5295,6 +5295,47 @@ phases.
               Down) and in the replays. Write-up:
               `docs/formats/radial-blur.md`.
 
+81. [x] **Track 62: through the road at the chevron corner.** Reported
+        on 2026-10-20, while the user drove during a track 62 Azahar run:
+        "WELL I WENT THROUGH THE GROUND THAT WAS FUN". Done after TASKS
+        76, before 72h-2c.
+        - [x] **The trace.** "FallLog 1" (with "DebugLog 1"; off by
+              default, `configitems.c`) has `worldstep.c` record each
+              step of player 1's car: the step, the move, each contact
+              it resolved (the other body's type, a track polygon's
+              normal and side, the backup, the crowbar's z, z and vz
+              before and after) and the rounds left over at
+              `WORLD_MAX_CONTACT_ROUNDS`. `main.c` writes a "fall:" line
+              a step. `tools/fall_trace.py BUNDLE LOG` adds the road's
+              height under each position, from the bundle's 0x34132
+              polygons, and shows the steps around the first one below
+              it. `nfshp2_warp.txt` put the car before the corner.
+        - [x] **The cause.** At the apex near (-1104, -328) the car hit
+              the outer wall, flew up and came down on the chevron signs
+              (smokeables). Three steps reached the twentieth round, and
+              signs were left overlapping the car. Then Crowbar parted
+              car and sign along the line of their centres. The sign's
+              centre is above the car's, so the car went 0.43 down
+              (frame 538, z 10.753 to 10.415), its centre 0.09 above the
+              road's plane. Below the plane, FindWaferNormal with
+              retail's `WaferBias` of 0 turns the road's normal down, and
+              the road pushes the car on through. The port's step
+              reaches the 0.05 s cap in heavy collisions, where the PS2
+              runs at 1/30, so bodies end deeper in each other.
+        - [x] **The fix** (`contact.c`, the port's own). With
+              `CrowbarSparesCars` (1 in the game), Crowbar and Resolve
+              leave a car where it is against a smokeable, and the sign
+              takes the whole push. `collisionbody_test.c` and
+              `carsnap_test.c` set it to 0, retail's Crowbar.
+              `collisionbody_check`: 83 scenarios, 0 differ, with a new
+              Crowbar against a smokeable either side; the five crowbar
+              and resolve mutations caught, `ct_crowbar_spares_always`
+              among them. `carsnap_check` and `world_check` 0 differ.
+              The same warp in Azahar: the sign pushed 0.31 down, the car
+              moved 0.001, and no step was below the road. Not yet on the
+              3DS. Write-up: `docs/formats/collision-body.md`, "The
+              port's departure (CrowbarSparesCars)".
+
 ### The retail frontend
 
 Asked for on 2026-09-28. The user sent seven PCSX2 photos of the retail

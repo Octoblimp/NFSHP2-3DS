@@ -802,6 +802,7 @@ int main(int argc, char **argv)
         die("cannot open", argv[1]);
     // A crash keeps everything printed before it.
     setvbuf(stdout, NULL, _IOLBF, 0);
+    CrowbarSparesCars = 0;      // retail's Crowbar (collisionbody.h)
 
     physcomp_install_vtables();
     physicscar_install_vtables();

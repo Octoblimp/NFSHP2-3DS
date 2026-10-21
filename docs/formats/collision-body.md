@@ -999,6 +999,28 @@ plane is taken to be below it. The port has had retail's 0 since TASKS 73.
 Neither body is moved; the push is only recorded. Twenty steps that do not
 part them leave CrowbarVector as it was.
 
+**The port's departure (CrowbarSparesCars).** The port leaves a car where
+it is against a smokeable (type 1), in Crowbar's steps and in Resolve, so
+the smokeable takes the whole push. `CrowbarSparesCars` in contact.c is 1
+in the game and 0 in the checkers, which keep retail's Crowbar.
+
+The reason is track 62's chevron corner near (-1104, -328), where the
+user's car went through the road:
+
+1. The car hit the outer wall, flew up and came down on the signs.
+2. The contacts reached the twentieth round, and the signs were left
+   overlapping the car into the next step.
+3. There, Crowbar parted car and sign along the line of their centres. The
+   sign's centre is above the car's, so the car was pushed 0.43 down.
+4. Its centre was then 0.09 above the road's plane. A little more and
+   FindWaferNormal, with retail's `WaferBias` of 0, would have turned the
+   road's normal down and pushed the car on through.
+
+The step is capped at 0.05 s, and the port reaches it in heavy collisions,
+where the PS2 runs at 1/30. Over a longer step the bodies end deeper in each
+other. With the rule, the same run's sign pushed 0.31 down and the car
+moved 0.001.
+
 **Resolve** (0x001ca760):
 
 1. Each body goes to physics mode against the other, the first first.
@@ -1425,7 +1447,7 @@ Slices D and E's scenarios come after slice C's. They cover:
   - either body's backup the shorter, and both equal;
   - `ContactThreshold` at 0, 0.25 and 0.05;
 - Crowbar along the line of centres at three times, and where the bodies
-  are apart at once;
+  are apart at once, and with either body a smokeable;
 - FindContactTime and Crowbar against the flat quad and the leaning
   triangle, with the track body first and second, below the plane within
   `WaferBias` and past it, and with nothing moveable;

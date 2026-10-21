@@ -1620,6 +1620,10 @@ static void dyn_step(uint32_t op)
             d->Body.pPoly = NULL;
             break;
         }
+        if (off == 12) {                // Type, a byte
+            d->Body.Type = (int8_t)v;
+            break;
+        }
         if (off == 84)
             at = (char *)&d->PhysicsMode;
         else if (off >= 100 && off < 256)
@@ -2826,6 +2830,7 @@ int main(int argc, char **argv)
         return 2;
     }
     fclose(fh);
+    CrowbarSparesCars = 0;      // retail's Crowbar (collisionbody.h)
     if (getenv("CB_TEST_UNBUFFERED") != NULL)
         setvbuf(stdout, NULL, _IONBF, 0);
 

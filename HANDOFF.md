@@ -28815,3 +28815,50 @@ user's go and the repo.
   collision resolve that second), before the fall; it lags a few
   seconds. Render-only code cannot move the car. It comes next, before
   72h-2c.
+
+## Session 146 -- through the road on track 62 (TASKS 81)
+
+The user, 2026-10-20: "Finish committing TASKS 76 first, then look into
+the fall through the ground on track 62." 76 went in as e126a0d, and the
+checklist was republished as v36.
+
+- **The trace**, kept and off by default: "FallLog 1" with "DebugLog 1".
+  - `worldstep.c` fills `WorldFallTrace` (`world.h`) each step for
+    CarTable[0]: dt, the move, up to 6 resolved contacts (the other
+    body's type, a polygon's nz and side, backup, crowbar z, z and vz
+    before and after), the rounds, and those dropped at the cap of 20.
+  - `main.c`'s logFallStep writes it as a "fall:" line after each
+    world_do_timestep.
+  - `tools/fall_trace.py BUNDLE LOG [--all]` adds the floor under each
+    position from the 0x34132 polygons (walls, flag 2, skipped).
+  - The warp `sdmc:/nfshp2_warp.txt`, "15 -1104 -282 4 49152 25", puts
+    the car before the corner 15 s in.
+- **The cause.**
+  1. The car hit the outer wall at the apex, flew up and came down on
+     the chevron signs (type 1).
+  2. Frames 535-537 reached the twentieth round, with 1 or 2 contacts
+     dropped, so the signs stayed inside the car.
+  3. In frame 538, Crowbar along the line of centres pushed the car 0.43
+     down, its centre 0.09 above the road's plane.
+  4. Past the plane, FindWaferNormal with retail's WaferBias of 0 points
+     the road's normal down. The road then pushes the car through, as the
+     user saw.
+- **The fix**, the port's own: `crowbar_moves` in `contact.c`. While
+  `CrowbarSparesCars` is 1 (the game), a car is not moved against a
+  smokeable, in Crowbar's steps and in Resolve, and the sign takes the
+  whole push. IsMoveable is still called once a body, in the image's
+  order.
+- **Checks.**
+  - The checkers' harnesses set the flag to 0, retail.
+  - `collisionbody_check`: 83 scenarios, 0 differ. It has a new Crowbar
+    with E1 and then E0 poked to type 1 (OP_DYN_POKE offset 12, a
+    byte). The crowbar and resolve mutations, `ct_crowbar_spares_always`
+    among them, are all 5 caught.
+  - `carsnap_check` and `world_check`: 0 differ.
+  - The CIA is built.
+  - Azahar, the warp at 25 m/s: frame 542's sign pushed 0.31 down, but
+    the car moved 0.001; 586 steps, none below the floor. The car took
+    the corner through the signs.
+  - Not yet on the 3DS.
+- **Next:** 72h-2c, then TASKS 75, then the release candidate again. The
+  Azahar card is back to track 42, without FallLog or the warp.

@@ -131,6 +131,94 @@ static void prof_rounds(int32_t round)
         WorldStepProfile.roundsMax = (uint32_t)round;
 }
 
+// ------------------------------------------------- the fall trace
+
+// Not in the image; see world.h.
+int32_t       WorldFallTraceOn;
+WorldFallStep WorldFallTrace;
+
+typedef bVector3 *(*FallVectorFn)(void *self);
+
+// The body's GetPosition and GetVelocity, through its table: the checkers
+// that link this file have no CarCollisionBody.
+static bVector3 *fall_vector(CollisionBody *b, int32_t slot)
+{
+    const VtEntry *e = vt_slot(b->_vtable, slot);
+
+    return ((FallVectorFn)e->fn)(vt_this(b, e));
+}
+
+#define fall_position(b) fall_vector((b), COLLISIONBODY_VT_GET_POSITION)
+#define fall_velocity(b) fall_vector((b), COLLISIONBODY_VT_GET_VELOCITY)
+
+// Player 1's car's body, while the trace is on.
+static CollisionBody *fall_body(World *w)
+{
+    Car *c;
+
+    if (!WorldFallTraceOn || w->TotalNumCars < 1)
+        return NULL;
+    c = w->CarTable[0];
+    if (c == NULL || c->pDynamicCollisionBody == NULL)
+        return NULL;
+    return &c->pDynamicCollisionBody->Dynamic.Body;
+}
+
+static int32_t fall_count(ContactNode *list, CollisionBody *fb)
+{
+    Contact *c;
+    int32_t n = 0;
+
+    for (c = list->next; c != (Contact *)(void *)list; c = c->Link.next)
+        if (c->pBody1 == fb || c->pBody2 == fb)
+            n++;
+    return n;
+}
+
+static WorldFallContact *fall_contact_begin(CollisionBody *fb, Contact *c,
+                                            int32_t round)
+{
+    WorldFallStep *s = &WorldFallTrace;
+    WorldFallContact *e;
+    CollisionBody *other;
+    float sign;
+
+    if (fb == NULL || (c->pBody1 != fb && c->pBody2 != fb))
+        return NULL;
+    if (s->resolved++ >= WORLD_FALL_CONTACTS)
+        return NULL;
+    e = &s->contact[s->resolved - 1];
+    other = c->pBody1 == fb ? c->pBody2 : c->pBody1;
+    sign = c->pBody1 == fb ? -1.0f : 1.0f;
+    e->round = round;
+    e->other = other->Type;
+    e->normalZ = 0.0f;
+    e->side = 0.0f;
+    if (other->Type == TRACK_POLYGON_COLLISION_BODY) {
+        const VCPlane *pl = &other->pPoly->pFaces->Plane;
+        const bVector3 *p = fall_position(fb);
+
+        e->normalZ = pl->CompressedNormal[2];
+        e->side = (pl->CompressedNormal[0] * p->x
+                   + pl->CompressedNormal[1] * p->y
+                   + pl->CompressedNormal[2] * p->z)
+                - pl->CompressedPlaneDistance;
+    }
+    e->backup = c->BackupTime;
+    e->crowbarZ = sign * c->CrowbarVector.z;
+    e->zBefore = fall_position(fb)->z;
+    e->vzBefore = fall_velocity(fb)->z;
+    return e;
+}
+
+static void fall_contact_end(CollisionBody *fb, WorldFallContact *e)
+{
+    if (e == NULL)
+        return;
+    e->zAfter = fall_position(fb)->z;
+    e->vzAfter = fall_velocity(fb)->z;
+}
+
 // A car's think or drive, its ticks added to its CarIndex's.
 static void prof_car(void (*fn)(Car *c, float dt), uint32_t *by_car, Car *c,
                      float dt)
@@ -489,8 +577,17 @@ void world_do_timestep_collisions(World *w, float dt)
     Contact *c;
     struct Collision *col;
     struct Collision *next_col;
+    CollisionBody *fb = fall_body(w);
     int32_t round = 0;
 
+    if (fb != NULL) {
+        WorldFallTrace.frame = WorldLoopCounter;
+        WorldFallTrace.dt = dt;
+        WorldFallTrace.zMoved = fall_position(fb)->z;
+        WorldFallTrace.vzMoved = fall_velocity(fb)->z;
+        WorldFallTrace.dropped = 0;
+        WorldFallTrace.resolved = 0;
+    }
     collisionbody_maybe_print_all();
 
     for (wit = CollisionBodyWitnessList.next; wit != WITNESS_END; wit = next) {
@@ -512,17 +609,22 @@ void world_do_timestep_collisions(World *w, float dt)
          wit = wit->Link.next)
         cbwitness_test_for_contact(wit, &list);
     prof_mark(WSP_TESTS);
+    if (fb != NULL)
+        WorldFallTrace.tested = fall_count(&list, fb);
 
     // Earliest first: resolve the head, drop every other contact either
     // body had, and look again round whatever the resolve left moving.
     while (list.next != CONTACT_END(&list)) {
         CollisionBody *b1;
         CollisionBody *b2;
+        WorldFallContact *fc;
         int32_t n;
         int32_t i;
 
         c = list.next;
+        fc = fall_contact_begin(fb, c, round);
         contact_resolve(c);
+        fall_contact_end(fb, fc);
         b1 = c->pBody1;
         b2 = c->pBody2;
         if (b1->Dynamic)
@@ -548,6 +650,11 @@ void world_do_timestep_collisions(World *w, float dt)
     }
     prof_mark(WSP_RESOLVE);
     prof_rounds(round);
+    if (fb != NULL) {
+        WorldFallTrace.rounds = round;
+        if (round == WORLD_MAX_CONTACT_ROUNDS)
+            WorldFallTrace.dropped = fall_count(&list, fb);
+    }
 
     // Twenty rounds and still touching: what is left is dropped unresolved.
     if (round == WORLD_MAX_CONTACT_ROUNDS) {

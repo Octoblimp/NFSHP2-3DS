@@ -239,6 +239,38 @@ typedef struct WorldStepProf {
 extern int32_t       WorldStepProfOn;
 extern WorldStepProf WorldStepProfile;
 
+// Not in the image. Each step of CarTable[0], player 1's car, while
+// WorldFallTraceOn is set ("FallLog 1"): where the move left it and every
+// contact of its that was resolved, for main.c's line a step. The user's
+// car went through the road on track 62 (2026-10-20), and the log's line
+// every 2 s showed only that it had. With the flag clear nothing is read.
+#define WORLD_FALL_CONTACTS 6
+
+typedef struct WorldFallContact {
+    int32_t round;
+    int32_t other;                      // the other body's Type
+    float   normalZ;                    // a wafer's face normal's z, else 0
+    float   side;                       // the car's centre off that plane
+    float   backup;                     // BackupTime
+    float   crowbarZ;                   // the car's share of CrowbarVector
+    float   zBefore, zAfter;            // the car's position round the resolve
+    float   vzBefore, vzAfter;          // and its velocity
+} WorldFallContact;
+
+typedef struct WorldFallStep {
+    int32_t frame;                      // WorldLoopCounter
+    float   dt;
+    float   zMoved, vzMoved;            // after the move, before the contacts
+    int32_t tested;                     // the car's contacts in the first tests
+    int32_t rounds;
+    int32_t dropped;                    // the car's, at the twentieth round
+    int32_t resolved;                   // the first WORLD_FALL_CONTACTS kept
+    WorldFallContact contact[WORLD_FALL_CONTACTS];
+} WorldFallStep;
+
+extern int32_t       WorldFallTraceOn;
+extern WorldFallStep WorldFallTrace;
+
 // 0x0014bce0. Empty.
 void world_flush_collisions(World *w);
 

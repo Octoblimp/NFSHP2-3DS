@@ -232,6 +232,13 @@ extern int32_t ConfigPauseLog;              // 0
 // Off by default (2026-10-20).
 extern int32_t ConfigEggCodes;              // 0
 
+// The port's own: "FallLog 1" has the log a "fall:" line for every step of
+// the world: where player 1's car was after the move and after each of its
+// contacts (world.h's WorldFallStep), for the car the user drove through
+// the road on track 62 (2026-10-20). tools/fall_trace.py puts the road's
+// height beside each. Needs "DebugLog 1". Off by default.
+extern int32_t ConfigFallLog;               // 0
+
 typedef void (*ConfigItemsLogFn)(const char *line);
 
 // Applies `text` (NUL-terminated), each word as it is read; SkipFE goes
