@@ -290,6 +290,8 @@ typedef struct {
     int  blurFailed;            // and ones with no RADIALBLUR or no room
     int  greyDrawn;             // black and white frames, since the load
     int  greyFailed;            // and ones with no copy or no room
+    int  focusDrawn;            // depth of field frames blurred, since the load
+    int  focusFailed;           // and ones with no copy, no room or another Z
 
     // --- the sun: what StuffSun drew and asked for, the frame just drawn.
     int   sunQuads;             // quads ePoly::Render drew

@@ -6023,8 +6023,9 @@ static void logRaceState(void)
     logLine("race: minimap %d polys (%d failed)", g_track.flailerPolys,
             g_track.flailerFailed);
     logLine("race: radial blur %d frames blended, %d failed; black and "
-            "white %d, %d failed", g_track.blurBlends, g_track.blurFailed,
-            g_track.greyDrawn, g_track.greyFailed);
+            "white %d, %d failed; depth of field %d, %d failed",
+            g_track.blurBlends, g_track.blurFailed, g_track.greyDrawn,
+            g_track.greyFailed, g_track.focusDrawn, g_track.focusFailed);
     logLine("race: sun %d quads (%d failed), last at %.0f %.0f alpha %d; "
             "Z rect at %d %d, %d read back, %d of it sky",
             g_track.sunQuads, g_track.sunQuadsFailed,

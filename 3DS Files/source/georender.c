@@ -12,6 +12,7 @@
 #include "c3dwrap.h"
 #include "configitems.h"
 #include "coresample.h"
+#include "efocus.h"
 #include "geofold_shbin.h"
 #include "geosolid_shbin.h"
 #include "geocull.h"
@@ -169,8 +170,18 @@ static int               s_mirrorW;
 static int               s_mirrorH;
 static bool              s_mirrorDrawn;
 
+// The depth of field's half target: its texture in VRAM and a target over
+// it with no depth buffer; whether a begin found no room for them; and the
+// frame's buffer the target was bound over, while it is.
+static C3D_Tex           s_focusTex;
+static C3D_RenderTarget* s_focus;
+static bool              s_focusNoRoom;
+static C3D_FrameBuf      s_focusBack;
+static bool              s_focusBound;
+
 static void free_envmap(void);
 static void free_mirror(void);
+static void free_focus(void);
 static void fog_row(const C3D_Mtx* projection, float row[4]);
 
 typedef uint32_t __attribute__((may_alias)) GeoWord;
@@ -345,6 +356,7 @@ void georender_exit(void)
     C3D_TexDelete(&s_noFogTex);
     free_envmap();
     free_mirror();
+    free_focus();
     shaderProgramFree(&s_foldProgram);
     DVLB_Free(s_foldDvlb);
     s_foldDvlb = NULL;
@@ -1611,6 +1623,335 @@ bool georender_draw_mirror_quad(const GeoRenderVertex v[4],
               -1.0f, false);
     return draw_screen_quad(v, gt, &screen, blend, false, -1.0f, sourceAlpha,
                             false);
+}
+
+// ------------------------------------------------------- the depth of field
+
+static void free_focus(void)
+{
+    if (s_focus) {
+        C3D_RenderTargetDelete(s_focus);
+        s_focus = NULL;
+    }
+    if (s_focusTex.data) {
+        C3D_TexDelete(&s_focusTex);
+    }
+    memset(&s_focusTex, 0, sizeof s_focusTex);
+    s_focusNoRoom = false;
+    s_focusBound  = false;
+}
+
+void georender_focus_free(void)
+{
+    free_focus();
+}
+
+bool georender_focus_begin(void)
+{
+    if (!s_ready || s_focusNoRoom || s_focusBound) {
+        return false;
+    }
+    if (!s_focus) {
+        if (!C3D_TexInitVRAM(&s_focusTex, GEO_FOCUS_SIZE, GEO_FOCUS_SIZE,
+                             GPU_RGBA8)) {
+            memset(&s_focusTex, 0, sizeof s_focusTex);
+            s_focusNoRoom = true;
+            return false;
+        }
+        s_focus = C3D_RenderTargetCreateFromTex(&s_focusTex, GPU_TEXFACE_2D,
+                                                0, -1);
+        if (!s_focus) {
+            free_focus();
+            s_focusNoRoom = true;
+            return false;
+        }
+        C3D_TexSetFilter(&s_focusTex, GPU_LINEAR, GPU_LINEAR);
+        C3D_TexSetWrap(&s_focusTex, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
+    }
+    s_focusBack = *C3D_GetFrameBuf();
+    if (!C3D_FrameDrawOn(s_focus)) {
+        return false;
+    }
+    s_focusBound = true;
+    return true;
+}
+
+// What C3D_FrameDrawOn did for the frame's own target: its buffer, and the
+// viewport over all of it.
+void georender_focus_end(void)
+{
+    if (!s_focusBound) {
+        return;
+    }
+    C3D_SetFrameBuf(&s_focusBack);
+    C3D_SetViewport(0, 0, s_focusBack.width, s_focusBack.height);
+    s_focusBound = false;
+}
+
+const C3D_Tex* georender_focus_texture(void)
+{
+    return s_focus ? &s_focusTex : NULL;
+}
+
+// A quad of the depth of field's, from the screen quads' ring with their
+// program and buffer: the vertex colour unlit, `tex` on unit 0 at a UV
+// scale of 1, the fog's row the near plane's, no culling, no alpha test,
+// and every stage passing what is before it. The caller sets its stages,
+// its blend and its depth test, and focus_quad_draw draws it.
+static bool focus_quad_begin(const GeoRenderVertex v[4], C3D_Tex* tex,
+                             const C3D_Mtx* screen)
+{
+    GeoRenderVertex* dst;
+    C3D_BufInfo*     buf;
+    float            fog[4] = { 0.0f, 0.0f, 0.0f, fog_s(1.0f) };
+    int              i;
+
+    if (!s_ready || !s_quads || s_numQuads >= GEO_QUAD_RING || !tex) {
+        return false;
+    }
+    run_forget();
+    dst = &s_quads[s_numQuads * 4];
+    memcpy(dst, v, 4u * sizeof *dst);
+
+    C3D_BindProgram(&s_program);
+    C3D_SetAttrInfo(&s_attr);
+    buf = C3D_GetBufInfo();
+    BufInfo_Init(buf);
+    BufInfo_Add(buf, s_quads, sizeof(GeoRenderVertex), 4, 0x3210);
+    set_unlit();
+    c3d_unif_set(s_uUvScale, 1.0f, 1.0f, 0.0f, 1.0f);
+    set_model(s_uMvp, s_uFogModel, s_uLightModel, screen, &s_identity, fog,
+              NULL);
+    C3D_TexBind(0, tex);
+    for (i = 0; i < 6; i++) {
+        C3D_TexEnvInit(C3D_GetTexEnv(i));
+    }
+    C3D_CullFace(GPU_CULL_NONE);
+    alpha_test(false, 0);
+    return true;
+}
+
+// The draw, and back what the next draw does not set itself: it sets its
+// first stage, its blend and its depth test, and the fog's stage
+// (apply_fog_colour), but not the other stages, the combiner's buffer or
+// the depth's map.
+static void focus_quad_draw(const C3D_Tex* tex, const char* what)
+{
+    int i;
+
+    draw_arrays(GPU_TRIANGLE_STRIP, s_numQuads * 4, 4, tex, what);
+    s_numQuads++;
+    for (i = 0; i < 6; i++) {
+        C3D_TexEnvInit(C3D_GetTexEnv(i));
+    }
+    C3D_TexEnvBufUpdate(C3D_Both, 0);
+    C3D_DepthMap(true, -1.0f, 0.0f);
+    s_fogApplied = ~0u;
+}
+
+static GPU_TEVSCALE focus_scale(int times)
+{
+    return times >= 4 ? GPU_TEVSCALE_4
+         : times == 2 ? GPU_TEVSCALE_2 : GPU_TEVSCALE_1;
+}
+
+// Stage `i` from passing what is before it, with `k` its constant's alpha.
+static C3D_TexEnv* focus_env(int i, uint32_t k)
+{
+    C3D_TexEnv* env = C3D_GetTexEnv(i);
+
+    C3D_TexEnvInit(env);
+    C3D_TexEnvColor(env, (k & 0xffu) << 24);
+    return env;
+}
+
+// sat(FarB - B), the texel's blue taken from the constant; for a FarB past
+// 255, 1 - B with FarB - 255 added.
+static void focus_far(int i, int farB, GPU_TEVSCALE scale)
+{
+    C3D_TexEnv* env;
+
+    if (farB > 255) {
+        env = focus_env(i, (uint32_t)(farB - 255));
+        C3D_TexEnvSrc(env, C3D_Alpha, GPU_TEXTURE0, GPU_CONSTANT, 0);
+        C3D_TexEnvOpAlpha(env, GPU_TEVOP_A_ONE_MINUS_SRC_B,
+                          GPU_TEVOP_A_SRC_ALPHA, 0);
+        C3D_TexEnvFunc(env, C3D_Alpha, GPU_ADD);
+    } else {
+        env = focus_env(i, (uint32_t)farB);
+        C3D_TexEnvSrc(env, C3D_Alpha, GPU_CONSTANT, GPU_TEXTURE0, 0);
+        C3D_TexEnvOpAlpha(env, GPU_TEVOP_A_SRC_ALPHA, GPU_TEVOP_A_SRC_B, 0);
+        C3D_TexEnvFunc(env, C3D_Alpha, GPU_SUBTRACT);
+    }
+    C3D_TexEnvScale(env, C3D_Alpha, scale);
+}
+
+// sat(B - NearB), the constant taken from the blue; for a NearB under 0, B
+// with -NearB added.
+static void focus_near(int i, int nearB, GPU_TEVSCALE scale)
+{
+    C3D_TexEnv* env;
+
+    env = focus_env(i, (uint32_t)(nearB < 0 ? -nearB : nearB));
+    C3D_TexEnvSrc(env, C3D_Alpha, GPU_TEXTURE0, GPU_CONSTANT, 0);
+    C3D_TexEnvOpAlpha(env, GPU_TEVOP_A_SRC_B, GPU_TEVOP_A_SRC_ALPHA, 0);
+    C3D_TexEnvFunc(env, C3D_Alpha, nearB < 0 ? GPU_ADD : GPU_SUBTRACT);
+    C3D_TexEnvScale(env, C3D_Alpha, scale);
+}
+
+// The stages a step takes, as focus_stages sets them.
+static int focus_stage_count(const EFocusStep* s)
+{
+    bool both = s->FarB > 0 && s->NearB < 255;
+    int  n;
+
+    if (!s->Ramp) {
+        return 1;
+    }
+    n  = both ? 3 + (s->Quads > 0 ? s->Quads - 1 : 0) : 1 + s->Quads;
+    n += !s->Times || s->K != 0;
+    n += s->Min != 0 || s->Max != 255;
+    return n;
+}
+
+// The step's alpha, efocus_pica_alpha's sums in the combiner's (efocus.h):
+// the sum, by Times where it is made; with both terms the far's into the
+// combiner's buffer, which stage 2 reads as stage 0 left it, and each
+// taking the first quad as its scale. Then the quads, each by 4; the
+// product, w + w K or w K, where it is not w; and the INTERPOLATE from Min,
+// the vertices' alpha, to Max.
+static void focus_stages(const EFocusStep* s)
+{
+    GPU_TEVSCALE times = focus_scale(s->Times ? s->Times : 1);
+    bool         both  = s->FarB > 0 && s->NearB < 255;
+    int          quads = s->Quads;
+    int          n     = 0;
+    C3D_TexEnv*  env;
+
+    if (!s->Ramp) {
+        env = focus_env(n, s->Alpha);
+        C3D_TexEnvSrc(env, C3D_Alpha, GPU_CONSTANT, 0, 0);
+        return;
+    }
+    if (both) {
+        GPU_TEVSCALE first = quads > 0 ? GPU_TEVSCALE_4 : GPU_TEVSCALE_1;
+
+        focus_far(n++, s->FarB, first);
+        focus_near(n++, s->NearB, first);
+        env = focus_env(n++, 0);
+        C3D_TexEnvSrc(env, C3D_Alpha, GPU_PREVIOUS, GPU_PREVIOUS_BUFFER, 0);
+        C3D_TexEnvFunc(env, C3D_Alpha, GPU_ADD);
+        C3D_TexEnvScale(env, C3D_Alpha, times);
+        C3D_TexEnvBufUpdate(C3D_Alpha, 1);
+        if (quads > 0) {
+            quads--;
+        }
+    } else if (s->FarB > 0) {
+        focus_far(n++, s->FarB, times);
+    } else if (s->NearB < 255) {
+        focus_near(n++, s->NearB, times);
+    } else {
+        env = focus_env(n++, 0);
+        C3D_TexEnvSrc(env, C3D_Alpha, GPU_CONSTANT, 0, 0);
+    }
+    for (; quads > 0; quads--) {
+        env = focus_env(n++, 0);
+        C3D_TexEnvScale(env, C3D_Alpha, GPU_TEVSCALE_4);
+    }
+    if (!s->Times || s->K != 0) {
+        env = focus_env(n++, s->K);
+        C3D_TexEnvSrc(env, C3D_Alpha, GPU_PREVIOUS, GPU_CONSTANT,
+                      GPU_PREVIOUS);
+        C3D_TexEnvFunc(env, C3D_Alpha,
+                       s->Times ? GPU_MULTIPLY_ADD : GPU_MODULATE);
+    }
+    if (s->Min != 0 || s->Max != 255) {
+        env = focus_env(n++, s->Max);
+        C3D_TexEnvSrc(env, C3D_Alpha, GPU_CONSTANT, GPU_PRIMARY_COLOR,
+                      GPU_PREVIOUS);
+        C3D_TexEnvFunc(env, C3D_Alpha, GPU_INTERPOLATE);
+    }
+}
+
+bool georender_draw_focus_step(const GeoRenderVertex v[4], C3D_Tex* depth,
+                               const struct EFocusStep* step, float at)
+{
+    GeoRenderVertex q[4];
+    int             i;
+
+    if (step == NULL || focus_stage_count(step) > 6) {
+        return false;
+    }
+    memcpy(q, v, sizeof q);
+    for (i = 0; i < 4; i++) {
+        memset(q[i].colour, 0xff, 3);
+        q[i].colour[3] = step->Min;
+    }
+    if (!focus_quad_begin(q, depth, &s_screen)) {
+        return false;
+    }
+    focus_stages(step);
+    C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_ONE, GPU_ZERO, GPU_ONE,
+                   GPU_ZERO);
+    // At `at` on the Z-buffer's map, as draw_screen_quad's depth, and drawn
+    // where it is no nearer than the buffer.
+    if (at > 0.0f) {
+        C3D_DepthMap(true, 0.0f, at);
+        C3D_DepthTest(true, GPU_LEQUAL, GPU_WRITE_ALPHA);
+    } else {
+        C3D_DepthTest(true, GPU_ALWAYS, GPU_WRITE_ALPHA);
+    }
+    focus_quad_draw(depth, "focus step");
+    return true;
+}
+
+bool georender_draw_focus_sample(const GeoRenderVertex v[4], C3D_Tex* colour,
+                                 uint8_t blend, bool add)
+{
+    C3D_Mtx     screen;
+    C3D_TexEnv* env;
+
+    if (!s_focusBound) {
+        return false;
+    }
+    // A texture's rows are its own, as the mirror's are.
+    Mtx_Ortho(&screen, 0.0f, (float)GEO_FOCUS_SIZE, (float)GEO_FOCUS_SIZE,
+              0.0f, 1.0f, -1.0f, false);
+    if (!focus_quad_begin(v, colour, &screen)) {
+        return false;
+    }
+    // The GS's Cs As >> 7: the texel by the constant, doubled.
+    env = focus_env(0, 0);
+    C3D_TexEnvColor(env, (uint32_t)blend * 0x01010101u);
+    C3D_TexEnvSrc(env, C3D_Both, GPU_TEXTURE0, GPU_CONSTANT, 0);
+    C3D_TexEnvFunc(env, C3D_Both, GPU_MODULATE);
+    C3D_TexEnvScale(env, C3D_Both, GPU_TEVSCALE_2);
+    if (add) {
+        C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_ONE, GPU_ONE,
+                       GPU_ONE, GPU_ONE);
+    } else {
+        C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_ONE, GPU_ZERO,
+                       GPU_ONE, GPU_ZERO);
+    }
+    C3D_DepthTest(false, GPU_ALWAYS, GPU_WRITE_COLOR);
+    focus_quad_draw(colour, "focus sample");
+    return true;
+}
+
+bool georender_draw_focus_blur(const GeoRenderVertex v[4])
+{
+    if (!s_focus || s_focusBound
+        || !focus_quad_begin(v, &s_focusTex, &s_screen)) {
+        return false;
+    }
+    C3D_TexEnvSrc(C3D_GetTexEnv(0), C3D_Both, GPU_TEXTURE0, 0, 0);
+    C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_DST_ALPHA,
+                   GPU_ONE_MINUS_DST_ALPHA, GPU_ZERO, GPU_ONE);
+    C3D_DepthTest(true, GPU_ALWAYS,
+                  (GPU_WRITEMASK)(GPU_WRITE_RED | GPU_WRITE_GREEN
+                                  | GPU_WRITE_BLUE));
+    focus_quad_draw(&s_focusTex, "focus blur");
+    return true;
 }
 
 // ------------------------------------------------------------- the strips

@@ -31,9 +31,10 @@
 // it before the draws, and trackview.c hands it to the PICA's fog unit as a
 // lookup by depth (efog_keep, efog_colour).
 //
-// Not here, the GS's: the CLUT uploads, the sprites and the DMA packets,
-// and eAttachDepthOfField. The port draws none of it; eattach_fog hands
-// each view's palette to gEFogAttachFn where the image builds the packet.
+// Not here, the GS's: the CLUT uploads, the sprites and the DMA packets.
+// The port draws none of it; eattach_fog hands each view's palette to
+// gEFogAttachFn where the image builds the packet. eAttachDepthOfField,
+// the chain's next, is efocus.h's.
 //
 // Cross-check: tools/weather_check.py. Write-up: docs/formats/weather-fog.md.
 

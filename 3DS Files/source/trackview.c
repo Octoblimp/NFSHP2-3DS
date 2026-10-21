@@ -17,6 +17,7 @@
 #include "eefpu.h"
 #include "eanim.h"
 #include "eenvmap.h"
+#include "efocus.h"
 #include "efog.h"
 #include "eframe.h"
 #include "elight.h"
@@ -151,6 +152,7 @@ static void render_epoly_3d(ePoly* p, TextureInfo* info, bMatrix4* m,
                             int flags);
 static void free_blur_previous(void);
 static void free_grey_copy(void);
+static void free_focus_copies(void);
 static void transfer_zbuffer_rect(uint8_t* dst, int x, int y, int w, int h);
 static float depth_of_gs_z(float g);
 static void target_to_screen(float x, float y, int targetW, int targetH,
@@ -2597,11 +2599,13 @@ void trackview_free(TrackView* v)
         }
         s_numSunRects = 0;
         // Their textures go with the track, and the radial blur's last
-        // frame and the black and white's copy with it.
+        // frame, the black and white's copy and the depth of field's
+        // copies and half target with it.
         s_numFlailer     = 0;
         s_flailerDropped = 0;
         free_blur_previous();
         free_grey_copy();
+        free_focus_copies();
     }
     if (v->info) {
         for (i = 0; i < v->numSolids + v->numOther; i++) {
@@ -3280,9 +3284,34 @@ static void fog_attach(eView* view, const uint32_t* palette,
     v->fogSkyKeep = efog_keep(palette, mode, 0);
 }
 
+// eAttachDepthOfField's seams (efocus.h): where the image builds a view's
+// pass, view 1's palette as the plan its passes draw (efocus_plan); and
+// where it builds the blur's, the blur. The draw is depth_of_field's, once
+// the frame is drawn. The 3DS has no view 2 to draw.
+static EFocusPlan s_focusPlan;
+static bool       s_focusPlanned;       // view 1's pass, this frame
+static bool       s_focusBlurred;       // and the blur's
+
+static void focus_attach(eView* view, const uint32_t* palette,
+                         const EFocusBand* band)
+{
+    if (view->ID != EVIEW_ID_PLAYER1 || s_draw == NULL) {
+        return;
+    }
+    efocus_plan(palette, band, &s_focusPlan);
+    s_focusPlanned = true;
+}
+
+static void focus_blur(void)
+{
+    s_focusBlurred = true;
+}
+
 // eDisplayFrame's fog (0x001138ac), which the PS2 lays over the frame once
 // it is drawn; see efog.h. Its palette depends on nothing drawn, so here
-// it is made first, and georender lays it on as each thing is drawn.
+// it is made first, and georender lays it on as each thing is drawn. The
+// depth of field after it, from the same test, whose palette depends on
+// nothing drawn either: its plan here, its passes in depth_of_field.
 static void fog_frame(TrackView* v, eView* view)
 {
     const WeatherQuery* q = &CachedWeatherQueries[view->ID];
@@ -3298,9 +3327,14 @@ static void fog_frame(TrackView* v, eView* view)
     v->fogSkyKeep = 1.0f;
     s_depthNear   = view->NearZ;
     s_depthFar    = view->FarZ;
-    gEFogAttachFn = fog_attach;
+    gEFogAttachFn  = fog_attach;
+    gEDofAttachFn  = focus_attach;
+    gEDofBlurFn    = focus_blur;
+    s_focusPlanned = false;
+    s_focusBlurred = false;
     if (InGameFlag && eattach_depth_into_alpha()) {
         eattach_fog();
+        eattach_depth_of_field();
     }
     v->fogOn     = s_fogOn;
     v->fogMode   = efog_view_mode(view);
@@ -3916,18 +3950,29 @@ static void free_blur_previous(void)
 // drawn so far is sent first, whether the frame goes in parts or not, and
 // the copy queued after waits for it, as what is sent after waits for the
 // copy. False when the buffer is not the top screen's, or the heap had no
-// 512 KB, which `noHeap` keeps.
+// 512 KB, which `noHeap` keeps. With `depth`, its depth buffer, D24S8, in
+// place of its colour: tiled as the colour is, its top byte G as a texel,
+// its middle B and its low A.
 #define TOP_TILE_ROW (240 / 8 * 64 * 4)           // bytes
 #define TOP_TILE_GAP ((256 - 240) / 8 * 64 * 4)
 
-static bool copy_top_screen(C3D_Tex* tex, bool* made, bool* noHeap,
-                            GPU_TEXTURE_FILTER_PARAM filter)
+static bool copy_top_buffer(C3D_Tex* tex, bool* made, bool* noHeap,
+                            GPU_TEXTURE_FILTER_PARAM filter, bool depth)
 {
     C3D_FrameBuf* fb = C3D_GetFrameBuf();
+    void*         src;
 
     if (fb == NULL || fb->colorBuf == NULL || fb->width != 240
         || fb->height != 400 || fb->colorFmt != GPU_RB_RGBA8) {
         return false;
+    }
+    src = fb->colorBuf;
+    if (depth) {
+        if (fb->depthBuf == NULL
+            || fb->depthFmt != GPU_RB_DEPTH24_STENCIL8) {
+            return false;
+        }
+        src = fb->depthBuf;
     }
     if (!*made) {
         if (*noHeap || !C3D_TexInit(tex, 256, 512, GPU_RGBA8)) {
@@ -3940,11 +3985,17 @@ static bool copy_top_screen(C3D_Tex* tex, bool* made, bool* noHeap,
         *made = true;
     }
     hangwatch_gpu_send_now();
-    GX_TextureCopy((u32*)fb->colorBuf, GX_BUFFER_DIM(TOP_TILE_ROW / 16, 0),
+    GX_TextureCopy((u32*)src, GX_BUFFER_DIM(TOP_TILE_ROW / 16, 0),
                    (u32*)tex->data,
                    GX_BUFFER_DIM(TOP_TILE_ROW / 16, TOP_TILE_GAP / 16),
                    240u * 400u * 4u, 8);
     return true;
+}
+
+static bool copy_top_screen(C3D_Tex* tex, bool* made, bool* noHeap,
+                            GPU_TEXTURE_FILTER_PARAM filter)
+{
+    return copy_top_buffer(tex, made, noHeap, filter, false);
 }
 
 // The GS reads its other buffer bilinear.
@@ -4095,6 +4146,132 @@ static void black_and_white(TrackView* v, eView* view)
         v->greyDrawn++;
     } else {
         v->greyFailed++;
+    }
+}
+
+// ------------------------------------------------------ the depth of field
+
+// The depth buffer's copy, read texel for texel, and the colour's, read
+// bilinear as the GS's jitter passes read the frame: made at the first
+// frame with a blur, kept to the track's end.
+static C3D_Tex s_focusDepth;
+static bool    s_focusDepthMade;
+static bool    s_focusDepthNoHeap;
+static C3D_Tex s_focusColour;
+static bool    s_focusColourMade;
+static bool    s_focusColourNoHeap;
+
+static void free_focus_copies(void)
+{
+    if (s_focusDepthMade) {
+        C3D_TexDelete(&s_focusDepth);
+    }
+    if (s_focusColourMade) {
+        C3D_TexDelete(&s_focusColour);
+    }
+    memset(&s_focusDepth, 0, sizeof s_focusDepth);
+    memset(&s_focusColour, 0, sizeof s_focusColour);
+    s_focusDepthMade    = false;
+    s_focusDepthNoHeap  = false;
+    s_focusColourMade   = false;
+    s_focusColourNoHeap = false;
+    georender_focus_free();
+}
+
+// eAttachDepthOfField's draw for view 1 (retail 0x00119f70, efocus.h),
+// after the fog and before the black and white, so the mirror and the HUD
+// stay sharp: the plan fog_frame made into the frame's alpha, read from
+// the depth buffer's copy; then the frame's copy at each jitter into the
+// half target, the first in its place where retail clears it to black and
+// adds each; then the half target back over the frame by that alpha. The
+// jitter is retail's sixteenths of a PS2 pixel, here on the 400 by 240,
+// and each sample's far edges are the frame's, where the copy's texture
+// runs on past them. The plan reads the depth by the race's Z range, 16 to
+// 0x800000; a frame in another is left sharp, and counted.
+static void depth_of_field(TrackView* v)
+{
+    static const float kX[4] = { 0.0f, 400.0f, 0.0f, 400.0f };
+    static const float kY[4] = { 0.0f, 0.0f, 240.0f, 240.0f };
+    static const float kU[4] = { 0.0f, (float)GEO_FOCUS_SIZE, 0.0f,
+                                 (float)GEO_FOCUS_SIZE };
+    const EFocusPlan*  p = &s_focusPlan;
+    GeoRenderVertex    q[4];
+    int                samples, n, i;
+
+    if (!s_focusPlanned || !s_focusBlurred || p->Count == 0) {
+        return;
+    }
+    if ((s_zRange->ZMin - 2.0f) * 4194304.0f != 16.0f
+        || s_zRange->ZMax != 4.0f
+        || gpuCmdBufSize - gpuCmdBufOffset < CMDBUF_GUARD_WORDS
+        || !copy_top_buffer(&s_focusDepth, &s_focusDepthMade,
+                            &s_focusDepthNoHeap, GPU_NEAREST, true)
+        || !copy_top_buffer(&s_focusColour, &s_focusColourMade,
+                            &s_focusColourNoHeap, GPU_LINEAR, false)) {
+        v->focusFailed++;
+        return;
+    }
+
+    memset(q, 0, sizeof q);
+    for (i = 0; i < 4; i++) {
+        q[i].pos[0] = kX[i];
+        q[i].pos[1] = kY[i];
+        q[i].st[0]  = (240.0f - kY[i]) / 256.0f;
+        q[i].st[1]  = kX[i] / 512.0f;
+        memset(q[i].colour, 0xff, 4);
+    }
+    for (n = 0; n < p->Count; n++) {
+        if (!georender_draw_focus_step(q, &s_focusDepth, &p->Step[n],
+                                       p->At[n])) {
+            v->focusFailed++;
+            return;
+        }
+    }
+
+    if (!georender_focus_begin()) {
+        v->focusFailed++;
+        return;
+    }
+    samples = FocusJitterSamples < 0 ? 0
+            : FocusJitterSamples > 6 ? 6 : FocusJitterSamples;
+    for (n = 0; n < (samples > 0 ? samples : 1); n++) {
+        float jx = 0.0f, jy = 0.0f;
+
+        if (samples > 0) {
+            jx = (float)FocusJitter[n][0] * (400.0f / 512.0f / 16.0f);
+            jy = (float)FocusJitter[n][1] * (240.0f / 448.0f / 16.0f);
+        }
+        for (i = 0; i < 4; i++) {
+            float sx = jx + (400.0f - jx) * kU[i] / (float)GEO_FOCUS_SIZE;
+            float sy = jy + (240.0f - jy) * kY[i] / 240.0f;
+
+            q[i].pos[0] = kU[i];
+            q[i].pos[1] = kY[i];
+            q[i].st[0]  = (240.0f - sy) / 256.0f;
+            q[i].st[1]  = sx / 512.0f;
+        }
+        // No samples is the clear alone: black.
+        if (!georender_draw_focus_sample(q, &s_focusColour,
+                                         samples > 0 ? (uint8_t)JitterBlend
+                                                     : 0,
+                                         n > 0)) {
+            georender_focus_end();
+            v->focusFailed++;
+            return;
+        }
+    }
+    georender_focus_end();
+
+    for (i = 0; i < 4; i++) {
+        q[i].pos[0] = kX[i];
+        q[i].pos[1] = kY[i];
+        q[i].st[0]  = kX[i] / 400.0f;
+        q[i].st[1]  = kY[i] / (float)GEO_FOCUS_SIZE;
+    }
+    if (georender_draw_focus_blur(q)) {
+        v->focusDrawn++;
+    } else {
+        v->focusFailed++;
     }
 }
 
@@ -4284,12 +4461,14 @@ void trackview_draw(TrackView* v)
     // the alpha test is put back off and the blend back to its own, and
     // the fog off.
     georender_set_fog(NULL, 0);
-    // The main chain's black and white (0x00113900), then the radial blur,
+    // The depth of field, the fog's chain's last (0x001138ac), then the
+    // main chain's black and white (0x00113900), then the radial blur,
     // then the mirror, after the view's scene and before the HUD
     // (0x00113a54 and 0x00113a64, then 0x00113af4). The render eggs are
     // put back between the blur and the mirror (0x00113a90) and set again
     // at the frame's end (0x00113d7c), after the HUD's EndFrame; here at
     // trackview_draw's, before the HUD, which reads nothing they stomp.
+    depth_of_field(v);
     black_and_white(v, view);
     display_radial_blur(v, view);
     SuspendRenderEggs();

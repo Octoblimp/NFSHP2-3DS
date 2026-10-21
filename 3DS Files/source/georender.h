@@ -325,6 +325,48 @@ bool georender_draw_hud_quad_w(const GeoRenderVertex v[4],
                                bool alphaTest, float width, float height);
 void georender_quads_rewind(void);
 
+// ------------------------------------------------------- the depth of field
+
+// eAttachDepthOfField's passes (efocus.h), as screen quads from the same
+// ring, each with neither fog nor alpha test, and the stages, the
+// combiner's buffer and the depth's map put back after.
+
+// The blur's buffer: retail's is the frame half across, here a texture
+// GEO_FOCUS_SIZE square in VRAM, RGBA8, with no depth buffer, read
+// bilinear and clamped. Made at the first begin and kept to
+// georender_focus_free, which the track's end calls; with no room for it
+// the begins fail until then.
+#define GEO_FOCUS_SIZE 256
+
+// The half target bound to be drawn on, x right to GEO_FOCUS_SIZE and y
+// down to it, with the frame's buffer kept for georender_focus_end to bind
+// again. Between them only georender_draw_focus_sample draws.
+bool           georender_focus_begin(void);
+void           georender_focus_end(void);
+const C3D_Tex* georender_focus_texture(void);
+void           georender_focus_free(void);
+
+// One of a view's steps (efocus.h's EFocusStep) into the top screen's
+// alpha alone: a quad over the screen, its texture `depth` -- the depth
+// buffer's copy, read as RGBA8, texel for texel -- with the step's sum in
+// the combiner's alpha. With an `at` past 0, it draws only where the depth
+// buffer is at `at` or nearer. False when the ring is full, or the step
+// takes more than the six stages.
+struct EFocusStep;
+bool georender_draw_focus_step(const GeoRenderVertex v[4], C3D_Tex* depth,
+                               const struct EFocusStep* step, float at);
+
+// A jitter sample: a quad in the half target's pixels of the frame's copy
+// `colour`, by `blend` (the GS's, 0x80 for 1.0), added to what is there
+// with `add`, else in its place.
+bool georender_draw_focus_sample(const GeoRenderVertex v[4], C3D_Tex* colour,
+                                 uint8_t blend, bool add);
+
+// The half target over the top screen, by the frame's alpha from the
+// frame to it -- retail's Focus blend, (Cs - Cd) Ad + Cd -- with the alpha
+// left as it is.
+bool georender_draw_focus_blur(const GeoRenderVertex v[4]);
+
 // ------------------------------------------------------------- the strips
 
 // How many strip vertices a frame can draw, in a ring of their own that

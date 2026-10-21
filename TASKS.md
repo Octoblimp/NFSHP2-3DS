@@ -5129,7 +5129,7 @@ phases.
           (the demo's 97.7%) and 90.6% at 4,000 and in the sky
           (`docs/formats/weather-fog.md`). CreateFocusPalette and
           eAttachDepthOfField are the depth of field's, which the port
-          does not draw.
+          did not draw then (TASKS 84 draws it).
         - joyevent, nothing to change: `scannertab.c` was read out of
           retail's disc (TASKS 49), so it has the four value changes:
           130 event names, 230 scanner rows (the demo's 231), and no
@@ -5186,7 +5186,8 @@ phases.
             sceIoctl and InitTLBFunctions.
         - Not drawn, on either disc's terms: the depth of field
           (CreateFocusPalette, eAttachDepthOfField). The port never had
-          it; it is a feature to add, not a value retail changed.
+          it; it is a feature to add, not a value retail changed. TASKS
+          84 added it.
 
 76. [x] **Rigid animations: the shaken bush, and the rest.** Found in
         TASKS 73's sixth slice. An eModel's rigid animation is its
@@ -5554,18 +5555,27 @@ phases.
               with the driver draw cut out (TASKS 46). The looks back are
               the checker's, not driven in Azahar.
 
-84. [ ] **The depth of field.** The second half of the 2026-10-20 ask,
+84. [x] **The depth of field.** The second half of the 2026-10-20 ask,
         after TASKS 83. CreateFocusPalette and eAttachDepthOfField: after
-        the fog, retail blurs what is out of focus by each pixel's depth
-        (the race camera's focus 15 ahead, depth 65). On the 3DS it is a
-        pass over the whole screen, so it has to keep 30 FPS.
+        the fog, retail blurs what is out of focus by each pixel's depth,
+        for the cameras that set a focus (attract mode's and the replays'
+        drive camera, the fly-bys, the close-ups; the player's own chase
+        view has perfect focus). On the 3DS it is a pass over the whole
+        screen, so it has to keep 30 FPS.
         - [x] **84a, retail's code read** (2026-10-21): GetFocusPalette,
               the ScreenZ/ViewZ helpers, CreateFocusPalette,
               eAttachDepthOfField and the globals, in
               `docs/formats/depth-of-field.md`. Retail's palette is 16x
               off its alpha (`i << 12` against `Z >> 8`); the port keeps
               that.
-        - [ ] **84b, the 3DS pass** and a mipsemu checker, at 30 FPS.
+        - [x] **84b, the 3DS pass** (2026-10-21): `efocus.c`'s palette
+              as a plan of up to three alpha quads read from the depth
+              buffer's copy, then the two jitter samples into a 256 x 256
+              target laid back by that alpha (`trackview.c`
+              `depth_of_field`). `tools/dof_check.py`: 65 scenarios, 0
+              differ; `--mutate` 107, 104 caught, 3 equivalent. Azahar's
+              attract demo blurred every frame at 30 FPS. Not run on a
+              3DS yet.
 
 ### The retail frontend
 

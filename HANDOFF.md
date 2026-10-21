@@ -29202,3 +29202,50 @@ for the night".
   target back), port it with a mipsemu checker, build, see it in Azahar
   at 30 FPS, then commit and republish the launch checklist. The v1.0.0
   tag and the push still wait for the user's go and the repo's name.
+
+## Session 154 -- the depth of field on the PICA (TASKS 84 done)
+
+The user: "Read @HANDOFF.md etc. and continue where you left off".
+
+- **efocus.c/.h** (new) port retail's GetFocusPalette, the four
+  ScreenZ/ViewZ helpers, CreateFocusPalette and eAttachDepthOfField, with
+  the seams `gEDofAttachFn` and `gEDofBlurFn`. `efocus_plan` turns view
+  1's palette into up to three steps of the frame's alpha, read from the
+  depth buffer: a constant, or the palette's two ramps made in the
+  combiners.
+- **The draw** (`trackview.c` `depth_of_field`, `georender.c`'s focus
+  quads):
+  - `fog_frame` makes the plan, after `eattach_fog`.
+  - After the scene's alpha lists, the depth buffer and the colour are
+    copied (`copy_top_buffer`).
+  - The alpha quads write only the alpha: one with the depth test ALWAYS,
+    then LEQUAL quads at 1/256 and 2/256.
+  - The two jitter samples go into a 256 x 256 VRAM target.
+  - That target is laid back over the frame by the frame's alpha, before
+    black and white, the blur, the mirror and the HUD.
+  - The log's "race:" line counts "depth of field N, M failed".
+- **tools/dof_check.py** runs retail's code in mipsemu next to
+  `tools/src/dof_test.c`: 65 scenarios, 910 lines, 0 differ. Its bound
+  holds every depth's alpha within one index and 2 of 255 of the
+  palette's. `--mutate`: 107 mutations, 104 caught, 3 equivalent
+  (`pl-entry`, `pb-clamp`, `fa-first-pal`).
+- **A fix found by the mutations.** With a ramp length under 1 and both
+  terms, step_scale ran out of stages. It is now one more quad, for a
+  slope of 256 against retail's 255, which gives the same alphas.
+- **Retail's player camera has perfect focus.** ChangeCameraMover passes
+  1 (`0x00176c58`), so a race behind the car is never blurred, on the PS2
+  either. The blur is for attract mode's and the replays' drive camera,
+  the fly-bys and the close-ups. The doc's cameras table says so now.
+- **Azahar** (AC power, Speed 100%):
+  - A SkipFE race on track 42 with the gas held: 30 FPS, 0 frames
+    blurred, as retail.
+  - The attract demo: 1,214 frames blurred, 0 failed, at 30 FPS. The
+    drive camera kept the near scenery sharp and softened the sky. The
+    close-ups blurred the car they look at, which is retail's 16x
+    mismatch.
+  - Not run on a 3DS yet. Untested there: the depth buffer's
+    TextureCopy, the VRAM target and the GPU's cost.
+- **Docs:** `docs/formats/depth-of-field.md`'s last part is the built
+  pass and its approximations. TASKS 84 is [x].
+- **Next:** the launch checklist is republished. The v1.0.0 tag and the
+  push still wait for the user's go and the repo's name.

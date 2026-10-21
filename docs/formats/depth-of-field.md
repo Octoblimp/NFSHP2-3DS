@@ -1,8 +1,9 @@
 # The depth of field
 
-TASKS 84, in progress. This page holds what retail's code does, read on
-2026-10-21. The port draws none of it yet; the plan for the 3DS is at the
-end.
+TASKS 84. This page holds what retail's code does, read on 2026-10-21,
+and how the port draws it on the PICA (the last part). The port's code is
+`3DS Files/source/efocus.c` and `trackview.c`'s `depth_of_field`; the
+cross-check is `tools/dof_check.py`.
 
 The depth of field is the last piece of `EcstasyE.obj`'s attaches, after
 the fog (`docs/formats/weather-fog.md`). Each frame retail blurs what is
@@ -141,6 +142,15 @@ fills with the depth's alpha.
 | bumpercam | dist, at least 2 | 7.5 |
 | orbitcam | Radius | 8 |
 
+The player's own chase view has PerfectFocus: ChangeCameraMover
+(`0x00176ae8`) builds its DriveCameraMover with the last argument 1
+(`addiu t2,zero,1` at `0x00176c58`). Its focus and depth stay 0, so
+CreateFocusPalette clears the palette and eAttachDepthOfField returns 0:
+a race behind the car is never blurred. The other cameras set a focus:
+the camera coordinator's drive camera (perfect focus off,
+`camera-coordinator.md`) in attract mode and the replays, the fly-bys and
+the close-ups.
+
 ## Retail's 16x mismatch
 
 The frame's alpha from eAttachDepthIntoAlpha is `Z >> 8`, or 255 past
@@ -153,33 +163,72 @@ is built as if entry i stood for Z `i << 12`. The two are 16 apart:
 - so everything nearer than about 64 m takes the 4 m entry's verdict,
   and a farther pixel is judged as if it were 1/16 as far.
 
-In the chase view (focus 15, depth 65) t0 is 0 and t1 is 234 (index
-21): sharp out to about 780 m, then the ramp, and index 0 (the sky,
-Z = 0) gets 112 of 128. The close-up cameras whose band leaves out 4 m
-blur everything within 64 m, the car they look at too. That is the game
-as shipped; the demo was consistent (alpha `min(Z >> 6, 0xfc)` and a
-shift of 10). The port will do what retail does: the palette by retail's
-code, looked up by `efog_depth_alpha`.
+In a drive camera with a focus (15, depth 65) t0 is 0 and t1 is 234
+(index 21): sharp out to about 780 m, then the ramp, and index 0 (the
+sky, Z = 0) gets 112 of 128. The close-up cameras whose band leaves out
+4 m blur everything within 64 m, the car they look at too. That is the
+game as shipped; the demo was consistent (alpha `min(Z >> 6, 0xfc)` and
+a shift of 10). The port does what retail does: the palette by retail's
+code, looked up by the depth as the PS2's index (the last part).
 
-## The 3DS plan (not built yet)
+## The 3DS pass
 
-- `efog.c/.h` (or a new `efocus.c`) gets the helpers, GetFocusPalette,
-  CreateFocusPalette and eAttachDepthOfField's control flow, with a seam
-  `gEDofAttachFn(view, palette)` as the fog has; `tools/` gets a mipsemu
-  checker in the pattern of `weather_check.py`.
-- `trackview_draw` makes the palette with the fog's frame and draws the
-  blur after the scene's alpha lists, before black and white, so the
-  mirror and the HUD stay sharp as on the PS2.
-- The draw: `copy_top_screen` into a texture; two jittered quads into a
-  half-size render target (half across only, 256 x 256, matches retail's
-  blur size on the 400 x 240 screen; retail's +2, +2 PS2 pixels are about
-  +1.56, +1.07 here), averaged; back on the top target, a few full-screen
-  quads of the half texture at fixed depths from `depth_of_gs_z`, depth
-  tested, each at a constant alpha, as steps of the palette's alpha by
-  index (far entries and near entries).
-- Not chosen: reading the depth buffer as a texture (a non-power-of-two
-  texture and 8-bit combiner sums) and GX_DisplayTransfer's scaling from
-  tiled to tiled (unproven).
-- The cost to watch: the 384 KB copy, the half pass (about 96k pixels)
-  and each layer (about 96k pixels). A race has about 13 MB of linear
-  heap free (13,146 KB in the last Azahar log).
+TASKS 84b, built 2026-10-21.
+
+- **The code.** `efocus.c` has the helpers, GetFocusPalette,
+  CreateFocusPalette and eAttachDepthOfField's control flow. Its seams
+  are `gEDofAttachFn(view, palette, band)`, where the image builds a
+  view's pass, and `gEDofBlurFn`, where it builds the blur.
+  `trackview.c`'s `fog_frame` runs it after `eattach_fog`, inside the
+  same test. View 1's palette becomes a plan (`efocus_plan`) before the
+  draws. `depth_of_field` draws the plan after the scene's alpha lists
+  and before black and white, the radial blur, the mirror and the HUD, so
+  those stay sharp as on the PS2.
+- **The frame's alpha.** `GX_TextureCopy` copies the D24S8 depth buffer
+  into a 256 x 512 linear texture, read as RGBA8. There G is the depth's
+  top byte and B its middle byte. In player 1's Z range (16 to
+  `0x800000`) the PS2's index, `Z >> 8`, is `128 G + B / 2` for G of 0
+  and 1, and 255 past them. So up to three full-screen quads write the
+  frame's alpha, with only the alpha written:
+  - one with the depth test ALWAYS, for G 0;
+  - one at the constant depth 1/256, with LEQUAL, for G 1;
+  - one at 2/256, also LEQUAL, for G of 2 and up.
+
+  Each quad is a constant, or the palette's two ramps about the band's
+  edges, made in the combiners (`EFocusStep`, `efocus.h`). The plan
+  merges the last two quads where they are the same.
+- **The blur.** The colour is copied the same way and read bilinear.
+  Each jitter sample goes into a 256 x 256 target in VRAM, half across as
+  retail's, at JitterBlend 64 by 2, so 0.5 each. The first sample
+  replaces and the next adds. Retail's jitter of (0, 0) and (2, 2) PS2
+  pixels is (0, 0) and (1.56, 1.07) here. Then the target is laid over
+  the frame by the frame's alpha (DST_ALPHA), writing RGB only.
+- **The approximations.** `dof_check.py` tests them all with its bound:
+  for each depth from 0 to `0x20400`, and at the far ends, the PICA's
+  alpha must be within 2 of 255 of the palette's alpha at the pixel's
+  index or a neighbour.
+  - The index from B / 2. On the PS2, the ZMin's 16 and a low byte of 224
+    or more carry an odd B into the next index. The port takes the index
+    B / 2 gives, at most one entry off.
+  - The combiners are 8-bit, and each product is taken down: within 2 of
+    255.
+  - The quads' depths are floats, so a region's edge may be one d24 unit
+    off.
+  - A FocusRampLength under 1 is a step. Its slope is 256 where retail's
+    is 255, which gives the same alphas.
+  - Each jitter sample is stretched by its offset so that its right and
+    bottom edges are the frame's. Past those edges the copy's texture
+    holds what the copy left. The stretch is at most 1.56 of 400 across
+    and 1.07 of 240 down.
+  - A view in another Z range is left sharp, and counted as failed. The
+    3DS draws only view 1.
+- **The cost.** Two 512 KB copies in linear memory and the 256 KB target
+  in VRAM, made at the first frame that blurs and freed with the track.
+  Each frame takes two copies, up to three alpha quads, two half quads
+  and the full-screen lay. The debug log's "race:" line counts the
+  frames: "depth of field N, M failed".
+- **Seen.** In Azahar's attract demo, every frame blurred (1,214 drawn,
+  0 failed) and the frame rate held at 30 FPS. The drive camera kept the
+  near scenery sharp and softened the sky. The close-ups blurred the car,
+  as retail's 16x mismatch does. A SkipFE race drew none, as retail does
+  behind the player's car. It has not been run on a 3DS yet.
