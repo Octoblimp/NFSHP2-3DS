@@ -73,7 +73,7 @@ Write-Host "Building from $driveLetter -> $projectDir"
 # meta/hp2 is used, so a failure here only warns.
 & python (Join-Path $PSScriptRoot "make_banner.py") --out (Join-Path $projectDir "meta\hp2")
 if ($LASTEXITCODE -ne 0) {
-    Write-Warning "make_banner.py failed -- the CIA gets the placeholder banner"
+    Write-Warning "make_banner.py failed -- the CIA gets the banner already in meta\hp2, or the placeholder without one"
 }
 
 # devkitPro's generated .d files record every source path as seen from the
