@@ -29254,3 +29254,37 @@ The user: "Read @HANDOFF.md etc. and continue where you left off".
   left.
 - **Next:** the user's device tests on that CIA, then their go. The
   v1.0.0 tag and the push still wait for the go and the repo's name.
+
+## Session 155 -- the release candidate passes on the 3DS
+
+The user tested the release candidate built from 9f112ca on their 3DS:
+"In all my device tests etc. I had zero issues whatsoever. I've given
+you the debug log so you can check just in case. Ignore any slowdowns
+you see. Only fix anything you notice that's an actual problem."
+
+- **The log** (`3DS Files/nfshp2_debug.txt`, 23,374 lines) has five
+  races: attract track 11, track 36 (2 laps), track 24 (quit from the
+  pause menu), attract track 25 and track 25. Nothing in it needs a fix:
+  - No abort, assert or error line. Every failed, dropped, missing,
+    bakes-failed, evicted and unchained count in the race lines is 0.
+  - The depth of field drew 3,378, 290, 49, 143 and 510 frames, 0
+    failed. The radial blur (218, 49, 114) and black and white (5,116)
+    had 0 failed too. 43 to 45 MB of linear memory stayed free.
+  - The five "hangwatch: no frame" notes are the track's attach behind
+    the held Loading screen, 4.5 to 4.9 s once a race: load time.
+  - "DeleteSlotPool() called on nonempty SlotPool CollisionSampleSounds
+    (2 slots allocated)" at track 24's unload is retail's: a scrape
+    sample that stopped before its collision ended is never deleted
+    until UnRegister deletes the pool (`0x001e4a78`, the same code).
+    A stopped sample holds no voice, so nothing reads the freed slots.
+    The pools at the exit and "Expanded slot pool bPNode" are bWare's
+    own warnings.
+  - "left main loop: 45 textures cached, 1 missing" is the main menu's
+    movie panel, `0xc3f0caef`: it is in no pack, since the movie fills it
+    at run time. The override's first lookup counts one miss, cached.
+  - The EA logo's 68 skipped frames of 180 are the boot's load.
+- **TASKS 47** is [x], from the user's report. TASKS 64 gets the
+  report as a note and stays open as the user's known issue.
+- **The launch checklist** (v44): the ten device tests Passed, 47 Done.
+- **Next:** the user's go and the GitHub repo's name, then the v1.0.0
+  tag and the push.

@@ -3326,7 +3326,7 @@ phases.
             draw of 22 to 28.
         - [ ] The user's word on the envmap a face a frame.
 
-47. [ ] **A brief artifact on the bridge before the finish line.**
+47. [x] **A brief artifact on the bridge before the finish line.**
         Reported on 2026-10-12, after the user played build bb70171 on
         their 3DS: "the bridge right before the finish line on my
         track ... had an artifact, I had two laps, showed both times.
@@ -3377,9 +3377,12 @@ phases.
             the deck (the fireball, the blast, the flash, then the crash
             cam at the abutment). The truss, deck and fences drew whole
             in every shot, with the helicopter among the girders.
-        - [ ] On the 3DS: the user's next race on track 44 with the
+        - [x] On the 3DS: the user's next race on track 44 with the
           helicopter, and what the artifact looks like if it is still
           there (a flash, a gap, a stretched or missing triangle).
+          2026-10-21: the user ran the launch checklist's device tests,
+          this one among them, on the release candidate built from
+          9f112ca, and had "zero issues whatsoever".
         - [x] Session 133 (2026-10-18), a likely cause on the device
           alone. The user's run of 792ce27 on track 21 had "the
           road/wall texture ... all staticky for a second" at the start
@@ -4098,6 +4101,12 @@ phases.
           buffer offset, index registers) from a shadow of the
           registers each send writes; blink frames against good ones.
           No Azahar runs: "Azahar can't reproduce it".
+        - 2026-10-21: the user ran the launch checklist's device tests on
+          the release candidate built from 9f112ca, the road on tracks
+          21 and 31 among them, and had "zero issues whatsoever". The
+          box stays open: the user's call of 2026-10-20 stands (ship
+          with the blink as a possible known issue), and the two runs
+          above are the way in if it comes back.
 
 65. [x] **The FPS dip in the same race.** Reported with TASKS 64:
         "there was a minor FPS slowdown too at one point, locate that
