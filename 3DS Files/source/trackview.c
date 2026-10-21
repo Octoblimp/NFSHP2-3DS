@@ -15,6 +15,7 @@
 #include "cardamage.h"
 #include "carrenderinfo.h"
 #include "eefpu.h"
+#include "eanim.h"
 #include "eenvmap.h"
 #include "efog.h"
 #include "eframe.h"
@@ -962,7 +963,7 @@ static void note_use(TrackView* v, TrackTex* t)
 
 static void defer(TrackView* v, int solid, int batch, const bMatrix4* lv,
                   const C3D_Mtx* mv, const TrackTex* t, const void* light,
-                  uint16_t flags)
+                  uint16_t flags, const GeoRenderVertex* vbo)
 {
     static const float none[3];
     TrackDeferred*     d;
@@ -976,6 +977,7 @@ static void defer(TrackView* v, int solid, int batch, const bMatrix4* lv,
     c = v->info[solid].centre ? v->info[solid].centre[batch] : none;
     d->modelView = *mv;
     d->light     = light;
+    d->vbo       = vbo;
     d->flags     = flags;
     // GetAABBZDepth: the centre through the local and view matrices, and
     // its z. A bMatrix4 multiplies the row vector on its left.
@@ -1475,17 +1477,34 @@ static void lighting_for(GeoLighting* L, const eLightContext* lc,
     L->fresnel[2] = 128.0f / 255.0f;
 }
 
+// The mesh a batch of `r` draws from: its own, or with `vbo` a copy of it
+// that draws the posed vertices there, each batch whole, since the boxes
+// its clusters hold are the bind pose's.
+static const GeoMesh* mesh_for(const TrackSolid* r,
+                               const GeoRenderVertex* vbo, GeoMesh* copy)
+{
+    if (vbo == NULL) {
+        return &r->mesh;
+    }
+    *copy          = r->mesh;
+    copy->vbo      = (GeoRenderVertex*)vbo;
+    copy->clusters = NULL;
+    return copy;
+}
+
 static void draw_lit_batch(TrackView* v, int solid, int batch,
-                           const void* light, uint16_t f)
+                           const void* light, uint16_t f,
+                           const GeoRenderVertex* vbo)
 {
     TrackSolid* r     = &v->info[solid];
     uint32_t    words = gpuCmdBufOffset;
     GeoLighting L;
+    GeoMesh     posed;
 
     CoreSamplePart = CS_PART_LIT;
     lighting_for(&L, (const eLightContext*)light, &v->solid[solid],
                  r->mesh.batch[batch].lightMaterial, f);
-    georender_draw_lit(&r->mesh, r->slot,
+    georender_draw_lit(mesh_for(r, vbo, &posed), r->slot,
                        r->slot ? v->solid[solid].numTextures : 0, batch, &L);
     FrameProfDraw.models[s_envFace ? 1 : s_mirrorView ? 2 : 0]
                         [FRAMEPROF_M_LIT_WORDS] += gpuCmdBufOffset - words;
@@ -1544,8 +1563,77 @@ static int model_solid(TrackView* v, eModel* m)
 // only what the attach loops would draw first anyway: the order-0 textures
 // that are not sorted. The rest wait for trackview_draw. A lit or
 // environment-mapped batch draws alone, with the light context.
-static void render_model(eModel* m, bMatrix4* matrix, void* light,
-                         uint32_t flags)
+//
+// With `bones`, RenderStrips' last argument, the model is an
+// eAnimation's (eanim.c): no rigid or vertex animation, and each vertex
+// posed by the bones into the skin ring (skin_mesh), which its batches
+// draw from.
+
+// x, y and z through `m` with a w of 1, as eMulVector (0x0011b2c0) takes
+// a bVector4: a bMatrix4 multiplies the row vector on its left.
+static void skin_point(float out[3], const bMatrix4* m, float x, float y,
+                       float z)
+{
+    out[0] = x * m->v0.x + y * m->v1.x + z * m->v2.x + m->v3.x;
+    out[1] = x * m->v0.y + y * m->v1.y + z * m->v2.y + m->v3.y;
+    out[2] = x * m->v0.z + y * m->v1.z + z * m->v2.z + m->v3.z;
+}
+
+// DoBlendingOnStrip (0x0010d778) and its vertex (0x0010d660), on the
+// baked mesh's vertices into the skin ring: each position's low bytes
+// are two bones and a weight, bone A in x's, B in y's and the weight in
+// z's, and the position goes through as it is, those bytes and all. A
+// weight of 0 is A's matrix alone and 1 B's; any other w is A's by
+// 1 - w / 256 and B's by w / 256. The normal stays the bind pose's, as
+// retail's VU1 lights it. Retail reads its bones unchecked; a bone past
+// the tree's here leaves the vertex where the bind pose has it. NULL when
+// the ring is full.
+static const GeoRenderVertex* skin_mesh(const GeoMesh* mesh,
+                                        const bMatrix4* bones, int numBones)
+{
+    GeoRenderVertex* out = georender_skin_alloc(mesh->numVerts);
+    int              i;
+
+    if (out == NULL) {
+        return NULL;
+    }
+    for (i = 0; i < mesh->numVerts; i++) {
+        const GeoRenderVertex* s = &mesh->vbo[i];
+        GeoRenderVertex*       d = &out[i];
+        uint32_t               bits[3];
+        uint32_t               a, b, weight;
+        float                  pa[3], pb[3], w, keep;
+
+        *d = *s;
+        memcpy(bits, s->pos, sizeof bits);
+        a      = bits[0] & 0xffu;
+        b      = bits[1] & 0xffu;
+        weight = bits[2] & 0xffu;
+        if (weight == 0) {
+            if ((int)a < numBones) {
+                skin_point(d->pos, &bones[a], s->pos[0], s->pos[1],
+                           s->pos[2]);
+            }
+        } else if (weight == 1) {
+            if ((int)b < numBones) {
+                skin_point(d->pos, &bones[b], s->pos[0], s->pos[1],
+                           s->pos[2]);
+            }
+        } else if ((int)a < numBones && (int)b < numBones) {
+            w    = (float)weight * (1.0f / 256.0f);
+            keep = 1.0f - w;
+            skin_point(pa, &bones[a], s->pos[0], s->pos[1], s->pos[2]);
+            skin_point(pb, &bones[b], s->pos[0], s->pos[1], s->pos[2]);
+            d->pos[0] = pb[0] * w + pa[0] * keep;
+            d->pos[1] = pb[1] * w + pa[1] * keep;
+            d->pos[2] = pb[2] * w + pa[2] * keep;
+        }
+    }
+    return out;
+}
+
+static void draw_model(eModel* m, bMatrix4* matrix, void* light,
+                       uint32_t flags, const bMatrix4* bones)
 {
     TrackView*  v = s_draw;
     TrackSolid* r;
@@ -1554,6 +1642,9 @@ static void render_model(eModel* m, bMatrix4* matrix, void* light,
     uint64_t    now = 0, lit = 0;
     uint16_t    f[GEO_MAX_BATCHES];
     int         i, b, numTextures, held = 0, indices = 0;
+    const GeoRenderVertex* vbo = NULL;
+    const GeoMesh*         mesh;
+    GeoMesh                posed;
     // The frame profiler's counts (frameprof.h): the view's, the envmap's
     // or the mirror's.
     uint32_t*   prof = FrameProfDraw.models[s_envFace    ? 1
@@ -1570,7 +1661,9 @@ static void render_model(eModel* m, bMatrix4* matrix, void* light,
     CoreSamplePart = CS_PART_SOLID;
     words = gpuCmdBufOffset;
     // A vertex animation's frame is a solid of its own, baked like any.
-    matrix = emodel_setup_animation(m, matrix);
+    if (bones == NULL) {
+        matrix = emodel_setup_animation(m, matrix);
+    }
     i = model_solid(v, m);
     if (i < 0) {
         CoreSamplePart = CS_PART_NONE;
@@ -1582,6 +1675,19 @@ static void render_model(eModel* m, bMatrix4* matrix, void* light,
         CoreSamplePart = CS_PART_NONE;
         return;
     }
+    if (bones != NULL) {
+        const eAnimationTree* tree = emodel_get_animation_tree(m);
+
+        CoreSamplePart = CS_PART_SKIN;
+        vbo = skin_mesh(&r->mesh, bones, tree ? tree->NumNodes : 0);
+        if (vbo == NULL) {
+            v->skinsDropped++;
+            CoreSamplePart = CS_PART_NONE;
+            return;
+        }
+        v->skinned++;
+    }
+    mesh = mesh_for(r, vbo, &posed);
     CoreSamplePart = CS_PART_MATRIX;
     eMulMatrix(&localView, matrix, s_worldView);
     to_c3d(&localView, &mv);
@@ -1615,7 +1721,7 @@ static void render_model(eModel* m, bMatrix4* matrix, void* light,
                 now |= (uint64_t)1 << b;
             }
         } else {
-            defer(v, i, b, &localView, &mv, t, light, f[b]);
+            defer(v, i, b, &localView, &mv, t, light, f[b], vbo);
             held++;
         }
     }
@@ -1631,11 +1737,11 @@ static void render_model(eModel* m, bMatrix4* matrix, void* light,
         georender_set_camera(&s_proj, &mv);
     }
     if (now) {
-        georender_draw_mask(&r->mesh, r->slot, numTextures, now);
+        georender_draw_mask(mesh, r->slot, numTextures, now);
     }
     for (b = 0; lit != 0; b++, lit >>= 1) {
         if (lit & 1u) {
-            draw_lit_batch(v, i, b, light, f[b]);
+            draw_lit_batch(v, i, b, light, f[b], vbo);
         }
     }
     prof[FRAMEPROF_M_WORDS] += gpuCmdBufOffset - words;
@@ -1657,6 +1763,22 @@ static void render_model(eModel* m, bMatrix4* matrix, void* light,
         }
     }
     CoreSamplePart = CS_PART_NONE;
+}
+
+static void render_model(eModel* m, bMatrix4* matrix, void* light,
+                         uint32_t flags)
+{
+    draw_model(m, matrix, light, flags, NULL);
+}
+
+// eanim.h's gEModelRenderStripsBonesFn: RenderStrips with the bones
+// (0x0010dd58), which eAnimation::Render calls for a posed model.
+static void render_model_bones(eModel* m, bMatrix4* matrix, void* light,
+                               uint32_t flags, bMatrix4* bones)
+{
+    if (bones != NULL) {
+        draw_model(m, matrix, light, flags, bones);
+    }
 }
 
 // ---------------------------------------------------------------- preparing
@@ -2357,6 +2479,7 @@ bool trackview_load(TrackView* v)
     load_shared_packs(v);
     eDisableFixUpTables = 1;
     gEModelRenderFn = render_model;
+    gEModelRenderStripsBonesFn = render_model_bones;
     gEPolyRenderFn  = render_epoly;
     gEPolyRender3DFn = render_epoly_3d;
     gEStripFns      = kStripFns;
@@ -2406,6 +2529,7 @@ bool trackview_attach(TrackView* v, uint8_t* data, size_t len)
         return false;
     }
     gEModelRenderFn = render_model;
+    gEModelRenderStripsBonesFn = render_model_bones;
     gEPolyRenderFn  = render_epoly;
     gEPolyRender3DFn = render_epoly_3d;
     gEStripFns      = kStripFns;
@@ -2452,6 +2576,9 @@ void trackview_free(TrackView* v)
         v->linkedSolids = 0;
         if (gEModelRenderFn == render_model) {
             gEModelRenderFn = NULL;
+        }
+        if (gEModelRenderStripsBonesFn == render_model_bones) {
+            gEModelRenderStripsBonesFn = NULL;
         }
         if (gEPolyRenderFn == render_epoly) {
             gEPolyRenderFn = NULL;
@@ -2604,7 +2731,7 @@ static int compare_deferred_at(const void* pa, const void* pb)
 
 // The entries in compare_deferred's order, as qsort of the entries left
 // them, for less: qsort sorts their indices, two bytes each, not the
-// entries, 88 (TASKS 46). What qsort compares and moves follows only
+// entries, 92 (TASKS 46). What qsort compares and moves follows only
 // from the count and the answers, so the indices end in the order the
 // entries did, a NaN depth's too. Then each entry moves once: a cycle of
 // the order at a time, through one held aside.
@@ -2666,9 +2793,12 @@ static void draw_deferred(TrackView* v, bool alpha)
         r = &v->info[d->solid];
         georender_set_camera(&s_proj, &d->modelView);
         if (d->flags & 0x180) {
-            draw_lit_batch(v, d->solid, d->batch, d->light, d->flags);
+            draw_lit_batch(v, d->solid, d->batch, d->light, d->flags,
+                           d->vbo);
         } else {
-            georender_draw_mask(&r->mesh, r->slot,
+            GeoMesh posed;
+
+            georender_draw_mask(mesh_for(r, d->vbo, &posed), r->slot,
                                 r->slot ? v->solid[d->solid].numTextures : 0,
                                 (uint64_t)1 << d->batch);
         }
@@ -4038,6 +4168,8 @@ void trackview_draw(TrackView* v)
     v->drawn        = 0;
     v->drawnTris    = 0;
     v->drawnInPlace = 0;
+    v->skinned      = 0;
+    v->skinsDropped = 0;
     v->cmdSkipped   = 0;
     v->stripsDrawn  = 0;
     v->stripsDropped = 0;
@@ -4320,6 +4452,7 @@ bool trackview_draw_frontend(TrackView* v, void (*render)(void*),
 
     // The seams the race's view sets too, and lets go of when it is freed.
     gEModelRenderFn = render_model;
+    gEModelRenderStripsBonesFn = render_model_bones;
     gEPolyRender3DFn = render_epoly_3d;
     gEStripFns      = kStripFns;
     gExStripFns     = kExStripFns;
@@ -4329,6 +4462,8 @@ bool trackview_draw_frontend(TrackView* v, void (*render)(void*),
     v->drawn        = 0;
     v->drawnTris    = 0;
     v->drawnInPlace = 0;
+    v->skinned      = 0;
+    v->skinsDropped = 0;
     v->cmdSkipped   = 0;
     v->stripsDrawn  = 0;
     v->stripsDropped = 0;

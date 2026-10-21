@@ -358,4 +358,16 @@ bool georender_draw_strip(const GeoRenderVertex* v, int n,
 bool georender_draw_sprites(const GeoRenderVertex* v, int n,
                             const GeoTexture* gt);
 
+// -------------------------------------------------------------- the skins
+
+// How many posed vertices a frame can hold, in a ring of their own that
+// georender_quads_rewind starts again with the quads': a driver's solid
+// is 903 to 2,749 of them (TASKS 83), and each car near enough draws one.
+#define GEO_SKIN_RING 16384
+
+// `n` vertices of the skin ring, which the GPU reads when the frame runs:
+// trackview.c's render_model_bones poses a mesh's vertices there and
+// draws them in place of its vbo. NULL when the ring is full.
+GeoRenderVertex* georender_skin_alloc(int n);
+
 #endif

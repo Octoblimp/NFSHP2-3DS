@@ -110,10 +110,10 @@ void player_change_debug_camera_joy_handler(struct Player *p,
 //
 // Player::CycleHud (0x00178ba8), tCopManager's BeACopRequestRoadBlock
 // (0x002288c8) and BeACopRequestChopper (0x002287d8), and AnimatedDriver's
-// Begin/EndLookingBackwards (0x001a9c40, 0x001a9c68). RequestZone
-// (0x00177c88) is car.h's gPlayerRequestZoneFn. NULL until their classes
-// are ported; here a NULL seam does nothing, so a button with no port yet
-// is a dead button rather than an abort.
+// Begin/EndLookingBackwards (0x001a9c40, 0x001a9c68; animdriver.c).
+// RequestZone (0x00177c88) is car.h's gPlayerRequestZoneFn. A NULL seam
+// does nothing, so a button with no port is a dead button rather than an
+// abort.
 extern void (*gPlayerCycleHudFn)(struct Player *p, int32_t dir);
 extern void (*gCopManagerBeACopRequestRoadBlockFn)(struct tCopManager *m);
 extern void (*gCopManagerBeACopRequestChopperFn)(struct tCopManager *m);

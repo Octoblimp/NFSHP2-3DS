@@ -1611,7 +1611,8 @@ is citro3d and owns the top.
         74), and the user played the game through on a 3DS on 2026-10-19.
         Two inherited pieces are not ported: AnimatedDriver (the driver's
         own animations, and R/C Car's big head in TASKS 50b), whose seams
-        stay empty and the race runs without, and DeliveryMover, whose
+        stay empty and the race runs without (ported since, TASKS 83,
+        2026-10-21), and DeliveryMover, whose
         `car_deliver_me_from_evil` nothing in the port calls.
 27. [x] Track rendering/streaming, collision. Task 24's debt is paid:
         `QuickSpline.obj` and `TrackPath.obj` are ported (Session 29,
@@ -3518,7 +3519,7 @@ phases.
               Heavy Fog is the weather query's `WeatherHeavyFog`, R/C
               Car `CarRenderMatrix` at half size, and Chrome Cars the
               environment pass's ALPHA_2, `georender_set_env_replace`.
-              R/C Car's big head is AnimatedDriver's, not ported; a
+              R/C Car's big head is AnimatedDriver's (TASKS 83); a
               NIS's black and white (the view's `+116`) waits for the
               NIS player's EnableOverrideRendering. `stomper_check`:
               1,524 ops, 1,736 lines, 0 differ, 0 facts wrong; 92
@@ -5507,6 +5508,57 @@ phases.
         - **If it is picked up.** The gated patch has not been seen. The
           track 21 road/wall static and the bridge artifact, both under
           TASKS 47, may be the same cause; neither is checked.
+
+83. [x] **The drivers in the cars.** Asked for on 2026-10-20, after TASKS
+        75 turned it up: "Port the cars' drivers and the depth of field
+        before the launch, one at a time, drivers first." Retail draws an
+        AnimatedDriver in every car but traffic, once the car is big
+        enough on screen, with its animations: the steering, the gear
+        change, looking back, driving backwards, the flinch in a crash,
+        the pre-race close-up, and R/C Car's big head (`vBoneScale`). The
+        port has the seams (`carrender.c`'s `render_driver`, `carmove.c`,
+        `carcollisionbody.c`, `cameracoord.c`, `carsnap.c`,
+        `trackflow.c`'s `gInitAnimatedDriverFn`) and nothing behind them.
+        - [x] **83a, the animations' data.** eAnimation.obj (retail
+              `0x001a67f8` .. `0x001a79f0`): LoaderAnimations for the
+              0x80034008 chunks (INGAMEB's DRIVER_ANIM01 and
+              DRIVER_SHIFT01, PRERACEANIM's two), eFindAnimationSolid,
+              eAnimationSolid's keys (16-bit quaternions a node a frame,
+              a translation a frame), Slerp, and eAnimation: the model,
+              the two solids, PoseMatrixRecursive down the solid's
+              0x34007 tree.
+        - [x] **83b, AnimatedDriver.** AnimatedDriver.obj (retail
+              `0x001a8f50` .. `0x001aa780`): AnimationInfo's table,
+              AnimationPlayer, the queue, the steering frame, looking and
+              driving backwards, BuildQuaternionTable, InitAnimatedDriver's
+              fix-up, InitializeArtwork's three LODs with the character's
+              skins, and Car::AssignAnimatedDriver.
+        - [x] **83c, the skinned draw.** eAnimation::Render's bones, and
+              RenderStrips' DoBlendingOnStrip (`0x0010d778`): each vertex
+              between two bones by the weight in its low bytes. On the
+              3DS the CPU blends the positions into georender's skin ring
+              (16,384 vertices a frame), and georender draws the copy lit
+              as a car's batch.
+        - [x] **83d, in the race.** The seams set, seen in Azahar: the
+              drivers in the grid's close-up and the chase camera, the
+              looks back, and the big head. 30 FPS kept.
+              **Done 2026-10-21.** `animdriver_check`: 13,662 steps,
+              9,866 lines, 0 differ; 6 facts, 0 wrong; 132 mutations, 131
+              caught, 1 equivalent. Azahar, track 42: every car but
+              traffic has its driver; in the chase view 42 a second pass
+              the size test, all at retail's far LOD (a plain model, LOD
+              1 needs the car bigger than 999 from behind). The quick
+              race's pre-race close-ups pose one. `EggCodes 8` (R/C Car):
+              4 posed a frame with the 5.5 head, 0 dropped. 30 FPS after
+              the start; the start's first 8 seconds at 20 are the same
+              with the driver draw cut out (TASKS 46). The looks back are
+              the checker's, not driven in Azahar.
+
+84. [ ] **The depth of field.** The second half of the 2026-10-20 ask,
+        after TASKS 83. CreateFocusPalette and eAttachDepthOfField: after
+        the fog, retail blurs what is out of focus by each pixel's depth
+        (the race camera's focus 15 ahead, depth 65). On the 3DS it is a
+        pass over the whole screen, so it has to keep 30 FPS.
 
 ### The retail frontend
 

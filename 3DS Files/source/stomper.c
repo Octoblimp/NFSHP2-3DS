@@ -16,7 +16,7 @@ Stomper *pStomper;
 
 int32_t OverrideAnimatedDriverLOD;
 int32_t nBoneScale = -1;
-float   vBoneScale[4];
+float   vBoneScale[4] = { 1.0f, 1.0f, 1.0f, 0.0f };
 
 // The lists, by the demo's names where it has them (sRadialBlur,
 // sCutiePetootie); the others are the port's. Each is retail's, entry for

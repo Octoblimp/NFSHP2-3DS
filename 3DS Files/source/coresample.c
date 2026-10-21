@@ -27,7 +27,7 @@ static const char* const kStage[CS_STAGES] = {
 
 static const char* const kPart[CS_PARTS] = {
     "none", "solid", "matrix", "batches", "bind", "model", "pass", "cull",
-    "draw", "lit", "send",
+    "draw", "lit", "send", "skin",
 };
 
 // The stages whose parts the line has.

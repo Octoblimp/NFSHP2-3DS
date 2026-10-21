@@ -101,9 +101,10 @@ extern const StompEntry *const StomperTable[STOMPER_NUM];
 extern Stomper *pStomper;
 
 // The R/C Car's big head: what AnimatedDriver::Render (0x001a9a30) and
-// the driver's bones read, which the port has nothing of. By the demo's
-// names: OverrideAnimatedDriverLOD, gp-19244 (1: the driver's LOD no
-// coarser than 1); nBoneScale, gp-19408 (-1); vBoneScale, 0x003110d0.
+// the driver's bones read (animdriver.c, eanim.c). By the demo's names:
+// OverrideAnimatedDriverLOD, gp-19244 (1: the driver's LOD no coarser
+// than 1); nBoneScale, gp-19408 (-1); vBoneScale, 0x003110d0, whose x, y
+// and z eAnimation.obj's static initialiser (0x001a71b0) sets to 1.
 extern int32_t OverrideAnimatedDriverLOD;
 extern int32_t nBoneScale;
 extern float   vBoneScale[4];

@@ -60,6 +60,7 @@ enum {
     CS_PART_DRAW,       // the draw: citro3d's state and the draw's words
     CS_PART_LIT,        // a lit batch: its lighting, its uniforms
     CS_PART_SEND,       // a part of the frame sent to the GPU
+    CS_PART_SKIN,       // a driver's vertices posed by its bones
     CS_PARTS
 };
 

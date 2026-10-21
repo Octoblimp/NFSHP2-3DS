@@ -210,6 +210,9 @@ static int              s_numStripVerts;
 // The sprites' ring, six vertices a sprite, and the sprites drawn from it.
 static GeoRenderVertex* s_sprites;
 static int              s_numSprites;
+// The skins' ring, and the vertices of it the frame has posed.
+static GeoRenderVertex* s_skins;
+static int              s_numSkinVerts;
 static C3D_Mtx          s_screen;
 // The screen's mapping with a vertex's z as its depth: z row (0, 0, -1,
 // 0), which C3D_DepthMap's default scale of -1 turns back into z.
@@ -304,6 +307,9 @@ bool georender_init(void)
     s_sprites = (GeoRenderVertex*)linearAlloc(GEO_SPRITE_RING * 6u
                                               * sizeof(GeoRenderVertex));
     s_numSprites = 0;
+    s_skins = (GeoRenderVertex*)linearAlloc(GEO_SKIN_RING
+                                            * sizeof(GeoRenderVertex));
+    s_numSkinVerts = 0;
     s_spriteScreen = s_screen;
     s_spriteScreen.r[2].x = 0.0f;
     s_spriteScreen.r[2].y = 0.0f;
@@ -334,6 +340,8 @@ void georender_exit(void)
     s_strips = NULL;
     linearFree(s_sprites);
     s_sprites = NULL;
+    linearFree(s_skins);
+    s_skins = NULL;
     C3D_TexDelete(&s_noFogTex);
     free_envmap();
     free_mirror();
@@ -1424,6 +1432,20 @@ void georender_quads_rewind(void)
     s_numQuads      = 0;
     s_numStripVerts = 0;
     s_numSprites    = 0;
+    s_numSkinVerts  = 0;
+}
+
+GeoRenderVertex* georender_skin_alloc(int n)
+{
+    GeoRenderVertex* v;
+
+    if (!s_ready || !s_skins || n <= 0
+        || s_numSkinVerts + n > GEO_SKIN_RING) {
+        return NULL;
+    }
+    v = &s_skins[s_numSkinVerts];
+    s_numSkinVerts += n;
+    return v;
 }
 
 static bool draw_screen_quad(const GeoRenderVertex v[4], const GeoTexture* gt,

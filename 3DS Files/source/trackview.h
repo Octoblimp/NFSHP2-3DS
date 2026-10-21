@@ -159,9 +159,12 @@ typedef struct {
 // batch; see strip_flags. Or one of eBeginStrip's strips, which always
 // wait, with `strip` its index in the view's strips; or one of
 // RenderEffects' packets, its sprites set `sprites` of trackview.c's.
+// `vbo` is a posed model's vertices in the skin ring (georender.h), which
+// the batch draws from in place of its solid's; NULL for the solid's.
 typedef struct {
     C3D_Mtx     modelView;
     const void* light;
+    const GeoRenderVertex* vbo;
     float       depth;          // the centre's view z, +z forward
     uint16_t    solid;
     uint8_t     batch;
@@ -252,6 +255,8 @@ typedef struct {
     int  drawInfos;
     int  frameMallocFails;
     int  drawnInPlace;          // of `drawn`, objects with no matrix of their own
+    int  skinned;               // of `drawn`, models posed by their bones
+    int  skinsDropped;          // posed models the skin ring had no room for
     int  skyDrawn;              // of `drawn`, StuffSky's: the dome, or none
     int  deferredSorted;        // of numDeferred, the ApplyAlphaSorting ones
     int  deferredDropped;       // past TRACKVIEW_MAX_DEFERRED, not drawn

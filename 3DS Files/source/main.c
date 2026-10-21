@@ -52,6 +52,7 @@
 #include "aiactions.h"
 #include "aicarcontroller.h"
 #include "aidriver.h"
+#include "animdriver.h"
 #include "bchunk.h"
 #include "bchunkload.h"
 #include "beltmover.h"
@@ -6014,9 +6015,11 @@ static void logRaceState(void)
                     (unsigned)w->Teleporter->BackwardTotals[
                         TRAFFIC_ROUTES_EACH - 1]);
     }
-    logLine("race: track drew %d of %d (%d sky), %d tris; %s",
+    logLine("race: track drew %d of %d (%d sky, %d posed, %d unposed), "
+            "%d tris; %s",
             g_track.drawn, g_track.drawInfos, g_track.skyDrawn,
-            g_track.drawnTris, g_track.note);
+            g_track.skinned, g_track.skinsDropped, g_track.drawnTris,
+            g_track.note);
     logLine("race: minimap %d polys (%d failed)", g_track.flailerPolys,
             g_track.flailerFailed);
     logLine("race: radial blur %d frames blended, %d failed; black and "
@@ -8047,12 +8050,37 @@ int main(int argc, char** argv)
     // once the grid is gone and waits on it, flying INGAMEB's four
     // pre-race cameras round the cars it picked, each on a
     // BumperCameraMover (11g-2c-2c-2) until both its splines run out. The
-    // countdown's COUNTDOWN_n cameras would use the same mover. No car has
-    // an AnimatedDriver yet, so the animation seam stays NULL.
+    // countdown's COUNTDOWN_n cameras would use the same mover. Each car
+    // it picks gets one of its driver's two waves (TASKS 83, below).
     gPreRaceCameraCoordinatorCtorFn = prerace_camera_coordinator_construct;
     gPreRaceCameraIsFinishedFn = prerace_camera_coordinator_is_finished;
     gBumperCameraMoverFn = bumper_camera_mover_construct;
     gBumperCameraMoverIsFinishedFn = bumper_camera_mover_is_finished_fn;
+    // The drivers in the cars (TASKS 83): retail's AnimatedDriver.obj and
+    // eAnimation.obj (animdriver.c, eanim.c), with the bundles' 0x80034008
+    // animations in loader slot 12. CarRenderInfo gives every car but
+    // traffic one; the gears, reversing, the collisions, the look back,
+    // the replays and the pre-race cameras animate it, and trackview.c's
+    // render_model_bones skins the posed bones.
+    gCarAssignAnimatedDriverFn = car_assign_animated_driver;
+    gCarUnAssignAnimatedDriverFn = car_unassign_animated_driver;
+    gInitAnimatedDriverFn = InitAnimatedDriver;
+    gCloseAnimatedDriverFn = CloseAnimatedDriver;
+    gReconnectAllAnimationsFn = eReconnectAllAnimations;
+    gAnimatedDriverRenderFn = animdriver_render;
+    gAnimatedDriverQueuedFn = animdriver_get_length_of_queued;
+    gAnimatedDriverBeginGearChangeFn = animdriver_begin_gear_change;
+    gAnimatedDriverBeginDrivingBackwardsFn =
+        animdriver_begin_driving_backwards;
+    gAnimatedDriverEndDrivingBackwardsFn = animdriver_end_driving_backwards;
+    gAnimatedDriverBeginCollisionFn = animdriver_begin_collision;
+    gAnimatedDriverDoSnapshotFn = animdriver_do_snapshot;
+    gAnimatedDriverBeginLookingBackwardsFn =
+        animdriver_begin_looking_backwards;
+    gAnimatedDriverEndLookingBackwardsFn = animdriver_end_looking_backwards;
+    gAnimatedDriverCancelAllAnimationsFn = animdriver_cancel_all;
+    gAnimatedDriverBeginAPreRaceAnimationFn =
+        animdriver_begin_a_pre_race_animation;
     // The demo coordinator (RE-4): the race-over states and a finished
     // player's camera show the car through the track's highlight cameras
     // where one holds it, on TrackCar, Bumper or TrackFly movers, and on
@@ -10139,10 +10167,11 @@ int main(int argc, char** argv)
                    g_track.pos[0], g_track.pos[1], g_track.pos[2],
                    g_track.yaw, g_track.pitch, g_track.speed,
                    g_track.stop + 1, g_track.numStops);
-            devLog(2, "track drew %d of %d (%d in place, %d sky), %d "
-                   "tris, cull zone %d",
+            devLog(2, "track drew %d of %d (%d in place, %d sky, %d "
+                   "posed, %d unposed), %d tris, cull zone %d",
                    g_track.drawn, g_track.drawInfos, g_track.drawnInPlace,
-                   g_track.skyDrawn, g_track.drawnTris,
+                   g_track.skyDrawn, g_track.skinned, g_track.skinsDropped,
+                   g_track.drawnTris,
                    (int)CurrentZoneNumber);
             if (g_track.listFrame) {
                 logLine("track drew: %s", g_track.drawList);

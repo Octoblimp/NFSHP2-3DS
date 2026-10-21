@@ -594,14 +594,14 @@ void     car_calculate_new_catchup_multipliers(Car *c);  // 0x001334f0
 void     car_update_position(Car *c, bVector3 *pos);     // 0x00130388
 
 // The three AnimatedDriver methods ChangeGear calls, and the Espresso link
-// UpdatePosition calls. AnimatedDriver is the render path's (task 29) and
+// UpdatePosition calls. AnimatedDriver is animdriver.c's (TASKS 83) and
 // Espresso a development tool the port has no side of, so each is a seam
-// in carmodes.h's style: NULL is a call the port cannot make yet, and
-// reaching it aborts. Nothing sets pAnimatedDriver or pCaffeineObj yet.
+// in carmodes.h's style: NULL is a call the port cannot make, and
+// reaching it aborts. Nothing sets pCaffeineObj.
 //
-//   BeginGearChange        0x0019f7a8  QueueAnimation(11)
-//   BeginDrivingBackwards  0x0019f7b0  byte 105 set, HandleDrivingBackwards
-//   EndDrivingBackwards    0x0019f7d0  byte 105 cleared, ReleaseAnimation(3)
+//   BeginGearChange        0x001a9bb0  QueueAnimation(11)
+//   BeginDrivingBackwards  0x001a9bb8  byte 105 set, HandleDrivingBackwards
+//   EndDrivingBackwards    0x001a9bd8  byte 105 cleared, ReleaseAnimation(3)
 //   espSetObjectPosition   0x00243308  the object and three floats, queued
 //                                      for the editor
 typedef void (*CarAnimatedDriverFn)(AnimatedDriver *d);
@@ -769,8 +769,8 @@ struct ReplaySnapshot;
 void car_do_snapshot(Car *c, struct ReplaySnapshot *s);
 
 // AnimatedDriver::DoSnapshot (0x001a9770), a car's driver's arms and head;
-// TASKS 72d. Car::DoSnapshot reaches it only for a car that has one, and
-// the port builds none yet, so an unset seam reached aborts.
+// TASKS 72d; animdriver.c's since TASKS 83. Car::DoSnapshot reaches it
+// only for a car that has one, and an unset seam reached aborts.
 typedef void (*AnimatedDriverDoSnapshotFn)(AnimatedDriver *d,
                                            struct ReplaySnapshot *s);
 extern AnimatedDriverDoSnapshotFn gAnimatedDriverDoSnapshotFn;

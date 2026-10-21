@@ -12,6 +12,7 @@
 #include "characterinfo.h"
 #include "copmgr.h"
 #include "difficultyinfo.h"
+#include "eanim.h"
 #include "elight.h"
 #include "epositionmarker.h"
 #include "esolid.h"
@@ -162,7 +163,6 @@ static int take(const uint32_t *types, size_t n, int slot, int unload,
 
 UNPORTED(LoaderFontInfo, UnloaderFontInfo, 3, 0x00015010u, 0x00030200u)
 UNPORTED(LoaderFlailerChunk, UnloaderFlailerChunk, 10, 0x80010200u)
-UNPORTED(LoaderAnimations, UnloaderAnimations, 12, 0x80034008u)
 UNPORTED(LoaderLanguage, UnloaderLanguage, 26, 0x00039000u)
 UNPORTED(LoaderDemoModeReplayGuard, UnloaderDemoModeReplayGuard, 29,
          0x00039100u, 0x00039101u, 0x00039102u)
@@ -200,7 +200,7 @@ BChunkLoader LoaderTable[BCHUNK_NUM_LOADERS] = {
     loader_collision_volumes,       //  9
     LoaderFlailerChunk,             // 10
     LoaderScenery,                  // 11
-    LoaderAnimations,               // 12
+    eanim_loader,                   // 12
     loader_cameras,                 // 13
     loader_sun,                     // 14
     copmgr_loader,                  // 15
@@ -233,7 +233,7 @@ BChunkLoader UnloaderTable[BCHUNK_NUM_LOADERS] = {
     unloader_collision_volumes,     //  9
     UnloaderFlailerChunk,           // 10
     UnloaderScenery,                // 11
-    UnloaderAnimations,             // 12
+    eanim_unloader,                 // 12
     unloader_cameras,               // 13
     unloader_sun,                   // 14
     copmgr_unloader,                // 15

@@ -236,7 +236,6 @@ want:
   for a frame or two.
 - The frame rate drops below 30 in the heaviest places: the fire on
   Coastal Parklands, the end of Desert Heat, and by some roadblocks.
-- R/C Car shrinks the cars, but not with the PS2's big-headed driver.
 - The PS2's two-player split screen is left out; Local Wireless takes
   its place. There is no rumble.
 

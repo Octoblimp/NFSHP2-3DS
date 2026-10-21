@@ -29125,3 +29125,48 @@ neither address, still to read.
 - **Next:** the checklist's three retail items are done. The release
   candidate is the CIA built in this session; the v1.0.0 tag and the
   push wait for the user's go and the repo's name.
+
+## Session 152 -- the drivers in the cars (TASKS 83)
+
+The user, 2026-10-20: "Port the cars' drivers and the depth of field
+before the launch, one at a time, drivers first." This session: "Continue
+where you left off".
+
+- **eanim.c/.h** (retail `0x001a67f8` .. `0x001a7c3c`), free of
+  `<3ds.h>`: LoaderAnimations for the 0x80034008 chunks (INGAMEB's
+  DRIVER_ANIM01 and DRIVER_SHIFT01, PRERACEANIM's two waves) in
+  `bchunkload.c`'s slot 12, eFindAnimationSolid, the 16-bit keys, Slerp,
+  PoseMatrixRecursive down the solid's 0x34007 tree with the stomper's
+  `nBoneScale`/`vBoneScale` (the R/C Car's big head), and Render.
+- **animdriver.c/.h** (retail `0x001a8f50` .. `0x001aa6c8`): the table at
+  `0x003111f8`, the two players and the queue, the steering frame and its
+  wiggle, BuildQuaternionTable, looking and driving backwards, the
+  collision flinch, the three blackball tables, the pre-race waves (on
+  `bViewSeed`, off the world's seed), InitAnimatedDriver's fix-up,
+  InitializeArtwork's three LODs with the character's skins, and
+  Car::AssignAnimatedDriver. `main.c` sets the seams.
+- **The skinned draw.** `trackview.c`'s `render_model_bones` blends each
+  vertex between its two bones by the weight in its low bytes, as
+  DoBlendingOnStrip's helper (`0x0010d660`) does, into georender's skin
+  ring (16,384 vertices a frame), and draws the copy lit as a car's
+  batch. The debug log's "race: track drew" line now counts the posed
+  and unposed models.
+- **animdriver_check** runs retail's AnimatedDriver and eAnimation code in
+  mipsemu next to `tools/src/animdriver_test.c`: 13,662 steps, 9,866
+  lines, 0 differ; 6 facts, 0 wrong. `--mutate`: 132 mutations, 131
+  caught, 1 equivalent (`qt_full`: at w = 1 the slerp gives the key
+  exactly). The loader, the constructor and the reconnect are read and
+  compared, not run: the harness's 64-bit layouts differ.
+  `docs/formats/animated-driver.md`.
+- **Azahar.** SkipFE race on track 42: every car but traffic has its
+  driver, 42 drawn a second in the chase view, all with retail's far LOD
+  (LOD 2, a plain model: LOD 1 needs the car bigger than 999 from
+  behind). The first 8 seconds at 20 FPS are the same with the driver
+  draw cut out (an A/B build), so they predate the drivers (TASKS 46);
+  after that 30 FPS. The quick race's pre-race close-ups
+  pose one driver a frame. With `EggCodes 8` (R/C Car), 4 drivers are
+  posed a frame with the 5.5 head poking out of each small car, 0
+  dropped. The looks back are the checker's, not driven in Azahar.
+- **README**: the R/C Car known issue is gone. TASKS 83 is [x].
+- **Next:** TASKS 84, the depth of field. The v1.0.0 tag and the push
+  still wait for the user's go and the repo's name.

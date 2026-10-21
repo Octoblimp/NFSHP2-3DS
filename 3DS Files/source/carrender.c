@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "animdriver.h"
 #include "bmath.h"
 #include "bmatrix.h"
 #include "cardriver.h"
@@ -181,14 +182,11 @@ static float dot3(const bVector3 *a, const bVector3 *b)
     return (a->x * b->x + a->y * b->y) + a->z * b->z;
 }
 
-// The word at +100 of the animated driver, which is not ported: nonzero
-// and the driver is not drawn.
+// The animated driver's DisableRenderingFlag (+100): nonzero and the
+// driver is not drawn.
 static int32_t animated_driver_hidden(const AnimatedDriver *d)
 {
-    int32_t w;
-
-    memcpy(&w, (const uint8_t *)d + 100, sizeof w);
-    return w;
+    return d->DisableRenderingFlag;
 }
 
 // -------------------------------------------------- the light textures

@@ -829,7 +829,7 @@ extern int32_t WilliamsAITuningMode;
 // What an impulse reaches through a seam. The damage, the pursuit and the
 // driver's animation change what happens next, so a NULL seam that is
 // reached aborts, as car.h's AnimatedDriver seams do; main.c binds the
-// damage to cardamage.c (task 51), and nothing sets pAnimatedDriver yet.
+// damage to cardamage.c (task 51) and the driver to animdriver.c.
 // The rumble and the force feedback are only felt, so a NULL one is
 // skipped.
 //
@@ -838,7 +838,8 @@ extern int32_t WilliamsAITuningMode;
 //                                              ApplyDamage: cardamage.c
 //   tCopManager::MonitorImpact     0x00213ff0  the pursuit: copmgr.c's
 //                                              copmgr_car_impact
-//   AnimatedDriver::BeginCollision 0x0019fa20  the render path (task 29)
+//   AnimatedDriver::BeginCollision 0x001a9e28  the driver's flinch:
+//                                              animdriver.c
 //   PortRumbleImpact               0x00152fa0  PortRumble, a small envelope
 //   Car::StartForceImpact          0x00133160  PortPlayCrash
 //
