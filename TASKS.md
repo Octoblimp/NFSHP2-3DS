@@ -5559,6 +5559,13 @@ phases.
         the fog, retail blurs what is out of focus by each pixel's depth
         (the race camera's focus 15 ahead, depth 65). On the 3DS it is a
         pass over the whole screen, so it has to keep 30 FPS.
+        - [x] **84a, retail's code read** (2026-10-21): GetFocusPalette,
+              the ScreenZ/ViewZ helpers, CreateFocusPalette,
+              eAttachDepthOfField and the globals, in
+              `docs/formats/depth-of-field.md`. Retail's palette is 16x
+              off its alpha (`i << 12` against `Z >> 8`); the port keeps
+              that.
+        - [ ] **84b, the 3DS pass** and a mipsemu checker, at 30 FPS.
 
 ### The retail frontend
 

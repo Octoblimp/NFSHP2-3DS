@@ -29170,3 +29170,35 @@ where you left off".
 - **README**: the R/C Car known issue is gone. TASKS 83 is [x].
 - **Next:** TASKS 84, the depth of field. The v1.0.0 tag and the push
   still wait for the user's go and the repo's name.
+
+## Session 153 -- the depth of field read (TASKS 84), stopped for the night
+
+The user, 2026-10-20: "Port the cars' drivers and the depth of field
+before the launch, one at a time, drivers first." This session:
+"Continue where you left off", then "Write up HANDOFF.MD etc. and stop
+for the night".
+
+- **Read, not ported yet.** Retail's GetFocusPalette (`0x00119b28`), the
+  four ScreenZ/ViewZ helpers (`0x00119b58` .. `0x00119bd8`),
+  CreateFocusPalette (`0x00119c20`) and eAttachDepthOfField
+  (`0x00119f70`) are decoded, with the globals' values from the image
+  (DrawDepthOfField 1, alpha 0 to 128, JitterBlend 64, 2 jitter samples,
+  a 24-entry ramp). All of it is in `docs/formats/depth-of-field.md`.
+  No source changed.
+- **Retail's 16x mismatch.** The frame's alpha is `Z >> 8` (or 255), the
+  buffer the fog reads too (gp-24920), but the focus palette is built for
+  Z `i << 12`. So retail judges everything nearer than about 64 m as if
+  it were 4 m away, and farther pixels at 1/16 of their distance: the
+  chase view is sharp out to about 780 m and the sky gets 112 of 128.
+  The demo was consistent (shift 10, alpha `Z >> 6`). The port will do
+  what retail does.
+- **The 3DS plan** (the doc's last part): the palette with the fog's
+  frame; after the alpha lists and before black and white, copy the top
+  screen, two jittered quads into a 256 x 256 half target, then a few
+  depth-tested full-screen layers of the blur at the palette's alpha
+  steps. Mirror and HUD stay sharp, as on the PS2.
+- **Next:** TASKS 84's plan steps 2 to 5: fix the design (the number of
+  layers, the half target in VRAM or linear, how trackview gets the top
+  target back), port it with a mipsemu checker, build, see it in Azahar
+  at 30 FPS, then commit and republish the launch checklist. The v1.0.0
+  tag and the push still wait for the user's go and the repo's name.
