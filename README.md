@@ -289,3 +289,7 @@ The port's own code is under the GNU General Public License, version 3
 (`LICENSE`). It covers the code alone: the game, its data and its art
 stay Electronic Arts'. The vendored `makerom` and `bannertool` keep their
 own licenses.
+
+## AI Disclosure
+
+Claude Opus 5.5 was used to help make this project possible. Specifically, it decompiled the game in full and ported it to the 3DS, and helped me debug in Azahar, then I tested by myself on real hardware (on a New Nintendo 3DS XL).
