@@ -44,10 +44,15 @@ float   ClipVolumeScaleX = 0.5f;
 float   ClipVolumeScaleY = 0.5f;
 float   CenterX = 2048.0f;
 float   CenterY = 2048.0f;
-float   ZMin = 2.0000038146972656f;     // 0x40000010
-float   ZMax = 2.2490234375f;           // 0x400ff000
-float   ZMin1 = 2.0000152587890625f;    // 0x40000040
-float   ZMax1 = 2.2499961853027344f;    // 0x400ffff0
+
+eZRange ZRanges[2] = {
+    { 2.0000038146972656f, 2.2490234375f,         // 0x40000010 0x400ff000
+      2.0000152587890625f, 2.2499961853027344f,   // 0x40000040 0x400ffff0
+      2.0009727478027344f, 2.2499961853027344f }, // 0x40000ff0 0x400ffff0
+    { 2.0000038146972656f, 4.0f,                  // 0x40000010 0x40800000
+      2.0000152587890625f, 4.00390625f,           // 0x40000040 0x40802000
+      4.5f, 7.5f },                               // 0x40900000 0x40f00000
+};
 
 uint32_t eFrameCounter;
 
@@ -63,6 +68,11 @@ eView *eGetView(int32_t id)
 eRenderTarget *eGetRenderTarget(int32_t id)
 {
     return &RenderTargets[id];
+}
+
+const eZRange *eview_z_range(const eRenderTarget *rt)
+{
+    return &ZRanges[rt->ZBufferMode == GS_PSMZ24];
 }
 
 int32_t eGetCurrentViewMode(void)

@@ -28984,6 +28984,36 @@ task". TASKS 75 is the checklist's last retail item.
     drawn with a matrix, which gets no light context. So the call would
     change nothing on screen.
 - **Checks.** The CIA builds.
-- **Next:** CreateViewMatricies (retail `0x0010e638`), then the joystick
-  tables, the scanner count, EnterEditTextMode's help,
-  EnableOverrideRendering and DroppedSpikes.
+- **CreateViewMatricies, CalculateViewMatricies and SetupMatrixPacks**
+  (retail `0x0010e638`, `0x001070c0` and `0x00105860`).
+  - Retail's Z table (`0x002c9e20`) replaces the demo's four Z globals:
+    two 24-byte entries, picked by the first target's ZBufferMode
+    (PSMZ24, 0x31, gets entry 1), each with a third pair. `eview.h`'s
+    `ZRanges` and `eview_z_range`.
+  - The third pair makes a fifth matrix, d2, the way the second makes
+    d. CalculateViewMatricies takes 576 bytes and puts VUClipScreen2 at
+    +512; the view and each target get it (`eView` +120, the target's
+    new 1168).
+  - SetupMatrixPacks makes three packs, each WorldClip, a VUClipScreen
+    and WorldView transposed (`eTransposeMatrix`). The demo's two held
+    WorldView first.
+  - `eview_check.py` runs the three out of SLES_507.31 (its `Retail`
+    class moves the port's 1,172-byte target to retail's 176). s_game
+    gives each view its own frame memory now, since retail's needs
+    1,728 bytes a view. 12 scenarios, 2,219 ops, 17,931 lines, 0
+    differ; 168 mutations, 167 caught, 1 equivalent (spos-w).
+  - On the 3DS: `trackview.c`'s sun read-back takes its view's target's
+    pair (`s_zRange`), so player 1 uses PSMZ24's, 16 to 0x800000.
+    `trackview_cuts_check.py` passes. The fog's depth-to-alpha still
+    models the demo's PSMZ16S buffer with entry 0; retail rewrote that
+    chain too, now on TASKS 75's list.
+- **joyevent**: nothing to change. `scannertab.c` came off retail's disc
+  in TASKS 49, so it has the four value changes `retail_consts.py`
+  found: 130 event names, 230 scanner rows, and no fifth configuration
+  for controller types 83, 115 and 121. GetJoystickButtonName's fallback
+  (`0x00330348`) is "" on both discs. `joystick_check.py`: 65,880 ops,
+  79,028 lines, 0 differ.
+- **Checks.** The CIA builds.
+- **Next:** EnterEditTextMode's help (`0x0016db68`),
+  EnableOverrideRendering (`0x001b1ce0`), DroppedSpikes, then the fog
+  chain.

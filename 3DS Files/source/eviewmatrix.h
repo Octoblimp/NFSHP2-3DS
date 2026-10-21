@@ -1,21 +1,23 @@
 // eviewmatrix -- the matrix half of eView.obj (0x00106700 .. 0x00107010)
 // and the three helpers it calls in EcstasyE.obj: CalculateH (0x00103ce0),
 // eRenderTarget::SetupMatrixPacks (0x00104d18) and CreateViewMatricies
-// (0x0010d268).
+// (0x0010d268). Retail changed the last three: CalculateViewMatricies
+// (0x001070c0), SetupMatrixPacks (0x00105860) and CreateViewMatricies
+// (0x0010e638) are retail's, with a third depth range.
 //
 // Once a frame the renderer calls CalculateViewMatricies for each active
-// view. It turns the camera into the five matrices the frame draws with,
-// puts them in frame memory, and hands them to the view and to its render
+// view. It turns the camera into the matrices the frame draws with, puts
+// them in frame memory, and hands them to the view and to its render
 // targets. The cull reads two of them: WorldViewMatrix, the camera's own,
 // and WorldScreenClipMatrix, world space to a clip volume the size of the
 // screen.
 //
 // Everything is in the GS's coordinates: a 4096-pixel square centred on
 // (2048, 2048) with the screen, ScreenWidth by ScreenHeight, in its middle,
-// and depths between ZMin and ZMax. The handheld keeps them. The cull and
-// the level of detail are measured in the PS2's pixels, and the renderer
-// takes the camera and H from the view and makes its own projection for
-// the 3DS's screen.
+// and depths between the target's ZMin and ZMax (ZRanges, eview.h). The
+// handheld keeps them. The cull and the level of detail are measured in
+// the PS2's pixels, and the renderer takes the camera and H from the view
+// and makes its own projection for the 3DS's screen.
 //
 // Written up with addresses in docs/formats/eview.md; checked by
 // tools/eview_check.py.
@@ -66,27 +68,31 @@ extern void (*gElSetupLightContextFn)(eLightContext *lc,
 // of the half angle, as a u16.
 float CalculateH(uint16_t fov);
 
-// 0x0010d268. From the view's camera and first render target:
+// Retail's 0x0010e638 (the demo's 0x0010d268). From the view's camera and
+// first render target:
 //
 //   the render targets' FovBias, tan(aBaselineFovMip / 2) / tan(fov / 2);
 //   the view's NearZ, FarZ, H, FovDegrees and ViewDirection;
-//   a  view to screen            (always)
-//   b  view to clip              (when b)
-//   c  clip to screen            (when c, and b)
-//   d  clip to screen, ZMin1     (when d, and b)
-//   e  view to a clip volume the size of the screen (when e)
+//   a   view to screen            (always)
+//   b   view to clip              (when b)
+//   c   clip to screen            (when c, and b)
+//   d   clip to screen, ZMin1     (when d, and b)
+//   d2  clip to screen, ZMin2     (when d2, and b, and c or d)
+//   e   view to a clip volume the size of the screen (when e)
 //   and last a = b * c, which needs both.
 //
-// Players 1 and 2 have their near plane scaled by tan(aBaselineFovZ / 2) /
-// tan(fov / 2) and keep their depth, unless their first mover drives or is
-// the bumper camera. A non-zero `nearz` or `farz` then overrides the
-// plane, and a non-zero `e_farz` e's far plane.
+// The depth ranges are the first target's ZRanges entry: PSMZ24's, or the
+// one for every other mode. Players 1 and 2 have their near plane scaled
+// by tan(aBaselineFovZ / 2) / tan(fov / 2) and keep their depth, unless
+// their first mover drives or is the bumper camera. A non-zero `nearz` or
+// `farz` then overrides the plane, and a non-zero `e_farz` e's far plane.
 void CreateViewMatricies(eView *view, bMatrix4 *a, bMatrix4 *b, bMatrix4 *c,
-                         bMatrix4 *d, bMatrix4 *e, float nearz, float farz,
-                         float e_farz);
+                         bMatrix4 *d, bMatrix4 *d2, bMatrix4 *e, float nearz,
+                         float farz, float e_farz);
 
-// eView::CalculateViewMatricies(float, float, float), 0x00106700. The five
-// matrices and their inverses into 512 bytes of frame memory:
+// eView::CalculateViewMatricies(float, float, float), retail's 0x001070c0
+// (the demo's 0x00106700). The matrices and their inverses into 576 bytes
+// of frame memory, the demo's 512:
 //
 //     +0    WorldView        the camera's matrix
 //     +64   WorldClip        WorldView * b
@@ -96,16 +102,19 @@ void CreateViewMatricies(eView *view, bMatrix4 *a, bMatrix4 *b, bMatrix4 *c,
 //     +320  ViewScreen       never written
 //     +384  VUClipScreen     c's diagonal and row 3, then c^-1's
 //     +448  VUClipScreen1    the same from d
+//     +512  VUClipScreen2    the same from d2, retail's
 //
-// then the view's eight pointers and each render target's five, and the
+// then the view's nine pointers and each render target's six, and the
 // targets' matrix packs. With no frame memory every pointer is
 // eMathIdentityMatrix and nothing is inverted.
 void eview_calculate_view_matrices(eView *view, float nearz, float farz,
                                    float e_farz);
 
-// eRenderTarget::SetupMatrixPacks, 0x00104d18. Two 192-byte packs from
-// frame memory, taken before either is filled: WorldView, WorldClip and
-// VUClipScreen, then the same with VUClipScreen1. A pack the frame memory
+// eRenderTarget::SetupMatrixPacks, retail's 0x00105860 (the demo's
+// 0x00104d18). Three 192-byte packs from frame memory, taken before any is
+// filled: WorldClip, VUClipScreen and WorldView transposed, then the same
+// with VUClipScreen1 and with VUClipScreen2. The demo's made two, WorldView
+// (not transposed), WorldClip and VUClipScreen. A pack the frame memory
 // cannot give is DefaultMatrixPack.
 void erender_setup_matrix_packs(eRenderTarget *rt);
 

@@ -41,18 +41,20 @@
 #define EVIEW_ID_ENVMAP_LO  4    // ENVMAP0F, R, B, L, U, D
 #define EVIEW_ID_ENVMAP_HI  9
 
-// eRenderTargetMatrixPack, 192 bytes (.mdebug type#4358): what the VU1
-// microcode is handed per target.
+// eRenderTargetMatrixPack, 192 bytes: what the VU1 microcode is handed per
+// target. The demo's (.mdebug type#4358) was WorldView, WorldClip and
+// VUClipScreen; retail's SetupMatrixPacks (0x00105860) fills it as below.
 typedef struct eRenderTargetMatrixPack {
-    bMatrix4 WorldView;          //   0
-    bMatrix4 WorldClip;          //  64
-    bMatrix4 VUClipScreen;       // 128
+    bMatrix4 WorldClip;          //   0
+    bMatrix4 VUClipScreen;       //  64
+    bMatrix4 WorldViewT;         // 128 WorldView, transposed
 } eRenderTargetMatrixPack;
 
-// eRenderTarget, 1168 bytes (.mdebug type#3199). Every field is named; the
-// two blocks of GS packets are kept as bytes so the offsets stay the disc's.
-// Retail's is 176 bytes and not yet ported. One of its fields is, MaxZ, at
-// retail's offset, 116, where the demo's packets start.
+// eRenderTarget: the demo's 1168 bytes (.mdebug type#3199), then retail's
+// third matrix pack and third VUClipScreen. Every field is named; the two
+// blocks of GS packets are kept as bytes so the offsets stay the demo's.
+// Retail's is 176 bytes, with the packets gone. Its MaxZ is at retail's
+// offset, 116, where the demo's packets start.
 typedef struct eRenderTarget {
     int32_t     ID;                     //    0
     const char *Name;                   //    4
@@ -93,8 +95,9 @@ typedef struct eRenderTarget {
     bMatrix4   *ClipScreen;             // 1152
     bMatrix4   *VUClipScreen;           // 1156
     bMatrix4   *VUClipScreen1;          // 1160
-    uint32_t    pad;                    // 1164
-} eRenderTarget;
+    eRenderTargetMatrixPack *MatrixPack2;   // 1164  retail's +148
+    bMatrix4   *VUClipScreen2;          // 1168  retail's +172
+} eRenderTarget;                        // 1172
 
 // OverrideRendering is retail's byte 6: NisManager::EnableOverrideRendering
 // (0x001b1ce0) sets it and the word at 116 to 1 for the view a NIS takes
@@ -131,7 +134,8 @@ typedef struct eView {
     void     *WorldLightContext;        // 108  eLightContext *
     int32_t   BlackAndWhiteMode;        // 112
     int32_t   NisBlackAndWhite;         // 116  retail's: see below
-    uint8_t   pad3[8];                  // 120
+    bMatrix4 *VUClipScreenMatrix2;      // 120  retail's, at its +100
+    uint32_t  pad3;                     // 124
 } eView;                                // 128
 
 #if UINTPTR_MAX == 0xFFFFFFFFu
@@ -144,12 +148,14 @@ typedef char eview_layout_check[
      && offsetof(eView, WorldLightContext) == 108
      && offsetof(eView, BlackAndWhiteMode) == 112
      && offsetof(eView, NisBlackAndWhite) == 116
-     && sizeof(eRenderTarget) == 1168
+     && offsetof(eView, VUClipScreenMatrix2) == 120
+     && sizeof(eRenderTarget) == 1172
      && offsetof(eRenderTarget, AspectRatioX) == 84
      && offsetof(eRenderTarget, MaxZ) == 116
      && offsetof(eRenderTarget, DrawContexts) == 240
      && offsetof(eRenderTarget, MatrixPack0) == 1136
-     && offsetof(eRenderTarget, VUClipScreen1) == 1160) ? 1 : -1];
+     && offsetof(eRenderTarget, VUClipScreen1) == 1160
+     && offsetof(eRenderTarget, VUClipScreen2) == 1168) ? 1 : -1];
 #endif
 
 // ------------------------------------------------------------ the globals
@@ -249,17 +255,28 @@ extern uint16_t aBaselineFovZ;
 
 // The screen, EcstasyE.obj's .sdata. The projections are in the GS's
 // coordinates: a 4096-pixel square with the screen in its middle, centred
-// on 2048, and a depth range just above 2.
+// on 2048, and a depth range from just above 2.
 extern int32_t ScreenWidth;             // 0x003227c8  512
 extern int32_t ScreenHeight;            // 0x003227cc  448
 extern float   ClipVolumeScaleX;        // 0x00322920  0.5
 extern float   ClipVolumeScaleY;        // 0x00322924  0.5
 extern float   CenterX;                 // 0x00322928  2048
 extern float   CenterY;                 // 0x0032292c  2048
-extern float   ZMin;                    // 0x00322930  0x40000010
-extern float   ZMax;                    // 0x00322934  0x400ff000
-extern float   ZMin1;                   // 0x00322938  0x40000040
-extern float   ZMax1;                   // 0x0032293c  0x400ffff0
+
+// Retail's depth ranges, 0x002c9e20: for each Z buffer, the projection's
+// ZMin and ZMax (a), then a second pair (d) and a third (d2). The floats'
+// mantissas are the GS's Z. [1] is PSMZ24's: 0x10 up to 0x800000. [0] is
+// every other mode's, and its first two pairs are the demo's ZMin .. ZMax1
+// (0x00322930 .. 0x0032293c), which retail dropped.
+typedef struct eZRange {
+    float ZMin, ZMax;
+    float ZMin1, ZMax1;
+    float ZMin2, ZMax2;
+} eZRange;
+extern eZRange ZRanges[2];
+
+// CreateViewMatricies' choice, by the target's ZBufferMode.
+const eZRange *eview_z_range(const eRenderTarget *rt);
 
 // eFrameCounter, 0x00322740 (gp-25776): the frames eDisplayFrame has
 // finished. It counts one at its very end, and so does the port's

@@ -225,14 +225,14 @@ static void dump_view(int k)
         fx(v->ViewDirection.z), fx(v->ViewDirection.pad),
         name_of(v->pRenderTarget0), name_of(v->pRenderTarget1),
         name_of(v->pCamera));
-    out("   list %s %s mats %s %s %s %s %s %s %s %s wq %u blend %s wlc %s"
+    out("   list %s %s mats %s %s %s %s %s %s %s %s %s wq %u blend %s wlc %s"
         " bw %d\n",
         name_of(v->CameraMoverList.next), name_of(v->CameraMoverList.prev),
         name_of(v->WorldViewMatrix), name_of(v->WorldClipMatrix),
         name_of(v->WorldScreenMatrix), name_of(v->WorldScreenClipMatrix),
         name_of(v->ClipScreenMatrix), name_of(v->ViewScreenMatrix),
         name_of(v->VUClipScreenMatrix), name_of(v->VUClipScreenMatrix1),
-        (unsigned)v->WeatherQueryCounter, name_of(v->pBlendMask),
+        name_of(v->VUClipScreenMatrix2), (unsigned)v->WeatherQueryCounter, name_of(v->pBlendMask),
         name_of(v->WorldLightContext), v->BlackAndWhiteMode);
 }
 
@@ -249,12 +249,14 @@ static void dump_rt(int k)
     eRenderTarget *r = &RenderTargets[k];
 
     out("  RT%d id %d active %u sc %d %d %d %d ar %08x %08x bias %08x"
-        " packs %s %s wc %s wv %s cs %s vu %s vu1 %s\n",
+        " z %d packs %s %s %s wc %s wv %s cs %s vu %s vu1 %s vu2 %s\n",
         k, r->ID, (unsigned)r->Active, r->ScissorX, r->ScissorY,
         r->ScissorW, r->ScissorH, fx(r->AspectRatioX), fx(r->AspectRatioY),
-        fx(r->FovBias), name_of(r->MatrixPack0), name_of(r->MatrixPack1),
+        fx(r->FovBias), r->ZBufferMode, name_of(r->MatrixPack0),
+        name_of(r->MatrixPack1), name_of(r->MatrixPack2),
         name_of(r->WorldClip), name_of(r->WorldView), name_of(r->ClipScreen),
-        name_of(r->VUClipScreen), name_of(r->VUClipScreen1));
+        name_of(r->VUClipScreen), name_of(r->VUClipScreen1),
+        name_of(r->VUClipScreen2));
 }
 
 static void dump_modes(void)
@@ -462,6 +464,13 @@ static void run(void)
                 out(" %s", name_of(eGetRenderTarget(k)));
             out("\n  mode %d view %s camera %s\n", eGetCurrentViewMode(),
                 name_of(eGetCurrentView()), name_of(eGetCurrentCamera()));
+            out("  ztab");
+            for (k = 0; k < 2; k++)
+                out(" %08x %08x %08x %08x %08x %08x", fx(ZRanges[k].ZMin),
+                    fx(ZRanges[k].ZMax), fx(ZRanges[k].ZMin1),
+                    fx(ZRanges[k].ZMax1), fx(ZRanges[k].ZMin2),
+                    fx(ZRanges[k].ZMax2));
+            out("\n");
             break;
         }
 
@@ -554,6 +563,7 @@ static void run(void)
             r->AspectRatioX = rdf();
             r->AspectRatioY = rdf();
             r->FovBias = rdf();
+            r->ZBufferMode = rdi();
             break;
         }
 
@@ -580,21 +590,28 @@ static void run(void)
             break;
         }
 
-        case OP_GLOBALS:
+        case OP_GLOBALS: {
+            int k;
+
             ScreenWidth = rdi();
             ScreenHeight = rdi();
             ClipVolumeScaleX = rdf();
             ClipVolumeScaleY = rdf();
             CenterX = rdf();
             CenterY = rdf();
-            ZMin = rdf();
-            ZMax = rdf();
-            ZMin1 = rdf();
-            ZMax1 = rdf();
+            for (k = 0; k < 2; k++) {
+                ZRanges[k].ZMin = rdf();
+                ZRanges[k].ZMax = rdf();
+                ZRanges[k].ZMin1 = rdf();
+                ZRanges[k].ZMax1 = rdf();
+                ZRanges[k].ZMin2 = rdf();
+                ZRanges[k].ZMax2 = rdf();
+            }
             aBaselineFovMip = (uint16_t)rd();
             aBaselineFovZ = (uint16_t)rd();
             MainDraw0Context = rt_at(rdi());
             break;
+        }
 
         case OP_CALCH: {
             uint16_t fov = (uint16_t)rd();
@@ -607,21 +624,23 @@ static void run(void)
             int k = rdi(), mask = rdi();
             float nearz = rdf(), farz = rdf(), efarz = rdf();
             eView *v = &eViews[k];
-            bMatrix4 m[5];
+            bMatrix4 m[6];
             int i;
 
             out("create V%d mask %d %08x %08x %08x\n", k, mask, fx(nearz),
                 fx(farz), fx(efarz));
-            for (i = 0; i < 5; i++)
+            for (i = 0; i < 6; i++)
                 fill(&m[i], 16, opno * 8 + (uint32_t)i);
             CreateViewMatricies(v, &m[0], &m[1], &m[2],
                                 (mask & 1) ? &m[3] : 0,
+                                (mask & 4) ? &m[5] : 0,
                                 (mask & 2) ? &m[4] : 0, nearz, farz, efarz);
             dump_matrix("a", &m[0]);
             dump_matrix("b", &m[1]);
             dump_matrix("c", &m[2]);
             dump_matrix("d", &m[3]);
             dump_matrix("e", &m[4]);
+            dump_matrix("d2", &m[5]);
             dump_view(k);
             if (v->pRenderTarget0 != 0)
                 out("  rt0 bias %08x\n", fx(v->pRenderTarget0->FovBias));
@@ -679,6 +698,7 @@ static void run(void)
             r->ClipScreen = mat_at(rdi());
             r->VUClipScreen = mat_at(rdi());
             r->VUClipScreen1 = mat_at(rdi());
+            r->VUClipScreen2 = mat_at(rdi());
             break;
         }
 

@@ -102,6 +102,7 @@ static const char* const kTexFormats[TRACKVIEW_NUM_TEXFILES] = {
 static TrackView*      s_draw;      // the viewer StuffScenery draws for
 static C3D_Mtx         s_proj;
 static const bMatrix4* s_worldView;
+static const eZRange*  s_zRange = &ZRanges[1]; // the view's target's
 static bool            s_envFace;   // drawing into the environment map
 static bool            s_mirrorView; // drawing into the rear-view mirror
 
@@ -3035,23 +3036,28 @@ static uint32_t tiled_index(int x, int y)
 
 // The GS's Z for a depth the PICA wrote. The PICA's is the Z-buffer's,
 // the view's depth d as near (far - d) / ((far - near) d): 1 at the near
-// plane, 0 at the far. The GS's is the same hyperbola from ZMin to ZMax --
-// floats in [2, 4), whose mantissas are the Z, 16 and 0x0ff000.
-static float gs_z_of_depth(float t)
+// plane, 0 at the far. The GS's is the same hyperbola from the range's
+// ZMin to its ZMax -- floats from 2 to 4, whose mantissas are the Z: 16
+// up to 0x0ff000, or to PSMZ24's 0x800000.
+static float gs_z_of_depth(const eZRange* r, float t)
 {
-    const float zmin = (ZMin - 2.0f) * 4194304.0f;
-    const float zmax = (ZMax - 2.0f) * 4194304.0f;
+    const float zmin = (r->ZMin - 2.0f) * 4194304.0f;
+    const float zmax = (r->ZMax - 2.0f) * 4194304.0f;
 
     return zmin + (zmax - zmin) * t;
 }
 
 // And for the fog's u, the view's depth as (far - d) / (far - near), whose
-// Z-buffer depth is near u / d.
+// Z-buffer depth is near u / d. The fog is still the demo's (efog.c),
+// which reads a PSMZ16S Z, so it keeps the demo's range, ZRanges[0],
+// whatever the view's target is. Retail rewrote the fog's chain for its
+// PSMZ24 buffer; that is TASKS 75's.
 static float gs_z_of(float u)
 {
     float d = s_depthFar - u * (s_depthFar - s_depthNear);
 
-    return gs_z_of_depth(d > 0.0f ? s_depthNear * u / d : 1.0f);
+    return gs_z_of_depth(&ZRanges[0],
+                         d > 0.0f ? s_depthNear * u / d : 1.0f);
 }
 
 // The fog's palette is looked up by the Z as a PSMZ16S read gives it,
@@ -3074,7 +3080,7 @@ static uint32_t gs_z(uint32_t d24)
     if (d24 == 0) {
         return 0;
     }
-    return gs_z24(gs_z_of_depth((float)d24 / 16777215.0f));
+    return gs_z24(gs_z_of_depth(s_zRange, (float)d24 / 16777215.0f));
 }
 
 // gs_z_of_depth backwards: the PICA's depth whose GS Z is g, or -1 for a
@@ -3083,8 +3089,8 @@ static uint32_t gs_z(uint32_t d24)
 // has.
 static float depth_of_gs_z(float g)
 {
-    const float zmin = (ZMin - 2.0f) * 4194304.0f;
-    const float zmax = (ZMax - 2.0f) * 4194304.0f;
+    const float zmin = (s_zRange->ZMin - 2.0f) * 4194304.0f;
+    const float zmax = (s_zRange->ZMax - 2.0f) * 4194304.0f;
     float       t    = (g - zmin) / (zmax - zmin);
 
     if (!(t < 1.0f)) {
@@ -3506,6 +3512,7 @@ void trackview_draw_envmap(TrackView* v)
         Mtx_Persp(&s_proj, C3D_AngleFromDegrees(90.0f), 1.0f, view->NearZ,
                   view->FarZ, false);
         s_worldView  = view->WorldViewMatrix;
+        s_zRange     = eview_z_range(view->pRenderTarget0);
         begin_view(v);
         drawn = v->drawn;
 
@@ -3700,6 +3707,7 @@ void trackview_draw_mirror(TrackView* v)
     Mtx_Persp(&s_proj, 2.0f * atanf(tany), tanx / tany, view->NearZ,
               view->FarZ, false);
     s_worldView = view->WorldViewMatrix;
+    s_zRange    = eview_z_range(view->pRenderTarget0);
     begin_view(v);
     drawn = v->drawn;
 
@@ -4034,6 +4042,7 @@ void trackview_draw(TrackView* v)
     eSetCurrentView(view);
     s_draw        = v;
     s_worldView   = view->WorldViewMatrix;
+    s_zRange      = eview_z_range(view->pRenderTarget0);
     v->drawn        = 0;
     v->drawnTris    = 0;
     v->drawnInPlace = 0;
@@ -4324,6 +4333,7 @@ bool trackview_draw_frontend(TrackView* v, void (*render)(void*),
     gExStripFns     = kExStripFns;
     s_draw        = v;
     s_worldView   = view->WorldViewMatrix;
+    s_zRange      = eview_z_range(view->pRenderTarget0);
     v->drawn        = 0;
     v->drawnTris    = 0;
     v->drawnInPlace = 0;

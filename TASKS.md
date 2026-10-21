@@ -5100,6 +5100,29 @@ phases.
           it: no scenery drawn in place on any track has a lit or
           environment-mapped strip (`docs/formats/eview.md`).
           eCreateLookAtMatrix is the same on both discs.
+        - CreateViewMatricies, CalculateViewMatricies and
+          SetupMatrixPacks, done: retail's Z table (`0x002c9e20`,
+          `ZRanges`) gives each Z buffer mode three Z pairs, PSMZ24's
+          half of the 24-bit buffer. The third pair makes a fifth matrix,
+          d2, its VUClipScreen2 (a 576-byte frame block) and a third
+          pack, and each pack holds WorldClip, a VUClipScreen and
+          WorldView transposed. `eview_check` runs retail's three: 2,219
+          ops, 17,931 lines, 0 differ; 168 mutations, 167 caught, 1
+          equivalent. On the 3DS only the sun's depth read-back changes,
+          player 1's quads taking PSMZ24's pair
+          (`docs/formats/sun-draw.md`).
+        - Still to do: the fog chain, which retail rewrote for the Z
+          table: eAttachDepthIntoAlpha (`0x00118a60`), eAttachFog
+          (`0x00119768`), CreateFogPalette (`0x00119308`),
+          CreateFocusPalette and GetFogPalette. The port's still models
+          the demo's PSMZ16S buffer with entry 0.
+        - joyevent, nothing to change: `scannertab.c` was read out of
+          retail's disc (TASKS 49), so it has the four value changes:
+          130 event names, 230 scanner rows (the demo's 231), and no
+          fifth configuration for controller types 83, 115 and 121 (the
+          demo's 24, 24 and 34). GetJoystickButtonName falls back to ""
+          on both discs. `joystick_check` runs retail's image: 65,880
+          ops, 79,028 lines, 0 differ.
 
 76. [x] **Rigid animations: the shaken bush, and the rest.** Found in
         TASKS 73's sixth slice. An eModel's rigid animation is its

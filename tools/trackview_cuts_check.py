@@ -149,8 +149,13 @@ def sun_program(src, hdr):
         "#include <math.h>\n#include <stdint.h>\n#include <stdio.h>\n"
         "#include <stdlib.h>\n#include <string.h>\n",
         "#define SUN_ZBUFFER_SIZE 32\n",
-        # The GS's Z range, as the engine sets it for a race.
-        "float ZMin = 2.0000038146972656f;\nfloat ZMax = 2.2490234375f;\n",
+        # The GS's Z range, player 1's in a race: PSMZ24's (eview.h).
+        "typedef struct { float ZMin, ZMax, ZMin1, ZMax1, ZMin2, ZMax2; }"
+        " eZRange;\n"
+        "static const eZRange s_psmz24 = {\n"
+        "    2.0000038146972656f, 4.0f, 2.0000152587890625f, 4.00390625f,\n"
+        "    4.5f, 7.5f };\n"
+        "static const eZRange* s_zRange = &s_psmz24;\n",
         block(src, "typedef struct {\n    uint32_t* dst;", "} SunRect;"),
         func(src, "target_to_screen"),
         func(src, "tiled_x"), func(src, "tiled_y"), func(src, "tiled_index"),

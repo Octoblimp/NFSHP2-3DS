@@ -245,14 +245,16 @@ were PSMZ16S at block 0, with `w * h / 8` quadwords.
 out at retail's offset from the packets' bytes, and `eview_set_max_z`
 does that one part of 0x00105ac0.
 
-**The range.** Retail's table at 0x002c9e20 gives each Z mode its
-projection's ZMin and ZMax, floats near 2 and 4 whose mantissa is the
-GS's Z. PSMZ24's ZMin is 0x40000010, which gives 16, as the demo's was.
-The port still builds the demo's projection (ZMax 0x400ff000, 0x0ff000),
-the view's near plane at ZMax and its far plane at ZMin. Between them,
-Z is linear in `t = n (f - d) / (d (f - n))` for a depth `d`, the same
-`t` citro3d's `Mtx_PerspTilt` writes. The rest of the table is the eView
-retail pass's.
+**The range.** Retail's table at 0x002c9e20 (`ZRanges`, `eview.h`)
+gives each Z mode its projection's ZMin and ZMax, floats near 2 and 4
+whose low 24 bits are the GS's Z. PSMZ24's are 0x40000010 and
+0x40800000, 16 and 0x800000; every other mode has the demo's, 16 and
+0x0ff000. The quads take the view's target's pair (`s_zRange`), so in a
+race player 1, which is PSMZ24, has its near plane at 0x800000 and its
+far plane at 16. Between them, Z is linear in `t = n (f - d) / (d (f -
+n))` for a depth `d`, the same `t` citro3d's `Mtx_PerspTilt` writes. The
+table's other pairs feed `CreateViewMatricies`' d and d2
+(`docs/formats/eview.md`).
 
 So under 2 is the clear, or a Z of 1, which is layer 0's. The sky is
 drawn with the Z writes off, and all the scenery writes at least ZMin's
@@ -297,7 +299,8 @@ depth is its `t`. `georender_draw_quad` maps the depth with a scale of 0
 and the quad's depth as the offset, so every fragment has that depth,
 and puts the Z-buffer's map back after.
 The viewer sets its target's `ZBufferMode` to PSMZ24, since the PICA's
-depth buffer is 24 bits, so `MaxZ` is 16777215.
+depth buffer is 24 bits, so `MaxZ` is 16777215 and its range is the
+table's PSMZ24 entry.
 
 The quads come from a 64-quad ring on the linear heap, which is rewound
 once a frame. Each quad is flushed from the data cache as it goes in.

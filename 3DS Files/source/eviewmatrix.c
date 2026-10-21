@@ -47,14 +47,15 @@ float CalculateH(uint16_t fov)
 }
 
 void CreateViewMatricies(eView *view, bMatrix4 *a, bMatrix4 *b, bMatrix4 *c,
-                         bMatrix4 *d, bMatrix4 *e, float nearz, float farz,
-                         float e_farz)
+                         bMatrix4 *d, bMatrix4 *d2, bMatrix4 *e, float nearz,
+                         float farz, float e_farz)
 {
     Camera *cam = view->pCamera;
     eRenderTarget *rt0 = view->pRenderTarget0, *rt1 = view->pRenderTarget1;
     float near = cam->CurrentKey.NearZ, far = cam->CurrentKey.FarZ;
     float bias, nf, h, invh, span, w, hs, gx, gy, cx, cy, p, q;
-    float ma[16], ml[16], mm[16], mn[16];
+    float ma[16], ml[16], m2[16], mm[16], mn[16];
+    const eZRange *z;
     bNode *first;
     int fixed = 0;
 
@@ -90,20 +91,25 @@ void CreateViewMatricies(eView *view, bMatrix4 *a, bMatrix4 *b, bMatrix4 *c,
     view->FovDegrees = (float)(int32_t)cam->CurrentKey.FieldOfView * 0.0054931640625f;
     view->ViewDirection = cam->CurrentKey.Direction;
 
-    // a, view to screen, and its twin for the second depth range.
+    // a, view to screen, and its twins for the second and third depth
+    // ranges, all three from the first target's Z buffer's.
+    z = eview_z_range(rt0);
     memset(ma, 0, sizeof ma);
     ma[0] = rt0->AspectRatioX;
     ma[5] = rt0->AspectRatioY;
     ma[8] = CenterX / h;
     ma[9] = CenterY / h;
-    ma[10] = (-ZMax * near + ZMin * far) / span / h;
+    ma[10] = (-z->ZMax * near + z->ZMin * far) / span / h;
     ma[11] = invh;
-    ma[14] = nf * (ZMax - ZMin) / span / h;
+    ma[14] = nf * (z->ZMax - z->ZMin) / span / h;
     memcpy(a, ma, sizeof ma);
 
     memcpy(ml, ma, sizeof ml);
-    ml[10] = (-ZMax1 * near + ZMin1 * far) / span / h;
-    ml[14] = nf * (ZMax1 - ZMin1) / span / h;
+    ml[10] = (-z->ZMax1 * near + z->ZMin1 * far) / span / h;
+    ml[14] = nf * (z->ZMax1 - z->ZMin1) / span / h;
+    memcpy(m2, ma, sizeof m2);
+    m2[10] = (-z->ZMax2 * near + z->ZMin2 * far) / span / h;
+    m2[14] = nf * (z->ZMax2 - z->ZMin2) / span / h;
 
     // The clip volume: the scissor scaled by ClipVolumeScale, and for e no
     // more than half of it.
@@ -130,8 +136,9 @@ void CreateViewMatricies(eView *view, bMatrix4 *a, bMatrix4 *b, bMatrix4 *c,
         mm[15] = 0.0f;
         memcpy(b, mm, sizeof mm);
 
+        // d2 is made only alongside c or d.
         if (c != 0 || d != 0) {
-            bMatrix4 n, l;
+            bMatrix4 n, l, l2;
 
             identity16(mn);
             mn[0] = 1.0f / mm[0];
@@ -142,10 +149,13 @@ void CreateViewMatricies(eView *view, bMatrix4 *a, bMatrix4 *b, bMatrix4 *c,
             mn[15] = -mm[10] / mm[14];
             memcpy(&n, mn, sizeof n);
             memcpy(&l, ml, sizeof l);
+            memcpy(&l2, m2, sizeof l2);
             if (c != 0)
                 eMulMatrix(c, &n, a);
             if (d != 0)
                 eMulMatrix(d, &n, &l);
+            if (d2 != 0)
+                eMulMatrix(d2, &n, &l2);
         }
     }
 
@@ -196,37 +206,40 @@ static void vu_clip_screen(bMatrix4 *o, const bMatrix4 *m, const bMatrix4 *mi)
     memcpy(o, v, sizeof v);
 }
 
-static void set_target(eRenderTarget *rt, bMatrix4 *const p[8])
+static void set_target(eRenderTarget *rt, bMatrix4 *const p[9])
 {
     rt->WorldClip = p[1];
     rt->WorldView = p[0];
     rt->ClipScreen = p[4];
     rt->VUClipScreen = p[6];
     rt->VUClipScreen1 = p[7];
+    rt->VUClipScreen2 = p[8];
     erender_setup_matrix_packs(rt);
 }
 
 void eview_calculate_view_matrices(eView *view, float nearz, float farz,
                                    float e_farz)
 {
-    bMatrix4 a, b, c, d, e, ci, di;
+    bMatrix4 a, b, c, d, d2, e, ci, di, d2i;
     Camera *cam = view->pCamera;
-    bMatrix4 *blk, *p[8];
+    bMatrix4 *blk, *p[9];
     eRenderTarget *rt0, *rt1;
     int i;
 
-    CreateViewMatricies(view, &a, &b, &c, &d, &e, nearz, farz, e_farz);
-    blk = eframe_malloc(8 * sizeof(bMatrix4));
+    CreateViewMatricies(view, &a, &b, &c, &d, &d2, &e, nearz, farz, e_farz);
+    blk = eframe_malloc(9 * sizeof(bMatrix4));
     if (blk == 0) {
-        for (i = 0; i < 8; i++)
+        for (i = 0; i < 9; i++)
             p[i] = &eMathIdentityMatrix;
     } else {
-        for (i = 0; i < 8; i++)
+        for (i = 0; i < 9; i++)
             p[i] = &blk[i];
         fInvertMatrix(&ci, &c);
         fInvertMatrix(&di, &d);
+        fInvertMatrix(&d2i, &d2);
         vu_clip_screen(&blk[6], &c, &ci);
         vu_clip_screen(&blk[7], &d, &di);
+        vu_clip_screen(&blk[8], &d2, &d2i);
         blk[0] = cam->CurrentKey.Matrix;
         blk[4] = c;
         eMulMatrix(&blk[1], &blk[0], &b);
@@ -242,6 +255,7 @@ void eview_calculate_view_matrices(eView *view, float nearz, float farz,
     view->ClipScreenMatrix = p[4];
     view->VUClipScreenMatrix = p[6];
     view->VUClipScreenMatrix1 = p[7];
+    view->VUClipScreenMatrix2 = p[8];
 
     rt0 = view->pRenderTarget0;
     rt1 = view->pRenderTarget1;
@@ -251,27 +265,28 @@ void eview_calculate_view_matrices(eView *view, float nearz, float farz,
         set_target(rt1, p);
 }
 
+// A pack from frame memory, or DefaultMatrixPack when there was none.
+static eRenderTargetMatrixPack *fill_pack(eRenderTargetMatrixPack *p,
+                                          const eRenderTarget *rt,
+                                          const bMatrix4 *vu)
+{
+    if (p == 0)
+        return &DefaultMatrixPack;
+    p->WorldClip = *rt->WorldClip;
+    p->VUClipScreen = *vu;
+    eTransposeMatrix(&p->WorldViewT, rt->WorldView);
+    return p;
+}
+
 void erender_setup_matrix_packs(eRenderTarget *rt)
 {
     eRenderTargetMatrixPack *p0 = eframe_malloc(sizeof *p0);
     eRenderTargetMatrixPack *p1 = eframe_malloc(sizeof *p1);
+    eRenderTargetMatrixPack *p2 = eframe_malloc(sizeof *p2);
 
-    if (p0 != 0) {
-        p0->WorldView = *rt->WorldView;
-        p0->WorldClip = *rt->WorldClip;
-        p0->VUClipScreen = *rt->VUClipScreen;
-        rt->MatrixPack0 = p0;
-    } else {
-        rt->MatrixPack0 = &DefaultMatrixPack;
-    }
-    if (p1 != 0) {
-        p1->WorldView = *rt->WorldView;
-        p1->WorldClip = *rt->WorldClip;
-        p1->VUClipScreen = *rt->VUClipScreen1;
-        rt->MatrixPack1 = p1;
-    } else {
-        rt->MatrixPack1 = &DefaultMatrixPack;
-    }
+    rt->MatrixPack0 = fill_pack(p0, rt, rt->VUClipScreen);
+    rt->MatrixPack1 = fill_pack(p1, rt, rt->VUClipScreen1);
+    rt->MatrixPack2 = fill_pack(p2, rt, rt->VUClipScreen2);
 }
 
 void eview_local_to_screen_clip(eView *view, bMatrix4 *o,

@@ -6,11 +6,11 @@ EcstasyE.obj: the view's constructor, the static constructor's share of the
 cameras and the views (0x00114098, run in place up to the texture
 downloader at 0x001142ac), eInitViews, the view names, the lookups and the
 current view, the movers' lists, eUpdateViewMode and MaybeChangeViewMode;
-then the matrices: CalculateH (0x00103ce0), CreateViewMatricies
-(0x0010d268), eView::CalculateViewMatricies, eRenderTarget::
-SetupMatrixPacks (0x00104d18), the local-to-clip products, the z-sort bias,
-the three GetPixelSize, GetScreenPosition, the screen's width and height,
-and SetupWorldLightContext.
+then the matrices: CalculateH (0x00103ce0), CreateViewMatricies,
+eView::CalculateViewMatricies, eRenderTarget::SetupMatrixPacks, the
+local-to-clip products, the z-sort bias, the three GetPixelSize,
+GetScreenPosition, the screen's width and height, and
+SetupWorldLightContext.
 
 The image is the oracle: tools/mipsemu.py runs the shipped functions out of
 NFSHP2.ELF, the harness (tools/src/eview_test.c) runs the port, both walk
@@ -18,9 +18,13 @@ the same script, and the two transcripts are diffed. No address is printed;
 the harness's head has the naming scheme. Floats are compared as bits, with
 every NaN printed as the one quiet NaN.
 
-SetupWorldLightContext is the one function retail changed, so it runs out
-of SLES_507.31 instead (0x00107900, through tools/retail_model.py), on a
-copy of the camera, SunPosition and the frame memory.
+Retail changed four of them, so they run out of SLES_507.31 instead,
+through tools/retail_model.py: CreateViewMatricies (0x0010e638), with its
+Z table (0x002c9e20) and a third depth range; CalculateViewMatricies
+(0x001070c0), with a ninth matrix; SetupMatrixPacks (0x00105860), with a
+third pack and WorldView transposed; and SetupWorldLightContext
+(0x00107900). Each runs on a copy of what it reads, and what it writes is
+copied back (class Retail).
 
 eWaitUntilRenderingDone (0x00110770) and elSetupLightContext (0x001154b8)
 are stubbed in the model and seamed in the harness, and each prints its
@@ -39,8 +43,10 @@ The script covers:
     players without a second one;
   * CalculateH over the fields of view and the screen widths, odd and
     negative;
-  * CreateViewMatricies over random cameras, targets and screens, each view
-    id, the first mover's type, the overrides, and d and e left out;
+  * the Z table as the port starts with it, against the disc's;
+  * CreateViewMatricies over random cameras, targets, screens and Z tables,
+    each view id, the first mover's type, each Z buffer mode, the
+    overrides, and d, d2 and e left out;
   * CalculateViewMatricies and SetupMatrixPacks with the frame memory
     running out at each allocation, one target and two, and one twice;
   * the local-to-clip products, aliased too, the bias, the three pixel
@@ -120,7 +126,7 @@ RENDMODE = 0x0032289c
 TWEAKMODE = 0x003228a0
 SWIDTH = 0x003227c8
 SHEIGHT = 0x003227cc
-SCREEN = 0x00322920        # CVSX CVSY CenterX CenterY ZMin ZMax ZMin1 ZMax1
+SCREEN = 0x00322920        # CVSX CVSY CenterX CenterY
 FOVMIP = 0x00325300
 FOVZ = 0x00325302
 FPOS = GP - 20044
@@ -128,18 +134,34 @@ FEND = GP - 20040
 FFAILED = GP - 20028
 FAMOUNT = GP - 20024
 
-# Retail's SetupWorldLightContext and what it touches, from its listing.
+# Retail's four and what they touch, from their listings.
 RGP = retail_model.RETAIL_GP
+R_CREATE = 0x0010e638
+R_CALC = 0x001070c0
+R_PACKS = 0x00105860
 R_LIGHT = 0x00107900
 R_ELIGHT = 0x00115978
 R_IDENT = 0x002dc380
+R_DMP = 0x002c84d0
 R_HACK = 0x002d70f0
 R_SUN = 0x002e03c0
+R_ZTAB = 0x002c9e20         # two of ZMin ZMax ZMin1 ZMax1 ZMin2 ZMax2
+R_SWIDTH = RGP - 25108
+R_SCREEN = RGP - 24736      # CVSX CVSY CenterX CenterY
+R_FOVMIP = RGP - 13422
+R_FOVZ = RGP - 13424
 R_FPOS = RGP - 19388
 R_FEND = RGP - 19384
 R_FFAILED = RGP - 19372
 R_FAMOUNT = RGP - 19368
 R_WLC = 112                 # eView's WorldLightContext, the demo's 108
+R_VU2 = 100                 # eView's VUClipScreenMatrix2
+R_VIEW = 160
+R_RT = 176                  # eRenderTarget, the demo's 1168
+# The demo's eView has no VUClipScreenMatrix2; the model keeps it past the
+# fields the demo's uses, where the port has it. The demo's eRenderTarget
+# has no room for the third pack or VUClipScreen2: Model.rt2 holds them.
+V_VU2 = 120
 
 # The static constructor from its first word to the texture downloader's
 # constructor, which is where eView's share ends.
@@ -149,9 +171,7 @@ SINIT_FRAME = 160
 
 FN = {
     "calch": 0x00103ce0,
-    "packs": 0x00104d18,
     "getrt": 0x00104d00,
-    "calc": 0x00106700,
     "l2sc": 0x00106a20,
     "l2c": 0x00106a38,
     "bias": 0x00106a50,
@@ -173,7 +193,6 @@ FN = {
     "curmode": 0x00107238,
     "update": 0x00107240,
     "maybe": 0x00107310,
-    "create": 0x0010d268,
     "wait": 0x00110770,
     "elight": 0x001154b8,
 }
@@ -184,7 +203,11 @@ s32 = me.s32
 
 CM_NONE, CM_DRIVE, CM_ORBIT, CM_BUMPER, CM_MIRROR, CM_STILL = 0, 1, 4, 5, 6, 12
 
-ZMIN, ZMAX, ZMIN1, ZMAX1 = 0x40000010, 0x400ff000, 0x40000040, 0x400ffff0
+# Retail's Z table: [0] for every Z buffer but PSMZ24, the demo's two
+# ranges and a third; [1] for PSMZ24.
+ZTAB = [0x40000010, 0x400ff000, 0x40000040, 0x400ffff0, 0x40000ff0, 0x400ffff0,
+        0x40000010, 0x40800000, 0x40000040, 0x40802000, 0x40900000, 0x40f00000]
+PSMZ24 = 0x31
 
 
 def fx(b):
@@ -219,14 +242,13 @@ class Script(object):
         self.op(OP_TAG, len(self.tags) - 1)
 
     def globals(self, sw=512, sh=448, cvsx=0.5, cvsy=0.5, cx=2048.0,
-                cy=2048.0, zmin=ZMIN, zmax=ZMAX, zmin1=ZMIN1, zmax1=ZMAX1,
-                mip=16384, fovz=9102, maindraw=16):
-        self.op(OP_GLOBALS, sw, sh, cvsx, cvsy, cx, cy, zmin, zmax, zmin1,
-                zmax1, mip, fovz, maindraw)
+                cy=2048.0, ztab=ZTAB, mip=16384, fovz=9102, maindraw=16):
+        self.op(OP_GLOBALS, sw, sh, cvsx, cvsy, cx, cy,
+                *(list(ztab) + [mip, fovz, maindraw]))
 
     def rt(self, r, active=1, sx=0, sy=0, sw=512, sh=448, arx=1.0, ary=1.0,
-           bias=1.0):
-        self.op(OP_SETRT, r, active, sx, sy, sw, sh, arx, ary, bias)
+           bias=1.0, zmode=0):
+        self.op(OP_SETRT, r, active, sx, sy, sw, sh, arx, ary, bias, zmode)
 
     def view(self, v, vid, active, rt0, rt1, cam):
         self.op(OP_SETVIEW, v, vid, active, rt0, rt1, cam)
@@ -439,10 +461,9 @@ def rand_globals(sc, rnd):
         cvsy=f32(rnd.choice((0.5, rnd.uniform(0.2, 1.4)))),
         cx=f32(rnd.choice((2048.0, rnd.uniform(1500, 2600)))),
         cy=f32(rnd.choice((2048.0, rnd.uniform(1500, 2600)))),
-        zmin=rnd.choice((ZMIN, bits(rnd.uniform(1.0, 2.0)))),
-        zmax=rnd.choice((ZMAX, bits(rnd.uniform(2.2, 3.0)))),
-        zmin1=rnd.choice((ZMIN1, bits(rnd.uniform(1.0, 2.0)))),
-        zmax1=rnd.choice((ZMAX1, bits(rnd.uniform(2.2, 3.0)))),
+        ztab=[rnd.choice((z, bits(rnd.uniform(1.0, 2.0) if j % 2 == 0
+                                  else rnd.uniform(2.2, 8.0))))
+              for j, z in enumerate(ZTAB)],
         mip=rnd.choice((16384, rnd.randrange(64, 32700))),
         fovz=rnd.choice((9102, rnd.randrange(64, 32700))),
         maindraw=16)
@@ -457,7 +478,8 @@ def rand_rt(sc, rnd, r):
                       -rnd.randrange(1, 900))),
           f32(rnd.choice((1.0, rnd.uniform(0.3, 2.0), -rnd.uniform(0.3, 2.0)))),
           f32(rnd.choice((1.0, rnd.uniform(0.3, 2.0)))),
-          f32(rnd.uniform(-3, 3)))
+          f32(rnd.uniform(-3, 3)),
+          rnd.choice((0, PSMZ24, PSMZ24, 58, 50, rnd.getrandbits(32))))
 
 
 def rand_view(sc, rnd, v, rt0, rt1, cam):
@@ -514,7 +536,7 @@ def s_create(sc, rnd, n=160):
                                            CM_BUMPER, CM_MIRROR, CM_STILL)))
             sc.op(OP_ATTACH, v, m)
         nearz, farz, efarz = overrides(rnd)
-        sc.op(OP_CREATE, v, rnd.randrange(4), nearz, farz, efarz)
+        sc.op(OP_CREATE, v, rnd.randrange(8), nearz, farz, efarz)
     for w in range(NVIEW):
         sc.op(OP_RESETLIST, w)
     # every view id and mover type through one camera, so the scaling shows
@@ -533,14 +555,21 @@ def s_create(sc, rnd, n=160):
                 sc.op(OP_ATTACH, 1, 0)
             for ov in ((0.0, 0.0, 0.0), (2.0, 0.0, 0.0), (0.0, 800.0, 0.0),
                        (0.0, 0.0, 300.0), (3.0, 700.0, 250.0)):
-                sc.op(OP_CREATE, 1, 3, *ov)
+                sc.op(OP_CREATE, 1, 7, *ov)
     sc.op(OP_RESETLIST, 1)
+    # each Z buffer mode, and each of d, d2 and e left out
+    sc.view(1, 1, 1, 1, 4, 5)
+    for zmode in (0, PSMZ24, 58, 50, 0x131, -1):
+        sc.rt(1, 1, 0, 0, 512, 448, 1.0, 0.875, 1.0, zmode)
+        sc.rt(4, 1, 0, 0, 512, 224, 1.0, 0.875, 1.0, PSMZ24 ^ zmode)
+        for mask in range(8):
+            sc.op(OP_CREATE, 1, mask, 0.0, 0.0, 0.0)
     # a head that reads NULL
     sc.view(2, 2, 1, 2, -1, 6)
     rand_cam(sc, rnd, 6, fov=16384)
     sc.rt(2, 1, 0, 0, 512, 448, 1.0, 1.0, 1.0)
     sc.op(OP_NULLLIST, 2)
-    sc.op(OP_CREATE, 2, 3, 0.0, 0.0, 0.0)
+    sc.op(OP_CREATE, 2, 7, 0.0, 0.0, 0.0)
     sc.op(OP_RESETLIST, 2)
     sc.op(OP_INITVIEWS)
 
@@ -557,8 +586,8 @@ def s_calc(sc, rnd):
     sc.view(2, 2, 1, 2, -1, 5)
     sc.view(3, 3, 1, 7, 7, 4)                     # one target twice
     # where the frame memory runs out: the block, then each pack
-    ends = [FRAMESZ, 512, 513, 704, 705, 896, 897, 1088, 1089, 1280, 1281,
-            0, 192, 384, 385, 100]
+    ends = [FRAMESZ, 576, 577, 768, 769, 960, 961, 1152, 1153, 1344, 1345,
+            1536, 1537, 1728, 1729, 0, 192, 384, 385, 576 + 385, 100]
     for v in (1, 2, 3):
         for end in ends:
             for pos in (0, 16):
@@ -587,13 +616,13 @@ def s_packs(sc, rnd):
     sc.tag("SetupMatrixPacks")
     for k in range(NMAT):
         sc.mat(k, rand_matrix(rnd))
-    for r, ms in ((0, (0, 1, 2, 3, 4)), (5, (5, 6, 7, 0, 1)),
-                  (9, (2, 2, 2, 3, 3))):
+    for r, ms in ((0, (0, 1, 2, 3, 4, 5)), (5, (5, 6, 7, 0, 1, 2)),
+                  (9, (2, 2, 2, 3, 3, 4))):
         sc.op(OP_SETRTM, r, *ms)
-        for end in (FRAMESZ, 385, 384, 193, 192, 0):
+        for end in (FRAMESZ, 577, 576, 385, 384, 193, 192, 0):
             sc.frame(0, end, r + end)
             sc.op(OP_PACKS, r)
-        sc.frame(32, 32 + 385, r)
+        sc.frame(32, 32 + 577, r)
         sc.op(OP_PACKS, r)
 
 
@@ -719,8 +748,9 @@ def s_game(sc, rnd):
     sc.op(OP_INIT)
     sc.op(OP_INITVIEWS)
     sc.globals()
+    # player 1's target is PSMZ24, as retail's packet builder makes it
     for r in range(NRT):
-        sc.rt(r, 0, 0, 0, 512, 448, 1.0, 0.875, 1.0)
+        sc.rt(r, 0, 0, 0, 512, 448, 1.0, 0.875, 1.0, PSMZ24 if r == 1 else 0)
     for v in range(NVIEW):
         sc.op(OP_RESETLIST, v)
     sc.op(OP_MTYPE, 0, CM_DRIVE)
@@ -731,8 +761,9 @@ def s_game(sc, rnd):
         pos = [f32(-120.0 + 40 * c), f32(900.0), f32(3.5), 1.0]
         m, fwd = look(pos, 0.7, -0.05)
         sc.cam(c, m, pos, fwd, 0.5, 5000.0, 9102 + 1000 * c)
-    sc.frame(0, FRAMESZ, 42)
     for v in (0, 1):
+        # retail's 1728 bytes a view, with two targets, and the light's 288
+        sc.frame(0, FRAMESZ, 42 + v)
         sc.op(OP_CALC, v, 0.0, 0.0, 0.0)
         sc.op(OP_LIGHT, v)
         sc.op(OP_SWH, v)
@@ -771,40 +802,80 @@ def script():
 # ---------------------------------------------------------------- the model
 
 
-class RetailLight(object):
-    """Retail's SetupWorldLightContext on a copy of the model's state: the
-    view's camera, SunPosition and the frame memory go in; the frame memory
-    and the view's light context come back. Its elSetupLightContext prints
-    the line the demo's stub would."""
+class Retail(object):
+    """Retail's CreateViewMatricies, CalculateViewMatricies, SetupMatrixPacks
+    and SetupWorldLightContext on a copy of the model's state: what each
+    reads goes in and what it writes comes back. A pointer crosses to its
+    twin here: the frame memory, the scratch matrices, the script's, the
+    view being run, each render target, the identity, DefaultMatrixPack
+    and hack_man_matrix. Retail's eRenderTarget is the demo's less its
+    packets, so the targets go across field by field, and the view's first
+    mover is one here with its type. The light context's
+    elSetupLightContext prints the line the demo's stub would."""
 
     def __init__(self, m):
         self.m = m
         r = self.r = retail_model.RetailEmu(ieee=True, eediv=True)
         r.stub_bware()
         r.call("eMathInit__Fv")
-        self.view = r.alloc(128, 16)
+        if [r.u32(R_ZTAB + 4 * j) for j in range(12)] != ZTAB:
+            sys.exit("retail's Z table is not ZTAB")
+        self.view = r.alloc(R_VIEW, 16)
         self.cam = r.alloc(452, 16)
+        self.mover = r.alloc(48, 16)
         self.frame = r.alloc(FRAMESZ + 64, 16)
+        self.scratch = r.alloc(6 * 64, 16)
+        self.mats = r.alloc(64 * NMAT, 16)
+        self.rts = r.alloc(R_RT * NRT, 16)
         self.k = 0
         r.stub(R_ELIGHT, self.elight)
 
-    def to_r(self, p):
-        return (p - self.m.frame + self.frame) & M32
+    # ---- the twins
 
-    def from_r(self, p):
-        return (p - self.frame + self.m.frame) & M32
+    def fixed(self):
+        return ((IDENT, R_IDENT), (DMP, R_DMP), (HACK, R_HACK))
+
+    def ranges(self):
+        m = self.m
+        return ((m.frame, self.frame, FRAMESZ + 64),
+                (m.scratch, self.scratch, 6 * 64),
+                (m.mats, self.mats, 64 * NMAT),
+                (m.view_at(self.k), self.view, 128))
+
+    def to_r(self, p):
+        p &= M32
+        if p == 0:
+            return 0
+        for a, b in self.fixed():
+            if p == a:
+                return b
+        for a, b, n in self.ranges():
+            if a <= p < a + n:
+                return p - a + b
+        if RTS <= p < RTS + 1168 * NRT and (p - RTS) % 1168 == 0:
+            return self.rts + (p - RTS) // 1168 * R_RT
+        sys.exit("no retail twin for %08x" % p)
+
+    def from_r(self, p, strict=True):
+        p &= M32
+        if p == 0:
+            return 0
+        for a, b in self.fixed():
+            if p == b:
+                return a
+        for a, b, n in self.ranges():
+            if b <= p < b + n:
+                return p - b + a
+        if (self.rts <= p < self.rts + R_RT * NRT
+                and (p - self.rts) % R_RT == 0):
+            return RTS + (p - self.rts) // R_RT * 1168
+        if strict:
+            sys.exit("no model twin for %08x" % p)
+        return None
 
     def name(self, p):
-        p &= M32
-        if p == R_IDENT:
-            return "I"
-        if p == R_HACK:
-            return "HM"
-        if p == self.view:
-            return "V%d" % self.k
-        if p and self.frame <= p <= self.frame + FRAMESZ:
-            return self.m.name(self.from_r(p))
-        return self.m.name(p) if p == 0 else "?"
+        q = self.from_r(p, strict=False)
+        return "?" if q is None else self.m.name(q)
 
     def elight(self, em):
         lc, lw, hack, eye, view = (em.reg[r] & M32 for r in (4, 5, 6, 7, 8))
@@ -817,7 +888,127 @@ class RetailLight(object):
         for j in range(0, n, 4):
             dst.put32(b + j, src.u32(a + j))
 
-    def run(self, k, v):
+    # ---- the state that goes across
+
+    def sync_globals(self):
+        m, r, e = self.m, self.r, self.m.e
+        r.put32(R_SWIDTH, m.u32(SWIDTH))
+        self.copy(e, r, SCREEN, R_SCREEN, 16)
+        for j, x in enumerate(m.ztab):
+            r.put32(R_ZTAB + 4 * j, x)
+        struct.pack_into("<H", r.mem, R_FOVMIP, e.u16(FOVMIP))
+        struct.pack_into("<H", r.mem, R_FOVZ, e.u16(FOVZ))
+
+    def frame_in(self):
+        m, r = self.m, self.r
+        self.copy(m.e, r, m.frame, self.frame, FRAMESZ + 64)
+        r.put32(R_FPOS, self.to_r(m.u32(FPOS)))
+        r.put32(R_FEND, self.to_r(m.u32(FEND)))
+        r.put32(R_FFAILED, m.u32(FFAILED))
+        r.put32(R_FAMOUNT, m.u32(FAMOUNT))
+
+    def frame_out(self):
+        m, r = self.m, self.r
+        self.copy(r, m.e, self.frame, m.frame, FRAMESZ + 64)
+        m.w32(FPOS, self.from_r(r.u32(R_FPOS)))
+        m.w32(FEND, self.from_r(r.u32(R_FEND)))
+        m.w32(FFAILED, r.u32(R_FFAILED))
+        m.w32(FAMOUNT, r.u32(R_FAMOUNT))
+
+    # (the demo's offset, retail's) in eRenderTarget
+    RT_WORDS = ((8, 8), (20, 20), (24, 24), (28, 28), (32, 32), (56, 56),
+                (84, 88), (88, 92), (100, 104))
+    RT_PTRS = ((1136, 140), (1140, 144), (1144, 152), (1148, 156),
+               (1152, 160), (1156, 164), (1160, 168))
+
+    def rt_in(self, p):
+        m, r = self.m, self.r
+        q, k = self.to_r(p), (p - RTS) // 1168
+        for a, b in self.RT_WORDS:
+            r.put32(q + b, m.u32(p + a))
+        for a, b in self.RT_PTRS:
+            r.put32(q + b, self.to_r(m.u32(p + a)))
+        r.put32(q + 148, self.to_r(m.rt2[k][0]))
+        r.put32(q + 172, self.to_r(m.rt2[k][1]))
+
+    def rt_out(self, p):
+        m, r = self.m, self.r
+        q, k = self.to_r(p), (p - RTS) // 1168
+        m.w32(p + 100, r.u32(q + 104))
+        for a, b in self.RT_PTRS:
+            m.w32(p + a, self.from_r(r.u32(q + b)))
+        m.rt2[k] = [self.from_r(r.u32(q + 148)), self.from_r(r.u32(q + 172))]
+
+    def view_in(self, k, v):
+        m, r, u = self.m, self.r, self.m.u32
+        self.k = k
+        self.copy(m.e, r, v, self.view, 48)
+        for off in (48, 52):
+            p = u(v + off)
+            r.put32(self.view + off, self.to_r(p))
+            if p:
+                self.rt_in(p)
+        cam = u(v + 56)
+        if cam:
+            self.copy(m.e, r, cam, self.cam, 448)
+        r.put32(self.view + 56, self.cam if cam else 0)
+        first = u(v + 60)
+        if first == v + 60:
+            first = self.view + 60
+        elif first:
+            r.put32(self.mover + 8, u(first + 8))
+            first = self.mover
+        r.put32(self.view + 60, first)
+        r.put32(self.view + 64, self.view + 60)
+
+    def view_out(self, v, mats):
+        m, r = self.m, self.r
+        self.copy(r, m.e, self.view + 8, v + 8, 40)
+        for off in (48, 52):
+            p = m.u32(v + off)
+            if p:
+                self.rt_out(p)
+        if mats:
+            for j in range(8):
+                m.w32(v + 68 + 4 * j,
+                      self.from_r(r.u32(self.view + 68 + 4 * j)))
+            m.w32(v + V_VU2, self.from_r(r.u32(self.view + R_VU2)))
+
+    def floats(self, fs):
+        for j, x in enumerate(fs):
+            self.r.fpr[12 + j] = x & M32
+
+    # ---- the four
+
+    def create(self, k, v, ms, mask, fs):
+        m, r = self.m, self.r
+        self.view_in(k, v)
+        self.copy(m.e, r, m.scratch, self.scratch, 6 * 64)
+        a, b, c, d, e, d2 = (s32(self.to_r(p)) for p in ms)
+        self.floats(fs)
+        r.call(R_CREATE, s32(self.view), a, b, c, d if mask & 1 else 0,
+               d2 if mask & 4 else 0, e if mask & 2 else 0)
+        self.copy(r, m.e, self.scratch, m.scratch, 6 * 64)
+        self.view_out(v, False)
+
+    def calc(self, k, v, fs):
+        self.view_in(k, v)
+        self.frame_in()
+        self.floats(fs)
+        self.r.call(R_CALC, s32(self.view))
+        self.frame_out()
+        self.view_out(v, True)
+
+    def packs(self, p):
+        m, r = self.m, self.r
+        self.copy(m.e, r, m.mats, self.mats, 64 * NMAT)
+        self.frame_in()
+        self.rt_in(p)
+        r.call(R_PACKS, s32(self.to_r(p)))
+        self.frame_out()
+        self.rt_out(p)
+
+    def light(self, k, v):
         m, r, e = self.m, self.r, self.m.e
         self.k = k
         cam = m.u32(v + 56)
@@ -826,19 +1017,10 @@ class RetailLight(object):
         r.put32(self.view + 56, self.cam if cam else 0)
         r.put32(self.view + R_WLC, m.u32(v + 108))
         self.copy(e, r, SUN, R_SUN, 16)
-        self.copy(e, r, m.frame, self.frame, FRAMESZ + 64)
-        r.put32(R_FPOS, self.to_r(m.u32(FPOS)))
-        r.put32(R_FEND, self.to_r(m.u32(FEND)))
-        r.put32(R_FFAILED, m.u32(FFAILED))
-        r.put32(R_FAMOUNT, m.u32(FAMOUNT))
+        self.frame_in()
         r.call(R_LIGHT, s32(self.view))
-        self.copy(r, e, self.frame, m.frame, FRAMESZ + 64)
-        m.w32(FPOS, self.from_r(r.u32(R_FPOS)))
-        m.w32(FEND, self.from_r(r.u32(R_FEND)))
-        m.w32(FFAILED, r.u32(R_FFAILED))
-        m.w32(FAMOUNT, r.u32(R_FAMOUNT))
-        lc = r.u32(self.view + R_WLC)
-        m.w32(v + 108, self.from_r(lc) if lc else 0)
+        self.frame_out()
+        m.w32(v + 108, self.from_r(r.u32(self.view + R_WLC)))
 
 
 class Model(object):
@@ -857,7 +1039,9 @@ class Model(object):
         self.mats = e.alloc(64 * NMAT, 16)
         self.tcams = e.alloc(448 * NTCAM, 16)
         self.frame = e.alloc(FRAMESZ + 64, 16)
-        self.scratch = e.alloc(5 * 64, 16)
+        self.scratch = e.alloc(6 * 64, 16)
+        self.rt2 = [[0, 0] for _ in range(NRT)]    # MatrixPack2 VUClipScreen2
+        self.ztab = list(ZTAB)
         self.vec = e.alloc(64, 16)
         emit = self.emit
 
@@ -878,7 +1062,7 @@ class Model(object):
         e.stub(SINIT_STOP, sinit_stop)
         e.stub(FN["wait"], wait)
         e.stub(FN["elight"], elight)
-        self.rl = RetailLight(self)
+        self.rl = Retail(self)
 
     def emit(self, line):
         self.out.append(line)
@@ -984,11 +1168,11 @@ class Model(object):
                      fx(u(v + 8)), fx(u(v + 12)), fx(u(v + 16)),
                      fx(u(v + 20)), fx(u(v + 24)), self.words(v + 32, 4),
                      n(u(v + 48)), n(u(v + 52)), n(u(v + 56))))
-        self.emit("   list %s %s mats %s wq %d blend %s wlc %s bw %d"
+        self.emit("   list %s %s mats %s %s wq %d blend %s wlc %s bw %d"
                   % (n(u(v + 60)), n(u(v + 64)),
                      " ".join(n(u(v + 68 + 4 * j)) for j in range(8)),
-                     u(v + 100), n(u(v + 104)), n(u(v + 108)),
-                     s32(u(v + 112))))
+                     n(u(v + V_VU2)), u(v + 100), n(u(v + 104)),
+                     n(u(v + 108)), s32(u(v + 112))))
 
     def dump_views(self):
         for k in range(NVIEW):
@@ -998,12 +1182,14 @@ class Model(object):
         r = self.rt_at(k)
         u, n = self.u32, self.name
         self.emit("  RT%d id %d active %d sc %d %d %d %d ar %08x %08x"
-                  " bias %08x packs %s %s wc %s wv %s cs %s vu %s vu1 %s"
+                  " bias %08x z %d packs %s %s %s wc %s wv %s cs %s vu %s"
+                  " vu1 %s vu2 %s"
                   % (k, s32(u(r)), u(r + 8), s32(u(r + 20)), s32(u(r + 24)),
                      s32(u(r + 28)), s32(u(r + 32)), fx(u(r + 84)),
-                     fx(u(r + 88)), fx(u(r + 100)), n(u(r + 1136)),
-                     n(u(r + 1140)), n(u(r + 1144)), n(u(r + 1148)),
-                     n(u(r + 1152)), n(u(r + 1156)), n(u(r + 1160))))
+                     fx(u(r + 88)), fx(u(r + 100)), s32(u(r + 56)),
+                     n(u(r + 1136)), n(u(r + 1140)), n(self.rt2[k][0]),
+                     n(u(r + 1144)), n(u(r + 1148)), n(u(r + 1152)),
+                     n(u(r + 1156)), n(u(r + 1160)), n(self.rt2[k][1])))
 
     def dump_modes(self):
         u = self.u32
@@ -1077,6 +1263,7 @@ class Model(object):
                 self.dump_views()
                 emit("  fov mip %d z %d maindraw %s"
                      % (e.u16(FOVMIP), e.u16(FOVZ), n(u(MAINDRAW))))
+                self.rl.sync_globals()
             elif code == OP_INITVIEWS:
                 emit("initviews")
                 self.call("initviews")
@@ -1103,6 +1290,9 @@ class Model(object):
                 emit("  mode %d view %s camera %s"
                      % (self.call("curmode"), n(self.call("curview")),
                         n(self.call("curcam"))))
+                emit("  ztab " + " ".join(
+                    "%08x" % fx(self.rl.r.u32(R_ZTAB + 4 * j))
+                    for j in range(12)))
             elif code == OP_CURVIEW:
                 v = rdi()
                 emit("curview %d" % v)
@@ -1145,7 +1335,7 @@ class Model(object):
             elif code == OP_SETRT:
                 r = self.rt_at(rdi())
                 self.w32(r + 8, rd())
-                for off in (20, 24, 28, 32, 84, 88, 100):
+                for off in (20, 24, 28, 32, 84, 88, 100, 56):
                     self.w32(r + off, rd())
             elif code == OP_SETVIEW:
                 v = self.view_at(rdi())
@@ -1168,11 +1358,13 @@ class Model(object):
             elif code == OP_GLOBALS:
                 self.w32(SWIDTH, rd())
                 self.w32(SHEIGHT, rd())
-                for j in range(8):
+                for j in range(4):
                     self.w32(SCREEN + 4 * j, rd())
+                self.ztab = list(rd(12))
                 struct.pack_into("<H", e.mem, FOVMIP, rd() & 0xffff)
                 struct.pack_into("<H", e.mem, FOVZ, rd() & 0xffff)
                 self.w32(MAINDRAW, self.rt_at(rdi()))
+                self.rl.sync_globals()
             elif code == OP_CALCH:
                 fov = rd() & 0xffff
                 self.call("calch", fov)
@@ -1182,14 +1374,12 @@ class Model(object):
                 fs = rd(3)
                 emit("create V%d mask %d %s" % (k, mask, " ".join(
                     "%08x" % fx(x) for x in fs)))
-                ms = [self.scratch + 64 * j for j in range(5)]
-                for j in range(5):
+                ms = [self.scratch + 64 * j for j in range(6)]
+                for j in range(6):
                     self.fill(ms[j], 16, opno * 8 + j)
                 v = self.view_at(k)
-                self.call("create", v, ms[0], ms[1], ms[2],
-                          ms[3] if mask & 1 else 0,
-                          ms[4] if mask & 2 else 0, f=fs)
-                for j, lab in enumerate("abcde"):
+                self.rl.create(k, v, ms, mask, fs)
+                for j, lab in enumerate(("a", "b", "c", "d", "e", "d2")):
                     self.dump_words(lab, ms[j], 16)
                 self.dump_view(k)
                 if u(v + 48):
@@ -1208,7 +1398,7 @@ class Model(object):
                 fs = rd(3)
                 emit("calc V%d %s" % (k, " ".join("%08x" % fx(x) for x in fs)))
                 v = self.view_at(k)
-                self.call("calc", v, f=fs)
+                self.rl.calc(k, v, fs)
                 self.dump_view(k)
                 for off, lab in ((48, "rt0"), (52, "rt1")):
                     r = u(v + off)
@@ -1222,13 +1412,15 @@ class Model(object):
                 for j in range(16):
                     self.w32(m + 4 * j, rd())
             elif code == OP_SETRTM:
-                r = self.rt_at(rdi())
+                k = rdi()
+                r = self.rt_at(k)
                 for off in (1144, 1148, 1152, 1156, 1160):
                     self.w32(r + off, self.mat_at(rdi()))
+                self.rt2[k][1] = self.mat_at(rdi())
             elif code == OP_PACKS:
                 k = rdi()
                 emit("packs RT%d" % k)
-                self.call("packs", self.rt_at(k))
+                self.rl.packs(self.rt_at(k))
                 self.dump_rt(k)
                 self.dump_frame()
                 self.dump_frame_memory()
@@ -1292,7 +1484,7 @@ class Model(object):
                 k = rdi()
                 v = self.view_at(k)
                 emit("light V%d" % k)
-                self.rl.run(k, v)
+                self.rl.light(k, v)
                 emit("  wlc %s" % n(u(v + 108)))
                 self.dump_frame()
                 self.dump_frame_memory()
@@ -1541,15 +1733,27 @@ MUTATIONS = [
     _m("view-h", "    view->H = h;", "    view->H = invh;"),
     _m("ma0", "    ma[0] = rt0->AspectRatioX;", "    ma[0] = rt0->AspectRatioY;"),
     _m("ma8", "    ma[8] = CenterX / h;", "    ma[8] = CenterY / h;"),
-    _m("ma10-order", "    ma[10] = (-ZMax * near + ZMin * far) / span / h;",
-       "    ma[10] = (-ZMax * near + ZMin * far) / (span * h);"),
+    _m("ma10-order",
+       "    ma[10] = (-z->ZMax * near + z->ZMin * far) / span / h;",
+       "    ma[10] = (-z->ZMax * near + z->ZMin * far) / (span * h);"),
     _m("ma11", "    ma[11] = invh;", "    ma[11] = 0.0f;"),
-    _m("ma14", "    ma[14] = nf * (ZMax - ZMin) / span / h;",
-       "    ma[14] = nf * (ZMax - ZMin) / span * invh;"),
-    _m("ml10", "    ml[10] = (-ZMax1 * near + ZMin1 * far) / span / h;",
-       "    ml[10] = (-ZMax * near + ZMin1 * far) / span / h;"),
-    _m("ml14", "    ml[14] = nf * (ZMax1 - ZMin1) / span / h;",
-       "    ml[14] = nf * (ZMax1 - ZMin) / span / h;"),
+    _m("ma14", "    ma[14] = nf * (z->ZMax - z->ZMin) / span / h;",
+       "    ma[14] = nf * (z->ZMax - z->ZMin) / span * invh;"),
+    _m("ml10", "    ml[10] = (-z->ZMax1 * near + z->ZMin1 * far) / span / h;",
+       "    ml[10] = (-z->ZMax * near + z->ZMin1 * far) / span / h;"),
+    _m("ml14", "    ml[14] = nf * (z->ZMax1 - z->ZMin1) / span / h;",
+       "    ml[14] = nf * (z->ZMax1 - z->ZMin) / span / h;"),
+    _m("m2-10", "    m2[10] = (-z->ZMax2 * near + z->ZMin2 * far) / span / h;",
+       "    m2[10] = (-z->ZMax2 * near + z->ZMin1 * far) / span / h;"),
+    _m("m2-14", "    m2[14] = nf * (z->ZMax2 - z->ZMin2) / span / h;",
+       "    m2[14] = nf * (z->ZMax1 - z->ZMin2) / span / h;"),
+    _m("z-range-any", "    return &ZRanges[rt->ZBufferMode == GS_PSMZ24];",
+       "    return &ZRanges[rt->ZBufferMode != 0];", EVC),
+    _m("z-range-first", "    z = eview_z_range(rt0);",
+       "    z = &ZRanges[0];"),
+    _m("z-table-value", "      4.5f, 7.5f },", "      4.5f, 7.0f },", EVC),
+    _m("d2-from-l", "                eMulMatrix(d2, &n, &l2);",
+       "                eMulMatrix(d2, &n, &l);"),
     _m("gx-clamp", "    if (gx < cx)\n        cx = gx;", "    (void)0;"),
     _m("gy-clamp", "    if (gy < cy)\n        cy = gy;", "    (void)0;"),
     _m("cx-half", "    cx = w * 0.5f;", "    cx = w * 0.6f;"),
@@ -1604,8 +1808,14 @@ MUTATIONS = [
     _m("calc-blk1-order", "        eMulMatrix(&blk[1], &blk[0], &b);",
        "        eMulMatrix(&blk[1], &b, &blk[0]);"),
     _m("calc-blk4", "        blk[4] = c;", "        blk[4] = d;"),
-    _m("calc-size", "    blk = eframe_malloc(8 * sizeof(bMatrix4));",
-       "    blk = eframe_malloc(7 * sizeof(bMatrix4));"),
+    _m("calc-size", "    blk = eframe_malloc(9 * sizeof(bMatrix4));",
+       "    blk = eframe_malloc(8 * sizeof(bMatrix4));"),
+    _m("calc-no-invert-d2", "        fInvertMatrix(&d2i, &d2);",
+       "        d2i = d2;"),
+    _m("calc-vu2-from-d", "        vu_clip_screen(&blk[8], &d2, &d2i);",
+       "        vu_clip_screen(&blk[8], &d, &di);"),
+    _m("calc-view-vu2", "    view->VUClipScreenMatrix2 = p[8];",
+       "    view->VUClipScreenMatrix2 = p[7];"),
     _m("calc-viewscreen", "    view->ViewScreenMatrix = p[5];",
        "    view->ViewScreenMatrix = p[4];"),
     _m("calc-rt1-skip", "    if (rt1 != 0)\n        set_target(rt1, p);",
@@ -1618,16 +1828,28 @@ MUTATIONS = [
     _m("st-cs", "    rt->ClipScreen = p[4];", "    rt->ClipScreen = p[5];"),
     _m("st-vu1", "    rt->VUClipScreen1 = p[7];",
        "    rt->VUClipScreen1 = p[6];"),
+    _m("st-vu2", "    rt->VUClipScreen2 = p[8];",
+       "    rt->VUClipScreen2 = p[7];"),
     # SetupMatrixPacks
     _m("packs-lazy",
        "    eRenderTargetMatrixPack *p1 = eframe_malloc(sizeof *p1);",
        "    eRenderTargetMatrixPack *p1 = p0 ? eframe_malloc(sizeof *p1) : 0;"),
-    _m("packs-p1-vu", "        p1->VUClipScreen = *rt->VUClipScreen1;",
-       "        p1->VUClipScreen = *rt->VUClipScreen;"),
-    _m("packs-default", "        rt->MatrixPack1 = &DefaultMatrixPack;",
-       "        rt->MatrixPack1 = 0;"),
-    _m("packs-p0-wv", "        p0->WorldView = *rt->WorldView;",
-       "        p0->WorldView = *rt->WorldClip;"),
+    _m("packs-p2-lazy",
+       "    eRenderTargetMatrixPack *p2 = eframe_malloc(sizeof *p2);",
+       "    eRenderTargetMatrixPack *p2 = p1 ? eframe_malloc(sizeof *p2) : 0;"),
+    _m("packs-p1-vu",
+       "    rt->MatrixPack1 = fill_pack(p1, rt, rt->VUClipScreen1);",
+       "    rt->MatrixPack1 = fill_pack(p1, rt, rt->VUClipScreen);"),
+    _m("packs-p2-vu",
+       "    rt->MatrixPack2 = fill_pack(p2, rt, rt->VUClipScreen2);",
+       "    rt->MatrixPack2 = fill_pack(p2, rt, rt->VUClipScreen1);"),
+    _m("packs-default", "        return &DefaultMatrixPack;",
+       "        return 0;"),
+    _m("packs-wc", "    p->WorldClip = *rt->WorldClip;",
+       "    p->WorldClip = *rt->WorldView;"),
+    _m("packs-not-transposed",
+       "    eTransposeMatrix(&p->WorldViewT, rt->WorldView);",
+       "    p->WorldViewT = *rt->WorldView;"),
     # the products and the bias
     _m("l2sc-matrix",
        "    eMulMatrix(o, local, view->WorldScreenClipMatrix);",
