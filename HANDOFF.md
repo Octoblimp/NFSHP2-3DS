@@ -28955,3 +28955,35 @@ FLICKERING" in the user's photos.
   attract mode play the disc's replay file N each time, and
   `run_azahar_attract.ps1 -File N` sets it.
 - **Next:** TASKS 75, then the release candidate again.
+
+## Session 149 -- the functions retail changed (TASKS 75)
+
+The user, 2026-10-20, after TASKS 82 was parked: "Move on to another
+task". TASKS 75 is the checklist's last retail item.
+
+- **SetupWorldLightContext** (retail `0x00107900`, the demo's
+  `0x00106e98`).
+  - The eye is 10 units back along the camera's z column and 4 up, the
+    demo's 9 and 7.
+  - The look-at from SunPosition goes through an identity into
+    LocalLightPositions (+128). Retail's VU1 programs read 860..866, 872
+    and 874..876 of the context, never 868..871, so it is dead. The
+    demo's went into EnvMapMatrix, which now keeps elSetupLightContext's
+    matrix from hack_man_matrix.
+  - eCreateLookAtMatrix: the demo's and retail's agree on 3,000 random
+    cases.
+  - `eview_check.py` runs retail's function out of SLES_507.31 for
+    OP_LIGHT, on a copy of the camera, SunPosition and the frame memory.
+    0 of 15,454 lines differ. 155 mutations, all caught, with the two
+    view-mode patterns TASKS 50b's `!eViewShowOne` had broken fixed.
+  - The port never calls it. eDisplayFrame does, for views 1 to 3, and
+    StuffScenery hands the context only to scenery drawn in place. On
+    the 31 track bundles, the only solids with a lit (0x80) or
+    environment-mapped (0x100) strip are TRACK_HELICOPTER, FIRETRUCK_00
+    and XB_GASTRKTANK_L1A_00. All three sit around their origin and are
+    drawn with a matrix, which gets no light context. So the call would
+    change nothing on screen.
+- **Checks.** The CIA builds.
+- **Next:** CreateViewMatricies (retail `0x0010e638`), then the joystick
+  tables, the scanner count, EnterEditTextMode's help,
+  EnableOverrideRendering and DroppedSpikes.

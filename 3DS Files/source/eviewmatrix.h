@@ -148,10 +148,14 @@ void eview_get_screen_position(eView *view, bVector3 *o, const bVector3 *p);
 float eview_get_screen_width(eView *view);
 float eview_get_screen_height(eView *view);
 
-// eView::SetupWorldLightContext, 0x00106e98. A light context for the
-// world, from frame memory, lit from 9 units behind the eye and 7 above,
-// with its environment map looking from SunPosition at the origin. NULL
-// without a camera or frame memory.
+// eView::SetupWorldLightContext, retail's 0x00107900 (the demo's
+// 0x00106e98). A light context for the world, from frame memory, lit from
+// 10 units behind the eye and 4 above, the demo's 9 and 7. The look-at from
+// SunPosition at the origin goes into LocalLightPositions, which nothing
+// reads, where the demo's replaced EnvMapMatrix. NULL without a camera or
+// frame memory. eDisplayFrame calls it for views 1 to 3 and the port does
+// not: no scenery drawn in place has a lit or environment-mapped strip
+// (docs/formats/eview.md).
 void eview_setup_world_light_context(eView *view);
 
 #endif

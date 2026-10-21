@@ -263,14 +263,26 @@ allocations.
   to the first target's scissor: `(x - 2048) + ScissorW / 2`, a C divide
   that rounds toward zero. z is the depth, and the fourth word is left
   alone. `GetScreenWidth` and `GetScreenHeight` are the scissor as floats.
-- `SetupWorldLightContext` (0x00106e98) clears `WorldLightContext` and
-  returns when there is no camera. Otherwise it takes 288 bytes of frame
-  memory, and returns with NULL stored when there are none. The eye is 9
-  units back along the camera's z column and 7 up. It calls
+- `SetupWorldLightContext` (retail 0x00107900, the demo's 0x00106e98)
+  clears `WorldLightContext` and returns when there is no camera.
+  Otherwise it takes 288 bytes of frame memory, and returns with NULL
+  stored when there are none. The eye is 10 units back along the camera's
+  z column and 4 up (the demo's 9 and 7). It calls
   `elSetupLightContext(lc, eMathIdentityMatrix, hack_man_matrix, eye,
   view)`: 1928 bytes of lighting that belong to the renderer, and a seam in
-  the port. The environment map then looks from `SunPosition` at the
-  origin, with z up.
+  the port. Then it makes a look-at from `SunPosition` at the origin, with
+  z up, multiplies it by an identity, and stores it in
+  `LocalLightPositions` (+128), which no VU1 program reads. The demo's
+  went into `EnvMapMatrix`, so in retail the world's environment pass
+  keeps the matrix `elSetupLightContext` made from `hack_man_matrix`, as a
+  car's does. tools/eview_check.py runs retail's.
+
+  `eDisplayFrame` calls it for views 1 to 3; the port does not.
+  `StuffScenery` hands the context only to scenery drawn in place, and no
+  in-place solid on any track has a lit (0x80) or environment-mapped
+  (0x100) strip. The three solids that do, `TRACK_HELICOPTER`,
+  `FIRETRUCK_00` and `XB_GASTRKTANK_L1A_00`, sit around their origin and
+  are drawn with a matrix, which gets no light context.
 
 ## What the handheld does with it
 

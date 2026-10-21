@@ -18,6 +18,10 @@ the same script, and the two transcripts are diffed. No address is printed;
 the harness's head has the naming scheme. Floats are compared as bits, with
 every NaN printed as the one quiet NaN.
 
+SetupWorldLightContext is the one function retail changed, so it runs out
+of SLES_507.31 instead (0x00107900, through tools/retail_model.py), on a
+copy of the camera, SunPosition and the frame memory.
+
 eWaitUntilRenderingDone (0x00110770) and elSetupLightContext (0x001154b8)
 are stubbed in the model and seamed in the harness, and each prints its
 call. The frame memory is 2 KB the script places the frame's position and
@@ -64,6 +68,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hostbuild
 import mipsemu as me
+import retail_model
 
 ROOT = Path(__file__).resolve().parent.parent
 NL = chr(10)
@@ -122,6 +127,19 @@ FPOS = GP - 20044
 FEND = GP - 20040
 FFAILED = GP - 20028
 FAMOUNT = GP - 20024
+
+# Retail's SetupWorldLightContext and what it touches, from its listing.
+RGP = retail_model.RETAIL_GP
+R_LIGHT = 0x00107900
+R_ELIGHT = 0x00115978
+R_IDENT = 0x002dc380
+R_HACK = 0x002d70f0
+R_SUN = 0x002e03c0
+R_FPOS = RGP - 19388
+R_FEND = RGP - 19384
+R_FFAILED = RGP - 19372
+R_FAMOUNT = RGP - 19368
+R_WLC = 112                 # eView's WorldLightContext, the demo's 108
 
 # The static constructor from its first word to the texture downloader's
 # constructor, which is where eView's share ends.
@@ -753,6 +771,76 @@ def script():
 # ---------------------------------------------------------------- the model
 
 
+class RetailLight(object):
+    """Retail's SetupWorldLightContext on a copy of the model's state: the
+    view's camera, SunPosition and the frame memory go in; the frame memory
+    and the view's light context come back. Its elSetupLightContext prints
+    the line the demo's stub would."""
+
+    def __init__(self, m):
+        self.m = m
+        r = self.r = retail_model.RetailEmu(ieee=True, eediv=True)
+        r.stub_bware()
+        r.call("eMathInit__Fv")
+        self.view = r.alloc(128, 16)
+        self.cam = r.alloc(452, 16)
+        self.frame = r.alloc(FRAMESZ + 64, 16)
+        self.k = 0
+        r.stub(R_ELIGHT, self.elight)
+
+    def to_r(self, p):
+        return (p - self.m.frame + self.frame) & M32
+
+    def from_r(self, p):
+        return (p - self.frame + self.m.frame) & M32
+
+    def name(self, p):
+        p &= M32
+        if p == R_IDENT:
+            return "I"
+        if p == R_HACK:
+            return "HM"
+        if p == self.view:
+            return "V%d" % self.k
+        if p and self.frame <= p <= self.frame + FRAMESZ:
+            return self.m.name(self.from_r(p))
+        return self.m.name(p) if p == 0 else "?"
+
+    def elight(self, em):
+        lc, lw, hack, eye, view = (em.reg[r] & M32 for r in (4, 5, 6, 7, 8))
+        self.m.emit("  light %s local %s hack %s eye %s view %s"
+                    % (self.name(lc), self.name(lw), self.name(hack),
+                       " ".join("%08x" % fx(em.u32(eye + 4 * j))
+                                for j in range(4)), self.name(view)))
+
+    def copy(self, src, dst, a, b, n):
+        for j in range(0, n, 4):
+            dst.put32(b + j, src.u32(a + j))
+
+    def run(self, k, v):
+        m, r, e = self.m, self.r, self.m.e
+        self.k = k
+        cam = m.u32(v + 56)
+        if cam:
+            self.copy(e, r, cam, self.cam, 448)
+        r.put32(self.view + 56, self.cam if cam else 0)
+        r.put32(self.view + R_WLC, m.u32(v + 108))
+        self.copy(e, r, SUN, R_SUN, 16)
+        self.copy(e, r, m.frame, self.frame, FRAMESZ + 64)
+        r.put32(R_FPOS, self.to_r(m.u32(FPOS)))
+        r.put32(R_FEND, self.to_r(m.u32(FEND)))
+        r.put32(R_FFAILED, m.u32(FFAILED))
+        r.put32(R_FAMOUNT, m.u32(FAMOUNT))
+        r.call(R_LIGHT, s32(self.view))
+        self.copy(r, e, self.frame, m.frame, FRAMESZ + 64)
+        m.w32(FPOS, self.from_r(r.u32(R_FPOS)))
+        m.w32(FEND, self.from_r(r.u32(R_FEND)))
+        m.w32(FFAILED, r.u32(R_FFAILED))
+        m.w32(FAMOUNT, r.u32(R_FAMOUNT))
+        lc = r.u32(self.view + R_WLC)
+        m.w32(v + 108, self.from_r(lc) if lc else 0)
+
+
 class Model(object):
     def __init__(self, sc):
         self.sc = sc
@@ -790,6 +878,7 @@ class Model(object):
         e.stub(SINIT_STOP, sinit_stop)
         e.stub(FN["wait"], wait)
         e.stub(FN["elight"], elight)
+        self.rl = RetailLight(self)
 
     def emit(self, line):
         self.out.append(line)
@@ -1203,7 +1292,7 @@ class Model(object):
                 k = rdi()
                 v = self.view_at(k)
                 emit("light V%d" % k)
-                self.call("light", v)
+                self.rl.run(k, v)
                 emit("  wlc %s" % n(u(v + 108)))
                 self.dump_frame()
                 self.dump_frame_memory()
@@ -1331,12 +1420,12 @@ MUTATIONS = [
     _m("unattach-no-back", "    next->prev = prev;\n    eUpdateViewMode();",
        "    eUpdateViewMode();", EVC),
     _m("mode-3-mirror",
-       "    if (first_mover(v1) != 0 && first_mover(v2) != 0)",
+       "    if (first_mover(v1) != 0 && first_mover(v2) != 0 && !eViewShowOne)",
        "    if (first_mover(v1) != 0 && first_mover(v3) != 0\n"
-       "        && first_mover(v2) != 0)", EVC),
+       "        && first_mover(v2) != 0 && !eViewShowOne)", EVC),
     _m("mode-3-alone",
-       "    if (first_mover(v1) != 0 && first_mover(v2) != 0)",
-       "    if (first_mover(v2) != 0)", EVC),
+       "    if (first_mover(v1) != 0 && first_mover(v2) != 0 && !eViewShowOne)",
+       "    if (first_mover(v2) != 0 && !eViewShowOne)", EVC),
     _m("mode-2", "        CurrentViewMode = 2;", "        CurrentViewMode = 4;",
        EVC),
     _m("mode-1", "        CurrentViewMode = 1;", "        CurrentViewMode = 0;",
@@ -1603,11 +1692,14 @@ MUTATIONS = [
        "    view->WorldLightContext = 0;\n    cam = view->pCamera;",
        "    cam = view->pCamera;"),
     _m("light-eye-x",
-       "    eye.x = cam->CurrentKey.Position.x - m->v0.z * 9.0f;",
-       "    eye.x = cam->CurrentKey.Position.x - m->v0.x * 9.0f;"),
+       "    eye.x = cam->CurrentKey.Position.x - m->v0.z * 10.0f;",
+       "    eye.x = cam->CurrentKey.Position.x - m->v0.x * 10.0f;"),
+    _m("light-eye-y",
+       "    eye.y = cam->CurrentKey.Position.y - m->v1.z * 10.0f;",
+       "    eye.y = cam->CurrentKey.Position.y - m->v1.z * 9.0f;"),
     _m("light-eye-z",
-       "    eye.z = cam->CurrentKey.Position.z - m->v2.z * 9.0f + 7.0f;",
-       "    eye.z = cam->CurrentKey.Position.z - m->v2.z * 9.0f - 7.0f;"),
+       "    eye.z = cam->CurrentKey.Position.z - m->v2.z * 10.0f + 4.0f;",
+       "    eye.z = cam->CurrentKey.Position.z - m->v2.z * 10.0f + 7.0f;"),
     _m("light-eye-w", "    eye.w = 1.0f;", "    eye.w = 0.0f;"),
     _m("light-hack", "        gElSetupLightContextFn(lc, &eMathIdentityMatrix,"
        " &hack_man_matrix,", "        gElSetupLightContextFn(lc,"
@@ -1617,7 +1709,10 @@ MUTATIONS = [
     _m("light-look-args",
        "    eCreateLookAtMatrix(&look, &SunPosition, &origin, &up);",
        "    eCreateLookAtMatrix(&look, &origin, &SunPosition, &up);"),
-    _m("light-envmap", "    lc->EnvMapMatrix = look;", "    (void)look;"),
+    _m("light-envmap", "    lc->LocalLightPositions = look;",
+       "    lc->EnvMapMatrix = look;"),
+    _m("light-positions", "    lc->LocalLightPositions = look;",
+       "    (void)look;"),
     _m("light-size", "    lc = eframe_malloc(sizeof *lc);",
        "    lc = eframe_malloc(256);"),
 ]

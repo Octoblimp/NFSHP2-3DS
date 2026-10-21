@@ -5090,6 +5090,17 @@ phases.
         A paired literal can be an alignment artefact, so each needs
         reading beside the port's. It comes after TASKS 73.
 
+        **In progress, Session 149** (2026-10-20: the checklist's last
+        retail item, one function at a time).
+        - SetupWorldLightContext, done: retail's (`0x00107900`) puts the
+          eye 10 back and 4 up, the demo's 9 and 7, and stores its
+          look-at from SunPosition in LocalLightPositions, which no VU1
+          program reads, where the demo's replaced EnvMapMatrix.
+          `eview_check` runs retail's now. The port still does not call
+          it: no scenery drawn in place on any track has a lit or
+          environment-mapped strip (`docs/formats/eview.md`).
+          eCreateLookAtMatrix is the same on both discs.
+
 76. [x] **Rigid animations: the shaken bush, and the rest.** Found in
         TASKS 73's sixth slice. An eModel's rigid animation is its
         solid's keyframed transform, timed by RigidAnimationStartTime

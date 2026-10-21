@@ -397,7 +397,7 @@ void eview_setup_world_light_context(eView *view)
     bVector4 eye;
     bVector3 origin = {0.0f, 0.0f, 0.0f, 0.0f};
     bVector3 up = {0.0f, 0.0f, 1.0f, 0.0f};
-    bMatrix4 look;
+    bMatrix4 look, unit;
 
     view->WorldLightContext = 0;
     cam = view->pCamera;
@@ -409,13 +409,19 @@ void eview_setup_world_light_context(eView *view)
         return;
 
     m = &cam->CurrentKey.Matrix;
-    eye.x = cam->CurrentKey.Position.x - m->v0.z * 9.0f;
-    eye.y = cam->CurrentKey.Position.y - m->v1.z * 9.0f;
+    eye.x = cam->CurrentKey.Position.x - m->v0.z * 10.0f;
+    eye.y = cam->CurrentKey.Position.y - m->v1.z * 10.0f;
     eye.w = 1.0f;
-    eye.z = cam->CurrentKey.Position.z - m->v2.z * 9.0f + 7.0f;
+    eye.z = cam->CurrentKey.Position.z - m->v2.z * 10.0f + 4.0f;
     if (gElSetupLightContextFn != 0)
         gElSetupLightContextFn(lc, &eMathIdentityMatrix, &hack_man_matrix,
                                &eye, view);
+    // Retail's look-at goes through an identity and into
+    // LocalLightPositions (+128), which no VU1 program reads; the demo's
+    // went into EnvMapMatrix. So the world's environment pass keeps the
+    // matrix elSetupLightContext made from hack_man_matrix, as a car's does.
     eCreateLookAtMatrix(&look, &SunPosition, &origin, &up);
-    lc->EnvMapMatrix = look;
+    eIdentity(&unit);
+    eMulMatrix(&look, &unit, &look);
+    lc->LocalLightPositions = look;
 }
