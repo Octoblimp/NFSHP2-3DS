@@ -1,7 +1,7 @@
 // tools/trackview_cuts_check.py's sun test, after trackview.c's
 // read_sun_rect and what it calls, cut out of it.
 //
-// The loop as it was before TASKS 46 (trackview.c at fe74105), with its
+// The loop as it was before TASKS 46 (trackview.c at 009bbda), with its
 // own copy of tiled_index.
 static uint32_t old_tiled_index(int x, int y)
 {

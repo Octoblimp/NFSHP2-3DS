@@ -1554,8 +1554,8 @@ is citro3d and owns the top.
         the eight seams remain: the four movers, and AIDriver,
         TrafficDriver and CopDriver.
 
-        **The jump cam is closed (Session 37, commits ce37726, 351b187,
-        ee33932 and 6f168b6).** The jump cam was the Player half of
+        **The jump cam is closed (Session 37, commits 4ee8707, ee9c9a0,
+        ef5a60c and 54b3c4d).** The jump cam was the Player half of
         Car::FinishMovement's four seams. `previewroute.c` is
         PreviewRoute and IsJumpCamAvailable. `spline.c` and
         `trackcarcam.c` are Spline and TrackCarCameraMover.
@@ -2116,7 +2116,7 @@ is citro3d and owns the top.
           its light -- then cut by the profile, keeping retail's look.
 
         **Closed 2026-10-20, at the launch prep.** The New 3DS is the only
-        target (6ac29d1), and a race holds 30 FPS on it outside the heaviest
+        target (f1ab9ad), and a race holds 30 FPS on it outside the heaviest
         scenes. Those are TASKS 46.
 
 ## Phase 5 -- Polish
@@ -2151,10 +2151,10 @@ is citro3d and owns the top.
 31. [x] Final CIA packaging + Old3DS/New3DS compatibility pass
         (Since 2026-10-03 the New 3DS is the target, task 28. Since
         2026-10-05 it is the only one, the user's call: an Old 3DS stops
-        at boot with a message (6ac29d1), and the pass checks only that.)
+        at boot with a message (f1ab9ad), and the pass checks only that.)
         The HOME Menu banner, sound and icon are TASKS 66's.
         - The Old 3DS message passed on the user's 3DS (2026-10-19).
-        - The release candidate (2026-10-20, built from 926d1e1):
+        - The release candidate (2026-10-20, built from 1ca8bf2):
           the disc-made icon, banner and siren, version 1.0.0, and
           GPL-3.0 for the port's code (`LICENSE`), all the user's
           picks. The release build was checked for test-only
@@ -2166,9 +2166,9 @@ is citro3d and owns the top.
           https://github.com/Octoblimp/NFSHP2-3DS. README's known
           issues gained TASKS 82's wall, the demo replays, 37f's split
           and the French art; `3DS Files/meta/hp2` is in git at the
-          user's word (d8dfd37). A fresh clone built the same .3dsx and
+          user's word (b9bde71). A fresh clone built the same .3dsx and
           the same CIA content (makerom's ticket and content IDs are
-          random). Tag v1.0.0 on f0770e9, pushed with master; the
+          random). Tag v1.0.0 on e94cbdf, pushed with master; the
           GitHub release has the CIA and the .3dsx as two files (no
           ZIP), the ones the user tested: CIA f197d13a...6096, .3dsx
           927b65b7...5d1f.
@@ -2435,7 +2435,7 @@ phases.
                   Play takes, up to 8, a race's grid. It takes 8: a UDS
                   network has up to 16 nodes, and Mario Kart 7 races 8
                   over Download Play. So the link is now a star of up to
-                  8 (e02c8a9 had 2): the host keeps a link for each
+                  8 (28a0c65 had 2): the host keeps a link for each
                   client, closes its network once all have come, ejects
                   late or quiet ones, and keeps a lost peer's place. The
                   soak takes `WirelessTestConsoles` and fails unless all
@@ -2843,7 +2843,7 @@ phases.
                       names it and counts down. Then its car is the
                       AI's on the frame of the first record built
                       without it. A client that loses its host holds,
-                      then races alone. Done in 2a9b396 (HANDOFF.md,
+                      then races alone. Done in 4493576 (HANDOFF.md,
                       Session 112):
                       - netstep's hold. netstep_check: 47 scenarios,
                         0 faults; 173 mutants, 170 caught, 3
@@ -2900,8 +2900,8 @@ phases.
                         yet run on real 3DSes.
                 - [x] 37g-3: a restarted console rejoins through Local
                       Wireless, then Join, known by its unique ID, and
-                      catches up. Done in Session 112, continued (2d84039
-                      netstep's half, b8bace6 the rest):
+                      catches up. Done in Session 112, continued (d9f5f1a
+                      netstep's half, 60253d8 the rest):
                       - netstep.c: the host keeps every record from GO
                         (delta-coded, a key every 64, 32 KB blocks up to
                         4 MB). `netstep_rejoin` lets a held place back
@@ -2974,7 +2974,7 @@ phases.
           show it: BUSTED! comes in huge and clear, then shrinks and
           darkens to its place, whole and in proportion
           (`out/busted_zoom_slowed.png`; `out/azahar_t38c`). The squash
-          and the cut top were the text drawing that 58f28ab replaced
+          and the cut top were the text drawing that 13330b2 replaced
           (2026-10-11): proportional text at ScaleX once.
         - BUSTED!'s letters sit unevenly ("BU ST ED!"). That is
           retail's: Render (0x001425dc..0x00142854) draws the glyph at
@@ -3155,7 +3155,7 @@ phases.
         glare is soft (Coastal Parklands, and the quick race's track).
         Find which layer or pass makes the edge and fix it, then look
         for other artifacts the user may mean. Done in Session 81
-        (9e044f3): the sun's quads were drawn with the opaque
+        (846bcde): the sun's quads were drawn with the opaque
         textures' alpha test, GREATER 0x60; retail gives the
         semitransparent textures GEQUAL 0, and the quad now takes its
         test from the texture's pass. The halo and rays fade into the
@@ -3168,9 +3168,9 @@ phases.
         textures only, timing build first, then indexed meshes and
         early depth) and the desert's lag near the end (2026-10-09).
         Session 81, lossless each: the solid shader in 17 instructions
-        where it took 31 (b293a76), the frame to the GPU in parts,
-        opt-in with "GpuSends 1" (9e044f3), and the clusters no view
-        can show left unsent (bb70171), which halve the envmap's and
+        where it took 31 (02bb05d), the frame to the GPU in parts,
+        opt-in with "GpuSends 1" (846bcde), and the clusters no view
+        can show left unsent (6ea6dd6), which halve the envmap's and
         the mirror's triangles. Left: the device's timing at the fog
         and the desert, and the user's word on the envmap a face a
         frame. (`docs/formats/draw-cuts.md`, "TASKS 46")
@@ -3199,7 +3199,7 @@ phases.
           (`sdmc:/nfshp2_gputiming.txt`, `DebugLog 1`). Its replays
           decide the next cuts: fill, the cost of each draw, the
           textures, and early depth.
-          - The first try (2026-10-18, Coastal Parklands, build 03ffcaf)
+          - The first try (2026-10-18, Coastal Parklands, build 64e8812)
             stopped at the countdown with an ARM11 data abort: a
             permission fault writing 0x1f000008, in `give_back`'s
             `memcpy` into the top screen's colour buffer. Track 11
@@ -3208,7 +3208,7 @@ phases.
             it (Azahar lets it). The GPU now copies them back from the
             linear heap and the readback is logged: 0 of 96,000 words
             differ on Azahar. To run again on the 3DS.
-          - The second try (2026-10-18, build 5679ab6): no crash, and
+          - The second try (2026-10-18, build 9343ab4): no crash, and
             the GPU's copy back read "0 colour and 0 depth words of
             96000 differ" on the 3DS. The race was Alpine Trail (track
             42, 2 laps, 3 AI, 4 cops); Coastal Parklands ran only as the
@@ -3301,7 +3301,7 @@ phases.
             says "ThreadGuard 1", at the user's word (2026-10-18). Its
             checks at each of the main loop's marks and every 10 ms on the
             game's core were 1.7 to 2.5% of Azahar's race profiles; the
-            crash it was made for was fixed the day it was found (399d67e).
+            crash it was made for was fixed the day it was found (9c3270f).
             Off, nothing is watched and the audio workers wait 10 ms on
             their own, as before it.
           - The sampler (Session 130, continued): "CoreSample 1" has a
@@ -3322,7 +3322,7 @@ phases.
           the slow stretch: the `samples, models:` lines say which parts
           of a model to cut next.
         - The desert on the device (2026-10-19, TASKS 79c's log: track
-          21, build f1e1f9d, `GPULog 0`). Two stretches under 30, both
+          21, build 371b48a, `GPULog 0`). Two stretches under 30, both
           laps alike:
           - x 1010 to 1080, y -780 to -180: 20 FPS, bound by the CPU.
             The draw takes 28 to 32 ms (models 13 to 15, mirror 4 to 6,
@@ -3338,13 +3338,13 @@ phases.
         - [ ] The user's word on the envmap a face a frame.
 
 47. [x] **A brief artifact on the bridge before the finish line.**
-        Reported on 2026-10-12, after the user played build bb70171 on
+        Reported on 2026-10-12, after the user played build 6ea6dd6 on
         their 3DS: "the bridge right before the finish line on my
         track ... had an artifact, I had two laps, showed both times.
         It was brief." The user brings the logs on 2026-10-13. The
         track is not named yet (two laps is a Quick Race's count). Ask
         which track and what it looked like (a flash, a gap, a
-        stretched or missing triangle). The clusters (bb70171) are new
+        stretched or missing triangle). The clusters (6ea6dd6) are new
         that night and decide what is drawn near the screen's edges,
         so a run with "ClusterCull 0" over the same bridge tells
         whether they made it or it was there before; then a capture
@@ -3369,10 +3369,10 @@ phases.
           under 22 FPS. In those frames the CPU's ~19 ms and the GPU's
           ~32 ms run one after the other (50.8 ms a frame): TASKS 46's
           "GpuSends 1" is meant to overlap them.
-        - [x] Session 128: the helicopter over the bridge. In bb70171
+        - [x] Session 128: the helicopter over the bridge. In 6ea6dd6
           its bombing run (plan 4) came down there on both laps, but
           `chopper_fire_salvo` was still a stub: the munitions came in
-          105de48 that night. So a run then was the helicopter at
+          9fa65a1 that night. So a run then was the helicopter at
           bombing height, some 4 m over the deck and inside the truss,
           with its dust, firing nothing. Today's build fires there, as
           retail does.
@@ -3393,12 +3393,12 @@ phases.
           there (a flash, a gap, a stretched or missing triangle).
           2026-10-21: the user ran the launch checklist's device tests,
           this one among them, on the release candidate built from
-          9f112ca, and had "zero issues whatsoever".
+          f0a58e0, and had "zero issues whatsoever".
         - [x] Session 133 (2026-10-18), a likely cause on the device
-          alone. The user's run of 792ce27 on track 21 had "the
+          alone. The user's run of 2253c5e on track 21 had "the
           road/wall texture ... all staticky for a second" at the start
           and near the end, the same stretch. The prepare puts the
-          track's textures in VRAM (2f0a300, 2026-10-08, before all
+          track's textures in VRAM (a1cb7c7, 2026-10-08, before all
           three reports) through `C3D_SyncTextureCopy`, which outside a
           frame waits for the GSP's PPF event without clearing it
           first. That event is still set by the transfer before, so
@@ -3828,11 +3828,11 @@ phases.
           boot walk's 32 shots, the movies among them, are flat.
         - Closed, 2026-10-16, after the user's second test: "Remove 3D
           support entirely, I don't like it." All of TASKS 59's code is
-          out. The sources are their b9556b3 selves again, and
+          out. The sources are their cd80ef6 selves again, and
           `stereo3d.c`, `stereo3d.h` and docs/formats/stereo-3d.md are
           gone. libctru leaves the top screen's 3D off, so the slider
           does nothing. The design and its Azahar measurements stay in
-          git, in b6bd138's docs/formats/stereo-3d.md.
+          git, in e92951d's docs/formats/stereo-3d.md.
 60. [x] **The car's particle effects (Car::TriggerEffect).** Found on
         2026-10-13 with TASKS 51a. `gCarTriggerEffectFn` is never set, so
         `Car::TriggerEffect` (`0x0011e2b8`) is skipped: a broken light,
@@ -3954,7 +3954,7 @@ phases.
           Pursuit, B told cops on, 4 cops in the race.
 
 64. [ ] **The road vanishes for a moment after the first chase starts.**
-        Reported on 2026-10-14, after the user played build 4988138 on
+        Reported on 2026-10-14, after the user played build 3545f0e on
         their 3DS (`3DS Files/nfshp2_debug.txt`, "DebugLog 1"): "when I
         first started the race, right by where a cop started chasing
         me, I saw a minor graphical artifact", and then, asked what it
@@ -4004,7 +4004,7 @@ phases.
         - [x] Session 133: the VRAM upload's copy, given back before
           the GPU had read it (TASKS 47's note), fixed. The likely
           cause of all three of the user's brief road artifacts.
-        - [ ] 2026-10-19: still there on build 6f090e6. The user paused
+        - [ ] 2026-10-19: still there on build 63892a0. The user paused
           right after seeing it ("look where I paused specifically,
           that's the area where I see the road briefly glitch out"):
           log line 9367, the same corner on lap 2, car 0 from 248.9
@@ -4021,7 +4021,7 @@ phases.
           and its depth read-back, the fog texture writes, the GPU
           timing replays (off, GPULog 0).
         - [x] Session 138: the pause's frames. With "DebugLog 1" (and
-          "PauseFrames", on by default; since af182fb "PauseLog 1"
+          "PauseFrames", on by default; since e3f7a01 "PauseLog 1"
           alone, off by default) a race keeps its last 96
           frames at 200 by 120 (a display transfer each frame start,
           before the clear) with each frame's numbers, and a pause
@@ -4036,7 +4036,7 @@ phases.
           dropped it.
         - [x] Session 139: found in the pause frames. The user's three
           pauses at the corner (2026-10-19, `nfshp2_pause_1.bin` to
-          `_3.bin`, build 049c9e9): the blink is pause 1's frames 77 to
+          `_3.bin`, build d0e50c4): the blink is pause 1's frames 77 to
           80 and 83 to 86, and pause 3's 85, 86, 88 and 89. In those
           frames one batch alone changes: the asphalt, ST_NEWROAD4 in
           RD_SECTION20_CHOP3 (texture 3), on the screen's right, shows
@@ -4063,19 +4063,19 @@ phases.
           the list keeps its colour and loses its depth to the fill's
           end, which is the buffer's end and the screen's right. It
           needs the list queued right behind the clear. The GPU sends
-          made that possible (on by default since b3b9bab, 2026-10-13,
+          made that possible (on by default since 9f5a3df, 2026-10-13,
           the day before the first report): with few models to build,
           as when the view swings to the open sea and the sun, the CPU
           queues the list while the GPU is still on the mirror. Azahar's
           fills end at once.
-        - [x] The change (4803cfc), which did not fix it: c3dwrap.c
+        - [x] The change (8402e29), which did not fix it: c3dwrap.c
           wraps C3D_FrameBufClear, so
           a clear of both is two fills, each on the first unit, and the
           list queued after waits for both. Every target's clear goes
           through it: the view, the mirror, the envmap faces, the
           frontend's, and citro2d's C2D_TargetClear. A frame's GX queue
           gains up to 8 entries (14 of 32 used before).
-        - [x] The user's run past the corner on 4803cfc's CIA
+        - [x] The user's run past the corner on 8402e29's CIA
           (2026-10-20): "Unfortunately blink still happens". The fill
           race cannot happen: GSP runs the GX commands in its queue
           one after another (citro3d's FrameEnd queues the list and
@@ -4094,7 +4094,7 @@ phases.
           dropped batch. The camera rebuilt from the logged pose is
           off (IoU 0.31 against the asphalt's pixels), so labels per
           pixel from it are not to be trusted.
-        - [x] PauseLog (af182fb): the pause's frames and their .bin need
+        - [x] PauseLog (e3f7a01): the pause's frames and their .bin need
           "PauseLog 1" in nfshp2_config.txt, 0 when it is not there
           (the user, 2026-10-20). It opens the debug log itself, as
           GPULog does. "PauseFrames" is gone.
@@ -4102,7 +4102,7 @@ phases.
           with one line added to nfshp2_config.txt: "GpuSends 0" (the
           frame goes to the GPU as one list), then "ClusterCull 0"
           (each batch drawn whole). The sends went on by default the
-          day before the first report (b3b9bab), so they are still the
+          day before the first report (9f5a3df), so they are still the
           first suspect, whatever the mechanism. Whichever run has no
           blink names the part.
         - [ ] Then a build that only logs: for the asphalt batch each
@@ -4113,7 +4113,7 @@ phases.
           registers each send writes; blink frames against good ones.
           No Azahar runs: "Azahar can't reproduce it".
         - 2026-10-21: the user ran the launch checklist's device tests on
-          the release candidate built from 9f112ca, the road on tracks
+          the release candidate built from f0a58e0, the road on tracks
           21 and 31 among them, and had "zero issues whatsoever". The
           box stays open: the user's call of 2026-10-20 stands (ship
           with the blink as a possible known issue), and the two runs
@@ -4185,7 +4185,7 @@ phases.
 67. [x] **Select Car's car icons are off their boxes.** Reported on
         2026-10-15: a friend testing multiplayer on a 3DS photographed
         it, on the build before Session 112 (the CIA with the working
-        graphics, 80b7324). The user: "its not aligned to the box". In
+        graphics, 7b5e569). The user: "its not aligned to the box". In
         the row of car icons under the car, the highlight box on the
         first icon and the icon do not line up. The box's left half is
         empty, and the icon starts at the box's middle and runs past its
@@ -4305,7 +4305,7 @@ phases.
             new off-by-default "TestFinish n" (configitems.h), which
             finishes a lone console's race n seconds after GO. The user
             played the End Game Menu by hand and said it returns fine.
-          - Done 2026-10-17 (9e63bc8), all on Azahar with
+          - Done 2026-10-17 (54c8231), all on Azahar with
             `run_azahar_career.ps1 -Race`, which now answers the End Game
             Menu (Next Race, or Quit after the last race) and says Yes to
             each autosave:
@@ -5333,7 +5333,7 @@ phases.
               the witnesses, the contact rounds and VClip's walks
               (`docs/formats/world.md`).
         - [x] **79c, the roadblock's cost.** The user's second race
-              (2026-10-19, build f1e1f9d: track 21, Hot Pursuit, 2 laps,
+              (2026-10-19, build 371b48a: track 21, Hot Pursuit, 2 laps,
               smoke bombs, a roadblock at about (1622, -334)) "went
               great". The save went through ("Game settings saved
               successfully!") and nothing aborted, so 79a holds on the
@@ -5486,7 +5486,7 @@ phases.
         no bueno, so you're done trying to fix it. Move on to another
         task and document this for later." The code is as it was before;
         the work is `docs/parked/tasks82-retail-lod.patch`, made against
-        b2c2307 (`git apply` it).
+        4ddefc6 (`git apply` it).
         - **What it is.** The user: "Pixelation much like the road issue
           from before", on "the one right before it entered the tunnel",
           and from their photos, "ITS LIKE FLICKERING". The wall's

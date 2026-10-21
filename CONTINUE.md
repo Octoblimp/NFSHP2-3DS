@@ -60,14 +60,14 @@ cop's HUD (hudcop.c, hudrender.c, hudscore.c), the setup screens
     shown pictures on the GPU (HANDOFF.md, "Session 78"). The white
     specks on some pictures are the disc's.
 - **12m-4 (done)** The Pre Race Blurb and the two-player You're The
-  Cop screen (startrace.c, f3767e9; HANDOFF.md, "Session 79").
+  Cop screen (startrace.c, 08faeb5; HANDOFF.md, "Session 79").
   startrace_check: 0 differ; 278 mutations, 274 caught, 4 equivalent.
 - **12m-5 (done)** A Be A Cop race from the frontend in Azahar
   (`tools/run_azahar_coprace.ps1`; HANDOFF.md, "Session 80"): the
   chase, the calls, the clock, the end and the results, with no abort
   since the IsBeingPursued seam. The icons go green to blue at a call,
   as retail's code has them. The cop buttons are X target, L roadblock,
-  R helicopter (ce58fac). Not seen: an arrest, which the gas-only
+  R helicopter (07dacb3). Not seen: an arrest, which the gas-only
   script cannot make. TASKS 43 is done (3DS button icons).
 
 **Now (Session 87, 2026-10-12): TASKS 39 is done (12k-6). The
@@ -131,8 +131,8 @@ then 37d-2), then TASKS 67 (Select Car's icons off their boxes), then
 career fully working, then TASKS 61, 46, 60 and 59. See HANDOFF.md's
 "Session 112, continued -- TASKS 68".**
 
-**Now (Session 112, continued, 2026-10-15): 37g-3 is done (2d84039,
-b8bace6), and with it 37g. A console closed or switched off mid-race
+**Now (Session 112, continued, 2026-10-15): 37g-3 is done (d9f5f1a,
+60253d8), and with it 37g. A console closed or switched off mid-race
 comes back through Local Wireless, Join. The racing host lets it back
 into its held place, sends the setup again, and gives it GO on the
 race's seed. It then runs the race from frame 0 on the host's records,
@@ -146,7 +146,7 @@ Both are now 37f-2's open difference, which is next, then 37d-2, then
 TASKS 61, 46, 60 and 59. See HANDOFF.md's "Session 112, continued --
 37g-3 done".**
 
-**Now (Session 112, continued, 2026-10-15): 37g-2 is done (de5218a). A
+**Now (Session 112, continued, 2026-10-15): 37g-2 is done (e35d3ed). A
 console whose link alone dropped, out of range and back, rejoins the
 race during the hold. The host opens its network to a lost console it
 still holds for, known by its user name and friend code seed. A client
@@ -160,7 +160,7 @@ Azahars. Next: 37g-3 (a restarted console back in the race), 37f's
 frame-1809 difference, 37d-2, then TASKS 61, 46, 60 and 59. See
 HANDOFF.md's "Session 112, continued".**
 
-**Now (Session 112, 2026-10-15): 37g-1 is done (2a9b396). A lost
+**Now (Session 112, 2026-10-15): 37g-1 is done (4493576). A lost
 console holds the race on every console for `WirelessHoldSeconds` (90
 s), under a box that names it and counts down, the race's sound muted.
 Then its car is the CPU's from the frame of the first record built
@@ -337,7 +337,7 @@ runs it between Azahar copies: with 2, 4 and 8 consoles, all reached
 Select Car (HANDOFF.md, "Session 97"). Next: 37c (the setup: cars,
 track, seeds, load, barrier), then 37d to 37f, then TASKS 61.**
 
-**Now (Session 96, 2026-10-14): TASKS 37b-1 is done (10f0e44 and its
+**Now (Session 96, 2026-10-14): TASKS 37b-1 is done (e03452d and its
 follow-up). Both Mode Selects' Challenge and the four race setups it
 leads to are ported (`bsetup.c`), checked against retail
 (challenge_check, racesetups_check), and walked on Azahar by
@@ -483,7 +483,7 @@ dead Circle "help"). TASKS 40 (12n, the radar meter) is done too:
 and the lights climb near a cop on Azahar. Next: TASKS 49, then 39
 (12k-6, after step 14b). TASKS 47 and 46 wait on the user.**
 
-**Now (Session 82, 2026-10-12): step 14 is done (14-10d, 3ac6572)
+**Now (Session 82, 2026-10-12): step 14 is done (14-10d, 3290b74)
 and so is task 38 (BUSTED! animates and is whole; no change, see
 TASKS.md 38). Next: TASKS 43's Blurb glyphs, TASKS 39 (12k-6, the
 helicopter's missiles), TASKS 40 (12n, the radar meter). TASKS 47 has
@@ -491,12 +491,12 @@ the user's log read (track 44; the helicopter over the bridge both
 laps) and waits on what the artifact looked like; TASKS 46 waits on
 the device's timing.**
 
-**Now (Session 81, 2026-10-12): TASKS 45 is done (9e044f3, the sun's
-glare). TASKS 46 has three lossless cuts in (the shader b293a76, the
-sends 9e044f3 opt-in, the clusters bb70171; `docs/formats/draw-cuts.md`,
+**Now (Session 81, 2026-10-12): TASKS 45 is done (846bcde, the sun's
+glare). TASKS 46 has three lossless cuts in (the shader 02bb05d, the
+sends 846bcde opt-in, the clusters 6ea6dd6; `docs/formats/draw-cuts.md`,
 "TASKS 46") and waits for the device's timing at the fog and the
 desert, and the user's word on the envmap a face a frame. Then step 14
-(full audio) and task 38 (BUSTED!). The user's build is bb70171.
+(full audio) and task 38 (BUSTED!). The user's build is 6ea6dd6.
 First, TASKS 47: the brief artifact on the bridge before the finish
 line the user saw on their 3DS, both laps; their logs come on
 2026-10-13.**
@@ -619,15 +619,15 @@ Session 58's earlier slices.
 the manager's Think) were Session 57's; 12a to 12c (the cop manager,
 the cops, CopMover) Session 56's ("First" below).
 Session 54 (2026-10-08): the AI pack runs at 20 FPS with all eight cars in view
-(commits 569dfde and ba9ef1f), which the user accepted; see "First"
+(commits 763aa71 and 631daeb), which the user accepted; see "First"
 below. Session 53 (2026-10-08) took out the mid-race hitches
-(3b62e00). Session 52
+(bb95e0b). Session 52
 (2026-10-08) made two graphics fixes: a second car of the player's
 type drew its wheels alone (eDuplicateSolid was a NULL seam; ported,
-d110c44), and skins went missing on TRACKB45 (the upload's scratch now
+3f48c63), and skins went missing on TRACKB45 (the upload's scratch now
 comes from the linear heap). Then 11h-3, the TrafficTeleporter
-(cd443d0), and B in a race no longer pops the frontend's stack
-(f539fdf).
+(046c498), and B in a race no longer pops the frontend's stack
+(e1894e1).
 **Start at "Now" just below.** Step 11, the racer AI, is under way:
 11a, what an AI car knows as it drives, 11b-1, retail's DriveTarget,
 11b-2 to 11b-4b, DrivingChoice whole, 11b-4a, CarCollisionPredict, 11c,
@@ -665,9 +665,9 @@ moved out of sight at densities of 0.4 and up. Next is the texture
 memory work (the user's ask, 2026-10-08, "Next, in this order" below),
 then step 12, the cops. The car selector is finished and checked against retail: SC-1
 (the logic and 2D), SC-2 (the 3D car on its turntable) and SC-3 (the
-effect system and the nebula, commits b7cb25c, 24976dd and 6427cc5).
+effect system and the nebula, commits 8b31f8d, ab9d85e and 289db0a).
 13b-4f, the device GPU's cost per model, waits on the user's timing
-run of 2fc77fc (below).
+run of 88d1685 (below).
 
 **The race on the New 3DS XL** (below, "The race on the device"):
 - **Speed.** With Session 35's mip chains it runs at 27-29 FPS where
@@ -675,8 +675,8 @@ run of 2fc77fc (below).
   With 200-380 in view the GPU's median is 43-47 ms (up to 58), and the
   race drops to 17-18 FPS (14 at worst). HANDOFF's Session 37 has the
   table.
-- **The jump cam is ported and on (Session 37, commits ce37726 to
-  6f168b6).** The user's ramp on the device "looked AMAZING". Its log
+- **The jump cam is ported and on (Session 37, commits 4ee8707 to
+  54b3c4d).** The user's ramp on the device "looked AMAZING". Its log
   (`3DS Files/nfshp2_debug_capture2.txt`) has zone 0 to 6 at world
   frame 3935, 6 to 7 at 3975 and 7 to 0 at 4023, the spans Azahar's run
   had. Its speed was as before: 28.9 FPS and a GPU median of 27.0 ms
@@ -687,7 +687,7 @@ run of 2fc77fc (below).
   WINDOW batch (draws 722 and 723), which the device puts one corner of
   above the roof. That is open.
 - **With the user.** The build (`3DS Files/NFSHP2-3DS.3dsx`, commit
-  2fc77fc) has the nebula, the race's smoke, the indexed meshes, the
+  88d1685) has the nebula, the race's smoke, the indexed meshes, the
   Old 3DS's message and the timing frame's probes. Ask for:
   - the race's `frame:` and `models:` lines in a heavy stretch, and
     whether the FPS there moved from 16-18;
@@ -700,7 +700,7 @@ run of 2fc77fc (below).
     `carsel: nebula` and `race: effects` lines;
   - whether the light-blue wedge over the Opel's roof is still there;
   - on their Old 3DS, that the .3dsx now shows "This port needs a New
-    3DS" and goes back to the launcher on START (6ac29d1).
+    3DS" and goes back to the launcher on START (f1ab9ad).
 Session 31 took the race on Azahar from 20 FPS to 28-30 and
 the draw from 39-46 ms to 23 (`docs/formats/draw-cuts.md`). The rest
 of 13b-4 (the models, 9 ms; the envmap, 6; the cull, 3) is 13b-4f,
@@ -852,7 +852,7 @@ The slices:
 ## Step 12, the cops and cop mode (Session 56)
 
 The user, 2026-10-08: "When you're done doing whatever, move on to cops
-and cop mode." The texture memory work is done (2f0a300, HANDOFF's
+and cop mode." The texture memory work is done (a1cb7c7, HANDOFF's
 Session 55): a cache that evicts the least recently drawn, and about
 4 MB of textures in VRAM. The skins' padding (e) waits for a map that
 needs it. TRACKB12 still wants a look on the device.
@@ -910,7 +910,7 @@ pursuit.obj, on a 10 KB manager. Its slices:
   HandleStateTransitions, MovementModeTransitions, the limbo, disabled
   and guard logics (they hold position), and the manager's
   ResetAllDamage (`docs/formats/cops.md`, "Think"). The sub-states are
-  in retail's numbering (b94f189): two values the demo lacks sit at 1
+  in retail's numbering (fe1b5ba): two values the demo lacks sit at 1
   and 2, so PURSUIT_FOLLOW is 3 and CAUGHTSPEEDER_WAITING 16.
   `gAddCopCarToRaceFn` is bound: a Hot Pursuit race makes its four cop
   cars, each in limbo (not drawn, parked, not colliding), and still runs
@@ -1342,7 +1342,7 @@ pursuit.obj, on a 10 KB manager. Its slices:
     Azahar, on AC: a Hot Pursuit quick race with two presses of X and
     then the gas, PASS at 29.9 fps (speed 99%), sound 0.5 ms a frame,
     a chase up with four cop cars.
-  - **14-4, done (816ae93):** the engines, CarSoundEngine.obj
+  - **14-4, done (707e621):** the engines, CarSoundEngine.obj
     (0x0020fad0 .. 0x00212470): PlayerEngineSound, AIEngineSound and
     engine_sound's two factories (`enginesound.c`,
     docs/formats/enginesound.md), bound at boot; bGetFile reads
@@ -1357,7 +1357,7 @@ pursuit.obj, on a 10 KB manager. Its slices:
     The link's .elf now stays in 3DS Files/build. Azahar, on AC: a Hot
     Pursuit quick race, gas only, PASS at 29.9 fps (speed 100%), sound
     0.8 ms a frame.
-  - **14-5, done (4278190):** the tyres, CarSoundTires.obj
+  - **14-5, done (007a508):** the tyres, CarSoundTires.obj
     (0x002124d8 .. 0x00214d68): BaseTireSound (the flop and the
     bottom-out), TerrainOneShot (the metal bump and the pothole, under a
     shared 0.3 s delay), PlayerTireSound (one a side: road or gravel
@@ -1370,7 +1370,7 @@ pursuit.obj, on a 10 KB manager. Its slices:
     5042 ops, 13994 lines, 0 differ; 447 mutations, 445 caught, 2
     equivalent (the squall volume's scale and cap). Azahar: a gas-only
     SkipFE race, no abort, 29 fps, sound 0.3 ms a frame.
-  - **14-6, done (39f7fd7):** the crashes and scrapes, CollisionSounds.obj
+  - **14-6, done (f408b70):** the crashes and scrapes, CollisionSounds.obj
     (0x001e4658 .. 0x001e5e58): the crash libraries (metal small,
     medium and hard by the impulse, wood on a wood or cactus wall,
     foliage), the looping scrapes on wood, cactus and solid walls, the
@@ -1385,7 +1385,7 @@ pursuit.obj, on a 10 KB manager. Its slices:
     `tools/collisionsound_check.py`: 633 ops, 1630 lines, 0 differ; 153
     mutations, 153 caught. Azahar, on AC: a gas-only SkipFE race, no
     abort, 30 fps (speed 99%), sound 0.1-0.7 ms a frame.
-  - **14-7, done (6084aa3):** the track's ambience and the chopper's
+  - **14-7, done (24751ff):** the track's ambience and the chopper's
     rotor. SoundScape.obj (0x001cdde0 .. 0x001cff20): the 0x80038000
     chunk's reverb areas, looping ambients (over an area, or a sound
     sphere round a source inside it) and one-shot ambients, the reverb's
@@ -1423,7 +1423,7 @@ pursuit.obj, on a 10 KB manager. Its slices:
       1806 banks of ENGLISHBAN.PCK; 591 mutations, 588 caught, 3
       equivalent. Azahar, on AC: a gas-only SkipFE race, no abort, 29
       fps (speed 100%).
-    - **14-8c, done (c8a4ce9):** the speech's stream. bSnd_VoicePlay's
+    - **14-8c, done (485155c):** the speech's stream. bSnd_VoicePlay's
       "_STREAM" path (0x0026129c), the "_CHAIN" queue (0x00261e80),
       PlayChain (0x00262848) and the stream poll (0x00263090) in
       `bsnd.c` (docs/formats/sound-driver.md, "Streams and the queue");
@@ -1439,7 +1439,7 @@ pursuit.obj, on a 10 KB manager. Its slices:
       caught, 2 equivalent. bsnd_check and bsound_check stay at 0
       differ. Azahar, on AC: a gas-only SkipFE race, no abort, 30 fps
       (speed 100%).
-    - **14-8d, done (c8b0d26):** cSEDWedge (0x002056f0 ..
+    - **14-8d, done (59e828f):** cSEDWedge (0x002056f0 ..
       0x00206760), bSegment (0x002761d0 .. 0x00276538) and Sound.obj's
       wedge creation (0x001ae754), LoadLocalizedSpeechFiles and
       UnLoadLocalizedSpeechFiles (0x001ae4d8, 0x001ae5e8) in
@@ -1456,7 +1456,7 @@ pursuit.obj, on a 10 KB manager. Its slices:
       the card: a gas-only SkipFE race at 30 fps, and a frontend Hot
       Pursuit quick race at 30 fps with "speech bank 0: loaded". No
       event is queued until 14-9, so nothing speaks yet.
-  - **14-9, done (a7f8f4b):** speech::mgr_t (0x00209ef0 ..
+  - **14-9, done (945358c):** speech::mgr_t (0x00209ef0 ..
     0x0020b868), its nfsFsm, conditions and actions (0x0020bf00 ..
     0x0020f7c0), speechContext_t (0x0020f7f8 .. 0x0020fac8) and
     ConvertSpeed (0x00223528) in `speechmgr.c`
@@ -1470,7 +1470,7 @@ pursuit.obj, on a 10 KB manager. Its slices:
     mutations, 876 caught, 9 equivalent. Azahar, on AC: a frontend
     Hot Pursuit quick race at 30 fps. Nothing raises an event until
     14-10, so nothing speaks yet.
-  - **14-10a, done (a96f7b6):** tPursuit's 13 speech methods
+  - **14-10a, done (61a347c):** tPursuit's 13 speech methods
     (0x0022aa20 .. 0x0022b908) in `pursuitspeech.c`, and
     Speech::ConvertCarType (0x002232f8) in `speechconv.c`
     (docs/formats/pursuit-speech.md). main.c binds them, and wraps the
@@ -1479,7 +1479,7 @@ pursuit.obj, on a 10 KB manager. Its slices:
     ops, 47809 lines, 0 differ; 281 mutations, all caught. Azahar, on
     AC: a frontend Hot Pursuit quick race, PASS, with two chases
     started. The cops speak with NFSHP2/SOUND/SPEECH on the SD card.
-  - **14-10b, done (95ea945):** the filler speech: TryFillerSpeech,
+  - **14-10b, done (d2ff3ab):** the filler speech: TryFillerSpeech,
     SayFillerSpeech and the nine filler classes (0x002315d0 ..
     0x00231d70) in `fillerspeech.c`, with IsCopNearChasedCar
     (docs/formats/pursuit-speech.md, "The filler speech"). main.c binds
@@ -1492,7 +1492,7 @@ pursuit.obj, on a 10 KB manager. Its slices:
     (gSpeechPulloverEventFn), 0x00207648 (gSpeechBeACopArrestFn),
     PlayBustedSpeech, and Speech's conversions 0x00223328,
     0x00223358 .. 0x002233b8 and 0x00223480 into speechconv.
-  - **14-10d, done (3ac6572, Session 82):** bcarsel's speakCar
+  - **14-10d, done (3290b74, Session 82):** bcarsel's speakCar
     (ConvertCarType; event 211 for a cop, 146 otherwise) bound in
     main.c; Select Track's ConvertTrackNumber was already bound. The
     selector now registers its eleven joystick events as retail's
@@ -1521,12 +1521,12 @@ until I get away from all the AI racers" and "still hitching when all
 the AI cars are in the view at once".
 
 - The hitches are gone: `trackview_prepare` bakes and uploads
-  everything at the load (3b62e00).
+  everything at the load (bb95e0b).
 - Track 45 with eight cars in view runs at 20 FPS (15 before), and 30
   with the pack gone. Two commits did it:
-  - 569dfde: one shbin, and the lit batches' and strips' state sent
+  - 763aa71: one shbin, and the lit batches' and strips' state sent
     only when it changes;
-  - ba9ef1f: citro3d's draws written in one go, in c3dwrap.c. The log's
+  - 631daeb: citro3d's draws written in one go, in c3dwrap.c. The log's
     `c3d: indexed draws written here` and `c3d: array draws written
     here` say its self-check passed.
 - The user: "20 to 30 isn't a big difference and I'm willing to let it
@@ -2309,7 +2309,7 @@ car's were.
     were gone and the main view showed through. RVM and RVM_MASK had
     failed to upload, with the linear heap down to 6 MB, and a texture
     that fails is not tried again. The texture memory work fixes it.
-- **11h-3, done: the TrafficTeleporter** (commit cd443d0).
+- **11h-3, done: the TrafficTeleporter** (commit 046c498).
   - `traffictele.c` is retail's TrafficTeleporter.obj (0x002226f8 to
     0x002232c0) but DoSnapshot. `airouteplan.c` is
     GuessTargetDestinations (0x001cbb70), the route walk it asks.
@@ -2325,7 +2325,7 @@ car's were.
     to 42 m. Quick Race's density is 0.33, under the 0.4 below which
     DoTimestep moves nothing, so its traffic stays where it was put
     and drives its routes. No car starts within 2000 of the start line.
-- **B in a race, fixed** (commit f539fdf). B is the brake and the
+- **B in a race, fixed** (commit e1894e1). B is the brake and the
   port's BACK. With no screen up in a race, retail has no screen-list
   handler at all (ChangeToScreen, 0x0016c4c0), but `flowInput` passed B
   on, and it popped the stack to New Main Menu under the race. The
@@ -2371,18 +2371,18 @@ about 10.2 with the fetch in it, the vertex work about 7.5, the draws'
 own cost about 1.44, the texture cache clears about 0.35.
 `docs/formats/draw-cuts.md`, "13b-4f", has the detail.
 
-- **The Old 3DS (6ac29d1).** The user's Old 3DS ran the .3dsx out of
+- **The Old 3DS (f1ab9ad).** The user's Old 3DS ran the .3dsx out of
   heap at the race's track (a 31.8 MB heap and a 31.8 MB linear heap
   under the Homebrew Launcher). They chose the New 3DS alone, for good:
   an Old 3DS now stops at boot with a message. No Old 3DS mode, ever.
-- **Done (609b418): indexed meshes.** `georender_bake` keeps each
+- **Done (e7d6462): indexed meshes.** `georender_bake` keeps each
   distinct vertex once a solid and the batches draw with
   `C3D_DrawElements`. TRACKB12's 401,385 list vertices are 176,505, and
   the post-vertex cache should shade about 1.7 a triangle where the
   list shaded 3. On Azahar the picture is the list's (the same depth to
   the bit) at 29.2 FPS; only the device can show the gain. The capture
   no longer numbers the envmap's draws (`capture_offscreen`).
-- **Probes (2fc77fc).** The timing frame sends the
+- **Probes (88d1685).** The timing frame sends the
   models' and the first envmap view's lists again three ways more: with
   the early depth test on, compared either way, each with its pixels
   counted against "as drawn", and with every RGBA8 texture fetched as
@@ -2549,7 +2549,7 @@ are four parts:
     depth buffer. Every address was in range and the clear before it
     was done. Nothing else the device had drawn on mixed the two
     sizes.
-  - The cube faces are RGBA8 now (commit 1644100), the top screen's
+  - The cube faces are RGBA8 now (commit c80df7d), the top screen's
     pair. The device still stopped at the same draw, now
     `c .../4` (`nfshp2_debug_rgba8_face.txt`), so the pair was not it.
     The faces stay RGBA8 for now; georender.c and light.md say so and
@@ -2625,7 +2625,7 @@ are four parts:
   - **It was the output components.** The build in
     `3DS Files/Hang Test Build/` (02:30), with that fix, loaded the race
     on the device and drove it. Its log is kept there with the older
-    ones. The probe and the per-draw check are gone (commit 0355be5).
+    ones. The probe and the per-draw check are gone (commit fcb04cb).
 - **The race on the device (2026-10-05): 8 FPS, the GPU's.** The
   device's GPU takes 113-120 ms a frame: the models' list 78 ms, each
   envmap view 5-7 ms. The CPU's part is about what Azahar shows (23 ms).
@@ -2635,7 +2635,7 @@ are four parts:
     with the combiner's alpha for a texture of one alpha. No ETC1, no
     16-bit.
   - Mip chains: the disc's, and made ones for the single-level
-    textures. **Done** (commit 0355be5): `texpack_upload_chain`, about
+    textures. **Done** (commit fcb04cb): `texpack_upload_chain`, about
     38 MB for the track where level 0 alone was 28.9. A chain that will
     not fit uploads as its one level and is counted `unchained` in the
     race's texture line.
@@ -2674,20 +2674,20 @@ are four parts:
     lossless RGB8 textures, and the envmap's cube faces back to
     RGBA5551, as they were before the hang hunt made them RGBA8 (the
     face pair was not the hang).
-- **The second run (Session 36, build 0355be5): 27-28 FPS.** The
+- **The second run (Session 36, build fcb04cb): 27-28 FPS.** The
   timing frames say 27.5-27.9 ms of GPU a frame: each envmap view
   3.6-4.0, the fold 0.3, the sky 1.4, the models 5.7, the sun and
   scenery 1.5, the cars and alpha lists 5.6, the bottom screen 1.1, the
   frame's end 0.7. The CPU's draw is about 10 ms. The worst frame each
-  second was 70-150 ms: the log's own writes (fixed in 8bf178a, below).
+  second was 70-150 ms: the log's own writes (fixed in d3db6e6, below).
   That run has no AI, cops or other cars; more will be needed for them.
-  - **Hitches (fixed, 8bf178a).** `logwriter.c` puts each log line in
+  - **Hitches (fixed, d3db6e6).** `logwriter.c` puts each log line in
     a 128 KB ring that a thread one priority below the main loop writes
     out, on core 2 of a New 3DS. stderr stays synchronous. The timing
     frame (a hitch of about 150 ms) now runs only when
     `sdmc:/nfshp2_gputiming.txt` is on the card as the race starts.
-  - **The ramp's abort (8bf178a), then the jump cam (Session 37).**
-    8bf178a's stand-in, `no_jump_cam`, is gone. `playerzone.c`,
+  - **The ramp's abort (d3db6e6), then the jump cam (Session 37).**
+    d3db6e6's stand-in, `no_jump_cam`, is gone. `playerzone.c`,
     `previewroute.c`, `spline.c` and `trackcarcam.c` are the jump cam,
     checked by `prevroute_check`, `trackcarcam_check` and
     `playerzone_check` (0 differ; every mutation caught but one
@@ -2737,7 +2737,7 @@ are four parts:
     20000000 to 24a33000). If it crosses 28000000, base georender's
     attribute buffers at 0x20000000 (after each BufInfo_Init and in
     `s_run.bufBase`).
-  - **The capture (commit 7480451).** With `sdmc:/nfshp2_capture.txt`
+  - **The capture (commit ae638d9).** With `sdmc:/nfshp2_capture.txt`
     on the card as a race starts (its number the seconds in, 6 if none),
     `capture.c` writes `nfshp2_cap_colour.bmp` and `_depth.bmp`, then a
     frame of each georender draw in a flat colour that is its number
@@ -2748,14 +2748,14 @@ are four parts:
     LOD bias, or the made levels' sizes, so the PICA's choice agrees
     with the GS's. If it still has one, read the box's draws and their
     depth.
-- **SC-3c is done** (b7cb25c, 24976dd). RenderEffects (0x00128da0)
+- **SC-3c is done** (8b31f8d, ab9d85e). RenderEffects (0x00128da0)
   is in `acidsys.c`, checked by `afx_check` (30 scenarios, 0 differ;
   394 mutants, 390 caught, 4 equivalent). `trackview_draw` and
   `trackview_draw_frontend` run it for FrameEffects and WorldEffects
   in eDisplayFrame's order, and `georender_draw_sprites` draws its
   packets. On Azahar TRACKB12's chimney smoke draws at 29.4 FPS.
   `docs/formats/acidfx.md` has it.
-- **SC-3d is done** (6427cc5). The CarSelector's 20 emitters of
+- **SC-3d is done** (289db0a). The CarSelector's 20 emitters of
   XE_SelectCarNebula and UpdateNebula, checked by `carsel_check`
   (8364 ops, 0 differ; 29 nebula mutations, 28 caught, 1
   equivalent). main.c steps FrameEffects each frame. On Azahar a faint
@@ -4599,7 +4599,7 @@ and so replaced every boot.
      - **Only the optimizations the New 3DS needs to hold 30 go in.**
      - **Nothing is done for the Old 3DS.** Since 2026-10-05 the port
        is the New 3DS's alone, the user's call: an Old 3DS stops at boot
-       with a message (6ac29d1, `new3ds-mode.md`, "An Old 3DS").
+       with a message (f1ab9ad, `new3ds-mode.md`, "An Old 3DS").
 
      It goes in four slices:
      - ~~**13b-1, the real clock and the pacing.**~~ Done in Session
@@ -4710,7 +4710,7 @@ and so replaced every boot.
          scenery 0.5, bottom 0.5, hud 0.2. The world takes 1.4-4.5. The
          worst frame of a second is 34-67 ms.
        - **13b-4f, under way** ("Waiting on the device" at the top): the device GPU's
-         cost per model. The indexed meshes are in (609b418). Then the
+         cost per model. The indexed meshes are in (e7d6462). Then the
          fill and the fetch, the draws' own cost, the envmap, the cull,
          and the spikes that make a frame of three blanks.
          To time a stage's parts, a probe of `svcGetSystemTick` marks
@@ -6003,7 +6003,7 @@ each class shows what it reaches.
 | 16 | The full frontend from retail: the 44 screens still plain or unregistered (`screen_registry.py --check-port`), the event tree (the career), the tourneys and the car selector | 6-10 |
 | 17 | Save data on the SD card in the memory card's place: Phils Load Save, the autosave, the boot autoload and the options (task 29) | 2-3 |
 | 18 | Every track and car: the thirty tracks and the whole car list load and race | 1-2 |
-| 19 | ~~Old 3DS performance~~ none: since 2026-10-05 the port is the New 3DS's alone (the user's call). An Old 3DS shows "This port needs a New 3DS" at boot and exits on START (6ac29d1); there is no Old 3DS mode | 0 |
+| 19 | ~~Old 3DS performance~~ none: since 2026-10-05 the port is the New 3DS's alone (the user's call). An Old 3DS shows "This port needs a New 3DS" at boot and exits on START (f1ab9ad); there is no Old 3DS mode | 0 |
 | 20 | The split-screen decision (task 30), then the final CIA, banner and hardware pass (task 31) | 1-2 |
 
 That was about 41-60 slices to the full game when the table was set.

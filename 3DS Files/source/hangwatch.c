@@ -700,7 +700,7 @@ static void time_stage(const char *name, bool split)
     if (split) {
         // The flush after the split, as C3D_FrameEnd has it: the split
         // writes the list's FINALIZE, and flushed before it those words
-        // stay in the New 3DS's L2 cache (04aa510).
+        // stay in the New 3DS's L2 cache (a2aa69f).
         C3D_FrameSplit(0);
         GSPGPU_FlushDataCache((const void *)__ctru_linear_heap,
                               __ctru_linear_heap_size);

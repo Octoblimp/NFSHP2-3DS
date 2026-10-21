@@ -112,7 +112,7 @@ void hangwatch_gpu_frame_end(void);
 // goes to the GPU at once. C3D_FrameEnd adds its last list before it
 // flushes the data cache, and C2D_TargetClear splits the frame with no
 // flush at all: either would hand the GPU words still in the New 3DS's L2
-// (04aa510). So a send goes right before each, citro2d flushed first, and
+// (a2aa69f). So a send goes right before each, citro2d flushed first, and
 // they find nothing left to split.
 
 // After hangwatch_gpu_begin: whether this frame is sent in parts. Never in

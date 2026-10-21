@@ -1,7 +1,7 @@
 // threadguard -- a tripwire over the audio workers' thread blocks.
 //
 // The device's race-end crash of 2026-10-11 (crash_dump_00000001.dmp, build
-// 8afa111): the speech stream's worker woke from LightEvent_WaitTimeout and
+// 7ba6909): the speech stream's worker woke from LightEvent_WaitTimeout and
 // returned to 0x7fc00000. Its saved registers, the frames above them, the
 // top of its stack and the start of its TLS were all that one word, over
 // 1152 bytes and more -- the default NaN the VFP gives for any float result

@@ -1,5 +1,5 @@
 ; tools/geosolid_check.py's reference: geosolid.v.pica as it was before
-; TASKS 46 (commit 9e044f3), with the model-view and the projection apart
+; TASKS 46 (commit 846bcde), with the model-view and the projection apart
 ; and the light in view space. The checker runs it and the new one on the
 ; same vertices. Nothing builds it into the game.
 ;

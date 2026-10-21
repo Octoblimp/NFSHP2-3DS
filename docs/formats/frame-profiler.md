@@ -344,7 +344,7 @@ The send is not in a stage of its own: each is inside the stage it
 ends. Those are mirror (the envmap's), sky (the mirror's), models (its
 own), bottom (the top screen's) and submit (the last).
 
-**Why.** The user's device log of 4988138 (track 31) has one slow
+**Why.** The user's device log of 3545f0e (track 31) has one slow
 second at world 186 s, 10.7 FPS after 23.1, then 20.2. The draw was
 70.5 ms where it was about 30: mirror 17.3, sky 13.0, models 15.8 and
 bottom 13.9, each about 10 ms over the seconds either side, and every

@@ -69,7 +69,7 @@
 // and depth with one GX_MemoryFill: the colour as its first buffer, on
 // the PSC's first fill unit, and the depth as its second, on the other.
 // __wrap_C3D_FrameBufClear makes a clear of both two fills, each on the
-// first unit (4803cfc). That was for the user's road blink on track 31,
+// first unit (8402e29). That was for the user's road blink on track 31,
 // on the theory that a list queued behind a clear could start while the
 // depth fill was still going. It cannot: GSP runs the GX commands in its
 // queue one after another. The blink stayed (the user, 2026-10-20); the

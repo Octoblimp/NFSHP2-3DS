@@ -12,7 +12,7 @@ hand the rasteriser.
   - Both shaders are assembled with devkitPro's picasso: the game's
     (geosolid.v.pica linked with geolit.v.pica, as the Makefile links
     them) and the reference, `tools/src/geosolid_ref.v.pica`, which is
-    geosolid.v.pica as it was at 9e044f3.
+    geosolid.v.pica as it was at 846bcde.
   - The reference's uniforms are the old ones: the projection, the
     model-view, the light in view space and the fog's view-space row. The
     new shader's are what `geosolidunif.c` makes of the same, built for

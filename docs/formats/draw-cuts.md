@@ -392,7 +392,7 @@ under these times there. Only a New 3DS's `frame:` lines can say how
 much. On Azahar, what is left to cut is the models (9.2), the envmap
 (6.2), the cull (2.7) and the cars (2.6), and the long frames' spikes.
 
-## 13b-5: the lit batches and the strips (commit 569dfde)
+## 13b-5: the lit batches and the strips (commit 763aa71)
 
 Session 53's profile of track 45's start, eight cars in view: a frame
 of 66.7 ms, the cars stage 18.2 ms with its lists 7.4, and each lit
@@ -413,7 +413,7 @@ The lit batches went from 453 words each to about 248, the view's words
 from 127,676 to about 104,700, and the lists from 7.4 ms to 4.3. The
 frame stayed at 15 FPS: about 50 ms of CPU, still over two blanks.
 
-## 13b-6: citro3d's draws in one go (commit ba9ef1f)
+## 13b-6: citro3d's draws in one go (commit 631daeb)
 
 A pair of timers round render_model's draw (taken out again) put the
 view's draw at 16.9 ms for about 660 models and 1,470 batches: about
@@ -486,7 +486,7 @@ fog are on the screen at once. The device's GPU is the bottleneck, at
 about 32 ms a frame against the CPU's 20, so each of these lightens the
 GPU and changes no pixel.
 
-- **The solid shader in 17 instructions** (b293a76), where it took 31.
+- **The solid shader in 17 instructions** (02bb05d), where it took 31.
   The model-view and the projection go as one matrix, and the fog's row
   and the light's direction are carried into the model's space, once a
   model on the CPU (`geosolidunif.c`), with the 1/127 and 1/255 scales
@@ -496,14 +496,14 @@ GPU and changes no pixel.
   PICA interpreter of its own on 48 scenes: colour, texture
   coordinates and fog equal, the position as accurate on the PICA's
   16-bit mantissas as before. 14 of 14 mutations caught.
-- **The frame to the GPU in parts** (9e044f3), opt-in.
+- **The frame to the GPU in parts** (846bcde), opt-in.
   `hangwatch_gpu_send` hands the GPU what was drawn so far after the
   mirror, the models and the top screen's HUD, so it draws while the
   CPU builds the rest, rather than idling until `C3D_FrameEnd`.
   Azahar draws the same frames with it. "GpuSends 1" in
   nfshp2_config.txt turns it on; it stays off until a device run has
   shown it never stops the GPU. (On by default since TASKS 57, below.)
-- **The clusters** (bb70171). Each batch of a baked mesh keeps a box
+- **The clusters** (6ea6dd6). Each batch of a baked mesh keeps a box
   round it and one round each 32 of its triangles, in their order,
   after its indices in the same linear block (`geocull.c`). A batch
   goes whole when its box is inside the view's four side planes, not
@@ -541,7 +541,7 @@ nothing; the device's timing lines are what will say how much of the
   frame's GPU. Drawing one face a frame would cut most of that, but the
   cars' reflections would lag the world by a few frames: a change to the
   look, so the user decides.
-- **Early depth and RGB8.** The timing frame's probes (2fc77fc) still
+- **Early depth and RGB8.** The timing frame's probes (88d1685) still
   wait for a device run.
 
 ## TASKS 57: the fire on track 11 (Session 88)
@@ -584,7 +584,7 @@ What was weighed, lossless only:
   screen's HUD and before `C3D_FrameEnd`. The pixels are the same:
   the parts run in order on one queue, each clear still runs before
   the draws to its own target, and each send flushes the linear heap
-  after its split (04aa510). Expected at the fire: about 4.4 + 50 ms a frame,
+  after its split (a2aa69f). Expected at the fire: about 4.4 + 50 ms a frame,
   where it was 23 + 50, so about 18 FPS from 13.8. Not measured on the
   device yet. "GpuSends 0" sends the frame whole, as before. Since
   TASKS 65 a send flushes by the kernel's own call, not by a request to
@@ -685,7 +685,7 @@ VRAM, and a race's textures leave less: track 11's leave 512 KB.
 
 ## TASKS 46: the draw's per-batch work (Session 128, continued)
 
-The first device run (6dd7060) found Alpine Trail bound by the CPU, with
+The first device run (27f6653) found Alpine Trail bound by the CPU, with
 the models the biggest share of its draw. A sampling profile of the same
 race's start on Azahar showed where a batch's CPU time goes:
 
@@ -1089,4 +1089,4 @@ were equivalent and are noted in the checker.
     marks check nothing and the workers wait 10 ms on their own, as
     before the guard. The crash it was made for was
     `DriveTarget::Resample`'s walk, fixed the day it was found
-    (399d67e).
+    (9c3270f).
