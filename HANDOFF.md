@@ -29247,5 +29247,10 @@ The user: "Read @HANDOFF.md etc. and continue where you left off".
     TextureCopy, the VRAM target and the GPU's cost.
 - **Docs:** `docs/formats/depth-of-field.md`'s last part is the built
   pass and its approximations. TASKS 84 is [x].
-- **Next:** the launch checklist is republished. The v1.0.0 tag and the
-  push still wait for the user's go and the repo's name.
+- **The release candidate** is rebuilt from 9f112ca, with the disc's
+  icon, banner and siren: `3DS Files/NFSHP2-3DS.cia` is 1,851,328 bytes,
+  SHA-256 `f197d13a...6096`, and the .3dsx is 2,022,832 bytes,
+  `927b65b7...5d1f`. The launch checklist (v43) says no retail work is
+  left.
+- **Next:** the user's device tests on that CIA, then their go. The
+  v1.0.0 tag and the push still wait for the go and the repo's name.
