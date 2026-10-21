@@ -140,6 +140,37 @@ buffer it needs, and skip every strip it does not want, straight from the
 (= 1.0) for every strip on the disc, so `eSolid::FixStripSTs()` is a no-op
 here and ST needs no scaling.
 
+`Nx`..`Nt`, `MaterialDensity` and `MipMapK` are the strip's mip level (TASKS
+82). `Nx`, `Ny`, `Nz` are its normal, 16384 = 1.0 with Z up; `Nt` is an angle,
+65536 to the turn; `MaterialDensity` is its texels' density, ST area over world
+area -- on track 11 the strips' own triangles give a median of 1.07 times it.
+`eSolid::CalcAutoK` (0x0010bfe8), run for every solid by `eFixUpTables` when
+the textures change, makes `MipMapK` from them and the texture's `Width` and
+`Height`:
+
+    s   = sqrt(1 - (Nz / 16384)^2)
+    f21 = 0.8 * (0.6 + 0.4 * max(0, bCos(Nt)))
+    div = max(0.001, 1 - f21 * (1 - s))
+    f   = MaterialDensity * Width * Height / div
+    K   = (int)((K0 / 16 - 2^L * Log2(1 / sqrt(f))) * 16)     (0 when f <= 0)
+
+with `K0` and `L` the texture record's (0 on every disc texture), so K is 16
+times log2 of the texels a unit of the world holds across, and a strip lying
+flat (div below 1) is up to a level coarser. `Log2__Ff` (0x0010be88) is an
+approximation the port does not copy; the exact log2 is within a sixteenth
+of a level. It stores K at `+0x3C` and `L` at `+0x3E`, and
+`eStripData::SetMipMapK` (0x0011c328) writes K's low byte to the strip's
+packet, where VU1 puts it in `TEX1` (texture-pack.md). On track 11's 10,159
+strips K/16 is mostly 2 to 6; 102 strips have no density and K 0, and 165
+have a negative K, whose low byte is a level of 14 or more. 161 of those
+are the sky dome's and the far mountains', whose textures have no levels,
+so it changes nothing; the other four (two of `W_BUSH5`'s) the GS drew at
+their texture's smallest level. The port does not use K: the PICA picks its
+own level (texture-pack.md). Baking the term before the texture's size,
+`log2(MaterialDensity / div)`, into each cluster of 32 triangles and making
+the PICA's level the GS's with the LOD bias was tried and parked on
+2026-10-20; it is `docs/parked/tasks82-retail-lod.patch`.
+
 `TextureNumber` is how a strip finds its texture, and it is the only link
 between geometry and the `0xb0300001` packs. It indexes the solid's own
 `0x00034006` table, which is the table whose length the `eSolid` header

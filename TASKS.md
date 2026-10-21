@@ -5363,6 +5363,54 @@ phases.
         chevrons some 30 s in, in both runs. The shots, every 15 s, did
         not catch it. What it looked like is still to ask.
 
+        **Parked by the user on 2026-10-20, in Session 148**: "Okay still
+        no bueno, so you're done trying to fix it. Move on to another
+        task and document this for later." The code is as it was before;
+        the work is `docs/parked/tasks82-retail-lod.patch`, made against
+        b2c2307 (`git apply` it).
+        - **What it is.** The user: "Pixelation much like the road issue
+          from before", on "the one right before it entered the tunnel",
+          and from their photos, "ITS LIKE FLICKERING". The wall's
+          W_WALLSTONE texels draw as blocks a few pixels tall that
+          flicker as the camera moves.
+        - **Why.** The GS and the PICA pick a mip level differently.
+          - Retail's TEX1 has LCM 0 (CreateTextureContext,
+            `0x00108cc0`), so the GS's level is log2(1/Q) + K/16: from
+            the depth alone, as for a strip facing the camera.
+          - K is each strip's own: eSolid::CalcAutoK (`0x0010bfe8`)
+            makes it from the strip's normal and MaterialDensity, and
+            SetMipMapK (`0x0011c328`) writes its low byte, which VU1
+            (entry 0x01e8) stores in TEX1 at 0x30a.
+          - The PICA takes the larger screen axis's texel step, so a
+            wall or road seen edge on comes out up to four levels
+            coarser, and MMin 3 (every track and car texture) is
+            NEAREST within a level.
+          - solid-geometry.md and texture-pack.md have the formula, the
+            storage and track 11's counts.
+        - **Tried.**
+          - MMag's filter (LINEAR) within a level for MMin 3, trilinear
+            then: `nfshp2_wall82b`'s shots show the wall blurred into
+            streaks.
+          - With that kept, an LOD bias set at draw time to the GS's
+            level less the PICA's:
+            - geobake bakes a GeoLod per 32-triangle cluster: the ST
+              gradients, the normal and log2(MaterialDensity / div);
+            - georender sets the bias of each run of clusters within half
+              a level of each other, after C3Di_UpdateContext, and
+              `RetailLod 0` turns it off.
+            Track 11 has 9,015 clusters. Seen face on, the bias is near 0
+            (median 0.10 over 5,911 clusters, p5 -1.52, p95 1.02), so the
+            units agree. Per cluster and not per batch, because only
+            38.3% of a batch's area lies within 25 degrees of its plane.
+          - The user watched that build's Azahar run (`nfshp2_wall82c`, 280
+            shots) and judged it still bad. That build also biased the
+            sky and far mountains, whose textures have no disc levels; the
+            patch has the fix (GeoTexture.retailMips, from the disc's
+            NumMipMapLevels), which was never run.
+        - **If it is picked up.** The gated patch has not been seen. The
+          track 21 road/wall static and the bridge artifact, both under
+          TASKS 47, may be the same cause; neither is checked.
+
 ### The retail frontend
 
 Asked for on 2026-09-28. The user sent seven PCSX2 photos of the retail

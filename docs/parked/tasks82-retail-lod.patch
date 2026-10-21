@@ -1,0 +1,923 @@
+diff --git a/3DS Files/source/configitems.c b/3DS Files/source/configitems.c
+index a3e9aa6..d00e3d9 100644
+--- a/3DS Files/source/configitems.c	
++++ b/3DS Files/source/configitems.c	
+@@ -41,6 +41,7 @@ int32_t ConfigDebugLog;                     // the port's own
+ int32_t ConfigGpuSends = 1;                 // the port's own
+ int32_t ConfigKernelFlush = 1;              // the port's own
+ int32_t ConfigClusterCull = 1;              // the port's own
++int32_t ConfigRetailLod = 1;                // the port's own
+ int32_t ConfigForceChopper;                 // the port's own
+ int32_t ConfigDebugMenu;                    // the port's own
+ int32_t ConfigWirelessTest;                 // the port's own
+@@ -113,6 +114,7 @@ static const ConfigItem kConfigItems[] = {
+     { "GpuSends",                   &ConfigGpuSends,             0 },
+     { "KernelFlush",                &ConfigKernelFlush,          0 },
+     { "ClusterCull",                &ConfigClusterCull,          0 },
++    { "RetailLod",                  &ConfigRetailLod,            0 },
+     { "ForceChopper",               &ConfigForceChopper,         0 },
+     { "DebugMenu",                  &ConfigDebugMenu,            0 },
+     { "WirelessTest",               &ConfigWirelessTest,         0 },
+diff --git a/3DS Files/source/configitems.h b/3DS Files/source/configitems.h
+index 7eaf021..f43f88d 100644
+--- a/3DS Files/source/configitems.h	
++++ b/3DS Files/source/configitems.h	
+@@ -90,6 +90,11 @@ extern int32_t ConfigKernelFlush;           // 1
+ // clusters (geocull.h), for a timing run to compare (2026-10-12).
+ extern int32_t ConfigClusterCull;           // 1
+ 
++// The port's own: "RetailLod 0" leaves the PICA's mip levels as it picks
++// them, without the bias that makes them the PS2's (TASKS 82, geobake.h's
++// GeoLod), for a run to compare.
++extern int32_t ConfigRetailLod;             // 1
++
+ // The port's own: "ForceChopper N" sends the helicopter after the player
+ // in an R-held (SkipFE) race and has it bomb every few seconds, for
+ // testing its munitions (12k-6) with no chase: 1 rockets, 2 and 3 the
+diff --git a/3DS Files/source/geobake.c b/3DS Files/source/geobake.c
+index 3b73e23..bc31b59 100644
+--- a/3DS Files/source/geobake.c	
++++ b/3DS Files/source/geobake.c	
+@@ -2,6 +2,7 @@
+ 
+ #include "geobake.h"
+ 
++#include <math.h>
+ #include <stdlib.h>
+ #include <string.h>
+ 
+@@ -210,6 +211,202 @@ static GeoMeshEdit* edit_alloc(int numStrips, int numRemap, int numToggles,
+     return e;
+ }
+ 
++// A strip's part of its K, as eSolid::CalcAutoK (0x0010bfe8) works it out
++// before the texture's size comes into it: log2(MaterialDensity / div),
++// where div is 1 less f21 * (1 - sqrt(1 - Nz^2)), at least 0.001, and f21
++// is 0.8 * (0.6 + 0.4 * max(0, bCos(Nt))). A strip with no density gets
++// K 0 (geobake.h's GeoLod).
++static float strip_lod_d(const GeoStripEntry* e)
++{
++    float z, s, c, f21, div;
++
++    if (!(e->materialDensity > 0.0f)) {
++        return GEO_LOD_KZERO;
++    }
++    z   = (float)e->normalZ * (1.0f / 16384.0f);
++    s   = 1.0f - z * z;
++    s   = s > 0.0f ? sqrtf(s) : 0.0f;
++    c   = cosf((float)e->normalT * (6.28318531f / 65536.0f));
++    f21 = 0.8f * (0.6f + 0.4f * (c > 0.0f ? c : 0.0f));
++    div = 1.0f - f21 * (1.0f - s);
++    if (div < 0.001f) {
++        div = 0.001f;
++    }
++    return log2f(e->materialDensity / div);
++}
++
++// One triangle's area, unit normal, and S's and T's change along a unit of
++// the model's space, which lie in its plane. False for one with no area.
++typedef struct {
++    float area;
++    float n[3];
++    float gs[3];
++    float gt[3];
++} TriLod;
++
++static float dot3(const float* a, const float* b)
++{
++    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
++}
++
++static bool tri_lod(const GeoRenderVertex* v, const uint16_t* t, TriLod* out)
++{
++    const float* p0 = v[t[0]].pos;
++    float        e1[3], e2[3], c[3];
++    float        nn, len, a11, a12, a22;
++    int          i, k;
++
++    for (i = 0; i < 3; i++) {
++        e1[i] = v[t[1]].pos[i] - p0[i];
++        e2[i] = v[t[2]].pos[i] - p0[i];
++    }
++    c[0] = e1[1] * e2[2] - e1[2] * e2[1];
++    c[1] = e1[2] * e2[0] - e1[0] * e2[2];
++    c[2] = e1[0] * e2[1] - e1[1] * e2[0];
++    nn   = dot3(c, c);
++    if (!(nn > 1e-12f)) {
++        return false;
++    }
++    len       = sqrtf(nn);
++    out->area = 0.5f * len;
++    for (i = 0; i < 3; i++) {
++        out->n[i] = c[i] / len;
++    }
++    // g . e1 and g . e2 are the ST's changes along the two edges, and g is
++    // a mix of the edges: solved, with |e1 x e2|^2 the system's determinant.
++    a11 = dot3(e1, e1);
++    a12 = dot3(e1, e2);
++    a22 = dot3(e2, e2);
++    for (k = 0; k < 2; k++) {
++        float  d1 = v[t[1]].st[k] - v[t[0]].st[k];
++        float  d2 = v[t[2]].st[k] - v[t[0]].st[k];
++        float  a  = (d1 * a22 - d2 * a12) / nn;
++        float  b  = (d2 * a11 - d1 * a12) / nn;
++        float* g  = k ? out->gt : out->gs;
++
++        for (i = 0; i < 3; i++) {
++            g[i] = a * e1[i] + b * e2[i];
++        }
++    }
++    return true;
++}
++
++// A cluster's GeoLod, from its `count` indices at `idx` (no more than
++// GEO_CLUSTER_INDICES) and their strips' terms at `triD`, one a triangle.
++// The plane is the triangles' normals averaged by area, each turned to
++// face as the largest does, since the strips' winding is no guide; a
++// gradient is turned to agree with the largest's too, as the level does
++// not care which way the ST runs.
++static void lod_build(const GeoRenderVertex* v, const uint16_t* idx,
++                      const float* triD, int count, GeoLod* out)
++{
++    TriLod tri[GEO_CLUSTER_TRIS];
++    bool   ok[GEO_CLUSTER_TRIS];
++    int    numTris = count / 3;
++    int    big     = -1;
++    float  nsum[3] = { 0.0f, 0.0f, 0.0f };
++    float  gsAll[3] = { 0.0f, 0.0f, 0.0f }, gtAll[3] = { 0.0f, 0.0f, 0.0f };
++    float  gsFlat[3] = { 0.0f, 0.0f, 0.0f }, gtFlat[3] = { 0.0f, 0.0f, 0.0f };
++    float  total = 0.0f, flat = 0.0f, dArea = 0.0f, dSum = 0.0f;
++    float  len;
++    int    t, i;
++
++    memset(out, 0, sizeof *out);
++    out->d = GEO_LOD_KZERO;
++    if (numTris > GEO_CLUSTER_TRIS) {
++        numTris = GEO_CLUSTER_TRIS;
++    }
++    for (t = 0; t < numTris; t++) {
++        ok[t] = tri_lod(v, idx + 3 * t, &tri[t]);
++        if (ok[t] && (big < 0 || tri[t].area > tri[big].area)) {
++            big = t;
++        }
++    }
++    if (big < 0) {
++        return;
++    }
++    for (t = 0; t < numTris; t++) {
++        float w;
++
++        if (!ok[t]) {
++            continue;
++        }
++        w = dot3(tri[t].n, tri[big].n) < 0.0f ? -tri[t].area : tri[t].area;
++        for (i = 0; i < 3; i++) {
++            nsum[i] += w * tri[t].n[i];
++        }
++    }
++    len = sqrtf(dot3(nsum, nsum));
++    for (i = 0; i < 3; i++) {
++        nsum[i] = len > 0.0f ? nsum[i] / len : tri[big].n[i];
++    }
++    for (t = 0; t < numTris; t++) {
++        const TriLod* r = &tri[t];
++        float         ws, wt;
++
++        if (!ok[t]) {
++            continue;
++        }
++        ws = dot3(r->gs, tri[big].gs) < 0.0f ? -r->area : r->area;
++        wt = dot3(r->gt, tri[big].gt) < 0.0f ? -r->area : r->area;
++        total += r->area;
++        for (i = 0; i < 3; i++) {
++            gsAll[i] += ws * r->gs[i];
++            gtAll[i] += wt * r->gt[i];
++        }
++        if (fabsf(dot3(r->n, nsum)) >= 0.9f) {
++            flat += r->area;
++            for (i = 0; i < 3; i++) {
++                gsFlat[i] += ws * r->gs[i];
++                gtFlat[i] += wt * r->gt[i];
++            }
++        }
++        if (triD[t] > GEO_LOD_KZERO) {
++            dArea += r->area;
++            dSum  += r->area * triD[t];
++        }
++    }
++    if (flat >= 0.6f * total) {
++        for (i = 0; i < 3; i++) {
++            out->n[i]  = nsum[i];
++            out->gs[i] = gsFlat[i] / flat;
++            out->gt[i] = gtFlat[i] / flat;
++        }
++    } else {
++        for (i = 0; i < 3; i++) {
++            out->gs[i] = gsAll[i] / total;
++            out->gt[i] = gtAll[i] / total;
++        }
++    }
++    if (dArea >= 0.5f * total) {
++        out->d = dSum / dArea;
++    }
++}
++
++// A batch's boxes' GeoLods: its own box's is left as none, as the draw
++// asks only for its clusters'.
++static void lod_boxes(const GeoRenderVertex* v, const uint16_t* idx,
++                      const float* triD, const GeoBatch* b, GeoLod* out)
++{
++    int n = geocull_count(b->count);
++    int j;
++
++    if (n <= 0) {
++        return;
++    }
++    memset(&out[0], 0, sizeof out[0]);
++    out[0].d = GEO_LOD_KZERO;
++    for (j = 1; j < n; j++) {
++        int first = b->first + (j - 1) * GEO_CLUSTER_INDICES;
++        int count = b->first + b->count - first;
++
++        if (count > GEO_CLUSTER_INDICES) {
++            count = GEO_CLUSTER_INDICES;
++        }
++        lod_build(v, idx + first, triD + first / 3, count, &out[j]);
++    }
++}
++
+ static bool bake(const GeoSolid* solid, GeoMesh* out, bool editable)
+ {
+     GeoBatch       batches[GEO_MAX_BATCHES];
+@@ -217,6 +414,7 @@ static bool bake(const GeoSolid* solid, GeoMesh* out, bool editable)
+     GeoStrip*      strip;
+     VertexSet      set     = { 0 };
+     uint16_t*      idx;
++    float*         triD;
+     int32_t*       vertFirst = NULL;
+     uint16_t*      remap     = NULL;
+     GeoToggle*     toggle    = NULL;
+@@ -268,19 +466,21 @@ static bool bake(const GeoSolid* solid, GeoMesh* out, bool editable)
+     set.vert = (GeoRenderVertex*)scratch_alloc((size_t)cap * sizeof *set.vert);
+     set.slot = (int32_t*)scratch_alloc((size_t)size * sizeof *set.slot);
+     idx      = (uint16_t*)scratch_alloc((size_t)numTris * 3u * sizeof *idx);
++    triD     = (float*)scratch_alloc((size_t)numTris * sizeof *triD);
+     if (editable) {
+         vertFirst = (int32_t*)scratch_alloc((size_t)(solid->numStrips + 1)
+                                      * sizeof *vertFirst);
+         toggle    = (GeoToggle*)scratch_alloc((size_t)solid->numStrips
+                                        * sizeof *toggle);
+     }
+-    if (!order || !strip || !set.vert || !set.slot || !idx
++    if (!order || !strip || !set.vert || !set.slot || !idx || !triD
+         || (editable && (!vertFirst || !toggle))) {
+         scratch_free(order);
+         scratch_free(strip);
+         scratch_free(set.vert);
+         scratch_free(set.slot);
+         scratch_free(idx);
++        scratch_free(triD);
+         scratch_free(vertFirst);
+         scratch_free(toggle);
+         out->batch = NULL;
+@@ -308,6 +508,7 @@ static bool bake(const GeoSolid* solid, GeoMesh* out, bool editable)
+             scratch_free(set.vert);
+             scratch_free(set.slot);
+             scratch_free(idx);
++            scratch_free(triD);
+             scratch_free(vertFirst);
+             scratch_free(toggle);
+             out->batch = NULL;
+@@ -347,15 +548,19 @@ static bool bake(const GeoSolid* solid, GeoMesh* out, bool editable)
+     qsort(order, (size_t)n, sizeof *order, order_cmp);
+ 
+     for (i = 0; i < n; i++) {
+-        GeoBatch* batch;
+-        int       local[GEO_MAX_STRIP_VERTS];
+-        int       t, c;
+-        int       first;
++        GeoBatch*     batch;
++        GeoStripEntry entry;
++        int           local[GEO_MAX_STRIP_VERTS];
++        int           t, c;
++        int           first;
++        float         d;
+ 
+         if (geo_decode_strip(solid, order[i].strip, strip) != GEO_OK) {
+             out->skippedStrips++;
+             continue;
+         }
++        d = geo_strip_entry(solid, order[i].strip, &entry) == GEO_OK
++          ? strip_lod_d(&entry) : GEO_LOD_KZERO;
+ 
+         // A new batch whenever the texture, the flags or the material
+         // changes, which after the sort is once per distinct three. The cap
+@@ -395,6 +600,7 @@ static bool bake(const GeoSolid* solid, GeoMesh* out, bool editable)
+         }
+         first = at;
+         for (t = 0; t < strip->numTris; t++) {
++            triD[at / 3] = d;
+             for (c = 0; c < 3; c++) {
+                 int v = strip->tri[t][c];
+ 
+@@ -470,7 +676,7 @@ static bool bake(const GeoSolid* solid, GeoMesh* out, bool editable)
+     }
+ 
+     // The vertices, then the indices from the next 16 bytes, then the
+-    // batches' boxes, and the batches, in one block.
++    // batches' boxes, the batches, and the boxes' GeoLods, in one block.
+     for (i = 0; i < out->numBatches; i++) {
+         out->batch[i].cluster = numClusters;
+         numClusters += geocull_count(out->batch[i].count);
+@@ -480,13 +686,16 @@ static bool bake(const GeoSolid* solid, GeoMesh* out, bool editable)
+     out->vbo = set.n > 0 && (!editable || out->edit != NULL)
+              ? (GeoRenderVertex*)block_alloc(
+                    vbytes + ibytes + (size_t)numClusters * sizeof(GeoCluster)
+-                   + (size_t)out->numBatches * sizeof(GeoBatch))
++                   + (size_t)out->numBatches * sizeof(GeoBatch)
++                   + (size_t)numClusters * sizeof(GeoLod))
+              : NULL;
+     if (out->vbo) {
+         GeoCluster* clusters = (GeoCluster*)((uint8_t*)out->vbo + vbytes
+                                              + ibytes);
++        GeoLod*     lod;
+ 
+         out->batch = (GeoBatch*)(clusters + numClusters);
++        lod        = (GeoLod*)(out->batch + out->numBatches);
+         memcpy(out->batch, batches,
+                (size_t)out->numBatches * sizeof(GeoBatch));
+         memcpy(out->vbo, set.vert, (size_t)set.n * sizeof *set.vert);
+@@ -500,8 +709,10 @@ static bool bake(const GeoSolid* solid, GeoMesh* out, bool editable)
+             geocull_build(set.vert[0].pos,
+                           (int)(sizeof(GeoRenderVertex) / sizeof(float)),
+                           idx + b->first, b->count, clusters + b->cluster);
++            lod_boxes(set.vert, idx, triD, b, lod + b->cluster);
+         }
+         out->clusters = numClusters > 0 ? clusters : NULL;
++        out->lod      = numClusters > 0 ? lod : NULL;
+     } else {
+         out->batch      = NULL;
+         out->numBatches = 0;
+@@ -512,6 +723,7 @@ static bool bake(const GeoSolid* solid, GeoMesh* out, bool editable)
+     scratch_free(set.vert);
+     scratch_free(set.slot);
+     scratch_free(idx);
++    scratch_free(triD);
+     if (!out->vbo && set.n > 0) {
+         scratch_free(out->edit);
+         memset(out, 0, sizeof *out);
+diff --git a/3DS Files/source/geobake.h b/3DS Files/source/geobake.h
+index 4e68832..8bc825b 100644
+--- a/3DS Files/source/geobake.h	
++++ b/3DS Files/source/geobake.h	
+@@ -61,6 +61,40 @@ typedef struct {
+ 
+ #define GEO_MAX_BATCHES 64
+ 
++// What picks a cluster's mip level as the PS2 did (TASKS 82), one for
++// each of the mesh's boxes (geocull.h), in its own space.
++//
++// The GS takes the level from the depth: log2(1/Q) + K, with each strip's
++// K made once by eSolid::CalcAutoK (0x0010bfe8) from its entry --
++// 16 log2(sqrt(MaterialDensity * Width * Height / div)), where div makes a
++// strip that lies flat up to a level coarser. VU1 puts K's low byte in
++// TEX1 for each strip. So the level is what a strip facing the camera
++// would need, however the strip is turned. The PICA takes it from how far
++// the texels move along the screen, the most they move along x or y: a
++// wall seen side-on is a run of texels squeezed into a few pixels across,
++// and it takes a level as much as four coarser than the PS2 did, which
++// the user saw as blocks that flickered before the wall by track 11's
++// tunnel. georender_draw sets the LOD register's bias to the difference
++// for each run of clusters: the level the GS would take, less the one the
++// PICA will, from the camera's place against the cluster's plane and the
++// way its ST run across it.
++//
++// `gs` and `gt` are S's and T's change along a unit of the model's space,
++// the cluster's triangles' averaged by area; `n` is their plane's normal,
++// or 0 when they make no plane (less than 60% of the area within 25
++// degrees of it), and then the draw counts them as facing the camera.
++// `d` is log2(MaterialDensity / div), averaged by area over the strips
++// with a density; GEO_LOD_KZERO when most have none, which CalcAutoK makes
++// K 0.
++typedef struct {
++    float gs[3];
++    float gt[3];
++    float n[3];
++    float d;
++} GeoLod;
++
++#define GEO_LOD_KZERO -1000.0f
++
+ // Where an editable mesh's strips went (georender_bake_editable).
+ typedef struct GeoMeshEdit GeoMeshEdit;
+ 
+@@ -84,12 +118,16 @@ typedef struct {
+     // Each batch's boxes, geocull_count(count) from its `cluster`, in vbo's
+     // block after the indices; NULL draws every batch whole.
+     const GeoCluster* clusters;
++    // A GeoLod for each box, in vbo's block after the batches; NULL with
++    // no clusters.
++    const GeoLod*     lod;
+     GeoMeshEdit*      edit;             // malloc'd; NULL but for an editable one
+ } GeoMesh;
+ 
+ // Decodes every strip of `solid` into one indexed mesh on the linear heap:
+ // each distinct vertex once, 28 bytes, then three 16-bit indices a
+-// triangle, then the batches' boxes (geocull.h). This is the expensive call -- it replays every VIF packet in
++// triangle, then the batches' boxes (geocull.h), the batches, and each
++// box's GeoLod. This is the expensive call -- it replays every VIF packet in
+ // the solid -- so it belongs at load time, not in a frame.
+ //
+ // The disc's largest solid, 911TURBO_A (4,138 triangles), is 4,255
+diff --git a/3DS Files/source/geometry.c b/3DS Files/source/geometry.c
+index c542440..1feeb29 100644
+--- a/3DS Files/source/geometry.c	
++++ b/3DS Files/source/geometry.c	
+@@ -195,6 +195,9 @@ static int chunk_next(const uint8_t* base, size_t bytes, size_t* off,
+ #define STRIP_NUM_POLYS    0x1e
+ #define STRIP_LIGHT_MAT    0x1f
+ #define STRIP_AABB_MAX     0x20
++#define STRIP_NORMAL_Z     0x34
++#define STRIP_NORMAL_T     0x36
++#define STRIP_DENSITY      0x38
+ 
+ static int read_solid_header(GeoSolid* s, const uint8_t* p, size_t size)
+ {
+@@ -252,6 +255,9 @@ int geo_strip_entry(const GeoSolid* solid, int index, GeoStripEntry* out)
+ 
+     rdf32v(p + STRIP_AABB_MIN, out->aabbMin, 3);
+     rdf32v(p + STRIP_AABB_MAX, out->aabbMax, 3);
++    out->normalZ         = (int16_t)rd16(p + STRIP_NORMAL_Z);
++    out->normalT         = rd16(p + STRIP_NORMAL_T);
++    out->materialDensity = rdf32(p + STRIP_DENSITY);
+     return GEO_OK;
+ }
+ 
+diff --git a/3DS Files/source/geometry.h b/3DS Files/source/geometry.h
+index bbe57b1..65fc9d7 100644
+--- a/3DS Files/source/geometry.h	
++++ b/3DS Files/source/geometry.h	
+@@ -85,6 +85,12 @@ typedef struct {
+     uint8_t  polyGroup;
+     float    aabbMin[3];
+     float    aabbMax[3];
++    // What eSolid::CalcAutoK makes the strip's mip K of (geobake.c):
++    // the normal's Z, 16384 == 1.0 with Z up, the angle Nt, 65536 a turn,
++    // and the texels' density, ST area over world area.
++    int16_t  normalZ;
++    uint16_t normalT;
++    float    materialDensity;
+ } GeoStripEntry;
+ 
+ typedef struct {
+diff --git a/3DS Files/source/georender.c b/3DS Files/source/georender.c
+index e71f4c6..e46f5cf 100644
+--- a/3DS Files/source/georender.c	
++++ b/3DS Files/source/georender.c	
+@@ -77,8 +77,14 @@ static struct {
+     const C3D_Tex* tex;         // texture unit 0's; NULL unknown
+     bool           uvSet;
+     float          uvScale[2];
++    bool           lodSet;
++    u16            lod;         // unit 0's LOD bias, as the register has it
+ } s_run;
+ 
++// The LOD bias the next draw wants on unit 0, in the register's 1/256ths
++// of a level: a run of clusters' (TASKS 82, draw_shown), else none.
++static u16 s_lodWant;
++
+ static void run_forget(void)
+ {
+     bool on = s_run.on;
+@@ -459,6 +465,33 @@ static void issue(GPU_Primitive_t prim, int first, int count,
+     }
+ }
+ 
++// Unit 0's texture. citro3d sends the texture's own LOD bias with it,
++// none, before the next draw.
++static void bind0(const C3D_Tex* tex)
++{
++    C3D_TexBind(0, (C3D_Tex*)tex);
++    s_run.lodSet = true;
++    s_run.lod    = tex->lodBias & 0x1FFFu;
++}
++
++// citro3d's own (c3dwrap.c).
++void C3Di_UpdateContext(void);
++
++// The bias the draw wants, if unit 0 does not hold it. It goes after
++// citro3d's state is brought up to date: a texture bound and not yet sent
++// would send its own bias after it.
++static void lod_send(const C3D_Tex* tex)
++{
++    if (tex == NULL || (s_run.lodSet && s_run.lod == s_lodWant)) {
++        return;
++    }
++    C3Di_UpdateContext();
++    GPUCMD_AddWrite(GPUREG_TEXUNIT0_LOD,
++                    (tex->lodParam & ~0x1FFFu) | s_lodWant);
++    s_run.lodSet = true;
++    s_run.lod    = s_lodWant;
++}
++
+ // A numbered draw (capture.h): its colour is its number, red the low byte,
+ // green the high and blue 0x55, as the first stage's constant with no fog
+ // after it and no blend. The alpha is the draw's own, so a cut-out cuts as
+@@ -520,12 +553,13 @@ static void draw_prims(GPU_Primitive_t prim, int first, int count,
+         u8       keep = t->maxLevel;
+ 
+         t->maxLevel = 0;
+-        C3D_TexBind(0, t);
++        bind0(t);
+         issue(prim, first, count, ibo);
+         t->maxLevel = keep;
+-        C3D_TexBind(0, t);
++        bind0(t);
+         return;
+     }
++    lod_send(tex);
+     issue(prim, first, count, ibo);
+ }
+ 
+@@ -549,7 +583,7 @@ static void set_combiner(const GeoTexture* gt, int uvScale, bool gs,
+     C3D_TexEnv* env;
+ 
+     if (gt && (!cached || s_run.tex != gt->tex)) {
+-        C3D_TexBind(0, gt->tex);
++        bind0(gt->tex);
+         s_run.tex = cached ? gt->tex : NULL;
+     }
+     if (!cached || !s_run.uvSet || s_run.uvScale[0] != u
+@@ -579,58 +613,212 @@ static void set_combiner(const GeoTexture* gt, int uvScale, bool gs,
+     }
+ }
+ 
++// log2 to within 0.005: the exponent, and a quadratic for the mantissa.
++static float fast_log2(float x)
++{
++    union {
++        float    f;
++        uint32_t u;
++    } v;
++    float e;
++
++    v.f = x;
++    e   = (float)((int)((v.u >> 23) & 0xffu) - 128);
++    v.u = (v.u & 0x007fffffu) | 0x3f800000u;
++    return e + (-0.34484843f * v.f + 2.02466578f) * v.f - 0.67487759f;
++}
++
++static float dot3(const float* a, const float* b)
++{
++    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
++}
++
++// What lod_bias needs for a batch: the camera in the model's space, made
++// again when the model-view changes, and the texture's texels across the
++// ST's 0..1, the image's and not the padding's.
++static struct {
++    bool    mvSet;
++    C3D_Mtx modelView;
++    float   cam[3];
++    float   w, h;
++    float   lwh;                // log2(w * h)
++} s_lod;
++
++// The model-view takes a point p to R p + t, so the camera, the view's
++// origin, is at -R^-1 t: R's inverse as its adjugate over its determinant.
++static void lod_camera(void)
++{
++    const C3D_FVec* r = s_modelView.r;
++    float           a = r[0].x, b = r[0].y, c = r[0].z;
++    float           d = r[1].x, e = r[1].y, f = r[1].z;
++    float           g = r[2].x, h = r[2].y, i = r[2].z;
++    float           tx = -r[0].w, ty = -r[1].w, tz = -r[2].w;
++    float           A = e * i - f * h, B = f * g - d * i, C = d * h - e * g;
++    float           det = a * A + b * B + c * C;
++    float           inv;
++
++    if (det == 0.0f) {
++        s_lod.cam[0] = s_lod.cam[1] = s_lod.cam[2] = 0.0f;
++        return;
++    }
++    inv          = 1.0f / det;
++    s_lod.cam[0] = (A * tx + (c * h - b * i) * ty + (b * f - c * e) * tz) * inv;
++    s_lod.cam[1] = (B * tx + (a * i - c * g) * ty + (c * d - a * f) * tz) * inv;
++    s_lod.cam[2] = (C * tx + (b * g - a * h) * ty + (a * e - b * d) * tz) * inv;
++}
++
++// Whether a batch's clusters take a bias: a texture the disc gave levels,
++// with levels to choose from here, and the mesh's GeoLods.
++static bool lod_begin(const GeoMesh* mesh, const GeoTexture* gt)
++{
++    if (gt == NULL || !gt->retailMips || gt->tex == NULL
++        || gt->tex->maxLevel == 0
++        || mesh->lod == NULL || mesh->clusters == NULL || !ConfigRetailLod) {
++        return false;
++    }
++    if (!s_lod.mvSet
++        || !same_bits(&s_lod.modelView, &s_modelView, sizeof s_modelView)) {
++        lod_camera();
++        s_lod.mvSet     = true;
++        s_lod.modelView = s_modelView;
++    }
++    s_lod.w   = (float)gt->tex->width * gt->uvScale[0];
++    s_lod.h   = (float)gt->tex->height * gt->uvScale[1];
++    s_lod.lwh = fast_log2(s_lod.w * s_lod.h);
++    return true;
++}
++
++// The level the GS took for a cluster, less the one the PICA will take, in
++// the bias's 1/256ths (geobake.h's GeoLod).
++//
++// The GS's is log2(1/Q) + K / 16: log2 of the world's size of a pixel at
++// that depth, and K, 8 log2 of the texels a unit of the world's area
++// holds -- CalcAutoK's d and the texture's size -- as an int, of which VU1
++// keeps the low byte. The PICA's is log2 of the texels a pixel steps
++// across, the more of its two ways: the same size of a pixel, times the
++// root of the larger eigenvalue of
++// [W gs; H gt] (1 + (k^2 - 1) a a^T) [W gs; H gt]^T, where a is the way
++// along the plane the view ray runs and k is 1 / cos of its angle to the
++// normal, no more than 16, the most the PICA's levels can make up. With
++// gs and gt in the plane, (k^2 - 1) (gs . a)^2 is (gs . r)^2 / (n . r)^2
++// for r the ray to the cluster's middle. The size of a pixel goes out of
++// the difference.
++static int lod_bias(const GeoLod* l, const GeoCluster* box)
++{
++    float r[3], ss, tt, st, nr, hd, lam, target;
++    int   i, bias;
++
++    for (i = 0; i < 3; i++) {
++        r[i] = (box->lo[i] + box->hi[i]) * 0.5f - s_lod.cam[i];
++    }
++    ss = dot3(l->gs, l->gs);
++    tt = dot3(l->gt, l->gt);
++    st = dot3(l->gs, l->gt);
++    nr = dot3(l->n, r);
++    if (nr != 0.0f) {
++        float rr = dot3(r, r) * (1.0f / 256.0f);
++        float q  = nr * nr;
++        float sr = dot3(l->gs, r);
++        float tr = dot3(l->gt, r);
++
++        q   = 1.0f / (q > rr ? q : rr);
++        ss += sr * sr * q;
++        tt += tr * tr * q;
++        st += sr * tr * q;
++    }
++    ss *= s_lod.w * s_lod.w;
++    tt *= s_lod.h * s_lod.h;
++    st *= s_lod.w * s_lod.h;
++    hd  = 0.5f * (ss - tt);
++    lam = 0.5f * (ss + tt) + sqrtf(hd * hd + st * st);
++    if (!(lam > 1e-20f)) {
++        return 0;
++    }
++    target = 0.0f;
++    if (l->d > GEO_LOD_KZERO) {
++        int k = (int)(8.0f * (l->d + s_lod.lwh));
++
++        target = (float)((unsigned)k & 0xffu) * (1.0f / 16.0f);
++    }
++    bias = (int)((target - 0.5f * fast_log2(lam)) * 256.0f);
++    return bias < -0x1000 ? -0x1000 : bias > 0xFFF ? 0xFFF : bias;
++}
++
++// Clusters whose biases differ by no more than this draw as one, at the
++// middle of theirs: half a level, in the bias's 1/256ths.
++#define LOD_SPREAD 128
++
+ // A mesh's batch, less what the view cannot show (geocull.h): whole when
+ // its box is inside the view, not at all when it is outside, and otherwise
+ // each run of its clusters that are not outside as a draw. The clusters
+ // are tested only against the planes the batch's box is across, the rest
+-// holding them wholly (geocull_box_in). Whether anything was drawn:
+-// citro3d sends the buffers with a draw, and until one has gone
+-// bind_buffer cannot move them by their one register.
++// holding them wholly (geocull_box_in). With `lodOf`, the texture its ST
++// are for, a run is of clusters with about the same LOD bias too
++// (lod_bias), so a batch inside the view can be more than one draw.
++// Whether anything was drawn: citro3d sends the buffers with a draw, and
++// until one has gone bind_buffer cannot move them by their one register.
+ static bool draw_shown(const GeoMesh* mesh, const GeoBatch* b,
+-                       const C3D_Tex* tex, const char* what)
++                       const C3D_Tex* tex, const GeoTexture* lodOf,
++                       const char* what)
+ {
+     const GeoCluster* k;
+-    bool              drawn = false;
+-    int               start = -1;
+-    unsigned          across;
++    const GeoLod*     l;
++    bool              drawn  = false;
++    bool              lod;
++    int               start  = -1;
++    int               lo     = 0;
++    int               hi     = 0;
++    unsigned          across = 0;
++    int               cull;
+     int               n, i;
+ 
+     CoreSamplePart = CS_PART_CULL;
+-    if (mesh->clusters == NULL || !ConfigClusterCull) {
++    lod = lod_begin(mesh, lodOf);
++    if (mesh->clusters == NULL) {
+         draw_prims(GPU_TRIANGLES, b->first, b->count, mesh->ibo, tex, what);
+         return true;
+     }
+-    k = mesh->clusters + b->cluster;
+-    switch (geocull_box_in(&s_cull, k, GEOCULL_ALL, &across)) {
+-    case GEOCULL_OUT:
++    k    = mesh->clusters + b->cluster;
++    cull = ConfigClusterCull ? geocull_box_in(&s_cull, k, GEOCULL_ALL, &across)
++                             : GEOCULL_IN;
++    if (cull == GEOCULL_OUT) {
+         return false;
+-    case GEOCULL_IN:
++    }
++    if (cull == GEOCULL_IN && !lod) {
+         draw_prims(GPU_TRIANGLES, b->first, b->count, mesh->ibo, tex, what);
+         return true;
+     }
++    l = lod ? mesh->lod + b->cluster + 1 : NULL;
+     n = geocull_count(b->count) - 1;
+     for (i = 0; i <= n; i++) {
+-        int first, end;
+-
+-        if (i < n
+-            && geocull_box_in(&s_cull, &k[1 + i], across, NULL)
+-               != GEOCULL_OUT) {
+-            if (start < 0) {
+-                start = i;
+-            }
++        bool shown = i < n
++                  && (cull == GEOCULL_IN
++                      || geocull_box_in(&s_cull, &k[1 + i], across, NULL)
++                         != GEOCULL_OUT);
++        int  bias  = shown && lod ? lod_bias(&l[i], &k[1 + i]) : 0;
++        int  first, end;
++
++        if (shown && start >= 0
++            && (bias > hi ? bias : hi) - (bias < lo ? bias : lo)
++               <= LOD_SPREAD) {
++            lo = bias < lo ? bias : lo;
++            hi = bias > hi ? bias : hi;
+             continue;
+         }
+-        if (start < 0) {
+-            continue;
++        if (start >= 0) {
++            first     = start * GEO_CLUSTER_INDICES;
++            end       = i * GEO_CLUSTER_INDICES < b->count
++                      ? i * GEO_CLUSTER_INDICES : b->count;
++            s_lodWant = (u16)(((lo + hi) / 2) & 0x1FFF);
++            draw_prims(GPU_TRIANGLES, b->first + first, end - first,
++                       mesh->ibo, tex, what);
++            drawn = true;
+         }
+-        first = start * GEO_CLUSTER_INDICES;
+-        end   = i * GEO_CLUSTER_INDICES < b->count
+-              ? i * GEO_CLUSTER_INDICES : b->count;
+-        draw_prims(GPU_TRIANGLES, b->first + first, end - first, mesh->ibo,
+-                   tex, what);
+-        drawn = true;
+-        start = -1;
++        start = shown ? i : -1;
++        lo    = bias;
++        hi    = bias;
+     }
++    s_lodWant = 0;
+     return drawn;
+ }
+ 
+@@ -639,7 +827,7 @@ static void draw_batch(const GeoMesh* mesh, const GeoBatch* b,
+                        const GeoTexture* gt, bool gs)
+ {
+     set_combiner(gt, s_uUvScale, gs, s_run.on);
+-    if (draw_shown(mesh, b, gt ? gt->tex : NULL, "batch")) {
++    if (draw_shown(mesh, b, gt ? gt->tex : NULL, gt, "batch")) {
+         s_run.bufSet = s_run.on;
+     }
+ }
+@@ -1102,7 +1290,7 @@ void georender_draw_lit(const GeoMesh* mesh, const GeoTexture* textures,
+             s_run.pass    = pass;
+         }
+         set_combiner(gt, s_lUvScale, true, s_run.on);
+-        if (draw_shown(mesh, b, gt ? gt->tex : NULL, "lit")) {
++        if (draw_shown(mesh, b, gt ? gt->tex : NULL, gt, "lit")) {
+             s_run.bufSet = s_run.on;
+         }
+     } else {
+@@ -1125,7 +1313,7 @@ void georender_draw_lit(const GeoMesh* mesh, const GeoTexture* textures,
+     CoreSamplePart = CS_PART_LIT;
+     c3d_unif_bool(s_lEnvPass,  true);
+     c3d_unif_bool(s_lGlossEnv, L->gloss);
+-    C3D_TexBind(0, (C3D_Tex*)sphere);
++    bind0(sphere);
+     env = C3D_GetTexEnv(0);
+     C3D_TexEnvInit(env);
+     C3D_TexEnvSrc(env, C3D_RGB, GPU_TEXTURE0, GPU_PRIMARY_COLOR, 0);
+@@ -1152,7 +1340,7 @@ void georender_draw_lit(const GeoMesh* mesh, const GeoTexture* textures,
+     C3D_DepthTest(true, GPU_GEQUAL, GPU_WRITE_COLOR);
+     alpha_test(false, 0);
+     // The strip's own clusters again: the same matrix, so the same ones.
+-    drawn = draw_shown(mesh, b, sphere, "env pass");
++    drawn = draw_shown(mesh, b, sphere, NULL, "env pass");
+     // Its combiner, texture and pass are no batch's.
+     s_run.combiner = -1;
+     s_run.tex      = NULL;
+@@ -1311,7 +1499,7 @@ void georender_envmap_fold(unsigned views)
+     // The texel by the strips' colour, the GS's modulate with a colour
+     // under 0x80, so not doubled; and the strips' alpha alone, as TEXA's
+     // TA1 is 0x80 and every texel of a face has its alpha bit.
+-    C3D_TexBind(0, &s_envTex);
++    bind0(&s_envTex);
+     env = C3D_GetTexEnv(0);
+     C3D_TexEnvInit(env);
+     C3D_TexEnvSrc(env, C3D_RGB, GPU_TEXTURE0, GPU_PRIMARY_COLOR, 0);
+@@ -1474,7 +1662,7 @@ static bool draw_screen_quad(const GeoRenderVertex v[4], const GeoTexture* gt,
+     // and 0xff nearly 2. The shader hands the colour over 255, so the
+     // combiner doubles it; the alpha the same, over the packs' alpha, which
+     // texpack_upload has doubled already.
+-    C3D_TexBind(0, gt->tex);
++    bind0(gt->tex);
+     env = C3D_GetTexEnv(0);
+     C3D_TexEnvInit(env);
+     if (green) {
+@@ -1649,7 +1837,7 @@ bool georender_draw_strip(const GeoRenderVertex* v, int n, const GeoTexture* gt)
+               &s_modelView, fog, NULL);
+     c3d_unif_set(s_uUvScale, gt->uvScale[0], gt->uvScale[1], 0.0f, 1.0f);
+     if (!s_run.on || s_run.tex != gt->tex) {
+-        C3D_TexBind(0, gt->tex);
++        bind0(gt->tex);
+         s_run.tex = s_run.on ? gt->tex : NULL;
+     }
+     if (!s_run.passSet || !same_pass(gt->pass, s_run.pass)) {
+@@ -1714,7 +1902,7 @@ bool georender_draw_sprites(const GeoRenderVertex* v, int n,
+     }
+ 
+     // As the screen quads' and the strips': the GS's 0x80 is 1.0.
+-    C3D_TexBind(0, gt->tex);
++    bind0(gt->tex);
+     env = C3D_GetTexEnv(0);
+     C3D_TexEnvInit(env);
+     C3D_TexEnvSrc(env, C3D_Both, GPU_TEXTURE0, GPU_PRIMARY_COLOR, 0);
+diff --git a/3DS Files/source/georender.h b/3DS Files/source/georender.h
+index d24d7cc..62bad6e 100644
+--- a/3DS Files/source/georender.h	
++++ b/3DS Files/source/georender.h	
+@@ -67,10 +67,16 @@ typedef struct {
+ // two and puts the image in the top-left -- so a 512x320 skin in a 512x512
+ // allocation needs (1.0, 0.625) here. It goes to the shader as a uniform per
+ // batch; see geosolid.v.pica.
++//
++// `retailMips` says the disc's texture has levels below its base. The
++// port makes a chain for every texture, but the GS drew one with none at
++// its base however far off, so only one with levels has its level made
++// the GS's (TASKS 82, geobake.h's GeoLod).
+ typedef struct {
+     C3D_Tex* tex;               // NULL when the hash resolved to nothing
+     float    uvScale[2];
+     GeoPass  pass;              // georender_draw_mask's; georender_draw's is fixed
++    bool     retailMips;
+ } GeoTexture;
+ 
+ // Loads the shader and describes the vertex layout. Call once, after
+diff --git a/3DS Files/source/texpack.c b/3DS Files/source/texpack.c
+index 444b5ce..b5506e4 100644
+--- a/3DS Files/source/texpack.c	
++++ b/3DS Files/source/texpack.c	
+@@ -712,8 +712,20 @@ static bool upload_chain(const TexPack* tp, const TexInfo* ti, int base,
+     // NEAREST_MIPMAP_LINEAR, LINEAR_MIPMAP_NEAREST and
+     // LINEAR_MIPMAP_LINEAR; 0 and 1 have no mips on the GS, and take the
+     // nearer level's filter between levels here.
++    //
++    // Within a level, a chain's 2 and 3 take MMAG's filter. CreateTextureContext
++    // (0x00108cc0) sets TEX1's LCM to 0, so the GS's LOD is log2(1/Q) plus
++    // the strip's K from CalcAutoK (0x0010bfe8): that of a strip facing the
++    // camera at the same depth, and the near part of any strip is magnified
++    // and drawn with MMAG. The PICA's LOD is the larger of the screen axes'
++    // texel steps, so a wall or road seen edge on comes out minified there,
++    // at a coarser level, and MMIN 3's NEAREST drew its texels as blocks a
++    // few pixels tall that flickered as the camera moved (TASKS 82, the
++    // stone wall before track 11's tunnel). Every track and car texture is
++    // MMAG 1, MMIN 3.
+     C3D_TexSetFilter(out, ti->mmag ? GPU_LINEAR : GPU_NEAREST,
+-                     (ti->mmin == 1 || ti->mmin >= 4) ? GPU_LINEAR
++                     (ti->mmin == 1 || ti->mmin >= 4
++                      || (ti->mmin >= 2 && ti->mmag)) ? GPU_LINEAR
+                                                       : GPU_NEAREST);
+     C3D_TexSetFilterMipmap(out, (ti->mmin == 3 || ti->mmin == 5)
+                                     ? GPU_LINEAR : GPU_NEAREST);
+diff --git a/3DS Files/source/trackview.c b/3DS Files/source/trackview.c
+index 59842ea..12e5a30 100644
+--- a/3DS Files/source/trackview.c	
++++ b/3DS Files/source/trackview.c	
+@@ -702,6 +702,7 @@ static void resolve_slot(TrackView* v, TrackSolid* r, int k,
+         r->slot[k].uvScale[0] = t->uvScale[0];
+         r->slot[k].uvScale[1] = t->uvScale[1];
+         r->slot[k].pass       = t->pass;
++        r->slot[k].retailMips = t->info->NumMipMapLevels > 0;
+     }
+ }
+ 

@@ -121,6 +121,39 @@ read either of them -- the caller passes both in as arguments. Nothing decoded
 the field either way, so no output changes; the entry was simply a guess that
 the completed type info now replaces.
 
+### The level the GS takes (TASKS 82)
+
+`CreateTextureContext` (0x00108cc0) puts `MMag`, `MMin`, `MipMapL` and
+`MipMapK` in `TEX1` with `LCM` 0, so the GS's level is
+`(log2(1/Q) << L) + K / 16`: from the depth alone, as for a strip facing the
+camera. `L` and `K` are 0 on every disc record, and the `K` the GS uses is
+not the record's but each strip's own, made by `eSolid::CalcAutoK` from the
+strip's density (solid-geometry.md). The CPU sends the `TEX0` and `TEX1`
+A+D quads with the strip's GIF tag, `UNPACK 0x6c080308`, eight quads to
+VU1 0x308 (`TEX1` at 0x30a), and VU1's strip program (entry 0x01e8,
+`tools/vu1dis.py --retail`) loads the strip's K from its header and stores
+it with `sq.y vf01, 778(vi00)` -- 778 is 0x30a, and `y` is the upper word of
+`TEX1`'s data, where K sits in bits 0-11. `eStripData::SetMipMapK` keeps
+K's low byte, so K / 16 is 0 to 15.94, and a negative K is a level of 14 or
+more.
+
+Every track and car texture is `MMag` 1 (LINEAR) and `MMin` 3
+(NEAREST_MIPMAP_LINEAR), but 92 that are `MMin` 5 (LINEAR_MIPMAP_LINEAR):
+15 each in TEX21-26LOCATION and 2 in TEX61.
+
+The PICA200 takes its level from how far the texels move along the screen,
+the more of its two ways, so a wall or a road seen side-on takes a level
+as much as four coarser than the GS's. The port leaves the PICA its own
+level, with `MMin` 3's NEAREST within a level, and track 11's stone wall
+before the tunnel shows it: its texels draw as blocks a few pixels tall
+that flicker as the camera moves (TASKS 82). Two fixes were tried and
+parked on 2026-10-20: `MMag`'s filter within a level, which blurred the
+wall into streaks, and an LOD bias for each run of 32-triangle clusters,
+set to the GS's level less the PICA's for a texture the disc gave levels,
+which still did not look right to the user on Azahar. Both are
+`docs/parked/tasks82-retail-lod.patch`, with `RetailLod 0` to turn the
+bias off.
+
 Everything from `0x4c` down used to be blank or guessed here. It is filled in
 because `tools/mdebug_stabs_scan.py` learned to join stab *continuations*: a
 type string too long for the assembler's line limit is split across

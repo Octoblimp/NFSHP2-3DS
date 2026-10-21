@@ -28924,3 +28924,34 @@ drifting." 9e19324 (TASKS 81) was in first.
   - The CIA is built with the diagnostic off.
   - The Azahar card's config was put back after each run.
 - **Next:** TASKS 75, then the release candidate again.
+
+## Session 148 -- the stone wall's flicker, parked (TASKS 82)
+
+The user, 2026-10-20: "Continue where you left off". TASKS 82 was the
+open retail item: the stone wall right before track 11's tunnel, "like
+FLICKERING" in the user's photos.
+
+- **The cause.** The GS and the PICA pick mip levels differently.
+  - Retail's TEX1 has LCM 0, so the GS takes log2(1/Q) plus each strip's
+    own K: eSolid::CalcAutoK (`0x0010bfe8`) makes K from the strip's
+    normal and MaterialDensity, and VU1 stores its low byte in TEX1.
+  - The PICA takes the larger screen axis's step, so a wall seen edge on
+    is up to four levels coarser, and MMin 3 is NEAREST within a level.
+  - solid-geometry.md and texture-pack.md have the formula and track
+    11's counts.
+- **Tried.**
+  - LINEAR within a level: the wall blurred into streaks.
+  - A per-cluster LOD bias to the GS's level (geobake's GeoLod,
+    georender's lod_bias, `RetailLod 0` to turn it off). Seen face on,
+    the bias is near 0 (median 0.10 over 5,911 clusters).
+  - The user watched that build's Azahar run: "Okay still no bueno, so
+    you're done trying to fix it. Move on to another task and document
+    this for later."
+- **Parked.** The code is back as it was, and the CIA was rebuilt from
+  it. The work is `docs/parked/tasks82-retail-lod.patch` against
+  b2c2307, with the gate for textures the disc gave no levels, added
+  after the run and never seen. TASKS 82 has the details.
+- **Tooling, b2c2307.** "DemoReplayFile N" (with "DemoReplays 1") has
+  attract mode play the disc's replay file N each time, and
+  `run_azahar_attract.ps1 -File N` sets it.
+- **Next:** TASKS 75, then the release candidate again.
