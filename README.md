@@ -19,8 +19,8 @@ races up to eight New 3DS consoles against each other.
 - A **New 3DS, New 3DS XL or New 2DS XL** with custom firmware (Luma3DS)
   and FBI. An Old 3DS or 2DS shows a message at boot and stops: it has too
   little memory and a third of the speed.
-- **Your own PS2 disc** of Need for Speed: Hot Pursuit 2. The port was
-  made from the European disc (SLES-50731); other discs are untested.
+- **Your own PS2 disc** of Need for Speed: Hot Pursuit 2 (specifically
+  SLES-50731, the PAL version). Other discs are untested.
 - About **2.9 GB** free on the SD card.
 - A computer with **Python 3.8 or newer** (nothing else to install) and
   about 7 GB free for the steps below.
@@ -55,7 +55,8 @@ races up to eight New 3DS consoles against each other.
    and it makes the `NFSHP2` folder there, for you to copy to the card's
    root. Don't copy `extracted-retail/` over as it is: it holds the
    tracks a second time, packed, and the game would load those.
-5. Install `NFSHP2-3DS.cia` with FBI and start it from the HOME Menu. The
+5. Install `NFSHP2-3DS.cia`, from this repository's Releases page or
+   built as below, with FBI and start it from the HOME Menu. The
    `.3dsx` runs from the Homebrew Launcher as well, but the CIA is what has
    been tested on hardware.
 
@@ -236,8 +237,19 @@ want:
   for a frame or two.
 - The frame rate drops below 30 in the heaviest places: the fire on
   Coastal Parklands, the end of Desert Heat, and by some roadblocks.
-- The PS2's two-player split screen is left out; Local Wireless takes
-  its place. There is no rumble.
+- On Coastal Parklands, the low stone wall before the tunnel can look
+  blocky and flicker when seen side-on.
+- Attract mode doesn't play the disc's demo replays: on the 3DS they
+  leave the PS2's path after one frame, so it plays its AI race demo
+  instead. `DemoReplays 1` in the config file turns them back on.
+- In Local Wireless, the consoles can fall out of step just after a
+  player finishes (two races in eight in testing): that car, driven by
+  the CPU from the finish on, can end up in a different place on each
+  console.
+- In French, the LOADING screen and the Need for Speed logo keep their
+  English art.
+- The language screen at boot appears at once, without the PS2's
+  slide-in.
 
 ## Building from source
 
@@ -265,10 +277,11 @@ It works around the space in the path and produces
 ## About
 
 A fan project, not made, endorsed or supported by Electronic Arts.
-Need for Speed and Hot Pursuit 2 are Electronic Arts' trademarks. The
+Need for Speed Hot Pursuit 2 and Need for Speed are Electronic Arts' trademarks. The
 repository holds no game data: the port runs only with files from a disc
-you own. The CIA's HOME Menu icon, banner and siren are made from the
-disc's files when it is built.
+you own. The one exception is the CIA's HOME Menu icon, banner and
+siren: `tools/make_banner.py` makes them from the disc's files, and they
+are kept in `3DS Files/meta/hp2` so the CIA builds without the disc.
 
 ## License
 

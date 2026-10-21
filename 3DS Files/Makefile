@@ -49,9 +49,10 @@ APP_VERSION_MICRO	:= 0
 
 # The HOME Menu banner (the logo as a spinning 3D badge), its sound (the
 # game's siren) and the icon are made from the retail files by
-# tools/make_banner.py, which tools/build_cia.ps1 runs into meta/hp2 --
-# git-ignored, like everything retail-derived. Without them the CIA gets the
-# placeholder banner and silence.
+# tools/make_banner.py, which tools/build_cia.ps1 runs into meta/hp2. They
+# are the one retail-derived thing in git, so a checkout without the disc
+# builds the same CIA. Without them the CIA gets the placeholder banner and
+# silence.
 ifneq ($(wildcard meta/hp2/banner.cgfx),)
 BANNER_ART	:= -ci meta/hp2/banner.cgfx -a meta/hp2/banner.wav
 ICON		:= meta/hp2/icon.png

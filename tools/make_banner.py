@@ -43,7 +43,8 @@ it), and the default chime instead of the siren (the WAV was mono).
 
 Writes banner.cgfx, banner.wav and icon.png into --out, by default
 "3DS Files/meta/hp2", where the Makefile looks for them; tools/build_cia.ps1
-runs this first. Being retail-derived, they are ignored by git.
+runs this first. They are retail-derived, and committed so that a checkout
+without the disc builds the same CIA.
 
 Usage:
     python tools/make_banner.py [--retail extracted-retail] [--out "3DS Files/meta/hp2"]
