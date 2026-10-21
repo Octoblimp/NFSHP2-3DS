@@ -5073,7 +5073,7 @@ phases.
         mutations caught). carstate, physicscar, cartypeinfo, wheel,
         carmode and 29 more checkers pass with 0 differ.
 
-75. [ ] **The rest of the demo-cited functions retail changed.** TASKS
+75. [x] **The rest of the demo-cited functions retail changed.** TASKS
         74's citation check found, outside the AI, functions the port
         cites only by the demo's address whose retail bodies change a
         value, not just an offset:
@@ -5090,7 +5090,7 @@ phases.
         A paired literal can be an alignment artefact, so each needs
         reading beside the port's. It comes after TASKS 73.
 
-        **In progress, Session 149** (2026-10-20: the checklist's last
+        **Done, Sessions 149 to 151** (2026-10-20: the checklist's last
         retail item, one function at a time).
         - SetupWorldLightContext, done: retail's (`0x00107900`) puts the
           eye 10 back and 4 up, the demo's 9 and 7, and stores its
@@ -5148,6 +5148,44 @@ phases.
           demo's for them. The port has no cEditText (TASKS 54's keyboard
           is the 3DS's) and no NIS player, and its Munition.obj is
           retail's. The citations name retail's addresses now.
+        - tGlobalBackgroundAnimation, done in Session 151: the blueprint
+          behind the menus' grid now drifts, fades and changes texture as
+          retail's (`0x002495f0`). The port had drawn the two bitmaps
+          where the bundle put them. Retail's start is 160..165 across
+          and its drift 50 seconds, the demo's 180..200 and 20.
+          `bganim.c`, called from ChangeToScreen and the frontend's tick.
+          `bganim_check` runs retail's: 5,173 steps, 7,197 lines, 0
+          differ, 15 facts; 46 mutations, 41 caught, 5 equivalent
+          (`docs/formats/frontend-background.md`). Seen in Azahar on the
+          main menu, setup and options screens.
+        - The functions the port cites by neither address, nothing else
+          to change. The recount has 33 rows, FrontendDatabase's
+          destructor twice:
+          - retail's already: the terrain table that CalcForceParameters,
+            GetBoomDistToWall and DebugTopology::Render read
+            (`terraintypetab.c`, read out of retail's disc), the help
+            lines DifferentData's screen configs point at
+            (`helpmenu.c`), TrackLockedDisplayer's 0.5, the engine
+            ducker's 5, the collision volume's 0.65, and
+            PauseDisplayOpts' leaderboard and menu;
+          - an offset or a moved global, not a value: FrontendDatabase's
+            offsets in its destructor, UserNameOptionsScreen and
+            JoystickPreConfig, the vibration flags' address,
+            EventTree::BuildTree's byte at 61 (the demo's 34), the
+            camera loader the NIS coordinator reads (retail's layout in
+            `cameracoord.h`), and RenderHud's 1 to 255;
+          - code the port does not have or never runs:
+            RainSplash::Respawn (dead on both discs), DemoPoly (a texture
+            viewer whose RenderMe stays 0), the route editor's
+            CreateNewRoute and RenderRoutes, the hidden Calibrate row's
+            DisplayCalibrateOffsetCallback, AnimatedDriver's two (not
+            ported, TASKS 26), JoystickPreConfig's re-read when a pad of
+            another type is plugged in, bSnd_BankLoad's SPU memory, and
+            the IOP and SDK's SOUND_PlayStream, sceDmaPutStallAddr,
+            sceIoctl and InitTLBFunctions.
+        - Not drawn, on either disc's terms: the depth of field
+          (CreateFocusPalette, eAttachDepthOfField). The port never had
+          it; it is a feature to add, not a value retail changed.
 
 76. [x] **Rigid animations: the shaken bush, and the rest.** Found in
         TASKS 73's sixth slice. An eModel's rigid animation is its

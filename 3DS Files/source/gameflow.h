@@ -247,6 +247,13 @@ typedef struct {
     // (0x0016bde8), UnlaunchFrontendMenus'.
     void (*songMonitor)(void* user);
     void (*songMonitorReset)(void* user);
+    // tGlobalBackgroundAnimation (bganim.h), the list's other (+456).
+    // ChangeToScreen calls ChangeScreenHash (0x00249a40) after Activate
+    // with the screen's hash, its FlailerHashes[0], or with 0 for a NULL
+    // name, and nothing for a name it cannot find. Tick calls Tick
+    // (0x00249ae8) after the song monitor, in IN_FRONTEND only.
+    void (*bgChangeScreen)(void* user, uint32_t screen);
+    void (*bgTick)(void* user);
     // What UnlaunchFrontendMenus reads: Fred.GameType (0x0030c77c), and
     // whether TheRaceParameters' AIDemoMode (+24) or ReplayDemoMode (+28)
     // is set. Not traced; no hook answers 0 for both.

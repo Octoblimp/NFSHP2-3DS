@@ -29076,3 +29076,52 @@ model GS done and a mutation pass running.
   tGlobalBackgroundAnimation (the frontend's grid and cross-faded
   backgrounds) and no depth of field; both need a look before they are
   called gaps.
+
+## Session 151 -- the menus' blueprint, and TASKS 75 done
+
+The user, 2026-10-20: "Continue where you left off". Session 150 ended
+with TASKS 75's last part, the changed functions the port cites by
+neither address, still to read.
+
+- **tGlobalBackgroundAnimation** (retail `0x002495f0` .. `0x00249c74`).
+  The faint car blueprint behind the menus' grid: FADING_BP_OBJECT
+  fades in over a second, eases across for 50 seconds, fades out over
+  the last one and starts again with another kept texture;
+  MASTER_BP_OBJECT goes to alpha 0. The port had drawn both bitmaps
+  where the bundle put them. Retail's start is 160..165 across and its
+  durations 50, the demo's 180..200 and 20.
+- **bganim.c/.h**, free of `<3ds.h>`: the 156-byte object, the kept
+  list (the event tree's car logos go through it, `eventtreeview.c`'s
+  `keepTexture` and `releaseKept`), Reset, ChangeScreenHash and Tick.
+  `gameflow.c` calls `bgChangeScreen` after ChangeToScreen's Activate,
+  with 0 for a NULL name, and `bgTick` after the song monitor, only in
+  IN_FRONTEND, as FlailerScreenList::Tick does. `main.c` keeps the one
+  object, made after the song monitor as the list's constructor does.
+- **bganim_check** runs retail's in mipsemu with the Flailer stubbed:
+  5,173 steps, 7,197 lines, 0 differ; 15 facts, 0 wrong. `--mutate`: 46
+  mutations, 41 caught, 5 equivalent (no whole number of ticks puts t
+  on 49 or 50 exactly; the two fade-out forms are exact by Sterbenz;
+  the list never holds a duplicate). Hashes go into the model
+  sign-extended, as mipsemu compares whole registers.
+  `docs/formats/frontend-background.md`.
+- **Azahar**: `run_azahar_test.ps1` PASS, 23 textures, 0 missing; the
+  blueprint shows behind the grid on the main menu, the setups and
+  Options, a new start on each screen. The run's "START was taken
+  before PRESS START" is the debug log's lag: PRESS START was already
+  up at the title shot.
+- **The rest of the 33 uncited rows**, nothing to change: retail's
+  already (the terrain table, the help lines, the four values Session
+  150 found), offsets or moved globals (FrontendDatabase's, the
+  vibration flags, BuildTree's byte, the camera loader, RenderHud's
+  255), or code the port does not have or never runs (DemoPoly's
+  texture viewer, the route editor, the Calibrate row, AnimatedDriver,
+  a pad type change, the SPU, IOP and SDK). TASKS 75 is [x].
+- **Not drawn**: the depth of field (CreateFocusPalette,
+  eAttachDepthOfField). The port never had it; it is a feature to add,
+  the user's call.
+- **Checks.** bootflow (96 scenarios, 56,711 lines), bscreens (1,277),
+  demomode (72,049), lobby and netrace pass with 0 differ. The CIA
+  builds (check_3dsx and check_shbin OK).
+- **Next:** the checklist's three retail items are done. The release
+  candidate is the CIA built in this session; the v1.0.0 tag and the
+  push wait for the user's go and the repo's name.

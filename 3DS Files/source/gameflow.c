@@ -308,7 +308,10 @@ int bgf_change_to_screen(BGameFlow* gf, const char* name, int pushCurrent)
             }
             makeSound(gf, data.noise);
             HOOK_VOID(gf, enterScreen, n);
+            HOOK_VOID(gf, bgChangeScreen, n->hash);
         }
+    } else if (!name) {
+        HOOK_VOID(gf, bgChangeScreen, 0u);
     }
     return gf->screen != NULL;
 }
@@ -433,10 +436,12 @@ void bgf_frame(BGameFlow* gf, float dt)
         bgf_send(gf, BMSG_SCREEN_TICK, &data);
     }
     // FlailerScreenList::Tick (0x0016cca8) ticks both popups after the
-    // screen, up or not, then the movie and the song monitor.
+    // screen, up or not, then the movie, the song monitor and, in the
+    // frontend, the blueprint behind the menus.
     bpopup_tick(gf);
     bgf_update_movie(gf);
     HOOK_VOID0(gf, songMonitor);
+    if (gf->current == BGF_IN_FRONTEND) HOOK_VOID0(gf, bgTick);
     bgf_service(gf);
 }
 

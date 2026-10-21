@@ -55,6 +55,7 @@
 #include "bchunk.h"
 #include "bchunkload.h"
 #include "beltmover.h"
+#include "bganim.h"
 #include "bmath.h"
 #include "bmem.h"
 #include "heapmap.h"
@@ -2846,6 +2847,37 @@ static void hookSongMonitor(void* user)
         logLine("ea trax: %s / %s", artist ? artist : "(null)",
                 name ? name : "(null)");
     }
+}
+
+// ------------------------------------------------------- the blueprint
+
+// FlailerScreenList's tGlobalBackgroundAnimation (bganim.h): the blueprint
+// drifting behind the menus, on RealTimer. The event tree's car logos join
+// its kept textures.
+static BgAnim g_bgAnim;
+
+static void hookBgChangeScreen(void* user, uint32_t screen)
+{
+    (void)user;
+    bganim_change_screen_hash(&g_bgAnim, screen, (int32_t)g_flow.realTimer);
+}
+
+static void hookBgTick(void* user)
+{
+    (void)user;
+    bganim_tick(&g_bgAnim, (int32_t)g_flow.realTimer, g_flow.realElapsed);
+}
+
+static void hookEtvKeepTexture(void* user, uint32_t hash)
+{
+    (void)user;
+    bganim_keep_add(&g_bgAnim, hash);
+}
+
+static void hookEtvReleaseKept(void* user)
+{
+    (void)user;
+    bganim_keep_reset(&g_bgAnim);
 }
 
 // The four reads tPopupMenu makes (banim.h). A handle is bui.c's object
@@ -8683,6 +8715,8 @@ int main(int argc, char** argv)
     hooks.jukebox          = hookJukebox;
     hooks.songMonitor      = hookSongMonitor;
     hooks.songMonitorReset = hookSongMonitorReset;
+    hooks.bgChangeScreen   = hookBgChangeScreen;
+    hooks.bgTick           = hookBgTick;
     hooks.gameType         = hookGameType;
     hooks.raceDemo         = hookRaceDemo;
     hooks.raceReturn       = hookRaceReturn;
@@ -8711,6 +8745,8 @@ int main(int argc, char** argv)
              kScreens, NUM_SCREENS, kBootStages, NUM_BOOT_STAGES, &hooks);
     // FlailerScreenList's constructor makes its song monitor (0x0016c25c).
     bsm_init(&g_songMonitor, &kSongMonitorHooks);
+    // And its background animation (0x0016c36c), bMalloc(156).
+    bganim_init(&g_bgAnim);
     g_flow.fred = fred_bytes();
     // The Autosave screen asks before it makes the save file, as the end
     // of a race always goes through it.
@@ -9289,6 +9325,8 @@ int main(int argc, char** argv)
     g_etvHooks.stopMovie               = hookCarSelStopMovie;
     g_etvHooks.jukeboxStart            = hookEtvJukebox;
     g_etvHooks.preloadCars             = hookSetupPreloadCars;
+    g_etvHooks.keepTexture             = hookEtvKeepTexture;
+    g_etvHooks.releaseKept             = hookEtvReleaseKept;
     g_etvHooks.trace                   = hookTrace;
     eventtreeview_init(&g_etvHooks);
 
