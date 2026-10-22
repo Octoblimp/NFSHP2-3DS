@@ -3922,9 +3922,13 @@ static void* resFindByName(const char* name)
     return find_resource_file(name);
 }
 
+static void badDataFile(const char* file);
+
 // LoadGlobalChunks' streamed packs (0x001683a0 and 0x0016856c): a
 // TexturePack with no file name, its table read from `file`, and none of
-// its pixels until they are asked for (texturestream.h).
+// its pixels until they are asked for (texturestream.h). Every one on the
+// disc has a table, so a pack without one is a card without the disc's
+// file, and the port says so rather than run on without its textures.
 static TexturePack* newStreamedPack(const char* var, const char* name,
                                     const char* file)
 {
@@ -3932,6 +3936,8 @@ static TexturePack* newStreamedPack(const char* var, const char* name,
         (TexturePack*)bMalloc((int)sizeof(TexturePack), var, 0, 16), name,
         NULL);
     texturepack_load_texture_table_from_file(p, file);
+    if (p->NumTextures == 0)
+        badDataFile(file);
     return p;
 }
 
@@ -4090,6 +4096,34 @@ static void waitForExit(void)
         gfxSwapBuffers();
         gspWaitForVBlank();
     }
+}
+
+// A data file that is missing or isn't the disc's: the card was made from
+// an extraction gone wrong (a friend's, 2026-10-21, had another file under
+// HUDTEX.BIN's name), and the fix is the README's steps again.
+static void badDataFile(const char* file)
+{
+    char path[GAMEDATA_MAX_PATH];
+    int  i;
+
+    snprintf(path, sizeof path, "%s/%s", gamedata_root(), file);
+    for (i = 0; path[i] != 0; i++)
+        if (path[i] == '\\') path[i] = '/';
+    fprintf(stderr, "data: %s is missing or isn't the disc's file\n", path);
+    logPrintf("data: %s is missing or isn't the disc's file, so the port "
+              "stops here\n", path);
+    fatalConsole();
+    printf("\nThis file is missing, or isn't the disc's:\n");
+    printf("  %s\n\n", path);
+    printf("Delete the NFSHP2 folder on the SD card\n");
+    printf("(keep NFSHP2/SAVES), then extract the disc\n");
+    printf("and copy it again with this release's\n");
+    printf("tools, as the README says.\n");
+    waitForExit();
+    C2D_Fini();
+    C3D_Fini();
+    gfxExit();
+    exit(1);
 }
 
 // --------------------------------------------------------- the bottom screen

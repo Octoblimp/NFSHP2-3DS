@@ -149,3 +149,13 @@ python tools/zdir_extract.py "PS2 Files/ZDIR.BIN" "PS2 Files/ZZDATA.BIN" out/
 Writes every entry plus a `manifest.csv`, using the recovered filename where
 one is known and `<index>_<hash>.bin` otherwise, and transparently
 decompresses `COMP` payloads with `--decompress`.
+
+A name goes to the entry whose `Hash` it has, which is how the game finds a
+file. The index in `docs/zdir_names*.txt` only records where the name was
+found. Until 2026-10-21 the extractor named entries by that index. On a
+different release's disc (a friend's had 397 entries, not 406), that put
+files under each other's names, and the 3DS faulted reading
+`GLOBAL\HUDTEX.BIN`. When the disc's directory differs from the list's,
+the extractor now lists the names that aren't on it. It also refuses a
+folder whose `manifest.csv` has a name that doesn't hash to its entry,
+because that folder came from the old naming.

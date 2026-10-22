@@ -250,6 +250,20 @@ and two more, and shows its own screen. The port leaves it out.
   MainLoop's ServiceResourceLoading runs the queued reads every frame.
   The frame LOADING shows is still drawn from the UI's DYNTEX bundle, not
   from this pack.
+- **The one check the image hasn't.** Before step 3, the port checks that
+  the table's leaf and its size word lie inside the bytes read. If they
+  don't, the file isn't a pack: it keeps no table, as a file that doesn't
+  open keeps none, and stderr says so. The image takes the header's word
+  for it. On 2026-10-21 a friend's New 3DS faulted reading 1.7 GB past the
+  buffer, because `GLOBAL\HUDTEX.BIN` on their card held another file.
+  `zdir_extract.py` had named another release's directory by index. Where
+  the check holds, the image's own test decides as before, so the checker
+  doesn't see it.
+- **A pack with no table stops the port.** Every streamed pack on the disc
+  has one, so `newStreamedPack` takes a pack without one to mean a card
+  that lacks the disc's file. It puts the file's path on screen with the
+  README's fix and exits when START is pressed. It doesn't run on with the
+  HUD or the cars untextured.
 - eWaitUntilRenderingDone is still NULL on the device, as it is for the
   resource system.
 

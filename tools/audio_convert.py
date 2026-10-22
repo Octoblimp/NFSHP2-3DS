@@ -75,6 +75,15 @@ def read_bank(msh_path):
 
     head = msh.read_bytes()
     body = msb.read_bytes()
+    # A file under the wrong name -- the extractor's, before 2026-10-21, on
+    # another release's disc -- says so here, not in a struct.error. The
+    # discs' largest index is 3.5 KB.
+    count = struct.unpack_from("<I", head, 8)[0] if len(head) >= HEADER_SIZE else 0
+    if not HEADER_SIZE + count * PATCH_SIZE <= len(head) <= 0x10000:
+        raise SystemExit(
+            "%s isn't a sound bank's index (%d bytes). Delete "
+            "extracted-retail and run tools/zdir_extract.py again."
+            % (msh, len(head)))
     size, pad, count = struct.unpack_from("<3I", head, 0)
     if size != len(head):
         print("warning: %s declares %d bytes but is %d" % (msh.name, size, len(head)),
@@ -92,6 +101,11 @@ def read_bank(msh_path):
                             offset=offset, adsr=adsr, reserved=reserved))
     for i, p in enumerate(patches):
         end = patches[i + 1]["offset"] if i + 1 < len(patches) else len(body)
+        if not p["offset"] <= end <= len(body):
+            raise SystemExit(
+                "%s: patch %d (%s) runs from %d to %d, outside %s's %d bytes. "
+                "Delete extracted-retail and run tools/zdir_extract.py again."
+                % (msh.name, i, p["name"], p["offset"], end, msb.name, len(body)))
         p["size"] = end - p["offset"]
         p["data"] = body[p["offset"]:end]
     del pad

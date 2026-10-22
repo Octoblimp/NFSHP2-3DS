@@ -12,6 +12,13 @@ docs/zdir_names.txt, which this script reads to lay the output out as the
 original directory tree. Entries whose name is still unrecovered fall back to
 `unknown/<index>_<hash>.bin`.
 
+A name goes to the entry with its hash, the way the game finds a file, and
+never to an index: another release of the game has a directory of other
+length and order, and until 2026-10-21 a name by index put files under
+each other's names there (a .MSH holding a track's textures). On a disc
+whose directory isn't the one the names came from, the names it lacks are
+listed, and an extraction left by the old naming is refused.
+
 Usage:
     python tools/zdir_extract.py "PS2 Files/ZDIR.BIN" "PS2 Files/ZZDATA.BIN" out/
     python tools/zdir_extract.py ... out/ --decompress   # also expand .LZC
@@ -37,6 +44,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from bhash import bhash  # noqa: E402
 from lzdecompress import decompress  # noqa: E402
 
 SECTOR = 2048
@@ -65,18 +73,43 @@ def read_entries(zdir_path):
 
 
 def read_names(path):
-    """index -> recovered path, from docs/zdir_names.txt ('?' means unknown)."""
-    names = {}
+    """(hash -> recovered path, every hash listed), from docs/zdir_names.txt
+    ('?' means unknown).
+
+    The list's own index is the entry it was recovered from on that disc,
+    and is not used: see the module's note."""
+    names, listed = {}, set()
     p = Path(path)
     if not p.exists():
-        return names
+        return names, listed
     for line in p.read_text(encoding="utf-8").splitlines():
         if not line or line.startswith("#"):
             continue
         parts = line.split(None, 5)
-        if len(parts) == 6 and parts[5] != "?":
-            names[int(parts[0])] = parts[5]
-    return names
+        if len(parts) != 6:
+            continue
+        h = int(parts[1], 16)
+        listed.add(h)
+        if parts[5] != "?":
+            if bhash(parts[5]) != h:
+                raise SystemExit("%s: %s does not hash to %08x"
+                                 % (p.name, parts[5], h))
+            names[h] = parts[5]
+    return names, listed
+
+
+def misnamed(manifest_path):
+    """The rows of an earlier manifest whose name isn't their entry's."""
+    p = Path(manifest_path)
+    if not p.exists():
+        return []
+    rows = p.read_text(encoding="utf-8").splitlines()[1:]
+    bad = []
+    for row in rows:
+        f = row.split(",")
+        if len(f) >= 7 and f[5] and bhash(f[5]) != int(f[1], 16):
+            bad.append(f[5])
+    return bad
 
 
 def main():
@@ -105,15 +138,33 @@ def main():
     only = [g.upper().replace("/", chr(92)) for g in a.only]
 
     entries = read_entries(a.zdir)
-    names = read_names(a.names)
+    names, listed = read_names(a.names)
     out_dir = Path(a.out_dir)
     zzdata_size = Path(a.zzdata).stat().st_size
-    out_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = out_dir / "manifest.csv"
+    bad = misnamed(manifest_path)
+    if bad:
+        raise SystemExit(
+            "%s came from an older zdir_extract.py that put %d files under "
+            "the wrong names (%s, ...). Delete the whole folder and run this "
+            "again." % (out_dir, len(bad), ", ".join(bad[:3])))
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    hashes = {e["hash"] for e in entries}
+    unnamed = [e for e in entries if e["hash"] not in names]
+    if hashes != listed:
+        absent = sorted(n for h, n in names.items() if h not in hashes)
+        print("This disc's directory isn't the one %s was made from: %d of "
+              "its %d entries are new to it, and %d named files aren't on "
+              "it%s" % (Path(a.names).name, len(hashes - listed), len(entries),
+                        len(absent), ":" if absent else "."))
+        for n in absent:
+            print("    " + n)
 
     # The leftover track .BUNs whose .LZC is on the disc: with --decompress
     # the .LZC's expansion takes the name.
-    lzcs = {n.upper()[:-4] for n in names.values() if hot_chunked(n)}
+    lzcs = {names[h].upper()[:-4] for h in hashes
+            if h in names and hot_chunked(names[h])}
 
     def superseded(name):
         up = (name or "").upper()
@@ -133,7 +184,7 @@ def main():
                       file=sys.stderr)
                 skipped += 1
                 continue
-            name = names.get(e["index"])
+            name = names.get(e["hash"])
             if superseded(name) or (only and not any(
                     fnmatch.fnmatchcase((name or "?").upper(), g) for g in only)):
                 manifest.write("%d,%08x,%d,%d,%d,%s,\n"
@@ -168,7 +219,7 @@ def main():
                               e["offset"], name or "", rel.as_posix()))
 
     print("Extracted %d entries (%d named, %d skipped, %d decompressed) to %s"
-          % (written, sum(1 for e in entries if e["index"] in names),
+          % (written, len(entries) - len(unnamed),
              skipped, expanded, out_dir))
     print("manifest:", manifest_path)
 

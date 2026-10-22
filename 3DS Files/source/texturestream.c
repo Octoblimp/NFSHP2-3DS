@@ -3,6 +3,7 @@
 #include "texturestream.h"
 
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "bchunk.h"
@@ -79,6 +80,26 @@ static void record_from_disc(TextureInfo *t, const uint8_t *d)
     memcpy(&t->ImageVramAddress, d + 162, 2);
 }
 
+// The port's one check, which the image hasn't: that the table the
+// header points at, and its length, lie inside the n bytes read. The
+// image takes the header's word, and a file that isn't a pack has it read
+// anywhere: a friend's device (2026-10-21) had another file under
+// HUDTEX.BIN's name, from an extraction that named a different release's
+// entries by index, and faulted 1.7 GB past the buffer. Where it holds,
+// the image's own test below decides as before.
+static int table_inside(const uint8_t *buf, int32_t n)
+{
+    uint32_t at, len;
+
+    if (n < 24)
+        return 0;
+    at = bchunk_u32(buf + 12);
+    if (at > (uint32_t)n - 24)
+        return 0;
+    len = bchunk_u32(buf + 20 + at);
+    return len <= (uint32_t)n - 24 - at;
+}
+
 void texturepack_load_texture_table_from_file(TexturePack *p,
                                               const char *filename)
 {
@@ -104,6 +125,11 @@ void texturepack_load_texture_table_from_file(TexturePack *p,
     bClose(f);
     // The pack chunk's first child is its header, its second the table,
     // its third the blob: each offset here counts from buf.
+    if (!table_inside(buf, n)) {
+        fprintf(stderr, "texturestream: %s isn't a texture pack\n", filename);
+        bFree(buf);
+        return;
+    }
     tab = 16 + bchunk_u32(buf + 12);
     blob = tab + 8 + bchunk_u32(buf + tab + 4);
     if ((uint32_t)n >= blob) {

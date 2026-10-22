@@ -29326,3 +29326,31 @@ you see. Only fix anything you notice that's an actual problem."
 - TASKS 31 is [x]. The launch checklist (v45) says released.
 - **Next:** whatever the user asks. The open TASKS boxes are the README's
   known issues, 46's timing run and 61 (a wish, not an issue).
+
+## Session 156 -- a friend's crash: the extractor's names, and the scrub
+
+- **The scrub.** `tools/ghidra_headless.sh` held a local path; it now
+  takes `$GHIDRA_DIR` or the `ghidra` folder beside the repository. The
+  whole history was rewritten to the clean file (filter-branch), commit
+  hashes in the docs were remapped (9494125), and master and v1.0.0 were
+  force-pushed. No other file in any commit had personal data. GitHub
+  Support is the user's to ask, for the cached views and the forks.
+- **The crash.** A friend's New 3DS hit an ARM11 data abort in
+  `texturestream.c` reading `GLOBAL\HUDTEX.BIN`: the file was another
+  entry's data. Their disc's directory has 397 entries, not the 406 of
+  ours, and `zdir_extract.py` named entries by their index in
+  `docs/zdir_names*.txt`, so every name after the first difference went
+  to the wrong file. That is also audio_pack's `struct.error`: the
+  `.MSH` it read was a 5 MB file.
+- **zdir_extract.py** names an entry by its hash (`bhash`), as the game
+  finds it; it lists the names the disc lacks and refuses a folder whose
+  manifest came from the old naming. **audio_convert.py** says a file
+  isn't a sound bank's index instead of a struct.error. **make_card.py**
+  refuses an old-naming folder and banks audio_pack hasn't built, and
+  `--prune` deletes card files the set doesn't have (keeps SAVES).
+- **The port** checks a texture pack's table is inside the file, and
+  stops at boot with a message naming the file when a needed pack has
+  none (`badDataFile`, main.c). Azahar: a normal boot passes; a swapped
+  HUDTEX.BIN shows the message. The README says what to redo.
+- Not known: which release the friend's disc is. Their SYSTEM.CNF serial
+  and ZDIR.BIN would say; whether the port runs on that data is untested.

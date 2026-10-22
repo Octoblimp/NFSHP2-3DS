@@ -63,6 +63,14 @@ races up to eight New 3DS consoles against each other.
 Saves go to `sdmc:/NFSHP2/SAVES`, made the first time the game saves. A
 screen that changes your save asks whether to save when you leave it.
 
+If the game stops at boot saying a file is missing or isn't the disc's, or
+a step above says `extracted-retail` came from an older `zdir_extract.py`,
+the files were extracted wrongly. Older copies of the tools could put
+another disc's files under the wrong names. Get the current tools, delete
+`extracted-retail/`, and do steps 2 to 4 again. Run step 4 as
+`python tools/make_card.py E:\ --prune` so it also deletes the old files
+on the card. It keeps `NFSHP2/SAVES`.
+
 ## Controls
 
 ### In a race
