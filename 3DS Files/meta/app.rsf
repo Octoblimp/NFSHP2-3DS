@@ -9,7 +9,7 @@ BasicInfo:
 
 TitleInfo:
   Category                : Application
-  UniqueId                : 0xFF3FF # within the reserved Evaluation/Prototype range; one past NFSU2-3DS's 0xFF3FE so both can coexist on one SD card
+  UniqueId                : 0xEC54E # title ID 000400000EC54E00; randomized because 0xFF3FF clashed with another homebrew
 
 Option:
   UseOnSD                 : true # install to SD card (via FBI)
