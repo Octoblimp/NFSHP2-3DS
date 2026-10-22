@@ -29354,3 +29354,12 @@ you see. Only fix anything you notice that's an actual problem."
   HUDTEX.BIN shows the message. The README says what to redo.
 - Not known: which release the friend's disc is. Their SYSTEM.CNF serial
   and ZDIR.BIN would say; whether the port runs on that data is untested.
+- **Released v1.0.1**, at the user's word ("Build and publish a v1.0.1
+  release with the rebuilt CIA and 3DSX"). The Makefile's version is
+  1.0.1 (662a8f9, tag v1.0.1, annotated, pushed with master). Built with
+  build_cia.ps1; no personal paths in either file. run_azahar_test:
+  PASS (its "START was taken" line is the log's lag, as before).
+  https://github.com/Octoblimp/NFSHP2-3DS/releases/tag/v1.0.1, marked
+  Latest, with `NFSHP2-3DS.cia` (1,851,840 bytes, 8a8bae94...00e0) and
+  `NFSHP2-3DS.3dsx` (2,023,580 bytes, 5662d56a...67fc), downloaded back
+  and matching. Not run on a 3DS yet; the notes say so.
