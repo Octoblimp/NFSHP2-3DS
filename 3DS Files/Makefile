@@ -45,7 +45,7 @@ APP_AUTHOR		:= Octoblimp
 # Menu read the icon and titles again instead of its cached ones.
 APP_VERSION_MAJOR	:= 1
 APP_VERSION_MINOR	:= 0
-APP_VERSION_MICRO	:= 2
+APP_VERSION_MICRO	:= 3
 
 # The HOME Menu banner (the logo as a spinning 3D badge), its sound (the
 # game's siren) and the icon are made from the retail files by
