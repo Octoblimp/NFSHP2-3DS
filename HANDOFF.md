@@ -29363,3 +29363,40 @@ you see. Only fix anything you notice that's an actual problem."
   Latest, with `NFSHP2-3DS.cia` (1,851,840 bytes, 8a8bae94...00e0) and
   `NFSHP2-3DS.3dsx` (2,023,580 bytes, 5662d56a...67fc), downloaded back
   and matching. Not run on a 3DS yet; the notes say so.
+
+## Session 157 -- a player's roadblock freeze, and v1.0.3
+
+- **v1.0.2** (2280344, between sessions): the CIA's title ID is now
+  000400000EC54E00; 0xFF3FF clashed with another homebrew. Released as
+  v1.0.2 with the same code as 1.0.1.
+- **The freeze.** A player's race froze three times in
+  `world_do_timestep` by a level 3 chase's roadblock (New 3DS XL, log
+  and video 2026-10-22). Azahar never showed it. The likely cause is a
+  car gone NaN: the step ends with a bubble sort of the car list on x
+  using `c.le.s`, which never ends for a NaN. The EE has no NaN.
+- **The fix** (56a517a): the step runs with the VFP rounding toward
+  zero (main.c `stepRoundToZero`), so overflow gives FLT_MAX as on the
+  EE; the list compare is `!(b.x < a.x)`, which leaves a NaN car where
+  it is; worldstep.c's NaN watch checks the cars after each part of the
+  step and puts a non-finite car back at its last good place and speed,
+  logging "world: ... not finite after the <part>"; a hangwatch stall
+  report has the stack's code words and "world step: in the <part>,
+  car N". On the host, the cop mover's translating move for a cop at
+  exactly zero velocity is NaN rounding to nearest and finite rounding
+  toward zero; whether that was the player's car is not known.
+  world_check: 0 differ, its 3 mutations caught. Azahar, with a NaN
+  forced into an AI car and a traffic car (test build only): both put
+  back, the race ran on at 30 FPS. DemoReplayDrift 2 is now 1.
+- **Released v1.0.3** at the user's word ("Also do the push and the
+  version bump, new release"). The Makefile's version is 1.0.3 (bd8ca31,
+  tag v1.0.3, annotated, pushed with master); same title ID, so it
+  installs over 1.0.2. Built with build_cia.ps1; no personal paths in
+  either file. run_azahar_test: PASS (its "START was taken" line is the
+  log's lag, as before).
+  https://github.com/Octoblimp/NFSHP2-3DS/releases/tag/v1.0.3, marked
+  Latest, with `NFSHP2-3DS.cia` (1,854,400 bytes, d494b035...c5e2) and
+  `NFSHP2-3DS.3dsx` (2,026,700 bytes, f8105aa7...dead), downloaded back
+  and matching. Not run on a 3DS yet; the notes say so and ask for
+  `nfshp2_debug.txt` with `DebugLog 1` if a race still freezes.
+- Next, when the player sends a log: look for "not finite after" lines;
+  the part and car name the site to fix with eefpu.h's helpers.
