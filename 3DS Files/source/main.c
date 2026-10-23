@@ -5308,21 +5308,13 @@ static struct {
 
 // Before the world's step of a disc replay's frame: the frame counted, the
 // first few with the seed and the checksum the step starts from, and a
-// line every 150. At "DemoReplayDrift 2" the VFP rounds toward zero and
-// flushes denormals for the step, as the EE does (RunFast's DN and FZ, and
-// RZ). Answers the FPSCR to put back after it, or 0 for none.
-static uint32_t demoReplayDriftStep(World* w)
+// line every 150. "DemoReplayDrift 2" was the step rounding toward zero,
+// as every step has since 2026-10-23 (stepRoundToZero).
+static void demoReplayDriftStep(World* w)
 {
-    uint32_t fpscr = 0;
-
     if (!ConfigDemoReplayDrift || !DemoModeReplayActiveFlag
         || !pReplayManager->ReplayingFlag)
-        return 0;
-    // First, so that the checksum below is the one the step's verify makes.
-    if (ConfigDemoReplayDrift >= 2) {
-        __asm__ volatile("vmrs %0, fpscr" : "=r"(fpscr));
-        __asm__ volatile("vmsr fpscr, %0" : : "r"(0x03c00000u) : "memory");
-    }
+        return;
     if (gDrift.snapshot != TheDemoModeReplay.PlayingSnapshotNumber
         || WorldLoopCounter != gDrift.loop + 1) {
         gDrift.snapshot = TheDemoModeReplay.PlayingSnapshotNumber;
@@ -5341,6 +5333,25 @@ static uint32_t demoReplayDriftStep(World* w)
                   (long)gDrift.frames, (long)gDrift.firstMiss);
     gDrift.frames++;
     gDrift.loop = WorldLoopCounter;
+}
+
+// The world's step rounds toward zero, as the EE does; libctru starts each
+// thread with the VFP rounding to nearest (and RunFast's DN and FZ, which
+// are the EE's too). Then a sum or product too big for a float is FLT_MAX,
+// as the EE's is, and not an infinity, which the next 0 it meets turns to
+// a NaN: the PS2 has neither (eefpu.h). A divide by zero is an infinity
+// whatever the rounding, and eefpu.h's ee_div stays the answer where the
+// image is seen dividing by zero. 2026-10-22: a player's race froze in
+// the step three times, at a roadblock. The step calls nothing from libm,
+// whose sinf and the rest are written for rounding to nearest. Answers the
+// FPSCR to put back after the step.
+static uint32_t stepRoundToZero(void)
+{
+    uint32_t fpscr;
+
+    __asm__ volatile("vmrs %0, fpscr" : "=r"(fpscr));
+    __asm__ volatile("vmsr fpscr, %0" : : "r"(fpscr | 0x00c00000u)
+                     : "memory");
     return fpscr;
 }
 
@@ -5879,6 +5890,67 @@ static void logFallStep(const World* w)
                       (double)e->vzAfter);
     }
     logLine("%s", line);
+}
+
+static const char* carSlotKind(const World* w, int i);
+
+// The world's step's parts (world.h's WSP_*), as the log names them.
+static const char* const WorldStepPartNames[WSP_PARTS] = {
+    "cops", "think", "drive", "heli", "begin", "move", "witnesses",
+    "tests", "resolve", "collisions", "finish", "events", "effects",
+    "rest"
+};
+
+// With DebugLog 1: each car the step found with a NaN or an infinity in
+// its state (world.h's WorldStepNaN), the part it was found after, what it
+// held and where it was put back.
+static void logStepNaN(const World* w)
+{
+    static uint32_t     logged;
+    const WorldStepNaN* n = &WorldStepNaNs;
+
+    if (n->count == logged)
+        return;
+    logged = n->count;
+    if (!g_log || n->part < 0 || n->part >= WSP_PARTS)
+        return;
+    logLine("world: %s %d (mode %d) not finite after the %s, loop %ld: at "
+            "%g %g %g vel %g %g %g spin %g %g %g; %s %.1f %.1f %.1f "
+            "(%lu found so far)",
+            carSlotKind(w, n->car), (int)n->car, (int)n->movementMode,
+            WorldStepPartNames[n->part], (long)n->frame,
+            (double)n->position.x, (double)n->position.y,
+            (double)n->position.z, (double)n->velocity.x,
+            (double)n->velocity.y, (double)n->velocity.z,
+            (double)n->spin.x, (double)n->spin.y, (double)n->spin.z,
+            n->reset ? "put back at" : "left, no good place; last",
+            (double)n->good.x, (double)n->good.y, (double)n->good.z,
+            (unsigned long)n->count);
+}
+
+// hangwatch's line in a stall's report (hangwatch.h): where in the world's
+// step the main thread is, and the car it is on, with its place and speed.
+static void worldStepNote(char* buf, size_t size)
+{
+    const World* w = pCurrentWorld;
+    int32_t      part = WorldStepPart;
+    int32_t      car = WorldStepCar;
+    int          n;
+
+    if (w == NULL || part < 0 || part >= WSP_PARTS)
+        return;
+    n = snprintf(buf, size, "world step: in the %s",
+                 WorldStepPartNames[part]);
+    if (n > 0 && (size_t)n < size && car >= 0 && car < w->TotalNumCars) {
+        const Car* c = w->CarTable[car];
+
+        snprintf(buf + n, size - (size_t)n,
+                 ", %s %d (mode %d) at %g %g %g, %g m/s",
+                 carSlotKind(w, car), (int)car, (int)c->TheMovementMode,
+                 (double)c->State.Position.x, (double)c->State.Position.y,
+                 (double)c->State.Position.z,
+                 (double)c->State.VelocityMagnitude);
+    }
 }
 
 static void logRaceState(void)
@@ -6469,11 +6541,12 @@ static void raceFrame(void)
                 MainLoopTiming.GenerateJoyEvents = bGetTicker();
                 frameMark("race: the world's step");
                 forceChopperTick(step);
-                fpscr = demoReplayDriftStep(w);
+                fpscr = stepRoundToZero();
+                demoReplayDriftStep(w);
                 world_do_timestep(w, step);
-                if (fpscr != 0)
-                    __asm__ volatile("vmsr fpscr, %0" : : "r"(fpscr) : "memory");
+                __asm__ volatile("vmsr fpscr, %0" : : "r"(fpscr) : "memory");
                 logFallStep(w);
+                logStepNaN(w);
             }
             replaymgr_end_frame(pReplayManager);
         }
@@ -7849,11 +7922,7 @@ static void clearWorldStep(void)
 // VClip's walks. Then the sums start again.
 static void logWorldStep(void)
 {
-    static const char* const parts[WSP_PARTS] = {
-        "cops", "think", "drive", "heli", "begin", "move", "witnesses",
-        "tests", "resolve", "collisions", "finish", "events", "effects",
-        "rest"
-    };
+    const char* const* parts = WorldStepPartNames;
     const WorldStepProf* p = &WorldStepProfile;
     const World* w = pCurrentWorld;
     char   line[1024];
@@ -7922,6 +7991,7 @@ int main(int argc, char** argv)
     // Where the main loop was if it stops (hangwatch.h): the first race on
     // a New 3DS XL drew a frame and stopped there.
     hangwatch_start(logLine);
+    hangwatch_note(worldStepNote);
     // The audio workers' tripwire, for "ThreadGuard 1" only (logOpen read
     // the config): off, its checks cost the game's core nothing.
     if (ConfigThreadGuard)

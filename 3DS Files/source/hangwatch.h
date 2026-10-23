@@ -35,14 +35,25 @@
 //     takes says what the stage's time is spent on. The frame looks as
 //     the others do.
 //
-// A mark is two stores. Each frame's GX queue is counted too: citro3d's
-// holds 32 entries, and the 33rd is svcBreak, so a new most is logged. A
-// timing frame's is not counted: each stage's split is an entry more.
+// A mark is three stores: the string, the count, and the main thread's
+// stack pointer there. The marks are far apart, so a loop between two of
+// them (the world's step, 2026-10-22: a player's race froze in it three
+// times, and the log could say no more) is found by the stack: the report
+// lists the words below the last mark's stack pointer that point into the
+// code, the nearest first. Most are the return addresses of the calls the
+// thread is in, which `nm` on the build's .elf names; some further down
+// are older calls' leftovers. A game note (hangwatch_note) says more,
+// such as the part of the world's step and the car.
+//
+// Each frame's GX queue is counted too: citro3d's holds 32 entries, and
+// the 33rd is svcBreak, so a new most is logged. A timing frame's is not
+// counted: each stage's split is an entry more.
 
 #ifndef HANGWATCH_H
 #define HANGWATCH_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #define HANGWATCH_TRAIL 16
@@ -58,12 +69,22 @@ void hangwatch_stop(void);
 // strings that live for the program.
 extern const char *volatile HangwatchTrail[HANGWATCH_TRAIL];
 extern volatile uint32_t    HangwatchMarks;
+extern volatile uint32_t    HangwatchSp;
 
 static inline void hangwatch_mark(const char *where)
 {
+    uint32_t sp;
+
+    __asm__ volatile("mov %0, sp" : "=r"(sp));
     HangwatchTrail[HangwatchMarks % HANGWATCH_TRAIL] = where;
     HangwatchMarks++;
+    HangwatchSp = sp;
 }
+
+// A line of the game's own for each stall's report, written into `buf`
+// by the watchdog's thread while the main thread is held: nothing when
+// `fn` leaves it empty. main.c's says where in the world's step it is.
+void hangwatch_note(void (*fn)(char *buf, size_t n));
 
 // aptMainLoop, marked as the wait it is, and a frame begun after it.
 bool hangwatch_main_loop(void);

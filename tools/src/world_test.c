@@ -404,6 +404,17 @@ void car_fake_engine_task(struct Car *c)
     printf("  engine %s\n", label(c));
 }
 
+// worldstep.c's NaN watch, the port's own: the image has none, so a car
+// put back is a line the model never prints.
+void car_reset_to_position(struct Car *c, const bVector3 *pos, float speed,
+                           uint16_t angle)
+{
+    (void)pos;
+    (void)speed;
+    (void)angle;
+    printf("  reset %s\n", label(c));
+}
+
 int32_t car_calculate_debug_checksum(struct Car *c)
 {
     int k = car_of(c);

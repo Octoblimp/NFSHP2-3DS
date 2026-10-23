@@ -242,9 +242,10 @@ extern int32_t ConfigFallLog;               // 0
 // The port's own: "DemoReplayDrift 1" has a disc replay (with "DemoReplays
 // 1") play on past its checksum misses instead of ending, and the log
 // count them: the first few with the checksum, the seed and the byte the
-// PS2 logged, then a line every 150 frames (72h-2c). At 2, the world's
-// steps also run with the VFP rounding toward zero and flushing denormals,
-// as the EE does. Needs "DebugLog 1". Off by default.
+// PS2 logged, then a line every 150 frames (72h-2c). 2 was the world's
+// steps run with the VFP rounding toward zero and flushing denormals, as
+// the EE does; since 2026-10-23 every step is (main.c's stepRoundToZero),
+// and 2 is 1. Needs "DebugLog 1". Off by default.
 extern int32_t ConfigDemoReplayDrift;       // 0
 
 // The port's own: "DemoReplayFile N" (with "DemoReplays 1") has attract

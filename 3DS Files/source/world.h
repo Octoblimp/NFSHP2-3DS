@@ -239,6 +239,33 @@ typedef struct WorldStepProf {
 extern int32_t       WorldStepProfOn;
 extern WorldStepProf WorldStepProfile;
 
+// Not in the image either, and kept whatever the flags. Where the step is,
+// for hangwatch's report on a stall (main.c's note): the part (WSP_*, or
+// -1 between steps) and the car it is on (its CarIndex, or -1). A
+// player's race froze in the step three times on 2026-10-22, and the log
+// could say no more than that.
+extern volatile int32_t WorldStepPart;
+extern volatile int32_t WorldStepCar;
+
+// And a car whose state is not finite. The EE has no NaN or infinity, so
+// retail never meets one; the port's IEEE floats can (eefpu.h). At the end
+// of each part the cars are looked at, and one with a NaN or an infinity
+// in its position, velocity, spin or speed is put back where it last had
+// none, at the speed it had there, before the step sorts the car list.
+// The last one found is kept here for main.c's log line.
+typedef struct WorldStepNaN {
+    uint32_t count;                     // cars found, all told
+    int32_t  frame;                     // WorldLoopCounter
+    int32_t  part;                      // the part it was found after
+    int32_t  car;                       // CarIndex
+    int32_t  movementMode;
+    int32_t  reset;                     // 0: no good place to put it back
+    bVector3 position, velocity, spin;  // as found
+    bVector3 good;                      // where it went back to
+} WorldStepNaN;
+
+extern WorldStepNaN WorldStepNaNs;
+
 // Not in the image. Each step of CarTable[0], player 1's car, while
 // WorldFallTraceOn is set ("FallLog 1"): where the move left it and every
 // contact of its that was resolved, for main.c's line a step. The user's

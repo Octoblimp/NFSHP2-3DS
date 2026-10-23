@@ -83,19 +83,36 @@ static float max_s(float fs, float ft)
 int32_t       WorldStepProfOn;
 WorldStepProf WorldStepProfile;
 
+volatile int32_t WorldStepPart = -1;
+volatile int32_t WorldStepCar = -1;
+WorldStepNaN     WorldStepNaNs;
+
 static uint32_t ProfStart;
 static uint32_t ProfLast;
+static World   *ProfWorld;              // the step's, and NULL outside one
 
-static void prof_start(void)
+static void nan_watch(World *w, int32_t part);
+
+static void prof_start(World *w)
 {
+    ProfWorld = w;
+    WorldStepPart = WSP_COPS;
+    WorldStepCar = -1;
     if (WorldStepProfOn)
         ProfStart = ProfLast = bGetTicker();
 }
 
+// The end of `part`. In a step, the cars are looked at for a NaN and where
+// the step is moves on to the next part; the ticks, while the profile is on.
 static void prof_mark(int32_t part)
 {
     uint32_t now;
 
+    if (ProfWorld != NULL) {
+        nan_watch(ProfWorld, part);
+        WorldStepPart = part + 1;
+        WorldStepCar = -1;
+    }
     if (!WorldStepProfOn)
         return;
     now = bGetTicker();
@@ -106,6 +123,8 @@ static void prof_mark(int32_t part)
 static void prof_end(void)
 {
     prof_mark(WSP_REST);
+    ProfWorld = NULL;
+    WorldStepPart = -1;
     if (WorldStepProfOn) {
         WorldStepProfile.steps++;
         if (ProfLast - ProfStart > WorldStepProfile.worst)
@@ -228,6 +247,7 @@ static void prof_car(void (*fn)(Car *c, float dt), uint32_t *by_car, Car *c,
 {
     uint32_t t0;
 
+    WorldStepCar = c->CarIndex;
     if (!WorldStepProfOn) {
         fn(c, dt);
         return;
@@ -236,6 +256,78 @@ static void prof_car(void (*fn)(Car *c, float dt), uint32_t *by_car, Car *c,
     fn(c, dt);
     if (c->CarIndex >= 0 && c->CarIndex < WORLD_MAX_CARS)
         by_car[c->CarIndex] += bGetTicker() - t0;
+}
+
+// ---------------------------------------------------- the NaN watch
+
+// Not in the image; see world.h. Each car's last place with nothing
+// non-finite in its state, by CarIndex, and the car it was then: a new
+// race's car may have the index without the place.
+static bVector3   GoodPosition[WORLD_MAX_CARS];
+static float      GoodSpeed[WORLD_MAX_CARS];
+static uint16_t   GoodAngle[WORLD_MAX_CARS];
+static const Car *GoodCar[WORLD_MAX_CARS];
+static uint32_t   NaNCars;              // by CarIndex, found and not put back
+
+static int32_t finite3(const bVector3 *v)
+{
+    return isfinite(v->x) && isfinite(v->y) && isfinite(v->z);
+}
+
+static void nan_watch(World *w, int32_t part)
+{
+    int32_t i;
+
+    for (i = 0; i < w->TotalNumCars && i < WORLD_MAX_CARS; i++) {
+        const Car      *c = w->CarTable[i];
+        const CarState *s = &c->State;
+        WorldStepNaN   *n = &WorldStepNaNs;
+
+        if (finite3(&s->Position) && finite3(&s->Velocity)
+            && finite3(&s->AngularVelocity) && isfinite(s->ForwardSpeed)) {
+            GoodPosition[i] = s->Position;
+            GoodSpeed[i] = s->ForwardSpeed;
+            GoodAngle[i] = s->Angle;
+            GoodCar[i] = c;
+            continue;
+        }
+        if (NaNCars & (1u << i))
+            continue;
+        NaNCars |= 1u << i;
+        n->count++;
+        n->frame = WorldLoopCounter;
+        n->part = part;
+        n->car = i;
+        n->movementMode = c->TheMovementMode;
+        n->reset = GoodCar[i] == c;
+        n->position = s->Position;
+        n->velocity = s->Velocity;
+        n->spin = s->AngularVelocity;
+        n->good = GoodPosition[i];
+    }
+}
+
+// Before the car list's sort: each car found is put back where it last
+// had no NaN, facing and going as it was. (Stopped, an AI racer thinks
+// itself stuck and backs up for seconds.) One with no such place is left
+// as it is; the sort passes it by.
+static void nan_put_back(World *w)
+{
+    int32_t i;
+
+    nan_watch(w, WSP_REST);
+    for (i = 0; NaNCars != 0 && i < w->TotalNumCars && i < WORLD_MAX_CARS;
+         i++) {
+        Car *c = w->CarTable[i];
+
+        if (!(NaNCars & (1u << i)))
+            continue;
+        NaNCars &= ~(1u << i);
+        if (GoodCar[i] == c)
+            car_reset_to_position(c, &GoodPosition[i], GoodSpeed[i],
+                                  GoodAngle[i]);
+    }
+    NaNCars = 0;
 }
 
 // ----------------------------------------------------- the clock and pause
@@ -431,9 +523,14 @@ void world_build_car_table(World *w)
 // GetCarByNumber and GetCarByDriverNumber are in world.c, beside the
 // replay's pointer snapshot that reads the first.
 
+// The image's `c.le.s`, a's x no greater than b's, is asked the other way
+// round: whether b's x is less. For any two numbers that is the same
+// answer. With a NaN the image's is no both ways round, and the sort would
+// swap the NaN car with its neighbour and back for ever, the step never
+// ending; the port's is yes, and the sort leaves the car where it is.
 int32_t world_car_list_check_flip(const Car *a, const Car *b)
 {
-    return a->State.Position.x <= b->State.Position.x;
+    return !(b->State.Position.x < a->State.Position.x);
 }
 
 static int32_t car_list_in_order(bNode *a, bNode *b)
@@ -735,7 +832,7 @@ void world_do_timestep(World *w, float dt)
         }
     }
 
-    prof_start();
+    prof_start(w);
     if (w->Teleporter != NULL && gTrafficTeleporterDoTimestepFn != NULL)
         gTrafficTeleporterDoTimestepFn(w->Teleporter, dt);
     if (gGlobalCopThinkFn != NULL)
@@ -763,8 +860,10 @@ void world_do_timestep(World *w, float dt)
     if (w->Helicopter != NULL && gChopperFlyFn != NULL)
         gChopperFlyFn(w->Helicopter, dt);
     prof_mark(WSP_CHOPPER);
-    for (i = 0; i < w->TotalNumCars; i++)
+    for (i = 0; i < w->TotalNumCars; i++) {
+        WorldStepCar = i;
         car_begin_movement(w->CarTable[i], dt);
+    }
     prof_mark(WSP_BEGIN);
 
     world_do_timestep_move(w, dt);
@@ -773,6 +872,7 @@ void world_do_timestep(World *w, float dt)
     for (i = 0; i < w->TotalNumCars; i++) {
         if (gCarFinishMovementFn == NULL)
             world_fail("Car::FinishMovement is not ported");
+        WorldStepCar = i;
         gCarFinishMovementFn(w->CarTable[i], dt);
     }
     prof_mark(WSP_FINISH);
@@ -818,6 +918,7 @@ void world_do_timestep(World *w, float dt)
 
     if (gEmProcessAllEventsFn != NULL)
         gEmProcessAllEventsFn();
+    nan_put_back(w);
     blist_sort((bNode *)(void *)&w->CarList, car_list_in_order);
     if (gUpdatePlayersGameStateFn != NULL)
         gUpdatePlayersGameStateFn();

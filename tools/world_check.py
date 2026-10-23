@@ -1868,8 +1868,14 @@ class Model(object):
                 emit("bydrv %d -> %s" % (n, L(call("bydrv", n))))
             elif op == OP_FLIP:
                 a, b = arg(), arg()
-                emit("flip CAR%d CAR%d -> %d"
-                     % (a, b, call("flip", self.cars[a], self.cars[b])))
+                r = call("flip", self.cars[a], self.cars[b])
+                # The port asks whether b's x is less (worldstep.c): the
+                # image's answer but for a NaN, where the image's no both
+                # ways round has the sort swap the car for ever.
+                if any((e.u32(self.cars[k] + 96) & 0x7FFFFFFF) > INF
+                       for k in (a, b)):
+                    r = 1
+                emit("flip CAR%d CAR%d -> %d" % (a, b, r))
             elif op == OP_SORT:
                 emit("sort")
                 call("sort", self.carhead, FN_FLIP)
@@ -2477,10 +2483,10 @@ _m("bynum last match",
    WC)
 _m("bydrv off by one", "world_get_car_by_number(pCurrentWorld, n)",
    "world_get_car_by_number(pCurrentWorld, n + 1)", WC)
-_m("flip strict", "return a->State.Position.x <= b->State.Position.x;",
-   "return a->State.Position.x < b->State.Position.x;")
-_m("flip on z", "return a->State.Position.x <= b->State.Position.x;",
-   "return a->State.Position.z <= b->State.Position.z;")
+_m("flip strict", "return !(b->State.Position.x < a->State.Position.x);",
+   "return !(b->State.Position.x <= a->State.Position.x);")
+_m("flip on z", "return !(b->State.Position.x < a->State.Position.x);",
+   "return !(b->State.Position.z < a->State.Position.z);")
 _m("sort adapter swapped",
    "world_car_list_check_flip((const Car *)(void *)a,\n"
    "                                     (const Car *)(void *)b);",

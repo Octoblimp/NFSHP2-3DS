@@ -36,11 +36,13 @@ bool C3Di_SplitFrame(u32 **pBuf, u32 *pSize);
 
 const char *volatile HangwatchTrail[HANGWATCH_TRAIL];
 volatile uint32_t    HangwatchMarks;
+volatile uint32_t    HangwatchSp;
 
 static const char kApt[] = "aptMainLoop: HOME, sleep or a suspend";
 static const char kApplet[] = "a library applet: the 3DS keyboard";
 
 static void (*s_log)(const char *fmt, ...);
+static void (*s_note)(char *buf, size_t n);
 static Thread            s_thread;
 static LightEvent        s_quit;         // hangwatch_stop
 static volatile uint32_t s_frames;       // frames begun
@@ -130,10 +132,87 @@ static void log_marks(uint32_t since, bool moving)
           moving ? "still moving" : "none moving", len ? line : "none");
 }
 
+// The game's note (hangwatch_note), when it has one.
+static void log_note(void)
+{
+    char line[256];
+
+    if (!s_note) return;
+    line[0] = '\0';
+    s_note(line, sizeof line);
+    if (line[0]) s_log("hangwatch: %s", line);
+}
+
+// How far the stack is read: down from the last mark's stack pointer, and
+// a little up from it, since a mark's own frame is gone by the calls after
+// it (frameMark's, from raceFrame).
+#define STACK_DOWN  (8u << 10)
+#define STACK_UP    64u
+#define STACK_WORDS 48
+
+// The text's addresses: the mapping at 0x100000, where the .3dsx's and the
+// CIA's code both start, is the text alone (the rodata after it is not
+// executable).
+static bool code_range(uint32_t *lo, uint32_t *hi)
+{
+    MemInfo  mi;
+    PageInfo pi;
+
+    if (R_FAILED(svcQueryMemory(&mi, &pi, 0x00100000u))) return false;
+    if (!(mi.perm & MEMPERM_EXECUTE)) return false;
+    *lo = mi.base_addr;
+    *hi = mi.base_addr + mi.size;
+    return true;
+}
+
+// The words on the main thread's stack below the last mark's stack pointer
+// that point into the text, the nearest first, each with its offset from
+// that pointer: `nm -n` on the build's .elf names them. Within the stack's
+// own mapping, so nothing unmapped is read.
+static void log_stack(void)
+{
+    uint32_t sp = HangwatchSp, lo, hi, top, bottom, a;
+    MemInfo  mi;
+    PageInfo pi;
+    char     line[160];
+    size_t   len = 0;
+    int      n = 0;
+
+    if (sp == 0 || !code_range(&lo, &hi)) return;
+    if (R_FAILED(svcQueryMemory(&mi, &pi, sp))) return;
+    top = sp + STACK_UP;
+    if (top > mi.base_addr + mi.size) top = mi.base_addr + mi.size;
+    bottom = sp - STACK_DOWN;
+    if (bottom < mi.base_addr) bottom = mi.base_addr;
+    s_log("hangwatch: stack at the last mark %08lx (%08lx..%08lx), code "
+          "%08lx..%08lx", (unsigned long)sp, (unsigned long)mi.base_addr,
+          (unsigned long)(mi.base_addr + mi.size), (unsigned long)lo,
+          (unsigned long)hi);
+    for (a = (top - 4u) & ~3u; a >= bottom && n < STACK_WORDS; a -= 4u) {
+        uint32_t v = *(const volatile uint32_t *)a;
+
+        if (v < lo || v >= hi) continue;
+        len += (size_t)snprintf(line + len, sizeof line - len, " %ld:%08lx",
+                                (long)(int32_t)(a - sp), (unsigned long)v);
+        if (++n % 8 == 0) {
+            s_log("hangwatch: stack%s", line);
+            len = 0;
+        }
+    }
+    if (len) s_log("hangwatch: stack%s", line);
+    else if (n == 0) s_log("hangwatch: stack has no code words");
+}
+
+void hangwatch_note(void (*fn)(char *buf, size_t n))
+{
+    s_note = fn;
+}
+
 static void watch_main(void *arg)
 {
     uint32_t frames = 0, marks = 0, next = 3000, stalledAt = 0;
     bool     stalled = false;
+    int      reports = 0;
 
     (void)arg;
     for (;;) {
@@ -154,6 +233,7 @@ static void watch_main(void *arg)
             frames = f;
             next = 3000;
             stalled = false;
+            reports = 0;
             continue;
         }
         if (f == 0 || HangwatchTrail[(m - 1) % HANGWATCH_TRAIL] == kApt
@@ -163,6 +243,9 @@ static void watch_main(void *arg)
         if (since < next) continue;
         if (!stalled) stalledAt = s_beatMs;
         log_marks(since, moving);
+        log_note();
+        // At 3 s and 10 s: what stays the same between them is the loop.
+        if (reports++ < 2) log_stack();
         log_queue("hangwatch");
         if (!stalled) log_regs("hangwatch");
         // The report on the card now, not with the next batch.
