@@ -90,6 +90,8 @@ SOURCES = [HARNESS, ESC, "3DS Files/source/average.c",
            "3DS Files/source/replay.c", "3DS Files/source/p32.c",
            "3DS Files/source/vtable.c"]
 RETAIL_VOICES = ["-DENGINESOUND_RETAIL_VOICES=1"]
+# Retail's top gear, whose zero shift point the port replaces (enginesound.h).
+RETAIL_TOP_GEAR = ["-DENGINESOUND_RETAIL_TOP_GEAR=1"]
 SOUND_DIR = ROOT / "extracted-retail" / "SOUND"
 TABLES = (SOUND_DIR / "ENGINE.CTB", SOUND_DIR / "ENGINE.LTB")
 HARNESS_TIMEOUT = 30
@@ -1080,6 +1082,17 @@ def script():
     a("redline|0|" + fx(-50.0))
     a("dt|0|7|7|3|0")
     a("redline|0|" + fx(9000.0))
+    # Top gear as the disc's cars have it: the gear above's shift point is
+    # never written, so it is 0 (FLT_MAX in retail), then one under the
+    # red line. The port's own top gear differs here (enginesound.h).
+    a("dt|0|6|6|3|0")
+    st(0, 10.0, 6, 1.0, 3000.0)
+    for top in (0.0, 3000.0):
+        a("shift|0|7|" + fx(top))
+        a("redline|0|" + fx(5000.0))
+        # Below zero the cap can't hide an infinity: -FLT_MAX, not -inf.
+        a("redline|0|" + fx(-50.0))
+    a("shift|0|7|" + fx(7000.0))
     a("dt|0|3|3|3|0")
     a("mode|0|3")
     a("redline|0|" + fx(4321.0))
@@ -1617,7 +1630,8 @@ def script():
 # ================================================================= build
 
 def build_harness(tmp, retail_voices, name="enginesound_test"):
-    flags = hostbuild.FLAGS + (RETAIL_VOICES if retail_voices else [])
+    flags = (hostbuild.FLAGS + RETAIL_TOP_GEAR
+             + (RETAIL_VOICES if retail_voices else []))
     return hostbuild.build(tmp, SOURCES, name=name, flags=flags)
 
 
@@ -2003,7 +2017,9 @@ MUTATIONS = [
        "                == c->pCarTypeInfo->DriveTrain.NumGears + 2)"),
     _m("red-top-add", "                r += s->TopGearRPMOffset;",
        "                r -= s->TopGearRPMOffset;"),
-    _m("red-cap", "            r = min_f(r, ei->MaxRPM * ratio);",
+    _m("red-mul", "            r = ee_mul(r, ratio);",
+       "            r *= ratio;"),
+    _m("red-cap", "            r = min_f(r, ee_mul(ei->MaxRPM, ratio));",
        "            r = min_f(r, ei->MaxRPM);"),
     _m("red-sync", "    c->State.RedLineSyncRPM = r;\n", ""),
     _m("red-out", "    *rpm = r;\n}", "}"),
@@ -2440,7 +2456,8 @@ def mutate_pass(only=None, jobs=None):
     for retail_voices in (False, True):
         label = "retail voices" if retail_voices else "mono"
         base = model_cached(lines, not retail_voices)
-        flags = hostbuild.FLAGS + (RETAIL_VOICES if retail_voices else [])
+        flags = (hostbuild.FLAGS + RETAIL_TOP_GEAR
+             + (RETAIL_VOICES if retail_voices else []))
         with tempfile.TemporaryDirectory() as tmp:
             exe = build_harness(tmp, retail_voices)
             out = Path(tmp) / "base.txt"

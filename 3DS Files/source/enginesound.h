@@ -50,6 +50,14 @@ struct Car;
 #define ENGINESOUND_RETAIL_VOICES 0
 #endif
 
+// Retail's UpdateToRedLineRPM in top gear divides the red line by a shift
+// point that is never written (0), so the engine's sound sticks at the red
+// line in every car's top gear. At 0 the port scales the top gear by 1
+// (enginesound.c); the checker builds with this at 1 to run retail's.
+#ifndef ENGINESOUND_RETAIL_TOP_GEAR
+#define ENGINESOUND_RETAIL_TOP_GEAR 0
+#endif
+
 // ------------------------------------------------------------- the tables
 
 // Retail's. Sound3d's slots (sound3d.h); ActivateSound and DeactivateSound

@@ -257,6 +257,15 @@ In top gear it adds TopGearRPMOffset. The result is capped at MaxRPM
 times the same ratio. The RPM is also written to the car's
 State.RedLineSyncRPM.
 
+"The next gear's" is ShiftUpRPM[gear + 1], and in top gear that is
+past the last point [CalculateShiftPoints](car-drivetrain.md) writes
+(top gear's own, MaxRPM). The slot pool zeroes the record, so retail
+divides by 0 and the ratio is FLT_MAX: in every car's top gear the
+level sits at 440, the red line, while CurrentRPM climbs 270 a frame,
+and after the downshift it takes seconds to fall back at 650 a frame.
+The Elise, with five gears, reaches its top gear at about 110 mph. The
+port changes this (below).
+
 **UpdateNitroEffect(volume, azimuth, pitch)**, in physics movement:
 
 - When the engine's NitroFlag first goes on, it plays the start and the
@@ -432,6 +441,13 @@ have them:
   address. ResolveTables only marks each table, and each read adds the
   field's own address to its offset.
 - **The bSamples are 4 bytes shorter**, as noted above.
+- **Top gear.** UpdateToRedLineRPM scales the top gear by 1, where
+  retail divides by the unwritten zero shift point above it and sticks
+  the sound at the red line (a player's report: the Elise past 110 mph,
+  2026-11-11). A shift point that isn't above 0 counts as the red line
+  too. `ENGINESOUND_RETAIL_TOP_GEAR` at 1 brings back retail's, and the
+  checker builds with it. Both multiplies are the EE's (`ee_mul`), so
+  retail's FLT_MAX stays FLT_MAX and is not an infinity.
 - **A missing patch.** Init then stops before reading the tables. The
   port's bMalloc zeroes memory, so the definitions stay NULL and
   HighestPatch stays 0, and UpdateEngine plays nothing. Retail would
@@ -452,24 +468,29 @@ through the port's tables. Both sides use the same printing fakes of:
 - the ticker, eGetView, IsReplayDemoMode and DriveTrain::GetState;
 - bGetFile, which serves the disc's own ENGINE.CTB and ENGINE.LTB.
 
-The harness is built twice. With `ENGINESOUND_RETAIL_VOICES` at 1 it
+The harness is built twice, both times with `ENGINESOUND_RETAIL_TOP_GEAR`
+at 1. With `ENGINESOUND_RETAIL_VOICES` at 1 it
 runs against the model as it is. At 0 it runs against the model in
 mono, where retail's GetAudioMode answers 0 and the player count is
 never 1.
 
-The script, 1024 operations, covers every function above:
+The script, 1033 operations, covers every function above:
 
 - each crossfade's ends and the Timbre beyond them;
 - the volume's cap, negative tables and the voices' 15-step smoothing;
 - the right voices' delay and its wrap;
+- the red line in each gear, and top gear with the disc's zero shift
+  point above it;
 - every audio mode, replay state and POV;
 - the nitro's start, hold, fade and stop;
 - the ducker either side of its music and throttle limits;
 - the AI's gear-change settling and the start line's revs, with the
   dice either side of 4.
 
-Both builds match retail: 6355 and 6234 lines, 0 differ.
+Both builds match retail: 6368 and 6247 lines, 0 differ. Built with
+the port's top gear instead, the two zero-shift-point lines differ
+(FLT_MAX and 11487 in retail, 5150 in the port) and nothing else.
 
-`--mutate` runs 384 mutations of enginesound.c out of the tree, in
+`--mutate` runs 385 mutations of enginesound.c out of the tree, in
 parallel, on the mono build first. Those that survive it run again on
-the retail-voices build. All 384 are caught.
+the retail-voices build. All 385 are caught.

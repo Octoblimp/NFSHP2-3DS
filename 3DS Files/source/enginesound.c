@@ -495,14 +495,25 @@ void playerenginesound_update_to_red_line_rpm(PlayerEngineSound *s,
             float shift = dt->ShiftUpRPM[gear + 1];
             float ratio;
 
+#if !ENGINESOUND_RETAIL_TOP_GEAR
+            // In top gear retail reads a shift point CalculateShiftPoints
+            // never writes, which the slot pool zeroed: the ratio was
+            // FLT_MAX, the sound sat at the red line and the smoothed RPM
+            // climbed 270 a frame, to fall 650 a frame after a downshift
+            // (the Elise's fifth, from about 110 mph). With no gear above,
+            // the port scales the top gear by 1.
+            if (gear > c->pCarTypeInfo->DriveTrain.NumGears
+                || !(shift > 0.0f))
+                shift = red;
+#endif
             if (red < shift)
                 shift = red;
             ratio = ee_div(red, shift);
-            r *= ratio;
+            r = ee_mul(r, ratio);
             if (c->State.CurrentGear
                 == c->pCarTypeInfo->DriveTrain.NumGears + 1)
                 r += s->TopGearRPMOffset;
-            r = min_f(r, ei->MaxRPM * ratio);
+            r = min_f(r, ee_mul(ei->MaxRPM, ratio));
         }
     }
     c->State.RedLineSyncRPM = r;
