@@ -29492,3 +29492,10 @@ you see. Only fix anything you notice that's an actual problem."
   (8,525,137, b3d05d45...2ade), downloaded back and matching. The notes
   say the engine fix hasn't been heard on a 3DS and the exes are
   unsigned (SmartScreen may warn).
+- **PC Apps/ is in the repository now**, at the user's word ("Put PC
+  Tools folder into the repo and commit it"): the .gitignore line is gone
+  and `PC Apps/NFSHP2-3DS Packer/` is committed as built: the two exes
+  (byte-identical to v1.0.4's assets), README.txt and source/ (the same
+  as tools/ and docs/zdir_names_retail.txt). Rebuilding with
+  build_packer.py replaces that folder, so commit it again after a
+  rebuild. The release and its tag were left as they were.
