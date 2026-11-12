@@ -40,7 +40,8 @@ The Packer is `tools/hp2_packer_gui.pyw` in this repository, and the same
 runs from a command line, on any system with Python:
 
 ```
-python tools/hp2_packer.py --disc NFSHP2.iso --card E:```
+python tools/hp2_packer.py --disc NFSHP2.iso --card E:\
+```
 
 `nfshp2-packer.exe` on the Releases page is the same command without
 Python. `python tools/build_packer.py` builds both programs (with
