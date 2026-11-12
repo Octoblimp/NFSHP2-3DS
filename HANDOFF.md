@@ -29400,3 +29400,95 @@ you see. Only fix anything you notice that's an actual problem."
   `nfshp2_debug.txt` with `DebugLog 1` if a race still freezes.
 - Next, when the player sends a log: look for "not finite after" lines;
   the part and car name the site to fix with eefpu.h's helpers.
+
+## Session 158 -- the Elise's engine at the red line, and the Packer
+
+- **The report.** A player: the Lotus Elise's engine "sounds like it's
+  redlining" past 110 mph and only comes back after slowing down.
+- **The cause** is retail's own. PlayerEngineSound::UpdateToRedLineRPM
+  (`0x00210880`) scales the RPM by red line / ShiftUpRPM[gear + 1], and in
+  top gear that is the entry after top gear's own MaxRPM, which
+  CalculateShiftPoints never writes. The DriveTrain slot pool zeroes its
+  slots (retail's too), so the ratio is red / 0 = FLT_MAX: the level sits
+  at 440 and CurrentRPM climbs 270 a frame for as long as the car is in
+  top gear, then falls 650 a frame after the downshift. Every car does
+  it in top gear; the Elise (five gears, fifth from about 110 mph) is the
+  one players reach it in. Car data dumped from GLOBALB.BUN's CarTypeInfo
+  array: the 5-gear cars are TS50, Jaguar, Vauxhall, Opel, Elise, CL55,
+  Diablo and traffic.
+- **The fix**: with no gear above (gear > NumGears) or a shift point not
+  above 0, the port uses the red line, so the top gear scales by 1 plus
+  its TopGearRPMOffset. `ENGINESOUND_RETAIL_TOP_GEAR` 1 is retail's; the
+  checker builds with it. The two multiplies are now ee_mul, so retail's
+  FLT_MAX isn't an infinity. enginesound_check: a top-gear case with the
+  disc's zero shift point (and one under the red line, and a negative
+  RPM) added; 1033 ops, 0 differ both builds; 385 mutations, all caught.
+  Built with the port's top gear, those lines and nothing else differ
+  (retail FLT_MAX / 11487, port 5150). The 3DS build compiles. Not heard
+  in Azahar or on a 3DS.
+- **NFSHP2-3DS Packer**, at the user's word ("make a GUI application like
+  what happened with NFSU2-3DS ... Just a packer application"): a window
+  (`tools/hp2_packer_gui.pyw`, tkinter) and command line
+  (`tools/hp2_packer.py`) that run the README's steps 2 to 4 in one go
+  from a disc image (.iso, read in place with a small ISO 9660 reader),
+  the disc's drive, or a folder with ZDIR.BIN and ZZDATA.BIN. It checks
+  SYSTEM.CNF's serial (notes anything but SLES_507.31), the free space,
+  takes the NFSHP2 folder itself as the card's root, can stop between
+  files, and deletes its work folder only if the run made it.
+  zdir_extract.py, audio_pack.py and make_card.py gained callable
+  extract() / pack() / make() with log and progress callbacks; their
+  command lines are unchanged. The README's Python steps stay as they
+  were, under "With Python, step by step".
+- **tools/build_packer.py** builds `PC Apps/NFSHP2-3DS Packer/` with
+  PyInstaller: `NFSHP2-3DS Packer.exe` (window, 11.7 MB) and
+  `nfshp2-packer.exe` (console, 8.5 MB), both one-file, a README.txt, and
+  source/ with the .py files, the name list and the icon (an original
+  one, drawn by the script). It builds from a copy under a subst drive
+  and then opens both programs back up and refuses to write them if any
+  file or code object names the home folder, the user's folder or the
+  repository's path. `/PC Apps/` is gitignored, like the CIA: release
+  assets.
+- **Tested**: the command line on the disc folder made a card of 299
+  files, 2.89 GB, in 2.2 minutes; every file the local extracted-retail
+  has is byte-identical, and all 25 .SBK match out/SOUND-retail. The
+  same from an ISO 9660 image of the disc's files (test-only writer)
+  made an identical card. The reader also lists a real PS2 DVD image
+  and names a non-HP2 disc as such.
+- **Run again, copy less.** The first window test found a second run
+  copying all 299 files again: a new extraction gives every file a new
+  time, and make_card skips by size and time. Now the packer dates the
+  disc's files with ZZDATA.BIN's own date (the image's directory record,
+  or the file's time from a drive or folder), so the same disc gives the
+  same times every run; the .SBK keep theirs (make_card wants them newer
+  than the .MSH). `OUTPUT_REVISION` moves every date 10 s, for when the
+  packer starts writing different bytes for the same disc.
+  zdir_extract.py doesn't rewrite a file whose bytes are unchanged
+  (write_if_changed). The work folder gets a made-by-nfshp2-packer.txt
+  when the run makes it, so a run that was stopped and started again
+  still deletes it; make_card leaves that file out. make_card's same()
+  also takes an exact hour off (FAT keeps local time).
+- **Tested after that**: two runs onto the same card from new work
+  folders: the second copied 25 files (the banks, 5.6 MB), skipped 274,
+  0.8 minutes. The window driven hidden through a whole run (5 steps,
+  bar full, done dialog, work folder deleted). The rebuilt exes (window
+  11,658,221 bytes, console 8,525,137) pass the build's scan; the
+  console one ran the same card from its own bundle (25 copied, 274
+  there), and the window one opens.
+- **Not done**: the engine fix isn't heard yet (Azahar or 3DS); nothing
+  committed; the README's "Releases page" line is true only once a
+  release has the two exes as assets (v1.0.4 would be next).
+- **Released v1.0.4** at the user's word ("Commit and release"). Commits
+  1ceb88e (engine fix), e9afaa5 (Packer), 863ca49 (Makefile 1.0.4, same
+  title ID), 84ab258 (a README line an edit had joined: the Packer
+  command's `E:\` and its closing fence). Built with build_cia.ps1, no
+  personal paths in the CIA or 3DSX; run_azahar_test PASS (the "START
+  was taken" line is the log's lag, as before). Tag v1.0.4, annotated,
+  pushed with master.
+  https://github.com/Octoblimp/NFSHP2-3DS/releases/tag/v1.0.4, Latest,
+  with `NFSHP2-3DS.cia` (1,854,400, 19e18178...c17b), `NFSHP2-3DS.3dsx`
+  (2,026,820, 6f1474ca...7ae5), `NFSHP2-3DS-Packer.exe` (11,658,221,
+  9f8d7281...877f; renamed from the build's "NFSHP2-3DS Packer.exe",
+  since GitHub turns spaces into dots) and `nfshp2-packer.exe`
+  (8,525,137, b3d05d45...2ade), downloaded back and matching. The notes
+  say the engine fix hasn't been heard on a 3DS and the exes are
+  unsigned (SmartScreen may warn).
