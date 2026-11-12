@@ -45,7 +45,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bhash import bhash  # noqa: E402
-from lzdecompress import decompress  # noqa: E402
+from lzdecompress import decompress as decompress_blob  # noqa: E402
 
 SECTOR = 2048
 RECORD_SIZE = 12
@@ -60,7 +60,9 @@ def hot_chunked(name):
 
 
 def read_entries(zdir_path):
-    data = Path(zdir_path).read_bytes()
+    """ZDIR.BIN's entries, from its path or its bytes."""
+    data = (bytes(zdir_path) if isinstance(zdir_path, (bytes, bytearray))
+            else Path(zdir_path).read_bytes())
     if len(data) % RECORD_SIZE != 0:
         raise SystemExit("ZDIR.BIN size %d is not a multiple of %d"
                          % (len(data), RECORD_SIZE))
@@ -98,6 +100,20 @@ def read_names(path):
     return names, listed
 
 
+def write_if_changed(path, data):
+    """Write data unless the file already holds exactly it, so a second run
+    keeps the first one's file times (make_card.py copies by size and
+    time). True if it wrote."""
+    p = Path(path)
+    try:
+        if p.stat().st_size == len(data) and p.read_bytes() == data:
+            return False
+    except OSError:
+        pass
+    p.write_bytes(data)
+    return True
+
+
 def misnamed(manifest_path):
     """The rows of an earlier manifest whose name isn't their entry's."""
     p = Path(manifest_path)
@@ -110,6 +126,111 @@ def misnamed(manifest_path):
         if len(f) >= 7 and f[5] and bhash(f[5]) != int(f[1], 16):
             bad.append(f[5])
     return bad
+
+
+def extract(zdir, zzdata, out_dir, names_path, decompress=False, only=(),
+            zz_base=0, zz_size=None, log=print, warn=None, progress=None):
+    """Extract the disc into out_dir; the command line's work, callable.
+
+    zdir is ZDIR.BIN's path or its bytes. zzdata is the path of the file
+    ZZDATA.BIN is in, starting zz_base bytes in and zz_size long (the rest
+    of the file by default), so a disc image can be read where it is.
+    progress(done, total), if given, is called after each entry and may
+    raise to stop. Returns (written, skipped, expanded)."""
+    if warn is None:
+        def warn(msg):
+            print(msg, file=sys.stderr)
+    only = [g.upper().replace("/", chr(92)) for g in only]
+
+    entries = read_entries(zdir)
+    names, listed = read_names(names_path)
+    out_dir = Path(out_dir)
+    if zz_size is None:
+        zz_size = Path(zzdata).stat().st_size - zz_base
+    manifest_path = out_dir / "manifest.csv"
+    bad = misnamed(manifest_path)
+    if bad:
+        raise SystemExit(
+            "%s came from an older zdir_extract.py that put %d files under "
+            "the wrong names (%s, ...). Delete the whole folder and run this "
+            "again." % (out_dir, len(bad), ", ".join(bad[:3])))
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    hashes = {e["hash"] for e in entries}
+    unnamed = [e for e in entries if e["hash"] not in names]
+    if hashes != listed:
+        absent = sorted(n for h, n in names.items() if h not in hashes)
+        log("This disc's directory isn't the one %s was made from: %d of "
+            "its %d entries are new to it, and %d named files aren't on "
+            "it%s" % (Path(names_path).name, len(hashes - listed),
+                      len(entries), len(absent), ":" if absent else "."))
+        for n in absent:
+            log("    " + n)
+
+    # The leftover track .BUNs whose .LZC is on the disc: with --decompress
+    # the .LZC's expansion takes the name.
+    lzcs = {names[h].upper()[:-4] for h in hashes
+            if h in names and hot_chunked(names[h])}
+
+    def superseded(name):
+        up = (name or "").upper()
+        return (decompress and fnmatch.fnmatchcase(up, TRACK_BUN)
+                and up[:-4] in lzcs)
+
+    written = skipped = expanded = 0
+    with open(zzdata, "rb") as zz, \
+            open(manifest_path, "w", encoding="utf-8", newline="\n") as manifest:
+        manifest.write("index,hash_hex,fad,size,offset,name,out_file\n")
+        for n_done, e in enumerate(entries, 1):
+            if progress:
+                progress(n_done - 1, len(entries))
+            end = e["offset"] + e["size"]
+            if end > zz_size:
+                warn("WARNING: entry %d exceeds ZZDATA.BIN bounds "
+                     "(offset=%d size=%d, file=%d)"
+                     % (e["index"], e["offset"], e["size"], zz_size))
+                skipped += 1
+                continue
+            name = names.get(e["hash"])
+            if superseded(name) or (only and not any(
+                    fnmatch.fnmatchcase((name or "?").upper(), g) for g in only)):
+                manifest.write("%d,%08x,%d,%d,%d,%s,\n"
+                               % (e["index"], e["hash"], e["fad"], e["size"],
+                                  e["offset"], name or ""))
+                continue
+            zz.seek(zz_base + e["offset"])
+            blob = zz.read(e["size"])
+
+            if name:
+                rel = Path(name.replace(chr(92), "/"))
+            else:
+                rel = Path("unknown") / ("%03d_%08x.bin" % (e["index"], e["hash"]))
+            dest = out_dir / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            write_if_changed(dest, blob)
+            written += 1
+
+            if decompress and blob[:4] == b"COMP":
+                if hot_chunked(name):
+                    raw = dest.with_suffix(".BUN")
+                else:
+                    raw = dest.with_suffix(dest.suffix + ".raw")
+                try:
+                    write_if_changed(raw, decompress_blob(blob))
+                    expanded += 1
+                except ValueError as exc:
+                    warn("WARNING: entry %d: %s" % (e["index"], exc))
+
+            manifest.write("%d,%08x,%d,%d,%d,%s,%s\n"
+                           % (e["index"], e["hash"], e["fad"], e["size"],
+                              e["offset"], name or "", rel.as_posix()))
+        if progress:
+            progress(len(entries), len(entries))
+
+    log("Extracted %d entries (%d named, %d skipped, %d decompressed) to %s"
+        % (written, len(entries) - len(unnamed), skipped, expanded, out_dir))
+    log("manifest: %s" % manifest_path)
+    return written, skipped, expanded
 
 
 def main():
@@ -135,93 +256,8 @@ def main():
             a.names = str(root / "docs" / "zdir_names_retail.txt")
     if not (a.zdir and a.zzdata and a.out_dir):
         ap.error("zdir, zzdata and out_dir are needed without --retail")
-    only = [g.upper().replace("/", chr(92)) for g in a.only]
-
-    entries = read_entries(a.zdir)
-    names, listed = read_names(a.names)
-    out_dir = Path(a.out_dir)
-    zzdata_size = Path(a.zzdata).stat().st_size
-    manifest_path = out_dir / "manifest.csv"
-    bad = misnamed(manifest_path)
-    if bad:
-        raise SystemExit(
-            "%s came from an older zdir_extract.py that put %d files under "
-            "the wrong names (%s, ...). Delete the whole folder and run this "
-            "again." % (out_dir, len(bad), ", ".join(bad[:3])))
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    hashes = {e["hash"] for e in entries}
-    unnamed = [e for e in entries if e["hash"] not in names]
-    if hashes != listed:
-        absent = sorted(n for h, n in names.items() if h not in hashes)
-        print("This disc's directory isn't the one %s was made from: %d of "
-              "its %d entries are new to it, and %d named files aren't on "
-              "it%s" % (Path(a.names).name, len(hashes - listed), len(entries),
-                        len(absent), ":" if absent else "."))
-        for n in absent:
-            print("    " + n)
-
-    # The leftover track .BUNs whose .LZC is on the disc: with --decompress
-    # the .LZC's expansion takes the name.
-    lzcs = {names[h].upper()[:-4] for h in hashes
-            if h in names and hot_chunked(names[h])}
-
-    def superseded(name):
-        up = (name or "").upper()
-        return (a.decompress and fnmatch.fnmatchcase(up, TRACK_BUN)
-                and up[:-4] in lzcs)
-
-    written = skipped = expanded = 0
-    with open(a.zzdata, "rb") as zz, \
-            open(manifest_path, "w", encoding="utf-8", newline="\n") as manifest:
-        manifest.write("index,hash_hex,fad,size,offset,name,out_file\n")
-        for e in entries:
-            end = e["offset"] + e["size"]
-            if end > zzdata_size:
-                print("WARNING: entry %d exceeds ZZDATA.BIN bounds "
-                      "(offset=%d size=%d, file=%d)"
-                      % (e["index"], e["offset"], e["size"], zzdata_size),
-                      file=sys.stderr)
-                skipped += 1
-                continue
-            name = names.get(e["hash"])
-            if superseded(name) or (only and not any(
-                    fnmatch.fnmatchcase((name or "?").upper(), g) for g in only)):
-                manifest.write("%d,%08x,%d,%d,%d,%s,\n"
-                               % (e["index"], e["hash"], e["fad"], e["size"],
-                                  e["offset"], name or ""))
-                continue
-            zz.seek(e["offset"])
-            blob = zz.read(e["size"])
-
-            if name:
-                rel = Path(name.replace(chr(92), "/"))
-            else:
-                rel = Path("unknown") / ("%03d_%08x.bin" % (e["index"], e["hash"]))
-            dest = out_dir / rel
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(blob)
-            written += 1
-
-            if a.decompress and blob[:4] == b"COMP":
-                if hot_chunked(name):
-                    raw = dest.with_suffix(".BUN")
-                else:
-                    raw = dest.with_suffix(dest.suffix + ".raw")
-                try:
-                    raw.write_bytes(decompress(blob))
-                    expanded += 1
-                except ValueError as exc:
-                    print("WARNING: entry %d: %s" % (e["index"], exc), file=sys.stderr)
-
-            manifest.write("%d,%08x,%d,%d,%d,%s,%s\n"
-                           % (e["index"], e["hash"], e["fad"], e["size"],
-                              e["offset"], name or "", rel.as_posix()))
-
-    print("Extracted %d entries (%d named, %d skipped, %d decompressed) to %s"
-          % (written, len(entries) - len(unnamed),
-             skipped, expanded, out_dir))
-    print("manifest:", manifest_path)
+    extract(a.zdir, a.zzdata, a.out_dir, a.names, decompress=a.decompress,
+            only=a.only)
 
 
 if __name__ == "__main__":

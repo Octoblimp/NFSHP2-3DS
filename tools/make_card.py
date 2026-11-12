@@ -49,6 +49,8 @@ LEAVE_OUT = [
     "*.MSH", "*.MSB", "*.RAW",
     "UNKNOWN/*", "MANIFEST.CSV", "KEY.TXT", "NFS6.ICO", "PAL.TAG",
     "MARKERS/*", "NIS/*", "REPLAY/MAY31/*",
+    # hp2_packer.py's note that it made the folder.
+    "MADE-BY-NFSHP2-PACKER.TXT",
 ]
 
 
@@ -61,36 +63,33 @@ def same(src, dst):
     if not dst.is_file():
         return False
     a, b = src.stat(), dst.stat()
-    # FAT keeps a file's time to 2 seconds.
-    return a.st_size == b.st_size and abs(a.st_mtime - b.st_mtime) <= 2
+    # FAT keeps a file's time to 2 seconds, in local time: Windows shows
+    # it an hour off once summer time starts or ends.
+    d = abs(a.st_mtime - b.st_mtime)
+    return a.st_size == b.st_size and (d <= 2 or abs(d - 3600) <= 2)
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("dest", help="the SD card's root, or a folder; "
-                                 "the files go into its NFSHP2 folder")
-    ap.add_argument("--src", default=str(ROOT / "extracted-retail"))
-    ap.add_argument("--prune", action="store_true",
-                    help="delete the files in NFSHP2 that aren't in the set "
-                         "(never SAVES)")
-    a = ap.parse_args()
-
-    src = Path(a.src)
+def make(dest, src, prune=False, log=print, progress=None):
+    """Copy src (the extraction) into dest/NFSHP2; the command line's work,
+    callable. progress(done, total), if given, is called around each file
+    and may raise to stop. Returns the number of leftover files found."""
+    src = Path(src)
     if not (src / "GLOBAL" / "GLOBALB.BUN").is_file():
-        sys.exit("%s has no GLOBAL/GLOBALB.BUN: run zdir_extract.py "
-                 "--retail --decompress first" % src)
+        raise SystemExit("%s has no GLOBAL/GLOBALB.BUN: run zdir_extract.py "
+                         "--retail --decompress first" % src)
     bad = misnamed(src / "manifest.csv")
     if bad:
-        sys.exit("%s came from an older zdir_extract.py that put %d files "
-                 "under the wrong names. Delete it, and the NFSHP2 folder on "
-                 "the card (keep NFSHP2/SAVES), then do the README's steps "
-                 "again." % (src, len(bad)))
+        raise SystemExit(
+            "%s came from an older zdir_extract.py that put %d files "
+            "under the wrong names. Delete it, and the NFSHP2 folder on "
+            "the card (keep NFSHP2/SAVES), then do the README's steps "
+            "again." % (src, len(bad)))
     for msh in sorted((src / "SOUND").glob("*.MSH")):
         sbk = msh.with_suffix(".SBK")
         if not sbk.is_file() or sbk.stat().st_mtime < msh.stat().st_mtime:
-            sys.exit("%s has no up-to-date %s: run audio_pack.py, and let it "
-                     "finish, first" % (msh.parent, sbk.name))
-    out = Path(a.dest) / "NFSHP2"
+            raise SystemExit("%s has no up-to-date %s: run audio_pack.py, and "
+                             "let it finish, first" % (msh.parent, sbk.name))
+    out = Path(dest) / "NFSHP2"
 
     files = sorted(p for p in src.rglob("*")
                    if p.is_file() and wanted(p.relative_to(src).as_posix()))
@@ -104,27 +103,44 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     free = shutil.disk_usage(out).free
     if need > free:
-        sys.exit("%s needs %.2f GB more and has %.2f GB free"
-                 % (out, need / 1e9, free / 1e9))
+        raise SystemExit("%s needs %.2f GB more and has %.2f GB free"
+                         % (out, need / 1e9, free / 1e9))
 
     for i, p in enumerate(todo, 1):
+        if progress:
+            progress(i - 1, len(todo))
         dst = out / p.relative_to(src)
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(p, dst)
-        print("[%d/%d] %s" % (i, len(todo), p.relative_to(src).as_posix()))
+        log("[%d/%d] %s" % (i, len(todo), p.relative_to(src).as_posix()))
+    if progress:
+        progress(len(todo), len(todo))
     for p in extra:
-        if a.prune:
+        if prune:
             p.unlink()
-            print("deleted %s" % p.relative_to(out).as_posix())
-    print("%s: %d files, %.2f GB (%d copied, %d already there)"
-          % (out, len(files), sum(p.stat().st_size for p in files) / 1e9,
-             len(todo), len(files) - len(todo)))
-    if extra and not a.prune:
-        print("%d files in %s aren't from %s, and the game may load them:"
-              % (len(extra), out, src))
+            log("deleted %s" % p.relative_to(out).as_posix())
+    log("%s: %d files, %.2f GB (%d copied, %d already there)"
+        % (out, len(files), sum(p.stat().st_size for p in files) / 1e9,
+           len(todo), len(files) - len(todo)))
+    if extra and not prune:
+        log("%d files in %s aren't from %s, and the game may load them:"
+            % (len(extra), out, src))
         for p in extra[:10]:
-            print("    " + p.relative_to(out).as_posix())
-        print("Run this again with --prune to delete them (SAVES is kept).")
+            log("    " + p.relative_to(out).as_posix())
+        log("Run this again with --prune to delete them (SAVES is kept).")
+    return len(extra)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("dest", help="the SD card's root, or a folder; "
+                                 "the files go into its NFSHP2 folder")
+    ap.add_argument("--src", default=str(ROOT / "extracted-retail"))
+    ap.add_argument("--prune", action="store_true",
+                    help="delete the files in NFSHP2 that aren't in the set "
+                         "(never SAVES)")
+    a = ap.parse_args()
+    make(a.dest, a.src, a.prune)
 
 
 if __name__ == "__main__":

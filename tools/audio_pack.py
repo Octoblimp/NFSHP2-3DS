@@ -178,6 +178,45 @@ def build_bank(msh, verify=False):
     return name, bytes(out) + bytes(blob), report
 
 
+def pack(src, out_dir, report=False, log=print, progress=None):
+    """Build every bank under src (a SOUND/ folder, or one .MSH) into
+    out_dir; the command line's work, callable. progress(done, total), if
+    given, is called around each bank and may raise to stop. Returns the
+    number of channels that didn't decode back exactly (0 without
+    report)."""
+    src = Path(src)
+    mshs = sorted(src.glob("*.MSH")) if src.is_dir() else [src]
+    if not mshs:
+        raise SystemExit("no .MSH under %s" % src)
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    total_p = total_b = 0
+    checked = inexact = 0
+    for k, msh in enumerate(mshs):
+        if progress:
+            progress(k, len(mshs))
+        name, blob, rep = build_bank(msh, report)
+        (out_dir / (name + ".SBK")).write_bytes(blob)
+        total_p += len(rep)
+        total_b += len(blob)
+        if report:
+            for pname, ch, n, exact in rep:
+                checked += len(exact)
+                inexact += exact.count(False)
+                log("  %-10s %-24s %dch %7d  %s"
+                    % (name, pname, ch, n,
+                       " ".join("exact" if e else "DIFFERS" for e in exact)))
+        log("%-12s %3d patches, %8.1f KB"
+            % (name, len(rep), len(blob) / 1024.0))
+    if progress:
+        progress(len(mshs), len(mshs))
+    log("%d banks, %d patches, %.2f MB" % (len(mshs), total_p, total_b / 1048576.0))
+    if report:
+        log("%d channels decoded back, %d differ" % (checked, inexact))
+    return inexact
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("src", help="a SOUND/ directory, or one .MSH inside it")
@@ -185,33 +224,8 @@ def main():
     ap.add_argument("--report", action="store_true",
                     help="decode each patch back and check it is sample-exact")
     a = ap.parse_args()
-
-    src = Path(a.src)
-    mshs = sorted(src.glob("*.MSH")) if src.is_dir() else [src]
-    if not mshs:
-        sys.exit("no .MSH under %s" % src)
-    out_dir = Path(a.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    total_p = total_b = 0
-    checked = inexact = 0
-    for msh in mshs:
-        name, blob, report = build_bank(msh, a.report)
-        (out_dir / (name + ".SBK")).write_bytes(blob)
-        total_p += len(report)
-        total_b += len(blob)
-        if a.report:
-            for pname, ch, n, exact in report:
-                checked += len(exact)
-                inexact += exact.count(False)
-                print("  %-10s %-24s %dch %7d  %s"
-                      % (name, pname, ch, n,
-                         " ".join("exact" if e else "DIFFERS" for e in exact)))
-        print("%-12s %3d patches, %8.1f KB"
-              % (name, len(report), len(blob) / 1024.0))
-    print("%d banks, %d patches, %.2f MB" % (len(mshs), total_p, total_b / 1048576.0))
+    inexact = pack(a.src, a.out_dir, a.report)
     if a.report:
-        print("%d channels decoded back, %d differ" % (checked, inexact))
         sys.exit(1 if inexact else 0)
 
 

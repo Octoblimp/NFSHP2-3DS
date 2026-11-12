@@ -22,10 +22,31 @@ races up to eight New 3DS consoles against each other.
 - **Your own PS2 disc** of Need for Speed: Hot Pursuit 2 (specifically
   SLES-50731, the PAL version). Other discs are untested.
 - About **2.9 GB** free on the SD card.
-- A computer with **Python 3.8 or newer** (nothing else to install) and
-  about 7 GB free for the steps below.
+- A Windows PC for **NFSHP2-3DS Packer**, with about 3.5 GB free while it
+  runs. Or any computer with **Python 3.8 or newer** (nothing else to
+  install), for the same tools as scripts, with about 7 GB free.
 
 ## Installing
+
+The easy way is **NFSHP2-3DS Packer**, on this repository's Releases page
+(nothing to install). Choose your disc and your SD card, and press **Make
+SD card files**. The disc can be a disc image (`.iso`) of it, the disc
+itself in a drive, or a folder with the disc's `ZDIR.BIN` and
+`ZZDATA.BIN`. It does steps 1 to 4 below in a few minutes, then you
+install the CIA (step 5). It keeps `NFSHP2/SAVES`, and with "Delete old
+game files" ticked it also does what `--prune` does below.
+
+The Packer is `tools/hp2_packer_gui.pyw` in this repository, and the same
+runs from a command line, on any system with Python:
+
+```
+python tools/hp2_packer.py --disc NFSHP2.iso --card E:```
+
+`nfshp2-packer.exe` on the Releases page is the same command without
+Python. `python tools/build_packer.py` builds both programs (with
+PyInstaller) into `PC Apps/NFSHP2-3DS Packer/`, with their source.
+
+### With Python, step by step
 
 1. In this repository's top folder, make a `PS2 Files/Full Game/` folder
    and copy `ZDIR.BIN` and `ZZDATA.BIN` from the root of your disc into
@@ -272,6 +293,8 @@ It works around the space in the path and produces
 `3DS Files/NFSHP2-3DS.3dsx` and `.cia`.
 
 - `3DS Files/` -- the devkitARM project.
+- `tools/hp2_packer*.py*` and `tools/build_packer.py` -- NFSHP2-3DS
+  Packer, its command line, and the script that builds them.
 - `tools/` -- the Python reverse-engineering and data tools, and the
   vendored `makerom` and `bannertool`. The `*_check.py` scripts run the
   disc's own code in a MIPS emulator (`tools/mipsemu.py`) beside the
