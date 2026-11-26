@@ -40,3 +40,11 @@ char* gamedata_path(const char* rel, char* out, size_t cap);
 
 // Whether a path inside the data directory exists.
 bool gamedata_exists(const char* rel);
+
+// The game's VIDEO_MODE for this install: 0 PAL, 1 NTSC. The PS2 game is
+// PAL when the disc has PAL.TAG (InitDisplaySystem's bFileExists), which
+// only the European discs do. An install with RELEASE.TXT and no PAL.TAG is
+// from an NTSC disc (USA, Asia, Korea; tools/release.py). One with neither
+// predates the other releases' support, when only the PAL disc installed,
+// so it is PAL.
+int gamedata_video_mode(void);

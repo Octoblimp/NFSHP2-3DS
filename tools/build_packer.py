@@ -44,7 +44,7 @@ GUI_NAME = "NFSHP2-3DS Packer"
 CLI_NAME = "nfshp2-packer"
 SOURCES = ["hp2_packer.py", "hp2_packer_gui.pyw", "zdir_extract.py",
            "audio_pack.py", "audio_convert.py", "make_card.py", "bhash.py",
-           "lzdecompress.py", "build_packer.py"]
+           "lzdecompress.py", "release.py", "build_packer.py"]
 
 README = """NFSHP2-3DS Packer
 =================
@@ -61,8 +61,10 @@ reads, from your own PS2 disc of the game. Nothing needs installing.
 It needs about 3.3 GB free for the disc's unpacked files while it runs
 (deleted at the end unless you keep them) and 2.9 GB on the SD card. Saves
 in NFSHP2/SAVES are never touched. Then install NFSHP2-3DS.cia with FBI and
-start the game. The port was made from SLES-50731, the PAL disc; others
-are untested.
+start the game. Any PS2 release works: USA SLUS-20362, Europe SLES-50731
+(v1.00 or v2.00), Asia SLPM-65181 or Korea SLPM-67527. The European discs
+play as PAL (a language choice at every start), the others as NTSC
+(English).
 
 Command line (the same work without a window):
 

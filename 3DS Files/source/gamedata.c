@@ -113,3 +113,9 @@ bool gamedata_exists(const char* rel)
     if (!gamedata_path(rel, path, sizeof(path))) return false;
     return file_exists(path);
 }
+
+int gamedata_video_mode(void)
+{
+    if (gamedata_exists("PAL.TAG")) return 0;
+    return gamedata_exists("RELEASE.TXT") ? 1 : 0;
+}
