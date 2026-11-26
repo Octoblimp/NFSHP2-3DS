@@ -12,9 +12,14 @@ copies it to <dest>/NFSHP2, leaving out:
   (8.8 MB on track 11) besides the bundle it expands into.
 - The sound banks' .MSH, .MSB and .RAW, which audio_pack.py's .SBK replace.
 - What the game never opens: the entries the disc's directory has no name
-  for (unknown/), the extractor's manifest.csv, KEY.TXT, NFS6.ICO, PAL.TAG
-  (gameflow.c sets the PAL mode itself), MARKERS/, NIS/ and the
-  REPLAY/MAY31 replays (the attract mode's are JUL23's).
+  for (unknown/), the extractor's manifest.csv, KEY.TXT, NFS6.ICO,
+  MARKERS/, NIS/ and the REPLAY/MAY31 replays (the attract mode's are
+  JUL23's).
+
+PAL.TAG, which only the European discs have, is copied: the game reads it
+for PAL or NTSC, as the PS2 does. NFSHP2/RELEASE.TXT says which release the
+files came from (tools/release.py), and an install with it and no PAL.TAG
+runs as NTSC (gamedata.c).
 
 That is the set the Azahar card was tested with, plus the EA logo in the
 other five languages, which are the same MV30 movie as the English one.
@@ -42,12 +47,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
 from zdir_extract import misnamed  # noqa: E402
+import release  # noqa: E402
 
 # Upper-case paths relative to extracted-retail/, '/' between parts.
 LEAVE_OUT = [
     "TRACKS/TRACKB*.LZC",
     "*.MSH", "*.MSB", "*.RAW",
-    "UNKNOWN/*", "MANIFEST.CSV", "KEY.TXT", "NFS6.ICO", "PAL.TAG",
+    "UNKNOWN/*", "MANIFEST.CSV", "KEY.TXT", "NFS6.ICO",
     "MARKERS/*", "NIS/*", "REPLAY/MAY31/*",
     # hp2_packer.py's note that it made the folder.
     "MADE-BY-NFSHP2-PACKER.TXT",
@@ -69,10 +75,12 @@ def same(src, dst):
     return a.st_size == b.st_size and (d <= 2 or abs(d - 3600) <= 2)
 
 
-def make(dest, src, prune=False, log=print, progress=None):
+def make(dest, src, prune=False, log=print, progress=None, info=None):
     """Copy src (the extraction) into dest/NFSHP2; the command line's work,
     callable. progress(done, total), if given, is called around each file
-    and may raise to stop. Returns the number of leftover files found."""
+    and may raise to stop. info is the disc's release.Release, for
+    RELEASE.TXT, when the caller read the disc. Returns the number of
+    leftover files found."""
     src = Path(src)
     if not (src / "GLOBAL" / "GLOBALB.BUN").is_file():
         raise SystemExit("%s has no GLOBAL/GLOBALB.BUN: run zdir_extract.py "
@@ -94,6 +102,7 @@ def make(dest, src, prune=False, log=print, progress=None):
     files = sorted(p for p in src.rglob("*")
                    if p.is_file() and wanted(p.relative_to(src).as_posix()))
     keep = {p.relative_to(src).as_posix().upper() for p in files}
+    keep.add(release.RELEASE_FILE)
     extra = sorted(p for p in out.rglob("*")
                    if p.is_file() and p.relative_to(out).parts[0].upper() != "SAVES"
                    and p.relative_to(out).as_posix().upper() not in keep) \
@@ -115,6 +124,24 @@ def make(dest, src, prune=False, log=print, progress=None):
         log("[%d/%d] %s" % (i, len(todo), p.relative_to(src).as_posix()))
     if progress:
         progress(len(todo), len(todo))
+    # Which release, and so PAL or NTSC: PAL.TAG is on the European discs
+    # only. Without the disc's boot program the release isn't known.
+    pal = (src / "PAL.TAG").is_file()
+    if not pal and (out / "PAL.TAG").is_file():
+        # Left by a European disc's files: it would make this one PAL.
+        (out / "PAL.TAG").unlink()
+        extra = [p for p in extra if p.name.upper() != "PAL.TAG"]
+        log("deleted PAL.TAG (this disc is NTSC)")
+    if info is None:
+        info = release.identify(None, None)._replace(
+            label="copied from " + src.name)
+    text = release.release_text(info, pal)
+    rel = out / release.RELEASE_FILE
+    if not rel.is_file() or rel.read_text("ascii") != text:
+        with open(rel, "w", encoding="ascii", newline="\n") as f:
+            f.write(text)
+    log("%s: %s, %s" % (release.RELEASE_FILE, info.label,
+                        "PAL" if pal else "NTSC"))
     for p in extra:
         if prune:
             p.unlink()

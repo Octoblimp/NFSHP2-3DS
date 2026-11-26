@@ -42,11 +42,10 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import audio_pack  # noqa: E402
 import make_card  # noqa: E402
+import release  # noqa: E402
 import zdir_extract  # noqa: E402
 
 APP_NAME = "NFSHP2-3DS Packer"
-# The disc the port was made from and tested with.
-TESTED_SERIAL = "SLES_507.31"
 SECTOR = 2048
 # Space the work folder needs while it runs: the extraction is 3.3 GB.
 WORK_NEED = int(3.5e9)
@@ -101,13 +100,16 @@ class Disc:
 
     zdir is ZDIR.BIN's bytes; zzdata, zz_base and zz_size say where
     ZZDATA.BIN's bytes are; serial is the boot file SYSTEM.CNF names, or
-    None; time is ZZDATA.BIN's date (the image's own record of it, else
-    the file's time), which the same disc gives every run."""
+    None; sha1 is that boot file's SHA-1, or None when it isn't there (a
+    folder of ZDIR.BIN and ZZDATA.BIN only); time is ZZDATA.BIN's date (the
+    image's own record of it, else the file's time), which the same disc
+    gives every run."""
 
     def __init__(self, path):
         p = Path(path)
         self.path = p
         self.serial = None
+        self.sha1 = None
         if p.is_file():
             self._open_image(p)
         elif p.is_dir():
@@ -119,6 +121,12 @@ class Disc:
         found = {}
         for child in p.iterdir():
             found[child.name.upper()] = child
+        # The disc's drive: SYSTEM.CNF and the program in its root, the two
+        # files in NFSHP2/.
+        if "NFSHP2" in found and found["NFSHP2"].is_dir():
+            for child in found["NFSHP2"].iterdir():
+                if child.name.upper() in ("ZDIR.BIN", "ZZDATA.BIN"):
+                    found[child.name.upper()] = child
         if "ZDIR.BIN" not in found or "ZZDATA.BIN" not in found:
             raise SystemExit(
                 "%s has no ZDIR.BIN and ZZDATA.BIN. Choose the disc's drive, "
@@ -131,13 +139,19 @@ class Disc:
         self.time = found["ZZDATA.BIN"].stat().st_mtime
         if "SYSTEM.CNF" in found:
             self.serial = boot_serial(found["SYSTEM.CNF"].read_bytes())
+        if self.serial in found:
+            elf = found[self.serial]
+            with open(elf, "rb") as f:
+                self.sha1 = release.sha1_of(
+                    lambda off, n: (f.seek(off), f.read(n))[1],
+                    elf.stat().st_size)
 
     def _open_image(self, p):
-        files = iso_root_files(p)
+        files = iso_files(p)
         if "ZDIR.BIN" not in files or "ZZDATA.BIN" not in files:
             raise SystemExit(
-                "%s has no ZDIR.BIN and ZZDATA.BIN in its root: is it the "
-                "Hot Pursuit 2 disc?" % p.name)
+                "%s has no NFSHP2/ZDIR.BIN and ZZDATA.BIN: is it the Hot "
+                "Pursuit 2 disc?" % p.name)
         with open(p, "rb") as f:
             lba, size, _ = files["ZDIR.BIN"]
             f.seek(lba * SECTOR)
@@ -146,6 +160,11 @@ class Disc:
                 lba, size, _ = files["SYSTEM.CNF"]
                 f.seek(lba * SECTOR)
                 self.serial = boot_serial(f.read(min(size, 4096)))
+            if self.serial in files:
+                lba, size, _ = files[self.serial]
+                self.sha1 = release.sha1_of(
+                    lambda off, n: (f.seek(lba * SECTOR + off), f.read(n))[1],
+                    size)
         lba, size, when = files["ZZDATA.BIN"]
         self.zzdata = str(p)
         self.zz_base = lba * SECTOR
@@ -156,9 +175,11 @@ class Disc:
                              "Make the image again." % p.name)
 
 
-def iso_root_files(path):
-    """{NAME: (first sector, size)} for the files in an ISO 9660 image's
-    root. A PS2 DVD image is one, with 2048-byte sectors."""
+def iso_files(path):
+    """{NAME: (first sector, size, time)} for the files in an ISO 9660
+    image's root and its NFSHP2 folder, where the discs keep ZDIR.BIN and
+    ZZDATA.BIN (a folder's files take its root's place). A PS2 DVD image is
+    one, with 2048-byte sectors."""
     with open(path, "rb") as f:
         f.seek(16 * SECTOR)
         pvd = f.read(SECTOR)
@@ -170,12 +191,20 @@ def iso_root_files(path):
         if block != SECTOR:
             raise SystemExit("%s has %d-byte blocks; only 2048 is supported"
                              % (Path(path).name, block))
-        root = pvd[156:156 + 34]
-        lba, size = struct.unpack_from("<I", root, 2)[0], \
-            struct.unpack_from("<I", root, 10)[0]
-        f.seek(lba * SECTOR)
-        data = f.read(size)
-    files = {}
+        files, dirs = iso_dir(f, pvd[156:156 + 34])
+        if "NFSHP2" in dirs:
+            files.update(iso_dir(f, dirs["NFSHP2"])[0])
+    return files
+
+
+def iso_dir(f, record):
+    """The files {NAME: (sector, size, time)} and folders {NAME: record} of
+    the ISO 9660 directory a directory record points to."""
+    lba, size = struct.unpack_from("<I", record, 2)[0], \
+        struct.unpack_from("<I", record, 10)[0]
+    f.seek(lba * SECTOR)
+    data = f.read(size)
+    files, dirs = {}, {}
     i = 0
     while i < len(data):
         n = data[i]
@@ -187,13 +216,16 @@ def iso_root_files(path):
         flags = rec[25]
         name_len = rec[32]
         name = rec[33:33 + name_len].decode("latin-1", "replace")
-        if not flags & 2 and name not in ("\x00", "\x01"):
+        if name not in ("\x00", "\x01"):
             name = name.split(";")[0].upper()
-            files[name] = (struct.unpack_from("<I", rec, 2)[0],
-                           struct.unpack_from("<I", rec, 10)[0],
-                           record_time(rec[18:25]))
+            if flags & 2:
+                dirs[name] = rec
+            else:
+                files[name] = (struct.unpack_from("<I", rec, 2)[0],
+                               struct.unpack_from("<I", rec, 10)[0],
+                               record_time(rec[18:25]))
         i += n
-    return files
+    return files, dirs
 
 
 def record_time(d):
@@ -249,6 +281,48 @@ def safe_to_delete(work):
     return all(c.name.upper() in known for c in w.iterdir())
 
 
+def identify(d, log):
+    """The disc's release (tools/release.py), from its boot program and
+    that program's SHA-1. A folder without SYSTEM.CNF and the program
+    can't say which it is: None, and PAL.TAG alone decides PAL or NTSC."""
+    if not d.serial:
+        log("Release: not known (no SYSTEM.CNF beside ZDIR.BIN)")
+        return None
+    if d.serial not in release.BOOT_NAMES:
+        raise SystemExit("This disc boots %s, which isn't Need for Speed: Hot "
+                         "Pursuit 2 for the PS2 (%s)"
+                         % (d.serial, release.SUPPORTED))
+    if not d.sha1:
+        log("Release: %s, not checked (%s isn't beside ZDIR.BIN)"
+            % (d.serial, d.serial))
+        return None
+    info = release.identify(d.serial, d.sha1)
+    if info.known:
+        log("Release: %s" % info.label)
+    else:
+        log("Release: %s, a version the port hasn't seen (SHA-1 %s); "
+            "packing it anyway" % (d.serial, d.sha1))
+    return info
+
+
+def check_directory(zdir, log):
+    """Refuse a disc that lacks a file the game needs
+    (release.compare_directory)."""
+    hashes = {struct.unpack_from("<I", zdir, i)[0]
+              for i in range(0, len(zdir), 12)}
+    names, listed = zdir_extract.read_names(names_file())
+    missing, extra = release.compare_directory(hashes, names, listed)
+    if missing:
+        raise SystemExit("This disc lacks %d of the game's files (%s%s): it "
+                         "isn't a release of Need for Speed: Hot Pursuit 2 "
+                         "the port knows, or the image is damaged"
+                         % (len(missing), ", ".join(missing[:3]),
+                            ", ..." if len(missing) > 3 else ""))
+    if extra:
+        log("%d entries on this disc aren't in the port's list; they are "
+            "left out" % len(extra))
+
+
 # ------------------------------------------------------------------- the run
 
 STEPS = ("Reading the disc", "Extracting the disc's files",
@@ -279,14 +353,11 @@ def run(disc, card, work=None, prune=False, keep_work=False,
     go(0)
     d = Disc(disc)
     log("Disc: %s" % d.path)
-    if d.serial:
-        log("Serial: %s" % d.serial)
-        if d.serial != TESTED_SERIAL:
-            log("Note: the port was made from %s (the PAL disc). Other "
-                "releases are untested." % TESTED_SERIAL)
+    info = identify(d, log)
     if len(d.zdir) == 0 or len(d.zdir) % 12:
         raise SystemExit("ZDIR.BIN is %d bytes, which isn't a directory of "
                          "this game" % len(d.zdir))
+    check_directory(d.zdir, log)
     tick(1, 1)
 
     have_extract = (work / "manifest.csv").is_file()
@@ -324,7 +395,8 @@ def run(disc, card, work=None, prune=False, keep_work=False,
             os.utime(p, (when, when))
 
     go(3)
-    extra = make_card.make(card, work, prune=prune, log=log, progress=tick)
+    extra = make_card.make(card, work, prune=prune, log=log, progress=tick,
+                           info=info)
 
     go(4)
     if keep_work:

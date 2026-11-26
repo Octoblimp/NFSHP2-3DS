@@ -474,7 +474,9 @@ void bgf_init(BGameFlow* gf,
     // screen, PAL shows it. InitDisplaySystem (0x00100750) picks it with
     // bFileExists("PAL.TAG"), and the retail disc, SLES_507.31, has PAL.TAG
     // in its ZDIR (entry 405, bf0a6606): it is a PAL disc, and it asks for a
-    // language on every boot, as it does on PCSX2.
+    // language on every boot, as it does on PCSX2. The USA, Asian and
+    // Korean discs have no PAL.TAG and run NTSC. PAL here; main() sets the
+    // install's own after bgf_init (gamedata_video_mode).
     gf->videoMode            = 0;
     // LanguageManager's constructor (0x0021dfa8). LoadGlobalChunks sets
     // English before the flow starts; see bgf_load_global_chunks.

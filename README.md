@@ -19,8 +19,11 @@ races up to eight New 3DS consoles against each other.
 - A **New 3DS, New 3DS XL or New 2DS XL** with custom firmware (Luma3DS)
   and FBI. An Old 3DS or 2DS shows a message at boot and stops: it has too
   little memory and a third of the speed.
-- **Your own PS2 disc** of Need for Speed: Hot Pursuit 2 (specifically
-  SLES-50731, the PAL version). Other discs are untested.
+- **Your own PS2 disc** of Need for Speed: Hot Pursuit 2, any release:
+  USA SLUS-20362, Europe SLES-50731 (v1.00 or v2.00), Asia SLPM-65181 or
+  Korea SLPM-67527 (see [docs/releases.md](docs/releases.md)). The
+  European discs play as PAL, with a language choice at every start; the
+  others play as NTSC, in English.
 - About **2.9 GB** free on the SD card.
 - A Windows PC for **NFSHP2-3DS Packer**, with about 3.5 GB free while it
   runs. Or any computer with **Python 3.8 or newer** (nothing else to

@@ -8876,6 +8876,11 @@ int main(int argc, char** argv)
 
     bgf_init(&g_flow, kGameFlowStages, BGF_NUM_STATES,
              kScreens, NUM_SCREENS, kBootStages, NUM_BOOT_STAGES, &hooks);
+    // PAL or NTSC by the disc the files came from, as InitDisplaySystem
+    // (0x00100750) decides it: the language screen at every start and the
+    // Options' Languages item are PAL's only (gamedata.h).
+    g_flow.videoMode = gamedata_video_mode();
+    logLine("video mode %s", g_flow.videoMode ? "NTSC" : "PAL");
     // FlailerScreenList's constructor makes its song monitor (0x0016c25c).
     bsm_init(&g_songMonitor, &kSongMonitorHooks);
     // And its background animation (0x0016c36c), bMalloc(156).
